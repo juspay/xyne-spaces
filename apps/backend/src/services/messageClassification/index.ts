@@ -1,12 +1,3 @@
-import {
-  makeLiteLLMProvider,
-  generateRunId,
-  generateTraceId,
-  run,
-  type Agent,
-  type RunConfig,
-  type RunState,
-} from '@juspay-jaf/jaf';
 import { z } from 'zod';
 import {
   MESSAGE_ACTS,
@@ -16,8 +7,11 @@ import {
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { createAgentEventLogger } from '@/agents/agentLogger';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { logLLMCallStart, logLLMError, logLLMSuccess } from '@/agents/agentLogger';
+import {
+  orgLLMCredentialService,
+  type OrgLLMCredential,
+} from '@/services/orgLLMCredentialService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { buildClassifierPrompt } from './prompt';
@@ -25,12 +19,8 @@ import { buildClassifierPrompt } from './prompt';
 const TAG = '[MessageClassification]';
 
 /**
- * A thread is only classified once it has at least this many messages.
- *
- * Classifying message-by-message as they arrive is both wasteful and inaccurate: several
- * tags are defined by what is open elsewhere in the thread (ANSWER needs a question above
- * it, RESOLUTION needs an open issue), so a one-message view guesses. Waiting for a real
- * thread and classifying all of it in a single call is cheaper AND better informed.
+ * A thread is only classified once it has at least this many messages. Several acts are
+ * defined by what is open above them (ANSWER, RESOLUTION), so a one-message view guesses.
  */
 export const MIN_THREAD_SIZE = Number(
   process.env['MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE'] ?? 5,
@@ -55,14 +45,12 @@ export interface ClassifyThreadResult {
 /**
  * Classify every message in a thread in one LLM call and apply the results.
  *
- * Auto-apply: acts are written straight onto the messages rather than proposed for
- * confirmation. Users remove what's wrong. Note there is no per-tag provenance, so a
- * re-run also overwrites hand-applied acts — see the known gaps in
- * .plan/message-classification.md.
+ * Once per message: a message that already has acts is sent as context but never rewritten.
+ * The vocabulary's dependencies all point backwards, so a later pass gets no better answer,
+ * and the column has no provenance — a re-run would silently clobber hand-applied acts.
+ * threadType is the exception, re-derived each pass and written only when it changes.
  *
- * Re-running on a grown thread re-tags earlier messages — deliberate, since later replies
- * change what an earlier message meant. Writes go through Prisma (this runs in a worker
- * with no client context); Zero replicates the rows to clients either way.
+ * Writes go through Prisma (no client context in a worker); Zero replicates to clients.
  */
 export async function classifyAndTagThread(conversationId: string): Promise<ClassifyThreadResult> {
   const conversation = await db.conversation.findUnique({
@@ -98,11 +86,11 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
       messageId: true,
       content: true,
       createdAt: true,
+      messageActs: true,
       sender: { select: { name: true } },
     },
-    // Newest first, then reversed below. Taking the OLDEST N would mean a long thread's
-    // recent messages were never classified at all, and every re-run would re-process the
-    // same opening stretch.
+    // Newest first, reversed below: taking the oldest N would never reach a long thread's
+    // recent messages.
     orderBy: { createdAt: 'desc' },
     take: MAX_THREAD_CONTEXT,
   });
@@ -110,21 +98,30 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   messages.reverse(); // back to chronological — the model is told the thread is in order
 
   const threadMessages: ClassifierMessage[] = messages
-    .map(m => ({
-      id: m.messageId,
-      text: stripHtml(m.content ?? ''),
-      author_display_name: m.sender?.name ?? 'Unknown',
-      timestamp_iso: m.createdAt.toISOString(),
-    }))
+    .map(m => {
+      const existing = parseActs(m.messageActs);
+      return {
+        id: m.messageId,
+        text: stripHtml(m.content ?? ''),
+        author_display_name: m.sender?.name ?? 'Unknown',
+        timestamp_iso: m.createdAt.toISOString(),
+        // Present => settled; enforced off-limits by the filter in classifyThread().
+        ...(existing.length > 0 && { existing_acts: existing }),
+      };
+    })
     .filter(m => m.text.length > 0);
 
   if (threadMessages.length < MIN_THREAD_SIZE) {
     return { tagged: 0, skipped: 'thread-too-short' };
   }
 
-  // Authorship isn't in the message text, so the model can't see it. We pass it in as a
-  // fact; the rule about what it implies lives in the prompt, not here. No classification
-  // decisions in code — one place owns the vocabulary and its rules.
+  // Nothing new to tag and a type already set: the call could only rewrite what is there.
+  const unclassified = threadMessages.filter(m => !m.existing_acts);
+  if (unclassified.length === 0 && conversation.threadType) {
+    return { tagged: 0, skipped: 'already-classified' };
+  }
+
+  // Passed as a fact, not a rule — what it implies lives in the prompt, not in code.
   const rootMessage = await db.message.findUnique({
     where: { messageId: conversation.initialMessageId },
     select: { msgType: true },
@@ -133,7 +130,12 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
 
   const modelName = process.env['MESSAGE_CLASSIFIER_MODEL'] ?? 'gpt-4o-mini';
   const { acts, threadType: modelThreadType } = await classifyThread(
-    { thread_messages: threadMessages, root_is_bot: rootIsBot },
+    {
+      thread_messages: threadMessages,
+      root_is_bot: rootIsBot,
+      // Anchor against re-typing churn: every flip broadcasts a new chip to the channel.
+      ...(conversation.threadType && { current_thread_type: conversation.threadType }),
+    },
     channel.projectId,
     modelName,
   );
@@ -164,23 +166,10 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
 }
 
 /**
- * Write the classifier's acts onto the message row.
+ * Push a message back into Vespa so its acts become searchable.
  *
- * The column holds the full set, so this is a plain overwrite rather than a diff — no
- * mapping rows to reconcile, no per-tag metadata to preserve.
- *
- * Caveat worth knowing: with acts stored as one column there is no per-tag record of who
- * applied it, so a re-run overwrites manual tags too. That is why the classifier stays
- * behind ENABLE_MESSAGE_CLASSIFICATION — when it is switched on, add a separate column for
- * manually-applied acts so the two can be merged instead of replaced.
- */
-/**
- * Push a message back into Vespa so its acts and thread type become searchable.
- *
- * Needed explicitly because this service writes through Prisma, which bypasses the Zero
- * side-effect layer that normally queues these feeds. Failures are swallowed: an
- * unsearchable tag is worse than nothing indexed, but not worth failing the whole
- * classification over.
+ * Explicit because Prisma writes bypass the Zero side-effect layer that normally queues
+ * these. Failures are swallowed — an unindexed tag is not worth failing classification for.
  */
 async function refeedToVespa(messageId: string, workspaceId: string | null): Promise<void> {
   try {
@@ -213,19 +202,106 @@ async function writeActs(messageId: string, acts: string[]): Promise<void> {
 }
 
 // ─── LLM invocation ──────────────────────────────────────────────────────────────
-const AGENT_NAME = 'MessageClassifierAgent';
+
+/** Log prefix, kept aligned with the other agents in agentLogger's output. */
+const AGENT_NAME = 'MessageClassifier';
+
+/** The LiteLLM key's parallel-request limit is shared with entity extraction, so 429s are
+ *  expected and transient — back off rather than burn a Bull attempt. */
+const RATE_LIMIT_MAX_RETRIES = 6;
+
+/** Generous — a 60-message thread on a loaded endpoint is not fast. */
+const REQUEST_TIMEOUT_MS = 300_000;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * One LiteLLM /chat/completions call. A plain fetch rather than an agent framework — this
+ * is single-shot with no tools, and going direct is what lets us set the params below.
+ * Mirrors services/entityExtraction/entityLlmClient.ts against the same endpoint.
+ */
+async function callLiteLLM(
+  credential: OrgLLMCredential,
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+): Promise<string> {
+  const url = `${credential.baseUrl.replace(/\/$/, '')}/chat/completions`;
+
+  // Disabling glm's <think> trace took entity extraction 45s -> 7.7s. Gated on the model:
+  // OpenAI 400s on unrecognised body params.
+  const supportsThinkingToggle = /glm/i.test(model);
+
+  // agentLogger's direct-call entry points, so this reads like every other agent in logs.
+  logLLMCallStart(AGENT_NAME, model, 'ORG_LITELLM_SERVICE_ACCOUNT');
+
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credential.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        // Classification wants determinism, not variety.
+        temperature: 0,
+        ...(supportsThinkingToggle && { chat_template_kwargs: { enable_thinking: false } }),
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    if (response.status === 429 && attempt < RATE_LIMIT_MAX_RETRIES) {
+      // Exponential backoff with jitter: 1.5s, 3s, 6s, ... capped at 30s.
+      const waitMs = Math.min(30_000, 1500 * 2 ** attempt) + Math.floor(Math.random() * 500);
+      logger.warn(`${TAG} Rate limited, backing off`, { attempt: attempt + 1, waitMs, model });
+      await response.body?.cancel();
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!response.ok) {
+      const body = (await response.text()).slice(0, 500);
+      const error = new Error(`LiteLLM error: ${response.status} ${body}`);
+      logLLMError(AGENT_NAME, error);
+      throw error;
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = data.choices?.[0]?.message?.content ?? '';
+    logLLMSuccess(AGENT_NAME, content);
+    return content;
+  }
+}
 
 interface ClassifierMessage {
   id: string;
   text: string;
   author_display_name: string;
   timestamp_iso: string;
+  /** Acts this message already carries. Absent means it still needs classifying. */
+  existing_acts?: string[];
 }
+
+/** messageActs is a stringified array; anything unparseable is treated as untagged. */
+const parseActs = (raw: string | null): string[] => {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+};
 
 interface ClassifierInput {
   thread_messages: ClassifierMessage[];
   /** True when a bot or automated system opened the thread. Gates the ALERT type. */
   root_is_bot: boolean;
+  /** The thread's current type, when it already has one. Anchor against re-typing churn. */
+  current_thread_type?: string;
 }
 
 interface Classification {
@@ -255,12 +331,8 @@ const RawOutputSchema = z.object({
 });
 
 /**
- * Coerce a model's answer onto the closed vocabulary.
- *
- * Models return near-misses — wrong case, hyphens for underscores, stray whitespace,
- * occasionally a value from the other vocabulary. Normalising those is worth it; inventing
- * a mapping for genuinely unknown values is not, so anything that doesn't land on a real
- * vocabulary entry becomes null and is simply not applied.
+ * Coerce onto the closed vocabulary. Near-misses (case, hyphens, whitespace) are worth
+ * normalising; guessing at genuinely unknown values is not, so those become null.
  */
 const coerce = (raw: string | null | undefined, valid: Set<string>): string | null => {
   if (!raw) return null;
@@ -273,13 +345,6 @@ async function classifyThread(
   projectId: string,
   modelName: string,
 ): Promise<Classification> {
-  const agent: Agent<{ projectId: string }, unknown> = {
-    name: AGENT_NAME,
-    instructions: () => buildClassifierPrompt(),
-    // Classification wants determinism, not variety.
-    modelConfig: { temperature: 0 },
-  };
-
   const credential = await orgLLMCredentialService.getCredentialByProjectId(
     projectId,
     OrgLLMServiceAccountPurpose.DEFAULT,
@@ -288,64 +353,27 @@ async function classifyThread(
     throw new Error('LiteLLM credentials are not configured for this organization');
   }
 
-  const provider = makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
-  const initialState: RunState<{ projectId: string }> = {
-    runId: generateRunId(),
-    traceId: generateTraceId(),
-    messages: [{ role: 'user', content: JSON.stringify(input, null, 2) }],
-    currentAgentName: AGENT_NAME,
-    context: { projectId },
-    turnCount: 0,
-  };
+  const output = await callLiteLLM(credential, modelName, [
+    { role: 'system', content: buildClassifierPrompt() },
+    { role: 'user', content: JSON.stringify(input, null, 2) },
+  ]);
 
-  const runConfig: RunConfig<{ projectId: string }> = {
-    agentRegistry: new Map([[AGENT_NAME, agent]]),
-    modelProvider: provider as RunConfig<{ projectId: string }>['modelProvider'],
-    maxTurns: 1,
-    modelOverride: modelName,
-    onEvent: createAgentEventLogger('MessageClassifier', 'ORG_LITELLM_SERVICE_ACCOUNT'),
-  };
+  // Strip reasoning blocks and pull the first JSON object out — models wrap output in
+  // prose or fences no matter how firmly the prompt says not to.
+  const cleaned = output.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  const parsed = RawOutputSchema.parse(JSON.parse(jsonMatch ? jsonMatch[0] : cleaned));
 
-  const result = await run(initialState, runConfig);
-
-  if (result.outcome.status !== 'completed') {
-    // Log the whole error object, not just its tag: the tag alone ("ModelBehaviorError")
-    // says a model misbehaved but not how, which is exactly what you need when a provider
-    // returns reasoning blocks or a shape the runner can't handle.
-    if (result.outcome.status === 'error') {
-      logger.error(`${TAG} Model run failed`, {
-        error: result.outcome.error,
-        model: modelName,
-      });
-    }
-    throw new Error(
-      `Message classification failed: ${
-        result.outcome.status === 'error' ? result.outcome.error._tag : result.outcome.status
-      }`,
-    );
-  }
-
-  const output = result.outcome.output;
-  let parsed: z.infer<typeof RawOutputSchema>;
-
-  if (typeof output === 'string') {
-    // Strip reasoning blocks and pull the first JSON object out — models wrap output in
-    // prose or fences no matter how firmly the prompt says not to.
-    const cleaned = output.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    parsed = RawOutputSchema.parse(JSON.parse(jsonMatch ? jsonMatch[0] : cleaned));
-  } else {
-    parsed = RawOutputSchema.parse(output);
-  }
-
-  // Only ids that were actually sent are accepted — a model that invents or hallucinates
-  // an id must not cause a write against an unrelated message.
-  const knownIds = new Set(input.thread_messages.map(m => m.id));
+  // Sent AND still unclassified. Blocks both a hallucinated id and a model that ignores
+  // the prompt and re-classifies a settled message. The prompt asks; this guarantees.
+  const eligibleIds = new Set(
+    input.thread_messages.filter(m => !m.existing_acts?.length).map(m => m.id),
+  );
   const acts = new Map<string, string[]>();
 
   for (const entry of parsed.classifications) {
-    if (!knownIds.has(entry.id)) {
-      logger.warn('[MessageClassifier] Model returned an unknown message id; dropping', {
+    if (!eligibleIds.has(entry.id)) {
+      logger.warn('[MessageClassifier] Model returned an unknown or already-tagged id; dropping', {
         returned: entry.id,
       });
       continue;

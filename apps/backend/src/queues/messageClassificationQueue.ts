@@ -13,12 +13,8 @@ const JOB_NAME = 'classify-message';
 export type MessageClassificationJob = { conversationId: string };
 
 /**
- * Off-request LLM classification of messages.
- *
- * Queued rather than inline because it runs an LLM call per message — doing that in the
- * message-send path would put model latency in front of the user. Failures are retried a
- * couple of times and then dropped: an untagged message is a missing chip, not a broken
- * message, so it must never block or fail the send.
+ * Off-request LLM classification. Queued so model latency never sits in the send path.
+ * Failures are retried twice then dropped — an untagged message is a missing chip.
  */
 class MessageClassificationQueue {
   private queue: Bull.Queue<MessageClassificationJob> | null = null;
@@ -76,23 +72,15 @@ class MessageClassificationQueue {
   }
 
   /**
-   * Consider a thread for classification after one of its messages was written.
+   * Consider a thread for classification. Guarded internally so callers can fire-and-forget.
    *
-   * Fully guarded internally so callers can fire-and-forget without knowing the rules —
-   * mirrors entityExtractionQueue.enqueueForMessage, which is called from the same place.
-   *
-   * Two rules, both about not wasting LLM calls:
-   *  - short threads are skipped entirely (see MIN_THREAD_SIZE)
-   *  - past that, only every BATCH_SIZE-th message triggers a pass. The jobId is keyed on
-   *    the bucket, and Bull drops a job whose id already exists, so a burst of replies
-   *    collapses into ONE classification instead of one per message. Crossing into a new
-   *    bucket mints a new id, which is how a growing thread gets re-classified with
-   *    fuller context.
+   * Short threads are skipped. Past that, the jobId is keyed on the bucket and Bull drops a
+   * duplicate id, so a burst of replies collapses into one pass; a new bucket mints a new
+   * id, which is how a growing thread gets re-classified.
    */
   async enqueueForMessage(conversationId: string): Promise<void> {
     try {
-      // replyCount off the conversation row rather than COUNT(*) over messages — a
-      // primary-key lookup instead of a scan, on a path that runs for every message.
+      // replyCount off the row, not COUNT(*): a PK lookup on a path that runs per message.
       const conversation = await db.conversation.findUnique({
         where: { conversationId },
         select: { replyCount: true },

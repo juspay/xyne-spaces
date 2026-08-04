@@ -59,28 +59,20 @@ export class MessagesACL extends BaseACL<'messages'> {
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
 
-    // Classification is shared metadata, not content: anyone who can READ a message may
-    // tag it, the same way anyone can react to it. Author-only would mean you could not
-    // tag a colleague's message, while the classifier tags everyone's — inconsistent.
-    //
-    // Narrow on purpose: allowed only when messageActs is the sole field being changed,
-    // so this cannot become a route for editing someone else's content. And gated on
-    // actual visibility, because verifyConversationInWorkspace above only checks the
-    // workspace — without this, anyone in the workspace could tag a message inside a
-    // private channel they are not in, or one targeted at someone else via visibleTo.
     const changedFields = Object.keys(args).filter(field => field !== 'messageId');
     const isAuthorOrSystem =
       message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM;
 
-    // Any update touching messageActs needs channel admin — checked on the FIELD, not on
-    // the update being acts-only. Otherwise an author could bundle acts into a content
-    // edit ({ content, edited, messageActs }) and write them without being an admin.
+    // Keyed on the field, not on the update being acts-only, so acts cannot ride along in
+    // a content edit and skip the admin check below.
     if (changedFields.includes('messageActs')) {
-      await this.verifyChannelAdminCanTag(args.messageId, tx);
+      if (isAuthorOrSystem) {
+        return;
+      }
 
-      // Acts alone are a channel-admin action. Anything bundled alongside is still an
-      // edit of the message itself, so the author rule continues to apply to it.
-      if (changedFields.length > 1 && !isAuthorOrSystem) {
+      await this.verifyChannelAdminCanTag(args.messageId, tx);
+      // An admin may relabel a colleague's message, not rewrite it.
+      if (changedFields.length > 1) {
         throw new MutationACLError(
           'Message update failed: only the original sender can edit this message',
           'messages',
@@ -96,20 +88,10 @@ export class MessagesACL extends BaseACL<'messages'> {
   }
 
   /**
-   * Only a channel ADMIN may hand-edit a message's classification.
+   * Who, other than the sender, may tag a message: a channel ADMIN.
    *
-   * Scoped to the channel rather than the org: acts describe what happened in this
-   * conversation, so the people who run this channel are the right editors — an org admin
-   * with no involvement here is not, and a member shouldn't be relabelling colleagues'
-   * messages. Classification is shared, team-visible metadata, so it is not the author's
-   * to control either.
-   *
-   * The classifier is unaffected: it writes through Prisma, bypassing this layer entirely.
-   * So AI tags everything and admins correct it.
-   *
-   * Membership is also the visibility check — you cannot be a channel admin of a channel
-   * you are not in. Only visibleTo needs testing separately, since a targeted message
-   * inside an admin's own channel may still not be theirs to read.
+   * Membership doubles as the visibility check — you cannot be admin of a channel you are
+   * not in — so only visibleTo needs testing separately.
    */
   private async verifyChannelAdminCanTag(messageId: string, tx: Transaction<Schema>): Promise<void> {
     const allowed = await tx.run(

@@ -22,23 +22,26 @@ export const buildClassifierPrompt = (): string => `You classify workplace chat 
 Output STRICT JSON only. No markdown, no commentary, no explanation.
 
 You will receive a JSON object with:
-- thread_messages: [{ id, text, author_display_name, timestamp_iso }] — the ENTIRE thread
-  in chronological order, starting with the message that opened it.
+- thread_messages: [{ id, text, author_display_name, timestamp_iso, existing_acts? }] — the
+  ENTIRE thread in chronological order, starting with the message that opened it.
+  existing_acts, when present, is the tags that message was already given.
 - root_is_bot: boolean — true when a bot or automated system posted the opening message.
+- current_thread_type: string, optional — the type this thread already carries.
 
-## Task — classify EVERY message in the thread
+## Task — classify ONLY the messages that have no existing_acts
 
-Return the tags for every message in thread_messages. A message usually performs ONE act,
-but it may perform several — "I'll patch this by 4pm, but which gateway should I point it
-at?" is both a COMMITMENT and a QUESTION. Return every act a message genuinely performs.
+Messages that already carry existing_acts are settled. They are given to you as context so
+you can judge the new ones — do NOT return entries for them, and do not revise them.
+
+Return the tags for each remaining message. A message usually performs ONE act, but it may
+perform several — "I'll patch this by 4pm, but which gateway should I point it at?" is both
+a COMMITMENT and a QUESTION. Return every act a message genuinely performs.
 
 Be conservative: most messages do exactly one thing. Only return more than one tag when the
 message clearly performs distinct acts, not when you are unsure which single tag fits.
 
-You see the whole thread at once, so use it. A message's tag often depends on what comes
-before AND after it: a question only becomes ANSWERED once someone answers it, and a
-"deploying now" only reads as STATUS_UPDATE rather than RESOLUTION because a later message
-closes it out. Judge each message with the full thread in view, not in isolation.
+You see the whole thread at once, so use it. A message's act depends on what is already open
+above it — read the earlier messages and their existing_acts before judging a new one.
 
 Classify each message by WHAT IT CREATES GOING FORWARD:
 
@@ -74,6 +77,10 @@ tools that already exist? Yes → REQUEST. Needs something built → FEATURE_REQ
 
 When no other type fits, DISCUSSION.
 
+When current_thread_type is given, keep it unless the thread has genuinely changed purpose —
+a question that turned out to be a bug is a real change; a few off-topic replies is not.
+Return current_thread_type unchanged if in doubt.
+
 ## Output
 
 {
@@ -83,6 +90,10 @@ When no other type fits, DISCUSSION.
   ]
 }
 
-One classifications entry per message in thread_messages, using the exact ids given.
+One classifications entry per message WITHOUT existing_acts, using the exact ids given.
+Messages that already have existing_acts must not appear in classifications at all.
 messageActs must have at least one value. Use the exact strings above — no other spelling,
-casing or punctuation.`;
+casing or punctuation.
+
+threadType covers the whole thread and is always required, even when every message was
+already classified.`;

@@ -20,13 +20,8 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
   }
 
   onInsert(args: InsertValue<MessagesSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    // Fire-and-forget: enqueue the thread (conversationId == threadId) for the
-    // nightly entity-extraction pass. Fully guarded internally, so it can never
-    // affect ingestion. Skipped inside if the channel has no approved types.
+    // Fire-and-forget: both are guarded internally and must never affect ingestion.
     void entityExtractionQueue.enqueueForMessage(args.conversationId);
-    // Same shape: LLM classification of the thread's messages. Guarded internally —
-    // skipped for short threads, and batched so a burst of replies is one pass, not one
-    // per message. Never awaited; an untagged message is a missing chip, not a failure.
     void messageClassificationQueue.enqueueForMessage(args.conversationId);
     return [{
       schema: messageSchema,

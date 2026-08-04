@@ -16,7 +16,7 @@ import {
   type MessageHoverToolbarActions,
 } from '../HoverActionsToolbar/messageHoverActionsRegistry';
 import { MessageTags } from '../../tags/MessageTags';
-import { useIsChannelAdmin } from '../../tags/useIsChannelAdmin';
+import { useCanEditMessageActs } from '../../tags/useCanEditMessageActs';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
@@ -934,9 +934,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     context,
   ]);
 
-  // Only channel admins may edit acts (MessagesACL.canUpdate enforces it server-side);
-  // hiding the picker keeps everyone else from clicking into an error.
-  const isChannelAdmin = useIsChannelAdmin(channelId);
+  const canEditMessageActs = useCanEditMessageActs(message.senderId, channelId);
 
   const hoverToolbarKey = useId();
   const canShowHoverToolbar =
@@ -969,14 +967,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         initialMessageId: conversation.initialMessageId,
       }),
       reactionsMd: message.reactions_md,
-      // Message acts are a thread-level concern: inside a thread each message gets its own
-      // act, while a channel-list row stands for the whole thread and shows its type
-      // instead. The channel list also builds its message from initial_message_md, which
-      // carries no acts — so a picker there could write a tag it could never display.
-      // Deleted and system messages aren't taggable either: a tag on a tombstone or an
-      // "X added a label" line has nothing to categorise.
+      // Thread-only: a channel-list row stands for the whole thread and shows its type,
+      // and it builds from initial_message_md, which carries no acts to display.
       ...(context === 'thread' &&
-        isChannelAdmin &&
+        canEditMessageActs &&
         !isMessageDeleted &&
         !isSystemMessage && { taggableMessageActs: message.messageActs ?? null }),
       onCopyLink,
