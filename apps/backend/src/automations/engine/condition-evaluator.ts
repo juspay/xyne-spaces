@@ -2,6 +2,7 @@ import type { Condition, LeafCondition } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import { ConditionOperator } from '../types/operators';
 import { extractRefPath, isPureRef } from '../util/variable-ref';
+import { logger } from '@/utils/logger';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -74,6 +75,42 @@ function applyOperator(
       return resolved !== undefined && resolved !== null && (resolved as number) < (refValue as number);
     case ConditionOperator.LTE:
       return resolved !== undefined && resolved !== null && (resolved as number) <= (refValue as number);
+
+    case ConditionOperator.HAS_TAG: {
+      if (!Array.isArray(resolved)) {
+        logger.info(`[CONDITION] has_tag — resolved is not an array (got ${typeof resolved}), result=false`);
+        return false;
+      }
+      const raw = String(refValue);
+      // value format: "category:match:tag1,tag2"  e.g. "priority:any:critical,high"
+      const firstColon = raw.indexOf(':');
+      const secondColon = raw.indexOf(':', firstColon + 1);
+      if (firstColon === -1 || secondColon === -1) {
+        logger.info(`[CONDITION] has_tag — malformed value="${raw}", result=false`);
+        return false;
+      }
+      const category = raw.slice(0, firstColon);
+      const match = raw.slice(firstColon + 1, secondColon);
+      const tags = raw.slice(secondColon + 1).split(',').filter(Boolean);
+      if (match !== 'any' && match !== 'all') {
+        logger.info(`[CONDITION] has_tag — invalid match="${match}", result=false`);
+        return false;
+      }
+      if (tags.length === 0) {
+        logger.info(`[CONDITION] has_tag — empty tag list, result=false`);
+        return false;
+      }
+      const tagEntries = resolved as Array<{ category: string; tag: string }>;
+      const presentTags = tagEntries.filter(t => t.category === category).map(t => t.tag);
+      const result = match === 'all'
+        ? tags.every(t => presentTags.includes(t))
+        : tags.some(t => presentTags.includes(t));
+      logger.debug(
+        `[CONDITION] has_tag category=${category} match=${match} want=[${tags.join(',')}] present=[${presentTags.join(',')}] result=${result}`,
+      );
+      return result;
+    }
+
     default:
       return assertNever(operator);
   }

@@ -14,6 +14,7 @@ interface StagesSubmenuProps {
   selectedStages: string[];
   onChange: (stages: string[]) => void;
   availableStages?: StageOption[];
+  isLoading?: boolean;
   className?: string;
 }
 
@@ -21,6 +22,7 @@ export const StagesSubmenu = ({
   selectedStages,
   onChange,
   availableStages = [],
+  isLoading = false,
   className = '',
 }: StagesSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,7 +88,11 @@ export const StagesSubmenu = ({
         </div>
       </div>
       <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
-        {!availableStages || availableStages.length === 0 ? (
+        {isLoading ? (
+          <div className='p-8 text-center text-sm text-muted-foreground' aria-live='polite'>
+            Loading stages…
+          </div>
+        ) : !availableStages || availableStages.length === 0 ? (
           <div className='p-8 text-center text-sm text-muted-foreground'>No stages available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>

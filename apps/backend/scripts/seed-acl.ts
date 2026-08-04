@@ -123,7 +123,7 @@ const DEFAULT_ADMIN_USER = {
   name: DEFAULT_ADMIN_EMAIL.split('@')[0],
   email: DEFAULT_ADMIN_EMAIL,
   authProvider: AuthProvider.EMAIL,
-  providerUserId: 'email-admin-seed-user-001',
+  providerUserId: `email-${DEFAULT_ADMIN_EMAIL}`,
   status: UserStatus.ACTIVE,
   role: WorkspaceRole.ADMIN,
 };

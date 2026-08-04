@@ -38,6 +38,7 @@ import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
+import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 config()
@@ -274,6 +275,12 @@ class WorkerService {
 
         tagGenerationPipeline.onCompleted(DESK_EMAIL_SOURCE_TYPE, (result) => {
           void enqueueTagVespaRefeed(DESK_EMAIL_SOURCE_TYPE, result.sourceId);
+          logger.info(`Tag generation completed for sourceId=${result.sourceId}, emitting tagGenerated event...`);
+          void emitTagGenerated({
+            sourceId: result.sourceId,
+            sourceType: result.sourceType,
+            tags: result.tags.map(t => ({ category: t.tagCategory, tag: t.tag, reason: t.reason ?? null })),
+          });
         });
       }
 

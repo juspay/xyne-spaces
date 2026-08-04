@@ -849,6 +849,7 @@ export class TicketRepository {
       isArchived?: boolean;
       closedAt?: Date | null;
       closedBy?: string | null;
+      aiPriority?: string;
     },
     updatedBy: string,
   ): Promise<void> {
@@ -862,6 +863,7 @@ export class TicketRepository {
     if (fields.isArchived !== undefined) data.isArchived = fields.isArchived;
     if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
     if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
+    if (fields.aiPriority !== undefined) data.aiPriority = fields.aiPriority;
 
     if (Object.keys(data).length <= 2) {
       return;

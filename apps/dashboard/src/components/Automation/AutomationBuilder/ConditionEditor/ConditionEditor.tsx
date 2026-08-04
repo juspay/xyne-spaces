@@ -21,6 +21,7 @@ import { detectEntityKind, isVariableRefValue } from '../SchemaForm/SchemaForm.u
 import { ReferenceChip, UseVariableButton } from '../SchemaForm/VariableFieldParts';
 import type { ConditionEditorProps } from './ConditionEditor.types';
 import { isAndGroup, isLeaf, makeEmptyLeaf, resolveLeafSchema } from './ConditionEditor.utils';
+import { TagValueInput } from './TagValueInput';
 
 const MAX_DEPTH = 2;
 
@@ -114,7 +115,7 @@ interface LeafRowProps {
   operators: {
     value: string;
     label: string;
-    valueType: 'string' | 'number' | 'boolean' | 'none';
+    valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag';
   }[];
   variableSources: VariablePickerSource[];
   onChange: (next: Condition) => void;
@@ -220,7 +221,7 @@ function ValueOperand({
   entityKind,
   variableSources,
 }: {
-  operator: { valueType: 'string' | 'number' | 'boolean' | 'none' } | undefined;
+  operator: { valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag' } | undefined;
   value: unknown;
   onChange: (next: unknown) => void;
   enumValues: string[] | null;
@@ -248,7 +249,9 @@ function ValueOperand({
           entityKind={entityKind}
         />
       </div>
-      <UseVariableButton sources={variableSources} onPick={onChange} modal={true} />
+      {operator?.valueType !== 'tag' && (
+        <UseVariableButton sources={variableSources} onPick={onChange} modal={true} />
+      )}
     </div>
   );
 }
@@ -260,12 +263,15 @@ function ValueInput({
   enumValues,
   entityKind,
 }: {
-  operator: { valueType: 'string' | 'number' | 'boolean' | 'none' } | undefined;
+  operator: { valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag' } | undefined;
   value: unknown;
   onChange: (next: unknown) => void;
   enumValues: string[] | null;
   entityKind: ReturnType<typeof detectEntityKind>;
 }): React.ReactElement {
+  if (operator?.valueType === 'tag') {
+    return <TagValueInput value={typeof value === 'string' ? value : ''} onChange={onChange} />;
+  }
   if (operator?.valueType === 'boolean') {
     return (
       <Checkbox
