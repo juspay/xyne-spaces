@@ -200,6 +200,7 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
+  RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
@@ -817,6 +818,13 @@ export const config = {
   },
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS,
+  },
+  pendingOAuthTokens: {
+    redisKeyPrefix: 'pendingauth:oauth:',
+    ttlSeconds: 10 * 60,
+  },
+  recentVisitedConversations: {
+    lookbackDays: envVars.RECENT_VISITED_LOOKBACK_DAYS,
   },
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)

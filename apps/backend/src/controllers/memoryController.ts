@@ -63,6 +63,23 @@ export class MemoryController {
 
       // Replace document userId with user's email
       document.userId = user.email;
+
+      // The underlying insert is an upsert keyed on the caller-supplied docId, so reject when
+      // the docId already belongs to another user. The owner is stored as either email or id.
+      const existingDoc = await getMemoryById(document.docId);
+      if (
+        existingDoc &&
+        existingDoc.userId !== user.email &&
+        existingDoc.userId !== userId
+      ) {
+        logger.warn('Blocked cross-user memory overwrite', {
+          docId: document.docId,
+          owner: existingDoc.userId,
+        });
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
       logger.info('Indexing memory document', {
         docId: document.docId,
         userId: document.userId,

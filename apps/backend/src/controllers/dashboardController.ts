@@ -1222,10 +1222,10 @@ export class DashboardController {
           });
           return;
         case 'execution_failed':
+          // Return a generic message; the detail is logged server-side in QueryExecutor.
           res.status(500).json({
             error: 'InternalServerError',
-            message: e.message,
-            details: e.details,
+            message: 'Query execution failed.',
           });
           return;
       }

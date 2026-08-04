@@ -12,7 +12,8 @@ const MCP_ICON_BASE = '/assets/mcp';
 const MCP_SVG_ONLY = new Set(['gmail', 'google-drive', 'sequentialthinking', 'xyne-spaces']);
 const MCP_ICON_BG: Record<string, string> = { 'xyne-spaces': 'bg-transparent' };
 
-const SIZE: Record<'md' | 'lg', string> = {
+const SIZE: Record<'sm' | 'md' | 'lg', string> = {
+  sm: 'size-8 rounded-lg p-1 text-[10px]',
   md: 'size-10 rounded-lg p-1.5 text-xs',
   lg: 'size-12 rounded-xl p-2 text-sm',
 };
@@ -32,17 +33,19 @@ export const McpServerIcon = ({
   size = 'md',
 }: {
   server: McpServer;
-  size?: 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg';
 }): ReactElement => {
   const [errored, setErrored] = useState(false);
-  const bg = MCP_ICON_BG[server.type] ?? 'bg-muted';
+  // `bg-card` (white), not `bg-muted` (grey), so brand logos sit on the same
+  // white-tile-with-grey-border frame the Browse MCP dialog's McpLogo uses.
+  const bg = MCP_ICON_BG[server.type] ?? 'bg-card';
   const sizeCls = SIZE[size];
 
   if (errored || !server.type) {
     return (
       <div
         className={cn(
-          'flex shrink-0 items-center justify-center border border-border font-semibold text-muted-foreground',
+          'flex shrink-0 items-center justify-center border border-border font-semibold text-muted-foreground shadow-sm',
           sizeCls,
           bg,
         )}
@@ -59,7 +62,7 @@ export const McpServerIcon = ({
       alt=''
       aria-hidden='true'
       onError={() => setErrored(true)}
-      className={cn('shrink-0 border border-border object-contain', sizeCls, bg)}
+      className={cn('shrink-0 border border-border object-contain shadow-sm', sizeCls, bg)}
     />
   );
 };

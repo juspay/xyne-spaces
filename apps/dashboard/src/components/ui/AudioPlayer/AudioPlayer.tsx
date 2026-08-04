@@ -1,9 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
-
-type AudioPlayState = 'idle' | 'loading' | 'playing' | 'paused';
+import { useAudioPlayback } from './useAudioPlayback';
 
 function formatSecs(s: number): string {
   const m = Math.floor(s / 60);
@@ -44,38 +41,11 @@ export function AudioPlayer({
   className,
   showToastOnError = false,
 }: AudioPlayerProps): React.ReactElement {
-  const [state, setState] = useState<AudioPlayState>('idle');
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(initialDurationSec);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const blobUrlRef = useRef<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Releases the current Audio element: stops playback, detaches the media
-  // resource (removeAttribute('src')+load() frees the decoder and makes the
-  // element + its listeners GC-able), and revokes the blob URL (which pins
-  // the whole recording's bytes). Runs on unmount AND before creating a
-  // replacement — previously each replay leaked the prior element + blob.
-  const releaseAudio = (): void => {
-    abortRef.current?.abort();
-    const a = audioRef.current;
-    if (a) {
-      a.pause();
-      a.removeAttribute('src');
-      a.load();
-      audioRef.current = null;
-    }
-    if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current);
-      blobUrlRef.current = null;
-    }
-  };
-  const releaseRef = useRef(releaseAudio);
-  releaseRef.current = releaseAudio;
-
-  useEffect(() => {
-    return (): void => releaseRef.current();
-  }, []);
+  const { state, currentTime, duration, canSeek, toggle, seek } = useAudioPlayback({
+    onLoad,
+    initialDurationSec,
+    showToastOnError,
+  });
 
   const stop = (e: { stopPropagation(): void }): void => {
     if (stopPropagation) e.stopPropagation();
@@ -83,61 +53,14 @@ export function AudioPlayer({
 
   const handleToggle = async (e: React.MouseEvent): Promise<void> => {
     stop(e);
-
-    if (state === 'playing') {
-      audioRef.current?.pause();
-      setState('paused');
-      return;
-    }
-    if (state === 'paused') {
-      void audioRef.current?.play();
-      setState('playing');
-      return;
-    }
-    if (state !== 'idle') return;
-
-    setState('loading');
-    releaseAudio(); // free the previous element + blob before creating new ones
-    try {
-      abortRef.current = new AbortController();
-      const blob = await onLoad(abortRef.current.signal);
-      const url = URL.createObjectURL(blob);
-      blobUrlRef.current = url;
-
-      const audio = new Audio(url);
-      audioRef.current = audio;
-
-      audio.addEventListener('loadedmetadata', () => {
-        if (isFinite(audio.duration)) setDuration(audio.duration);
-      });
-      audio.addEventListener('timeupdate', () => setCurrentTime(audio.currentTime));
-      audio.addEventListener('playing', () => setState('playing'));
-      audio.addEventListener('pause', () => {
-        if (!audio.ended) setState('paused');
-      });
-      audio.addEventListener('ended', () => {
-        setState('idle');
-        setCurrentTime(0);
-      });
-
-      await audio.play();
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setState('idle');
-      if (showToastOnError) toast.error('Failed to load recording');
-    }
+    await toggle();
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>): void => {
     stop(e);
-    const newTime = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-    }
+    seek(parseFloat(e.target.value));
   };
 
-  const canSeek = state === 'playing' || state === 'paused';
   const totalLabel = duration > 0 ? formatSecs(duration) : '--:--';
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -177,6 +100,7 @@ export function AudioPlayer({
             />
           </div>
         </div>
+
         {/* Invisible range input on top for interaction */}
         <input
           type='range'

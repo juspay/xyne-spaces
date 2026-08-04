@@ -105,6 +105,7 @@ function assertMainWindowSender(event: IpcMainInvokeEvent): void {
 export function setupMTLSIpcHandlers(): void {
 
     // mtls start
+    // Privileged mTLS identity operations are restricted to the main window's top frame.
     ipcMain.handle('generate-keys', async (event) => {
         assertMainWindowSender(event);
         Logger.info(EnrollmentEvent.FIRST_TIME_SIGNUP_START);

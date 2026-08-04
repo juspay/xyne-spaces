@@ -17,7 +17,8 @@
  * The resolved specs are forwarded to xyne-claw as `callableAgents` in the /run
  * body, where buildCallableAgentTools() turns each into a governed tool.
  */
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import type { AppPrismaClient } from "../db.js";
 import { parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs, type ProviderConfig } from "./agent-provider-config.js";
 import { resolveCustomSubagentsForRun, type CustomSubagentSpec } from "./subagent-resolver.js";
@@ -96,7 +97,7 @@ export function toLightweightCallableAgentSpec(
 }
 
 export async function hydrateCallableAgentSpec(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   callee: AgentRowWithSkills,
   identityMode: DelegationIdentityMode,
 ): Promise<CallableAgentSpec> {
@@ -153,7 +154,7 @@ export async function hydrateCallableAgentSpec(
  * enabled callee agents are returned.
  */
 export async function resolveCallableAgentsForRun(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   callerAgentId: string,
   requestedCalleeSlugs: string[],
   callerOrgId?: string,
@@ -227,7 +228,7 @@ export async function resolveCallableAgentsForRun(
  * forwarded; xyne-claw hydrates a selected callee at execute time.
  */
 export async function resolveOrchestratorCallableAgentsForRun(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   callerAgentId: string,
   callerOrgId: string,
   opts: { runningUserId?: string; isAdmin?: boolean } = {},
@@ -281,7 +282,7 @@ export async function resolveOrchestratorCallableAgentsForRun(
 }
 
 export async function resolveCallableAgentSpecForOrchestratorCall(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   args: {
     callerSlug: string;
     calleeSlug: string;

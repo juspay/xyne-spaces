@@ -5,12 +5,10 @@ import { voiceInputService } from '../../services/VoiceInput/voiceInputService';
 import { cn } from '../../utils/classNames';
 
 interface ComposerVoiceButtonProps {
-  /** Called with the transcribed text once recording stops and STT returns. */
   onTranscript: (text: string) => void;
-  /** Notifies the parent whenever recording/transcribing state changes, so the
-   *  composer can render the "Listening…" UI + animated border while active. */
   onStateChange?: (state: { isRecording: boolean; isTranscribing: boolean }) => void;
   disabled?: boolean;
+  className?: string;
 }
 
 /**
@@ -24,6 +22,7 @@ export function ComposerVoiceButton({
   onTranscript,
   onStateChange,
   disabled = false,
+  className,
 }: ComposerVoiceButtonProps): ReactElement {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -147,6 +146,7 @@ export function ComposerVoiceButton({
           ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
           : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
         (disabled || isTranscribing) && 'cursor-not-allowed opacity-60',
+        className,
       )}
       data-track-category='XyneAI'
       data-track-name={isRecording ? 'STOP_VOICE_INPUT' : 'START_VOICE_INPUT'}

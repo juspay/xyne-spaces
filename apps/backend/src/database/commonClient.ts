@@ -1,6 +1,8 @@
 import { PrismaClient as CommonPrismaClient } from '../../prisma-common/generated/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { withRetry } from '@/utils/retry';
+import { installPrismaRetryMiddleware } from './retryMiddleware';
 
 /**
  * Builds the common DB connection URL with pool settings from env config.
@@ -50,6 +52,8 @@ export class CommonDatabaseClient {
         },
       });
 
+      installPrismaRetryMiddleware(CommonDatabaseClient.instance, 'prisma.common');
+
       (CommonDatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Common database error:', e);
       });
@@ -76,7 +80,7 @@ export class CommonDatabaseClient {
 
     try {
       const client = CommonDatabaseClient.getInstance();
-      await client.$connect();
+      await withRetry(() => client.$connect(), 'prisma.common.connect');
       CommonDatabaseClient.isConnected = true;
       logger.info('Common database connected successfully');
       return true;

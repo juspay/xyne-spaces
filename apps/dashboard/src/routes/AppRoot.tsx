@@ -101,9 +101,11 @@ import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
-import RecordingsScreen from './RecordingsScreen/RecordingsScreen';
-import RecordingDetailScreen from './RecordingDetailScreen/RecordingDetailScreen';
+import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
+import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
+import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
@@ -178,6 +180,7 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
+import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
@@ -205,8 +208,11 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/AILibraryScreen';
+import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
+import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
+import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
-import AISectionScreen from './AIScreen/AISectionScreen';
+import AISectionLayout from './AIScreen/AISectionLayout';
 import UserGuideScreen from './UserGuideScreen';
 import DailyBriefScreen from './DailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
@@ -287,6 +293,7 @@ const WorkspaceRedirect = (): ReactElement => {
 };
 
 const AppRoot = (): ReactElement => {
+  const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
   const rightPanelRef = useRef<PanelImperativeHandle>(null);
@@ -694,7 +701,7 @@ const AppRoot = (): ReactElement => {
                   <>
                     <IncomingCallModal />
                     <GlobalCallOverlay />
-                    <RecordingOverlay />
+                    {recordingVersion === 'v2' ? <NoteTakerOverlayHost /> : <RecordingOverlay />}
                     <GlobalUploadProgress />
                     <NotificationHandler />
                     <ElectronBadgeSync />
@@ -712,6 +719,7 @@ const AppRoot = (): ReactElement => {
                 )}
                 <AttachmentGalleryModal />
                 <ThreadCitationModal />
+                <TranscriptCitationModal />
                 <AttachmentCitationPreview />
                 <ErrorReportModal
                   isOpen={isErrorReportOpen}
@@ -820,10 +828,30 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
+                  { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                  { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+                  { path: 'library/skill/create', element: <AISkillCreateScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
-                  { path: 'digital-twin', element: <AISectionScreen title='Digital twin' /> },
-                  { path: 'metrics', element: <AISectionScreen title='Metrics' /> },
-                  { path: 'workflow', element: <AISectionScreen title='Workflow' /> },
+                  {
+                    element: <AISectionLayout />,
+                    children: [
+                      {
+                        path: 'digital-twin',
+                        element: <ClawDigitalTwinScreen />,
+                        children: [
+                          { index: true, element: <DigitalTwinMemoriesTab /> },
+                          { path: 'hot', element: <DigitalTwinHotTab /> },
+                          { path: 'proposals', element: <DigitalTwinProposalsTab /> },
+                          { path: 'recall', element: <DigitalTwinRecallTab /> },
+                          { path: 'graph', element: <DigitalTwinGraphTab /> },
+                          { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
+                          { path: 'settings', element: <DigitalTwinSettingsTab /> },
+                        ],
+                      },
+                      { path: 'metrics', element: <ClawMetricsScreen /> },
+                      { path: 'settings', element: <ClawSettingsScreen /> },
+                    ],
+                  },
                 ],
               },
               {
@@ -1234,11 +1262,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'recordings',
-                element: <RecordingsScreen />,
+                element: <RecordingsRoute />,
               },
               {
                 path: 'recordings/:recordingId',
-                element: <RecordingDetailScreen />,
+                element: <RecordingDetailRoute />,
               },
               {
                 path: 'user-groups/:userGroupId/assignment-config',
@@ -1464,6 +1492,7 @@ export const router = createBrowserRouter([
                   <AttachmentGalleryModal />
                   <AttachmentCitationPreview />
                   <ThreadCitationModal />
+                  <TranscriptCitationModal />
                 </EditProvider>
               </InitialStateLoader>
             </ZeroFallbackProvider>
