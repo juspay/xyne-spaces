@@ -13,7 +13,14 @@ const backfillAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
  * @desc Backfill or reconcile denormalized conversation_participant fields
  * @access TICKET-MIGRATION Admin only
  * @body {
- *   types?: ('lastReplyAt' | 'staleLastReplyAt' | 'channelId' | 'orphanedParticipants')[],
+ *   types?: (
+ *     | 'lastReplyAt'
+ *     | 'legacyLastReadAt'
+ *     | 'staleLastReplyAt'
+ *     | 'channelId'
+ *     | 'orphanedParticipants'
+ *   )[],
+ *   lastReadAtCutoff?: string, // Required for legacyLastReadAt; valid timestamp
  *   batchSize?: number,
  *   delayMs?: number,
  *   dryRun?: boolean
