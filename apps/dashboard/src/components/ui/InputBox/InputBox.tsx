@@ -988,8 +988,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               convertedExtension: getFileExtension(fileName),
             });
             void addDraftAttachments([file]);
-            editor?.commands.setContent('');
-            setContent('');
             return true;
           }
           return false;
