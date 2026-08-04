@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { ChannelRecapBackfillController } from '@/controllers/channelRecapBackfillController';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';

@@ -1,4 +1,5 @@
-import { PrismaClient, PRStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { PRStatus } from '@xyne/shared';
 import { PullRequestDataWithRepo } from '../types/bitbucket.js';
 import { DatabaseClient } from '@/database/client';
 import { getContextOrNull } from '@/database/tenant/context';

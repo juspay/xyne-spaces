@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream';
-import { AttachmentEntityType, AttachmentUploadStatus, type Prisma } from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
 import { config } from '@/config/env';

@@ -1,5 +1,12 @@
-import { DashboardRole, DashboardVisibility, Prisma, QueryVisualizationType } from '@prisma/client';
-import { defaultSizeFor, nextOpenPosition, parseDashboardConfig } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
+import {
+  defaultSizeFor,
+  nextOpenPosition,
+  parseDashboardConfig,
+  DashboardRole,
+  DashboardVisibility,
+  QueryVisualizationType,
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 

@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { PrismaClient, ChannelRole, UserType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { ChannelRole, UserType } from '@xyne/shared';
 import { db } from '../src/database/client';
 import { repositories } from '../src/database/repositories/index';
 import { runWithContext } from '../src/database/tenant/context';

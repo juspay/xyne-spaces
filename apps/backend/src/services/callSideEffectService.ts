@@ -7,8 +7,15 @@ import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
-import { InvitationResponse, NotificationType, ChannelScopeType, CallType, CallOrigin } from '@prisma/client';
-import { ActivityClassification, MessageType } from '@xyne/shared';
+import {
+  ActivityClassification,
+  MessageType,
+  InvitationResponse,
+  NotificationType,
+  ChannelScopeType,
+  CallType,
+  CallOrigin,
+} from '@xyne/shared';
 
 class CallSideEffectService {
     private logger = logger.child({ module: 'CallSideEffectService' });

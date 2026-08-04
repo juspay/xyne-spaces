@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
+import { RecordingType, CallType } from '@xyne/shared';
 import type { WebhookEvent } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import { RecordingType } from '@prisma/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
@@ -143,7 +143,7 @@ class NoteTakerWebhookController {
       externalId: call.externalId,
       channelId: null,
       title: call.title,
-      callType: call.callType,
+      callType: call.callType as CallType,
       startedAt: call.startedAt,
     }).catch((autoError) => {
       logger.error('[NoteTaker Webhook] Failed to emit call-started automation event:', autoError);
@@ -244,7 +244,7 @@ class NoteTakerWebhookController {
         externalId: call.externalId,
         channelId: null,
         title: call.title,
-        callType: call.callType,
+        callType: call.callType as CallType,
         startedAt: call.startedAt,
         endedAt,
         aiSummary: call.aiSummary,

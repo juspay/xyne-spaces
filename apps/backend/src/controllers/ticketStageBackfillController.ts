@@ -1,5 +1,5 @@
-import { ExternalEntityType, TicketStatusV2 } from '@prisma/client';
 import { Request, Response } from 'express';
+import { ExternalEntityType, TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
 import { ApiResponse } from '@/types/express';
@@ -361,7 +361,7 @@ export class TicketStageBackfillController {
           boardId: stage.boardId,
           sequenceNumber: stage.sequenceNumber,
           eta: stage.eta,
-          defaultTicketStatusV2: stage.defaultTicketStatusV2,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2 as TicketStatusV2,
         });
         stagesByBoard.set(stage.boardId, boardStages);
       }

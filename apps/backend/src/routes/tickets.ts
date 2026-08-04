@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { TicketController } from '../controllers/ticketController';
 import { ReleaseNotesController } from '../controllers/releaseNotesController';
 import { AnalyticsController } from '../controllers/analyticsController';
@@ -9,7 +10,6 @@ import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidat
 import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 
 const router = Router();

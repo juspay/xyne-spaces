@@ -1,5 +1,5 @@
-import { ActivityType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityType } from '@xyne/shared';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';

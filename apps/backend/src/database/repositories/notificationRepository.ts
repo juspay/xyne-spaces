@@ -1,6 +1,7 @@
 import { BaseRepository } from './base';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { Notification, NotificationPreference, BrowserNotificationSubscription, NotificationType, NotificationStatus, NotificationDeliveryMethod } from '@prisma/client';
+import { Notification, NotificationPreference, BrowserNotificationSubscription } from '@prisma/client';
+import { NotificationType, NotificationStatus, NotificationDeliveryMethod } from '@xyne/shared';
 
 // Define create/update input types
 type NotificationCreateInput = {

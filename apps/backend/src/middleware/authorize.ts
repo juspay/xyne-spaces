@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import { AccessType } from '@xyne/shared';
 import { DatabaseClient } from '../database/client';
-import { AccessType } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 

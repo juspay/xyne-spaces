@@ -1,9 +1,9 @@
 import { z } from 'zod';
+import { NotificationType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import { notificationService } from '@/services/notificationService';
-import { NotificationType } from '@prisma/client';
 import type { AutomationContext } from '../types/context';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { buildNotifyActionUrl, NOTIFY_LINK_TYPES, type NotifyLinkType } from './notify-action-url';

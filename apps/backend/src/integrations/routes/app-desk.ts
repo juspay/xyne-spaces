@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
+import { AppPermissionStatus, AppPermissionType, ChannelType } from '@xyne/shared';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { AppPermissionStatus, AppPermissionType, ChannelType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { appDeskService } from '@/services/appDeskService';
 import { DESK_SOURCE_PREFIXES, extractInstalledAppId } from '@/integrations/core/deskSources';

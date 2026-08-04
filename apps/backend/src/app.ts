@@ -167,7 +167,6 @@ import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
 import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
 import teamIntelligenceRoutes from '@/team-intelligence/routes';
-import telepresenceMonitoringRoutes from '@/telepresence-monitoring/routes';
 import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
 import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
 import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
@@ -369,7 +368,6 @@ export class App {
 
     // Team intelligence sync route (S2S auth - called by Mettle)
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
-    this.app.use('/api/telepresence-monitoring', telepresenceMonitoringRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
     this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);

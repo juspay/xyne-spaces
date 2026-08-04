@@ -5,7 +5,8 @@
  * to the User table with authProvider: 'API_KEY' and userType: 'BOT'.
  */
 
-import { User, AuthProvider, UserStatus, UserType } from '@prisma/client';
+import { User } from '@prisma/client';
+import { AuthProvider, UserStatus, UserType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { botCatalog, type BotDefinition } from '../index.js';
 import {logger} from '@/utils/logger';

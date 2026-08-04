@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma, EmailType, DeskType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -12,7 +12,15 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
-import { resolveParentOption } from '@xyne/shared';
+import {
+  resolveParentOption,
+  TicketPriority,
+  TicketStatusV2,
+  MessageDirection,
+  ExternalEntityType,
+  EmailType,
+  DeskType,
+} from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
@@ -2067,7 +2075,7 @@ export class TicketController {
         }
         await emailChannelPreferenceRepo.upsert({
           channelId,
-          deskType: channelPref?.deskType ?? DeskType.EMAIL,
+          deskType: (channelPref?.deskType ?? DeskType.EMAIL) as DeskType,
           boardId: boardIdToConfigure,
         });
       }
