@@ -28,7 +28,13 @@ const GOOGLE_CALENDAR_SCOPES = [
   'email',
   'profile',
   'https://www.googleapis.com/auth/calendar.readonly',
-  'https://www.googleapis.com/auth/documents',
+];
+const GOOGLE_DOCS_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  // Limited to files created or opened by this app; sufficient for Docs create/update.
+  'https://www.googleapis.com/auth/drive.file',
 ];
 const MICROSOFT_CALENDAR_SCOPES = [
   'openid',
@@ -94,7 +100,7 @@ function getPlatform(req: Request): CalendarOAuthPlatform {
 function redirectWithError(
   req: Request,
   res: Response,
-  state: Pick<CalendarOAuthState, 'workspaceId' | 'platform'> | null,
+  state: Pick<CalendarOAuthState, 'workspaceId' | 'platform' | 'returnPath'> | null,
   error: string
 ): void {
   const frontendUrl = getFrontendUrl(req);
@@ -180,9 +186,16 @@ router.post('/init', authMiddleware.authenticate, async (req: Request, res: Resp
       return;
     }
 
+    const isDocsExport = req.body?.purpose === 'docs_export';
+    if (isDocsExport && provider !== 'GOOGLE') {
+      res.status(400).json({ success: false, error: 'Google Docs export requires a Google account' });
+      return;
+    }
+
     const platform = getPlatform(req);
     const returnPath = sanitizeReturnPath(req.body?.returnPath);
     const { state, codeChallenge } = await calendarOAuthStateService.create({
+      purpose: isDocsExport ? 'docs_export' : 'calendar_reauth',
       provider,
       ownerUserId: user.id,
       workspaceId: user.workspaceId,
@@ -195,7 +208,7 @@ router.post('/init', authMiddleware.authenticate, async (req: Request, res: Resp
     if (provider === 'GOOGLE') {
       authUrl = createGoogleClient(req).generateAuthUrl({
         access_type: 'offline',
-        scope: GOOGLE_CALENDAR_SCOPES,
+        scope: isDocsExport ? GOOGLE_DOCS_SCOPES : GOOGLE_CALENDAR_SCOPES,
         prompt: 'consent',
         include_granted_scopes: true,
         login_hint: user.email,
@@ -297,7 +310,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     res.redirect(
       buildCalendarOAuthRedirect(getFrontendUrl(req), state, {
         calendarOAuth: 'success',
-        syncCalendar: 'true',
+        ...(state.purpose === 'calendar_reauth' ? { syncCalendar: 'true' } : {}),
       })
     );
   } catch (error) {

@@ -8,7 +8,7 @@ import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { logger } from '@/utils/logger';
 
-const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/documents';
+const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 function recordingTitle(value: string | null): string {
   return (value?.trim() || 'Untitled Recording').slice(0, 240);
@@ -43,6 +43,16 @@ function markdownToDocumentText(markdown: string): string {
   return text;
 }
 
+async function hasGoogleDocsScope(accessToken: string): Promise<boolean> {
+  const response = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
+    { signal: AbortSignal.timeout(10_000) },
+  );
+  if (!response.ok) throw new Error(`Unable to verify Google Docs access (${response.status})`);
+  const tokenInfo = (await response.json()) as { scope?: string };
+  return tokenInfo.scope?.split(' ').includes(GOOGLE_DOCS_SCOPE) ?? false;
+}
+
 async function readDetailedSummary(
   canvasId: string | null,
   workspaceId: string
@@ -63,46 +73,55 @@ async function readDetailedSummary(
 
 export class RecordingGoogleDocController {
   context = async (req: Request, res: Response): Promise<void> => {
-    const userId = req.user?.id;
-    const workspaceId = req.user?.workspaceId;
-    const { callId } = req.params;
-    if (!userId || !workspaceId) {
-      res.status(401).json({ success: false, error: 'Unauthorized' });
-      return;
-    }
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      const { callId } = req.params;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
 
-    const call = await repositories.calls.findByExternalId(callId);
-    if (
-      !call ||
-      call.callType !== CallType.HEADLESS ||
-      (call.workspaceId !== null && call.workspaceId !== workspaceId)
-    ) {
-      res.status(404).json({ success: false, error: 'Recording not found' });
-      return;
-    }
-    if (call.createdByUserId !== userId || !(await callShareService.canView(call, userId, workspaceId))) {
-      res.status(403).json({ success: false, error: 'Only the recording owner can export it' });
-      return;
-    }
+      const call = await repositories.calls.findByExternalId(callId);
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+      if (
+        call.createdByUserId !== userId ||
+        !(await callShareService.canView(call, userId, workspaceId))
+      ) {
+        res.status(403).json({ success: false, error: 'Only the recording owner can export it' });
+        return;
+      }
 
-    const credentials = await getCalendarCredentialsByOwnerUserId(userId, AuthProvider.GOOGLE);
-    const metadata = call.metadata as Record<string, unknown> | null;
-    const detailedSummaryCanvasId =
-      typeof metadata?.detailedSummaryCanvasId === 'string'
-        ? metadata.detailedSummaryCanvasId
-        : null;
-    const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId).catch(
-      () => null,
-    );
-    const summary = detailedSummary?.trim() || call.aiSummary?.trim();
-    res.json({
-      success: true,
-      canExport: !!credentials,
-      summary: summary ? markdownToDocumentText(summary) : null,
-      unavailableReason: credentials
-        ? undefined
-        : 'Connect Google Calendar to create a Google Doc from this recording.',
-    });
+      const credentials = await getCalendarCredentialsByOwnerUserId(userId, AuthProvider.GOOGLE);
+      const canExport = !!credentials && (await hasGoogleDocsScope(credentials.accessToken));
+      const metadata = call.metadata as Record<string, unknown> | null;
+      const detailedSummaryCanvasId =
+        typeof metadata?.detailedSummaryCanvasId === 'string'
+          ? metadata.detailedSummaryCanvasId
+          : null;
+      const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId).catch(
+        () => null,
+      );
+      const summary = detailedSummary?.trim() || call.aiSummary?.trim();
+      res.json({
+        success: true,
+        canExport,
+        summary: summary ? markdownToDocumentText(summary) : null,
+        unavailableReason: credentials
+          ? 'Reconnect Google Calendar to grant access for creating Google Docs.'
+          : 'Connect Google Calendar to create a Google Doc from this recording.',
+      });
+    } catch (error) {
+      logger.error('[RecordingGoogleDoc] Failed to prepare export context', { error });
+      res.status(500).json({ success: false, error: 'Failed to prepare Google Docs export' });
+    }
   };
 
   export = async (req: Request, res: Response): Promise<void> => {

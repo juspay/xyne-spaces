@@ -3,9 +3,10 @@ import { redisService } from '@/services/redisService';
 
 export type CalendarOAuthPlatform = 'web' | 'electron';
 export type CalendarOAuthProvider = 'GOOGLE' | 'MICROSOFT';
+export type CalendarOAuthPurpose = 'calendar_reauth' | 'docs_export';
 
 export interface CalendarOAuthState {
-  purpose: 'calendar_reauth';
+  purpose: CalendarOAuthPurpose;
   provider: CalendarOAuthProvider;
   ownerUserId: string;
   workspaceId: string;
@@ -30,7 +31,7 @@ function parseState(raw: string | null): CalendarOAuthState | null {
   try {
     const parsed = JSON.parse(raw) as Partial<CalendarOAuthState>;
     if (
-      parsed.purpose !== 'calendar_reauth' ||
+      (parsed.purpose !== 'calendar_reauth' && parsed.purpose !== 'docs_export') ||
       (parsed.provider !== 'GOOGLE' && parsed.provider !== 'MICROSOFT') ||
       !parsed.ownerUserId ||
       !parsed.workspaceId ||
@@ -50,14 +51,13 @@ function parseState(raw: string | null): CalendarOAuthState | null {
 
 class CalendarOAuthStateService {
   async create(
-    input: Omit<CalendarOAuthState, 'purpose' | 'codeVerifier' | 'createdAt'>
+    input: Omit<CalendarOAuthState, 'codeVerifier' | 'createdAt'>
   ): Promise<{ state: string; codeChallenge: string }> {
     const state = crypto.randomBytes(32).toString('base64url');
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 
     const stateData: CalendarOAuthState = {
-      purpose: 'calendar_reauth',
       ...input,
       codeVerifier,
       createdAt: Date.now(),

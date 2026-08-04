@@ -47,7 +47,7 @@ export function GoogleDocPreviewModal({
     setIsConnecting(true);
     try {
       const returnPath = `${window.location.pathname}${window.location.search}`;
-      const { authUrl } = await initCalendarOAuth('web', returnPath);
+      const { authUrl } = await initCalendarOAuth('web', returnPath, 'docs_export');
       window.location.assign(authUrl);
     } catch (error) {
       toast.error(
