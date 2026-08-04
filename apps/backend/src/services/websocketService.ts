@@ -1,4 +1,5 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
 import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent } from './redisService';
@@ -10,7 +11,6 @@ import { logger } from '@/utils/logger';
 import { authMiddleware } from '../middleware/auth';
 import { notificationService } from '@/notification-service';
 import { type NotificationData } from './notificationService';
-import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';

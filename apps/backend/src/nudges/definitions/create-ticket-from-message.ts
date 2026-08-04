@@ -9,7 +9,7 @@ import {
 } from '@juspay-jaf/jaf';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import {
   NudgeOutputSchemaLenient,
   type ProactiveNudgeOutputLenient,
@@ -141,7 +141,7 @@ export const createTicketFromMessage: NudgeDefinition<
   MessageNudgePayload,
   MessageNudgeEvaluationContext
 > = {
-  kind: 'CREATE_TICKET_FROM_MESSAGE',
+  kind: NudgeKind.CREATE_TICKET_FROM_MESSAGE,
   mode: 'explicit',
   priority: 'medium',
   trigger: {

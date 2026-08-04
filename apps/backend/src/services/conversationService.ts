@@ -540,7 +540,7 @@ export class ConversationService {
       messageId: message.messageId,
       conversationId: conversation.conversationId,
       channelId,
-      msgType: message.msgType,
+      msgType: message.msgType as MessageType,
       userId,
     });
 
@@ -807,7 +807,7 @@ export class ConversationService {
       messageId: message.messageId,
       conversationId,
       content: message.content ?? undefined,
-      msgType: message.msgType,
+      msgType: message.msgType as MessageType,
       isBot,
       userId,
       createdAt: message.createdAt,

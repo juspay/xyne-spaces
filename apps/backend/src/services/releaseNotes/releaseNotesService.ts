@@ -597,7 +597,7 @@ export class ReleaseNotesService {
           conversationId: ticket.conversationId,
           userId: releaseBotId,
           content: messageContent,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           metadata: {
             messageSubtype: 'ticket_deployed_with_release',
             canvasUrl,

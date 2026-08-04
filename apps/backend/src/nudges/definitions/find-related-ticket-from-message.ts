@@ -274,7 +274,7 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
   MessageNudgePayload,
   MessageNudgeEvaluationContext
 > = {
-  kind: 'FIND_RELATED_TICKET_FROM_MESSAGE',
+  kind: NudgeKind.FIND_RELATED_TICKET_FROM_MESSAGE,
   mode: 'explicit',
   priority: 'medium',
   trigger: {

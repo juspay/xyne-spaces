@@ -307,7 +307,7 @@ export class ExternalSourceCore {
         externalId: normalizedData.externalId,
         externalThreadId: normalizedData.externalThreadId,
         entityId: resolvedEntityId,
-        direction: 'INCOMING',
+        direction: MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
       });
     }
@@ -505,7 +505,7 @@ export class ExternalSourceCore {
           conversationId: conversation.conversationId,
           userId: senderId,
           content: messageContent,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           uploadedFiles: uploadedFiles,
           metadata: {
             externalSource: source.name,
@@ -770,7 +770,7 @@ export class ExternalSourceCore {
         channelId: source.channelId,
         userId: senderId,
         content: messageContent,
-        msgType: 'BOT',
+        msgType: MessageType.BOT,
         uploadedFiles: uploadedFiles,
         metadata: {
           externalSource: source.name,

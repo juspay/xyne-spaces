@@ -7,12 +7,13 @@ import type {
   NudgeBuildContextRuntime,
 } from '../types';
 import { EMPTY_ACTIVITY_CONTEXT } from '../types';
+import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
 
 export const forwardMessageLink: NudgeDefinition<
   ActivityEventNudgePayload,
   NudgeEvaluationContext
 > = {
-  kind: 'FORWARD_MESSAGE_LINK',
+  kind: NudgeKind.FORWARD_MESSAGE_LINK,
   mode: 'implicit',
   trigger: {
     subscribesTo: ['MESSAGE.FORWARDED'],

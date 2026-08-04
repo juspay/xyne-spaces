@@ -557,7 +557,7 @@ class NotificationService {
           conversationId: conversationId,
           senderId: botInfo.id,
           content: flowJsonString,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           hasAttachment: false,
         });
 
@@ -2007,7 +2007,7 @@ class NotificationService {
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',
         message: `You have been assigned to ticket "${ticket.title}"`,
-        type: 'TICKET_ASSIGNMENT',
+        type: NotificationType.TICKET_ASSIGNMENT,
         relatedEntityType: 'ticket',
         relatedEntityId: ticketId,
         actionUrl,

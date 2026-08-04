@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import type {
   NudgeDefinition,
   ActivityEventNudgePayload,
@@ -12,7 +13,7 @@ import { parseXyneUrlsFromContent } from './helpers';
 
 export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, NudgeEvaluationContext> =
   {
-    kind: 'LINK_PASTE_TO_SURFACE',
+    kind: NudgeKind.LINK_PASTE_TO_SURFACE,
     mode: 'implicit',
     trigger: {
       subscribesTo: ['MESSAGE.SENT'],

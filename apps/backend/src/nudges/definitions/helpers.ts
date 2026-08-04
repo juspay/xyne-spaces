@@ -1,5 +1,3 @@
-import { MessageType } from '@prisma/client';
-import type { SurfaceAreaType } from '@prisma/client';
 import { z } from 'zod';
 import {
   makeLiteLLMProvider,
@@ -12,7 +10,7 @@ import {
 } from '@juspay-jaf/jaf';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, MessageType, SurfaceAreaType } from '@xyne/shared';
 import { parseAgentOutput } from '@/services/agents/utils';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { extractUrls } from '@/utils/urlUtils';

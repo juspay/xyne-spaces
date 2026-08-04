@@ -382,7 +382,7 @@ export class ChannelController {
         initialMessage: {
           messageId: createdMessage.messageId,
           content: createdMessage.content,
-          msgType: createdMessage.msgType,
+          msgType: createdMessage.msgType as MessageType,
           hasAttachment: createdMessage.hasAttachment,
           attachments: [],
           createdAt: createdMessage.createdAt,
@@ -744,7 +744,7 @@ export class ChannelController {
         forwardedMessage: {
           messageId: result.createdMessage.messageId,
           content: result.createdMessage.content,
-          msgType: result.createdMessage.msgType,
+          msgType: result.createdMessage.msgType as MessageType,
           hasAttachment: result.createdMessage.hasAttachment,
           attachments: result.copiedAttachments,
           createdAt: result.createdMessage.createdAt,

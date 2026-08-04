@@ -294,7 +294,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         messageId: message.messageId,
         conversationId,
         channelId,
-        msgType: message.msgType,
+        msgType: message.msgType as MessageType,
         userId: senderId,
       });
     }

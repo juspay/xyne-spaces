@@ -1341,7 +1341,7 @@ export class WhatsAppMigrationService {
           userId: senderUserId,
           content: messageContent,
           uploadedFiles,
-          msgType: 'USER',
+          msgType: MessageType.USER,
           createdAt: message.timestamp,
           isAddingParticipant: false,
           messageMetadata,

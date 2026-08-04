@@ -261,7 +261,7 @@ export class DashboardController {
             title: c.title ?? null,
             queryType: 'external',
             queryJson: c.queryJson,
-            visualType: c.visualType as QueryVisualizationType,
+            visualType: c.visualType as SharedVisualizationType,
             position: c.position,
             config: c.config ?? '{}',
             createdBy: ctx.userId,

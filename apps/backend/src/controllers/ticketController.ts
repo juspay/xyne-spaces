@@ -868,7 +868,7 @@ export class TicketController {
             conversationId,
             senderId: userId,
             content: `Ticket created in ${board?.name || 'Unknown Board'}: ${title}`,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
             metadata: { ticketId: ticket.id },
           }, initialMessageId);
           await messageMetadataService.syncInitialMessageMd(conversationId);

@@ -1128,7 +1128,7 @@ model UserGroup {
   description String?
   metadata    Json? // Team-specific config: statuses, skills, etc.
   autoRotationEnabled  Boolean           @default(false)
-  rotationInterval     RotationInterval? // Only set when autoRotationEnabled is true
+  rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1333,8 +1333,8 @@ model UserPreference {
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
 
   // Global notification settings
-  globalDesktopNotificationLevel  NotificationLevel? // Default level for all channels (desktop)
-  globalMobileNotificationLevel   NotificationLevel? // Default level for all channels (mobile)
+  globalDesktopNotificationLevel  String?            // Default level for all channels (desktop)
+  globalMobileNotificationLevel   String?            // Default level for all channels (mobile)
   threadReplyNotificationsEnabled Boolean           @default(true) // Receive thread reply notifications globally
   channelWideMentionsEnabled      Boolean           @default(true) // Receive @channel and @here mention notifications
   notificationKeywords            String?             // Global keyword-notification list (max 50, each <= 80 chars)
@@ -1691,7 +1691,7 @@ model PullRequests {
   repositoryUrl           String
   prUrl                   String
   updatedAt               DateTime  @updatedAt
-  status                  PRStatus
+  status                  String
   ticketId                String?   // Ticket reference for prs raised by devs
 
   // Relations
@@ -1916,7 +1916,7 @@ model OrgMember {
   orgId       String   // Organization ID (no FK constraint)
   userId      String   @default("deprecated")   // Deprecated not using, only here for backward compatibility
   email       String   @unique // Email address — globally unique, one org per email
-  role        OrgRole  // OWNER | ADMIN | MEMBER | VIEWER
+  role        String   // OWNER | ADMIN | MEMBER | VIEWER
   passwordHash String?  // For email-password based login; null for existing Google/Microsoft SSO users unless explicitly set by forgot password
   joinedAt    DateTime @default(now())
   invitedBy   String?  // Who invited this user (no FK constraint)
@@ -2093,7 +2093,7 @@ model Project {
   ticketSequence Int              @default(0) // Used when ENABLE_COMMON_DB_TICKET_SEQUENCE is disabled
   description    String?
   workspaceId    String // Workspace this project belongs to
-  type           ProjectType      @default(DEFAULT)
+  type           String           @default("DEFAULT")
   createdBy      String // User ID (no FK constraint)
   updatedBy      String? // User ID (no FK constraint)
   createdAt      DateTime         @default(now())
@@ -2127,8 +2127,8 @@ model Board {
   updatedBy           String?              // User ID (no FK constraint)
   description         String?              // Board description
   metadata            Json?                // Board configuration including ticketFormConfig
-  vcsProvider         VCSProviderType?      // Main release board VCS provider
-  releaseTrackingMode ReleaseTrackingMode? // Main release board tracking mode
+  vcsProvider         String?               // Main release board VCS provider
+  releaseTrackingMode String?              // Main release board tracking mode
   createdAt           DateTime             @default(now())
   updatedAt           DateTime?            @updatedAt
 
@@ -2337,8 +2337,8 @@ model ChannelUserStatus {
   lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
   customRecapPrompt         String?     // Optional custom prompt for personalized recaps
 
-  desktopNotificationLevel  NotificationLevel?    // Channel notification preference (desktop); null = inherit UserPreference.globalDesktopNotificationLevel
-  mobileNotificationLevel   NotificationLevel?   // Channel notification preference (mobile); null = inherit UserPreference.globalMobileNotificationLevel
+  desktopNotificationLevel  String?               // Channel notification preference (desktop); null = inherit UserPreference.globalDesktopNotificationLevel
+  mobileNotificationLevel   String?              // Channel notification preference (mobile); null = inherit UserPreference.globalMobileNotificationLevel
   threadReplyNotificationsEnabled Boolean?       // Per-channel override: null = inherit UserPreference.threadReplyNotificationsEnabled
   channelWideMentionsEnabled      Boolean?       // Per-channel override: null = inherit UserPreference.channelWideMentionsEnabled
 
@@ -2692,7 +2692,7 @@ model Message {
   senderId            String      // User who sent the message (no FK constraint)
   workspaceId         String?     // Workspace for ACL optimization (denormalized from conversation)
   content             String      // Text content
-  msgType             MessageType @default(USER) // USER | BOT | SYSTEM
+  msgType             String      @default("USER") // USER | BOT | SYSTEM
   hasAttachment       Boolean     @default(false) // Quick check for attachments
   edited              Boolean     @default(false) // Whether the message has been edited
   isDeleted           Boolean     @default(false)
@@ -2955,7 +2955,7 @@ model ExternalMessage {
   entityType         String                @default("MESSAGE")
   entityId           String?               // Entity ID for MESSAGE, Email ID
   messageId          String                // Link to our Message (no FK constraint)
-  direction          MessageDirection      // INCOMING | OUTGOING
+  direction          String                // INCOMING | OUTGOING
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -3026,7 +3026,7 @@ model ProactiveNudge {
   id                      String             @id @default(cuid())
   messageId               String
 
-  type                    NudgeType
+  type                    String
   priority                String             // HIGH, MEDIUM, LOW
 
   title                   String
@@ -3049,13 +3049,13 @@ model ProactiveNudge {
 model SurfaceNudge {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String            @id @default(cuid())
-  nudgeKind   NudgeKind
+  nudgeKind   String
   sourceId    String
   title       String
   description String            @db.Text
   priority    String?           @default("medium")
   actions     Json?
-  state       NudgeState        @default(ACTIVE)
+  state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
   projectId   String
@@ -3179,11 +3179,11 @@ model Notification {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
-  type              NotificationType
+  type              String
   title             String
   message           String
-  status            NotificationStatus          @default(UNREAD)
-  deliveryMethods   NotificationDeliveryMethod[]
+  status            String                      @default("UNREAD")
+  deliveryMethods   String[]
   metadata          Json?                       // Additional context data
   relatedEntityType String?                     // "ticket", "workflow", "message", etc.
   relatedEntityId   String?                     // ID of the related entity
@@ -3206,7 +3206,7 @@ model NotificationPreference {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id               String           @id @default(cuid())
   userId           String           // User ID (no FK constraint)
-  notificationType NotificationType
+  notificationType String
   browserEnabled   Boolean          @default(true)
   emailEnabled     Boolean          @default(false)
   slackEnabled     Boolean          @default(false)
@@ -3390,8 +3390,8 @@ model CallRecording {
   egressId      String?         @unique          // webhook correlation key
   startedBy     String                           // user id; always set at creation. Cascade on user hard-delete
   name          String?                          // prefilled "Recording 1", renamable on stop
-  recordingType RecordingType                    // explicit at start (no default)
-  status        RecordingStatus                  // explicit at insert (born RECORDING_ACTIVE, no default)
+  recordingType String                           // explicit at start (no default)
+  status        String                           // explicit at insert (born RECORDING_ACTIVE, no default)
   storagePath   String?                          // final MP4 object key, set only on UPLOADED (read by all consumers)
   segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
   messageId     String?                          // thread message this recording is posted under
@@ -3419,7 +3419,7 @@ model RecurringCallSeries {
   timezone       String                    // IANA timezone e.g. "America/New_York"
   startTime      String                    // Time of day, 24h format e.g. "10:00"
   endTime        String                    // Time of day, 24h format e.g. "11:00"
-  status         RecurringCallSeriesStatus @default(ACTIVE)
+  status         String                    @default("ACTIVE")
   startsOn       DateTime                  // Series start date (first possible occurrence)
   endsOn         DateTime?                 // Series end date (null = indefinite)
   metadata           Json?                     // Extra config e.g. { "reminderMinutes": 10 }
@@ -3884,7 +3884,7 @@ enum LookupType {
 // Lookup values table - stores dynamic enumeration values for various entities
 model LookupValue {
   id        String          @id @default(cuid())
-  type      LookupType // Category/type of lookup value
+  type      String     // Category/type of lookup value
   value     String          // The actual value
   createdAt DateTime        @default(now())
 
@@ -4029,7 +4029,7 @@ model Query {
   queryJson      Json
   entityType     String?         // Deprecated: use targetEntity instead
   targetEntity   String?         // Entity/table being queried (e.g., TICKET, USER_WORKLOAD_MAPPING)
-  visualType     QueryVisualizationType?
+  visualType     String?
   position       String?
   createdBy      String
   createdAt      DateTime        @default(now())
@@ -4101,7 +4101,7 @@ model UserActivityEvent {
   url             String
   triggerType     String    @default("CLICK")
   contextMetadata Json?   
-  platform        Platform    
+  platform        String
   timestamp       DateTime
 
   @@index([userId])
@@ -4350,7 +4350,7 @@ model ReleaseEvent {
   id                    String            @id @default(cuid())
   releaseId             String            // Always present - Release ticket ID
   applicationReleaseId  String?           // App-specific events (SubTicket ID)
-  eventType             ReleaseEventType
+  eventType             String
   eventName             String            // Specific action
   message               String            // Human-readable message
   userId                String?           // NULL = system event
@@ -4472,8 +4472,8 @@ model RCA {
   ownerId               String     // User ID (no FK constraint)
   summary               String?
   rootCause             String?
-  severity              SEVERITY
-  status                RCAStatus  @default(DRAFT)
+  severity              String
+  status                String     @default("DRAFT")
   bugTypeId             String     // bug type
   categoryTypeId        String     // category type
   issueCategoryId       String?
@@ -4558,7 +4558,7 @@ model ReleaseAttribution {
 model Recap {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
-  entityType  RecapEntityType
+  entityType  String
   entityId    String
   recapDate   DateTime
   summary     String
@@ -5087,11 +5087,11 @@ model DynamicDashboardQuery {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String                  @id @default(cuid())
   title        String?
-  queryType    QueryType               @default(internal)
+  queryType    String                  @default("internal")
   queryJson    Json
   entityType   String?
   targetEntity String?
-  visualType   QueryVisualizationType?
+  visualType   String?
   position     String                  @default("{}")
   config       String                  @default("{}")
   createdBy    String

@@ -143,7 +143,7 @@ export const scheduleCallFromThread: NudgeDefinition<
   MessageNudgePayload,
   MessageNudgeEvaluationContext
 > = {
-  kind: 'SCHEDULE_CALL_FROM_THREAD',
+  kind: NudgeKind.SCHEDULE_CALL_FROM_THREAD,
   mode: 'explicit',
   priority: 'low',
   trigger: {

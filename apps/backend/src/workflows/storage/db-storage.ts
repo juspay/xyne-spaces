@@ -3310,7 +3310,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
       conversationId,
       senderId: 'Knowledge Bot',
       content: messageContent,
-      msgType: 'BOT',
+      msgType: MessageType.BOT,
       hasAttachment: false,
     })
     
@@ -3362,7 +3362,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
         conversationId: ticket.conversationId,
         senderId,
         content: messageContent,
-        msgType: 'BOT',
+        msgType: MessageType.BOT,
         hasAttachment: false,
       })
 
