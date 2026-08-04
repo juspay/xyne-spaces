@@ -4463,4 +4463,4 @@ img.inline-emoji,
    can render over the following message rows.  */
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
-} 
+}
