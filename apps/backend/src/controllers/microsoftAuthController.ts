@@ -514,6 +514,7 @@ export class MicrosoftAuthController {
             microsoftUserData.email,
           );
 
+
           let domainConflict = null;
           let domainConflictError = null;
           let publicEmailError = null;
