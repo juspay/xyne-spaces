@@ -1,12 +1,11 @@
 import { app, ipcMain, IpcMainInvokeEvent } from 'electron';
 import * as os from 'os';
-import * as path from 'path';
 import log from 'electron-log/main';
 
 import { keychain } from '../keychain';
 import { config } from '../app/config';
 import { getBundledUIUrl } from '../services/custom-protocol';
-import { getMainWindow } from '../window/manager';
+import { getMainWindow, showLoadingOverlay, showWindowError } from '../window/manager';
 import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { safeRecordMetric } from '../services/telemetry';
@@ -42,8 +41,7 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
             log.error('Main window not available for URL load retry');
             throw error;
         }
-        const loading_page = path.join(__dirname, '..', '..', 'assets', 'loading.html');
-        await mainWindow.loadFile(loading_page);
+        await showLoadingOverlay(mainWindow);
         Logger.logError(EnrollmentEvent.URL_LOAD_FAILED, error);
         // If we haven't exceeded max retries, try again
         if (attempts < MAX_RETRIES) {
@@ -62,8 +60,7 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
             });
             
             // Load error page with helpful message about system popup approval
-            const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
-            await mainWindow.loadFile(errorPage);
+            await showWindowError(mainWindow, 'timeout-error.html');
         }
     }
 }
@@ -137,6 +134,7 @@ export function setupMTLSIpcHandlers(): void {
             const frontendUrl = config.useBundledUI ? bundledUrl : config.FRONTEND_URL;
             const mainWindow = getMainWindow();
             if (mainWindow && !mainWindow.isDestroyed()) {
+                await showLoadingOverlay(mainWindow);
                 await urlLoadWithRetry(async () => {
                     Logger.info(EnrollmentEvent.LOAD_URL, { url: frontendUrl });
                     await mainWindow.loadURL(frontendUrl);

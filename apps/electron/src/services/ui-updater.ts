@@ -523,7 +523,9 @@ async function applyAndReload(mainWindow: BrowserWindow, releaseConfig: ReleaseC
     }
     
     const bundledUrl = `${config.DEEP_LINK_PROTOCOL}://./`;
-    void mainWindow.loadURL(bundledUrl);
+    // Lazy import avoids custom-protocol -> ui-updater -> window-manager initialization cycle.
+    const { loadUrl } = await import('../window/manager');
+    await loadUrl(mainWindow, bundledUrl, undefined, true);
   }
 }
 

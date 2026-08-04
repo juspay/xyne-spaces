@@ -19,6 +19,7 @@ import {
   XYNE_THEME_COMPONENT_TOKENS,
   XYNE_THEME_COMPONENT_TOKENS_DARK,
 } from '../../themes/componentTokens';
+import type { Theme } from '../../hooks/useTheme';
 import {
   processNumericMetric,
   processTimeSeriesData,
@@ -31,28 +32,24 @@ import {
   processDurationMetric,
 } from './AnalyticsScreen.utils';
 
-type Theme = 'classic' | 'midnight' | 'summer_breeze';
-
-const THEME_STORAGE_KEY = 'xyne-theme';
+const readDocumentTheme = (): Theme => {
+  if (typeof document === 'undefined') return 'classic';
+  const theme = document.documentElement.dataset['theme'];
+  return theme === 'midnight' || theme === 'summer_breeze' ? theme : 'classic';
+};
 
 const AnalyticsScreen = (): ReactElement => {
   const [dateRange, setDateRange] = useState<DateRange>(() => getDateRange('today'));
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-      return stored ?? 'classic';
-    }
-    return 'classic';
-  });
+  const [theme, setTheme] = useState<Theme>(readDocumentTheme);
 
   const { user } = useAuth();
 
   // Listen for theme changes via data-theme attribute (Settings updates this)
   useEffect(() => {
     const observer = new MutationObserver(() => {
-      const currentStored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-      if (currentStored && currentStored !== theme) {
-        setTheme(currentStored);
+      const currentTheme = readDocumentTheme();
+      if (currentTheme !== theme) {
+        setTheme(currentTheme);
       }
     });
 

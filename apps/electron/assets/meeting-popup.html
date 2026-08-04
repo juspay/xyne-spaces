@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Meeting Detected</title>
+  <script src="./theme.js"></script>
   <style>
     html { font-size: 16px; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -21,7 +22,8 @@
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      background: #fff;
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
       border-radius: 0.875rem;
       box-shadow: 0 0 0.75rem rgba(0,0,0,0.18);
       padding: 0.875rem 1rem;
@@ -48,9 +50,9 @@
       height: 1.5rem;
       border-radius: 50%;
       border: 1px solid #e0e0e0;
-      background: #fff;
+      background: var(--surface);
       cursor: pointer;
-      color: #666;
+      color: var(--muted);
       font-size: 0.625rem;
       display: flex;
       align-items: center;
@@ -58,7 +60,7 @@
       font-family: inherit;
       box-shadow: 0 1px 4px rgba(0,0,0,0.12);
     }
-    .btn-dismiss:hover { background: #f5f5f5; color: #333; }
+    .btn-dismiss:hover { background: var(--page-bg); color: var(--text); }
 
     .icon {
       width: 2.5rem;
@@ -74,7 +76,7 @@
     .title {
       font-weight: 600;
       font-size: 0.875rem;
-      color: #111;
+      color: var(--text);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -82,13 +84,13 @@
 
     .subtitle {
       font-size: 0.75rem;
-      color: #888;
+      color: var(--muted);
       margin-top: 0.125rem;
       white-space: nowrap;
     }
 
     .btn-record {
-      background: #000;
+      background: var(--accent);
       color: #fff;
       border: none;
       border-radius: 1.25rem;
@@ -100,7 +102,7 @@
       flex-shrink: 0;
       font-family: inherit;
     }
-    .btn-record:hover { background: #222; }
+    .btn-record:hover { background: var(--accent-hover); }
 
     /* ── Recording-started pill ── */
     .recording-pill {
@@ -108,7 +110,8 @@
       display: none;
       align-items: center;
       gap: 0.875rem;
-      background: #fff;
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
       border-radius: 2rem;
       box-shadow: 0 0 0.75rem rgba(0,0,0,0.18);
       padding: 0.5rem 1.75rem 0.5rem 1.125rem;
@@ -150,7 +153,7 @@
 
     .progress-ring-fill {
       fill: none;
-      stroke: #333;
+      stroke: var(--text);
       stroke-width: 2.5;
       stroke-linecap: round;
       stroke-dasharray: 113; /* circumference: 2π × 18 ≈ 113 */
@@ -178,7 +181,7 @@
       display: block;
       width: 4px;
       border-radius: 2px;
-      background: #333;
+      background: var(--text);
       transform-origin: center;
       animation: wave 0.55s ease-in-out infinite alternate;
     }
@@ -193,6 +196,7 @@
       to   { transform: scaleY(1);    }
     }
   </style>
+  <link rel="stylesheet" href="./theme.css">
 </head>
 <body>
   <!-- Default popup -->

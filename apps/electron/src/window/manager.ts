@@ -1,4 +1,5 @@
-import { BrowserWindow, shell, Menu, MenuItem, app } from 'electron';
+import { BrowserWindow, shell, Menu, MenuItem, app, net, WebContentsView } from 'electron';
+import { promises as fs } from 'fs';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -6,8 +7,9 @@ import { getIsQuitting } from '../app/main';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
-import { getBundledUIUrl } from '../services/custom-protocol';
+import { getBundledUIUrl, getUIPath } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
+import { getAppTheme } from '../services/app-theme';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 
 import { keychain } from '../keychain';
@@ -19,6 +21,9 @@ import { safeRecordMetric } from '../services/telemetry';
 import type { Counter } from '@opentelemetry/api';
 
 let mainWindow: BrowserWindow | null = null;
+let loadingView: WebContentsView | null = null;
+let dashboardReadinessArmed = false;
+let revealInactive = false;
 let isCompactMode = false;
 let isReloading = false;
 let normalBounds: { width: number; height: number } | null = null;
@@ -32,13 +37,131 @@ export function setWindowReferences(): void {
   setInterceptorMainWindow(mainWindow);
 }
 
+const assetPath = (fileName: string): string =>
+  path.join(__dirname, '..', '..', 'assets', fileName);
+
+function resizeLoadingView(window: BrowserWindow): void {
+  if (!loadingView || loadingView.webContents.isDestroyed()) return;
+  const [width, height] = window.getContentSize();
+  loadingView.setBounds({ x: 0, y: 0, width, height });
+}
+
+export async function showLoadingOverlay(window: BrowserWindow): Promise<void> {
+  dashboardReadinessArmed = false;
+  if (loadingView && !loadingView.webContents.isDestroyed()) {
+    resizeLoadingView(window);
+    await loadingView.webContents.loadFile(assetPath('loading.html'), {
+      query: { theme: getAppTheme() },
+    });
+    return;
+  }
+
+  loadingView = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  loadingView.setBackgroundColor(getAppTheme() === 'midnight' ? '#1A1A1F' : '#F7F7F8');
+  window.contentView.addChildView(loadingView);
+  resizeLoadingView(window);
+  loadingView.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const target = new URL(url);
+      if (target.protocol === 'https:') void shell.openExternal(url);
+    } catch {
+      // Ignore malformed links from static pages.
+    }
+    return { action: 'deny' };
+  });
+  loadingView.webContents.on('will-navigate', (event, url) => {
+    if (url === 'xyne-reload://app') {
+      event.preventDefault();
+      void loadApp(window);
+    }
+  });
+  await loadingView.webContents.loadFile(assetPath('loading.html'), {
+    query: { theme: getAppTheme() },
+  });
+  if (!window.isDestroyed() && !window.isVisible()) {
+    if (revealInactive) window.showInactive();
+    else window.show();
+    revealInactive = false;
+  }
+}
+
+export function hideLoadingOverlay(window = mainWindow): void {
+  if (!loadingView) return;
+  if (window && !window.isDestroyed()) window.contentView.removeChildView(loadingView);
+  if (!loadingView.webContents.isDestroyed()) loadingView.webContents.close();
+  loadingView = null;
+}
+
+export async function showWindowError(window: BrowserWindow, fileName: string): Promise<void> {
+  await showLoadingOverlay(window);
+  if (!loadingView || loadingView.webContents.isDestroyed()) return;
+  await loadingView.webContents.loadFile(assetPath(fileName), {
+    query: { theme: getAppTheme() },
+  });
+}
+
+export function isDashboardUrl(url: string): boolean {
+  try {
+    const current = new URL(url);
+    if (current.protocol === `${config.DEEP_LINK_PROTOCOL}:`) return true;
+    return current.origin === new URL(config.FRONTEND_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
+export function markDashboardReady(window: BrowserWindow): void {
+  if (
+    !dashboardReadinessArmed ||
+    window !== mainWindow ||
+    window.isDestroyed() ||
+    !isDashboardUrl(window.webContents.getURL())
+  ) return;
+  dashboardReadinessArmed = false;
+  hideLoadingOverlay(window);
+}
+
+async function waitForLocalDashboard(url: string): Promise<boolean> {
+  const target = new URL(url);
+  if (!['localhost', '127.0.0.1'].includes(target.hostname)) return true;
+
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await net.fetch(url);
+      if (response.ok && (await response.text()).includes('id="root"')) return true;
+    } catch {
+      // Vite may not be listening yet.
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+async function dashboardTargetReady(url: string): Promise<boolean> {
+  if (config.useBundledUI) {
+    try {
+      await fs.access(path.join(getUIPath(), 'index.html'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return waitForLocalDashboard(url);
+}
+
 export async function loadApp(window: BrowserWindow) {
   log.info('[WindowManager] loadApp called');
   log.info('[WindowManager] config.enableMtls:', config.enableMtls);
   log.info('[WindowManager] config.useBundledUI:', config.useBundledUI);
 
-  const loadingPage = path.join(__dirname, '..', '..', 'assets', 'loading.html');
-  await window.loadFile(loadingPage);
+  await showLoadingOverlay(window);
   
   // check mtls
   if (config.enableMtls) {
@@ -51,7 +174,7 @@ export async function loadApp(window: BrowserWindow) {
         url: targetUrl,
         has_certificate: false,
       });
-      await loadUrl(window, targetUrl, mtlsFrontendLoaded);
+      await loadUrl(window, targetUrl, mtlsFrontendLoaded, false);
       return;
     } else {
       const isHealthy = await certificateHealthCheck();
@@ -77,14 +200,22 @@ export async function loadApp(window: BrowserWindow) {
     Logger.info(EnrollmentEvent.DASHBOARD_LOAD, {
       url: bundledUrl,
     });
-    await loadUrl(window, bundledUrl, dashboardLoad);
+    if (!(await dashboardTargetReady(bundledUrl))) {
+      await showWindowError(window, 'load-error.html');
+      return;
+    }
+    await loadUrl(window, bundledUrl, dashboardLoad, true);
     return;
   }
   else {
     Logger.info(EnrollmentEvent.DASHBOARD_LOAD, {
       url: config.FRONTEND_URL,
     });
-    await loadUrl(window, config.FRONTEND_URL, dashboardLoad);
+    if (!(await dashboardTargetReady(config.FRONTEND_URL))) {
+      await showWindowError(window, 'load-error.html');
+      return;
+    }
+    await loadUrl(window, config.FRONTEND_URL, dashboardLoad, true);
     return;
   }
 }
@@ -119,8 +250,13 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   // Restore maximized/windowed state, then reveal once painted to avoid a resize flash.
   applyPostCreate(mainWindow);
   track(mainWindow, () => isCompactMode);
-  mainWindow.once('ready-to-show', () =>
-    options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
+  revealInactive = !!options?.inactive;
+  mainWindow.on('resize', () => mainWindow && resizeLoadingView(mainWindow));
+  mainWindow.webContents.on(
+    'did-frame-navigate',
+    (_event, url, _httpResponseCode, _httpStatusText, isMainFrame) => {
+      if (isMainFrame) dashboardReadinessArmed = isDashboardUrl(url);
+    },
   );
 
   // Handle external links
@@ -265,7 +401,8 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
-          await loadUrl(mainWindow, mainWindow.webContents.getURL());
+          await showLoadingOverlay(mainWindow);
+          await loadUrl(mainWindow, mainWindow.webContents.getURL(), undefined, true);
         }
       } catch (error) {
         log.error('[WindowManager] Error during reload:', error);
@@ -282,8 +419,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   mainWindow.webContents.on('did-finish-load', async () => {
     const bodyText = await mainWindow?.webContents.executeJavaScript('document.body.innerText').catch(() => '');
     if (bodyText && bodyText.includes('RBAC: access denied')) {
-      const errorPage = path.join(__dirname, '..', '..', 'assets', 'vpn-error.html');
-      void mainWindow?.loadFile(errorPage);
+      if (mainWindow) void showWindowError(mainWindow, 'vpn-error.html');
     }
   });
 
@@ -306,6 +442,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   });
 
   mainWindow.on('closed', () => {
+    hideLoadingOverlay(mainWindow);
     mainWindow = null;
   });
 
@@ -390,7 +527,13 @@ function setupSpellcheckerContextMenu(window: BrowserWindow): void {
 const LOAD_URL_MAX_RETRIES = 3;
 const LOAD_URL_RETRY_DELAY_MS = 1000;
 
-export async function loadUrl(window: BrowserWindow, url: string, counter?: Counter): Promise<void> {
+export async function loadUrl(
+  window: BrowserWindow,
+  url: string,
+  counter?: Counter,
+  waitForDashboardReady = isDashboardUrl(url),
+): Promise<void> {
+  await showLoadingOverlay(window);
   let lastError: Error | undefined;
 
   for (let attempt = 1; attempt <= LOAD_URL_MAX_RETRIES; attempt++) {
@@ -400,6 +543,12 @@ export async function loadUrl(window: BrowserWindow, url: string, counter?: Coun
       safeRecordMetric(() => {
         counter?.add(1, { success: 'true', buildVersion: app.getVersion() });
       });
+      if (!waitForDashboardReady) {
+        await window.webContents.executeJavaScript(
+          'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+        ).catch(() => undefined);
+        hideLoadingOverlay(window);
+      }
       return;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -415,8 +564,7 @@ export async function loadUrl(window: BrowserWindow, url: string, counter?: Coun
   safeRecordMetric(() => {
     counter?.add(1, { success: 'false', error: 'url_load_error', buildVersion: app.getVersion() });
   });
-  const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
-  await window.loadFile(errorPage);
+  await showWindowError(window, 'load-error.html');
 }
 
 const MAX_HEALTH_CHECK_RETRIES = 3;
@@ -470,6 +618,9 @@ async function certificateHealthCheckWithRetry(validationWindow: BrowserWindow):
       if (certErrCount === MAX_HEALTH_CHECK_RETRIES) {
         // Every single error was a certificate error
         await handleCertificateError({ errorDescription: errorMessage });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          await showWindowError(mainWindow, 'invalid-certificate.html');
+        }
       } else {
         // Generic failure (timeout, network, or mixed errors)
         Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
@@ -478,8 +629,7 @@ async function certificateHealthCheckWithRetry(validationWindow: BrowserWindow):
         });
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-          const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
-          await mainWindow.loadFile(errorPage);
+          await showWindowError(mainWindow, 'timeout-error.html');
         }
       }
 

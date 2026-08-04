@@ -4,7 +4,13 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
-import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
+import {
+  getMainWindow,
+  isDashboardUrl,
+  loadApp,
+  markDashboardReady,
+  toggleWindowCompactMode,
+} from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config } from '../app/config';
 import { performHardReload } from '../services/version-checker';
@@ -27,6 +33,7 @@ import {
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
+import { getAppTheme, isAppTheme, setAppTheme } from '../services/app-theme';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -163,6 +170,30 @@ export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
   setupMTLSIpcHandlers();
+
+  ipcMain.on('app:get-theme', (event, fallbackTheme: unknown) => {
+    if (!isMainWindowSender(event)) {
+      event.returnValue = 'classic';
+      return;
+    }
+    event.returnValue = getAppTheme(fallbackTheme);
+  });
+
+  ipcMain.on('app:set-theme', (event, theme: unknown) => {
+    if (!isMainWindowSender(event) || !isAppTheme(theme)) return;
+    setAppTheme(theme);
+    setRecordingPillTheme(theme === 'midnight' ? 'dark' : 'light');
+  });
+
+  ipcMain.on('dashboard:app-ready', (event) => {
+    if (!isMainWindowSender(event)) return;
+    const mainWindow = getMainWindow();
+    if (!mainWindow || !isDashboardUrl(mainWindow.webContents.getURL())) {
+      errorLogger.warn('[dashboard] Blocked readiness IPC from unexpected URL');
+      return;
+    }
+    markDashboardReady(mainWindow);
+  });
 
   // Webview preload path handler
   ipcMain.on('get-webview-preload-path', (event) => {
@@ -575,12 +606,6 @@ export function setupIpcHandlers(): void {
       syncRecordingState(!!state?.active, state?.startTime);
     },
   );
-
-  ipcMain.on('app:theme-changed', (event, theme: unknown) => {
-    if (!isMainWindowSender(event)) return;
-    if (theme !== 'light' && theme !== 'dark') return;
-    setRecordingPillTheme(theme);
-  });
 
   ipcMain.on('recording:renderer-ready', (event) => {
     if (!isMainWindowSender(event)) return;

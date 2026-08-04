@@ -10,6 +10,7 @@ import { safeRecordMetric } from '../services/telemetry';
 import { app } from 'electron';
 import { IKeychain } from './IKeychain';
 import { config } from '../app/config';
+import log from 'electron-log';
 
 const execAsync = promisify(exec);
 // Shell-free variant (argument array, no /bin/sh) for commands that must handle values parsed
@@ -256,28 +257,53 @@ class MacKeychainService implements IKeychain {
         }
     }
     async deleteIdentity(commonName: string): Promise<void> {
-        console.log(`Deleting identity for "${commonName}"...`);
-        // Security command to delete identity (cert + key) matching the preference
-        // -c: Match on common name
-        const cmd = `${SECURITY} delete-identity -c "${commonName}"`;
-
+        log.info(`Deleting identity for "${commonName}"...`);
         try {
-            await execAsync(cmd);
-            console.log("Identity deleted successfully.");
-            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
+            const { stdout } = await execFileAsync(SECURITY, ['find-certificate', '-a', '-c', commonName, '-Z']);
+            const hashes = stdout
+                .split(/(?=SHA-256 hash:)/)
+                .filter(block => block.match(/"labl"<blob>="([^"]*)"/)?.[1] === commonName)
+                .map(block => block.match(/SHA-256 hash:\s*([0-9A-F]+)/i)?.[1])
+                .filter((hash): hash is string => Boolean(hash));
+
+            if (hashes.length === 0) {
+                log.info("Identity not found, nothing to delete.");
+                Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
+                return;
+            }
+
+            for (const hash of new Set(hashes)) {
+                try {
+                    // Hash uniquely identifies one identity even when common names are duplicated.
+                    await execFileAsync(SECURITY, ['delete-identity', '-Z', hash]);
+                } catch (identityError: any) {
+                    if (!identityError.stderr?.includes("not be found")) {
+                        throw identityError;
+                    }
+
+                    // Partial enrollment may leave a certificate without its private key.
+                    await execFileAsync(SECURITY, ['delete-certificate', '-Z', hash]);
+                }
+            }
+
+            log.info(`Deleted ${hashes.length} identity certificate(s) successfully.`);
+            Logger.info(EnrollmentEvent.IDENTITY_DELETED, {
+                common_name: commonName,
+                deleted_count: hashes.length,
+            });
         } catch (e: any) {
-            // It might fail if not found, which is fine
-            if (e.stderr && e.stderr.includes("not be found")) {
-                console.log("Identity not found, nothing to delete.");
+            if (e.stderr?.includes("not be found")) {
+                log.info("Identity not found, nothing to delete.");
                 Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
             } else {
-                console.warn("Delete identity warning:", e.stderr || e.message);
+                log.error("Delete identity failed:", e.stderr || e.message);
                 Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
+                throw e;
             }
+        } finally {
+            // Also clear memory just in case
+            this.privateKeyPem = null;
         }
-
-        // Also clear memory just in case
-        this.privateKeyPem = null;
     }
 
     async checkIdentity(commonName: string): Promise<boolean> {

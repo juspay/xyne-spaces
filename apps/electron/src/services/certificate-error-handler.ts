@@ -1,7 +1,5 @@
 import log from 'electron-log/main';
 import { config } from '../app/config';
-import path from 'path';
-import { getMainWindow } from '../window/manager';
 import { keychain } from '../keychain';
 /**
  * SSL/TLS error codes that indicate certificate issues requiring re-enrollment
@@ -47,17 +45,6 @@ export async function handleCertificateError(
     await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
     log.info('[CertificateErrorHandler] Certificate cleared successfully');
     
-    const mainWindow = getMainWindow();
-
-    if (mainWindow) {
-      // Load the invalid certificate error page
-      const errorPage = path.join(__dirname, '..', '..', 'assets', 'invalid-certificate.html');
-      log.info('[CertificateErrorHandler] Loading invalid certificate page');
-      await mainWindow.loadFile(errorPage);
-    } else {
-      log.error('[CertificateErrorHandler] Main window is not available to reload the app');
-    }
-
   } catch (error) {
     log.error('[CertificateErrorHandler] Failed to handle certificate error:', error);
     

@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Connection Error</title>
+    <script src="./theme.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -52,9 +53,10 @@
             background-color: #0056b3;
         }
     </style>
+    <link rel="stylesheet" href="./theme.css">
 </head>
 
-<body>
+<body class="themed-page">
     <div class="container">
         <h1>Access Denied</h1>
         <p>It looks like you are not connected to the VPN or don't have permission to access this resource.</p>
@@ -71,8 +73,7 @@
             if (window.electronAPI && window.electronAPI.reloadApp) {
                 window.electronAPI.reloadApp();
             } else {
-                // Fallback
-                location.reload();
+                location.href = 'xyne-reload://app';
             }
         });
     </script>
