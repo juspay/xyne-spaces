@@ -73,7 +73,7 @@ if [ -n "$DASHBOARD_CHANGED" ]; then
   pnpm run lint:errors-only || exit 1
 
   echo "Running dashboard build..."
-  pnpm run validate || exit 1
+  XYNE_DOCTOR_NO_INTERACTIVE=1 pnpm run validate || exit 1
 else
   echo "⏭️  Skipping dashboard checks (no dashboard files changed)"
 fi
