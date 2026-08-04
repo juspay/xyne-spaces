@@ -8826,12 +8826,11 @@ export const mutators = defineMutators({
           (a, b) => MESSAGE_ACT_NAMES.indexOf(a) - MESSAGE_ACT_NAMES.indexOf(b),
         );
 
-        await tx.mutate.messages.update({
-          messageId,
-          // '[]' rather than null when cleared: null means "never classified" and the
-          // classifier would tag it again on its next pass. '[]' means deliberately empty.
-          messageActs: unique.length > 0 ? JSON.stringify(unique) : '[]',
-        });
+        // '[]' rather than null when cleared: null means "never classified" and the
+        // classifier would tag it again on its next pass. '[]' means deliberately empty.
+        const next = unique.length > 0 ? JSON.stringify(unique) : '[]';
+
+        await tx.mutate.messages.update({ messageId, messageActs: next });
       },
     ),
   },

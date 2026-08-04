@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, ChannelVisibility, MessageType, Schema } from '@xyne/shared';
+import { ChannelVisibility, MessageType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -59,41 +59,27 @@ export class MessagesACL extends BaseACL<'messages'> {
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
 
+    if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
+      return;
+    }
+
     const changedFields = Object.keys(args).filter(field => field !== 'messageId');
-    const isAuthorOrSystem =
-      message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM;
 
     // Keyed on the field, not on the update being acts-only, so acts cannot ride along in
-    // a content edit and skip the admin check below.
-    if (changedFields.includes('messageActs')) {
-      if (isAuthorOrSystem) {
-        return;
-      }
-
-      await this.verifyChannelAdminCanTag(args.messageId, tx);
-      // An admin may relabel a colleague's message, not rewrite it.
-      if (changedFields.length > 1) {
-        throw new MutationACLError(
-          'Message update failed: only the original sender can edit this message',
-          'messages',
-        );
-      }
+    // a content edit. Tagging a colleague's message is open; rewriting their words is not.
+    if (changedFields.length === 1 && changedFields[0] === 'messageActs') {
+      await this.verifyChannelMemberCanTag(args.messageId, tx);
       return;
     }
 
-    if (isAuthorOrSystem) {
-      return;
-    }
     throw new MutationACLError('Message update failed: only the original sender can edit this message', 'messages');
   }
 
   /**
-   * Who, other than the sender, may tag a message: a channel ADMIN.
-   *
-   * Membership doubles as the visibility check — you cannot be admin of a channel you are
-   * not in — so only visibleTo needs testing separately.
+   * Who, other than the sender, may tag a message: any member of its channel. Open on
+   * purpose — changes are logged, so the policy can be tightened against real usage.
    */
-  private async verifyChannelAdminCanTag(messageId: string, tx: Transaction<Schema>): Promise<void> {
+  private async verifyChannelMemberCanTag(messageId: string, tx: Transaction<Schema>): Promise<void> {
     const allowed = await tx.run(
       zql.messages
         .where('messageId', messageId)
@@ -103,7 +89,7 @@ export class MessagesACL extends BaseACL<'messages'> {
             channel
               .where('workspaceId', '=', this.ctx.workspaceId)
               .whereExists('participants', participant =>
-                participant.where('userId', this.ctx.userID).where('role', ChannelRole.ADMIN),
+                participant.where('userId', this.ctx.userID),
               ),
           ),
         )
@@ -112,7 +98,7 @@ export class MessagesACL extends BaseACL<'messages'> {
 
     if (!allowed) {
       throw new MutationACLError(
-        'Message update failed: only a channel admin can change message tags',
+        'Message update failed: only channel members can change message tags',
         'messages',
       );
     }

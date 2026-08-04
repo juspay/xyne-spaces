@@ -11461,7 +11461,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // than silently widening what the column can hold.
           acts: z.array(z.enum(MESSAGE_ACT_NAMES)),
         }),
-        async ({ tx, args: { messageId, acts } }) => {
+        async ({ tx, ctx, args: { messageId, acts } }) => {
           // resolveMessage, not a raw zql.messages lookup: the channel list never syncs
           // messages rows, so a direct lookup would throw there. This falls back to the
           // conversation's initial_message_md.
@@ -11474,12 +11474,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             (a, b) => MESSAGE_ACT_NAMES.indexOf(a) - MESSAGE_ACT_NAMES.indexOf(b),
           );
 
-          await tx.mutate.messages.update({
+          // '[]' rather than null when cleared: null means "never classified" and the
+          // classifier would tag it again on its next pass. '[]' means deliberately empty.
+          const next = unique.length > 0 ? JSON.stringify(unique) : '[]';
+
+          // Tagging is open to every channel member — this is how we find out whether that
+          // was the right call. Backend copy only; the shared copy runs in a browser.
+          logger.info('[MessageTag] Acts changed by hand', {
             messageId,
-            // '[]' rather than null when cleared: null means "never classified" and the
-            // classifier would tag it again on its next pass. '[]' means deliberately empty.
-            messageActs: unique.length > 0 ? JSON.stringify(unique) : '[]',
+            conversationId: message.conversationId,
+            userId: ctx.userID,
+            isAuthor: message.senderId === ctx.userID,
+            from: message.messageActs,
+            to: next,
           });
+
+          await tx.mutate.messages.update({ messageId, messageActs: next });
         },
       ),
     },
