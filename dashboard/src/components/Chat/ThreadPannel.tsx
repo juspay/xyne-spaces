@@ -876,7 +876,7 @@ export const ThreadMessages = ({
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
-            {previewCardMode ? null : isUserMember || channel?.isArchived ? (
+            {isUserMember || channel?.isArchived ? (
               <div className='px-3 pb-3 bg-background'>
                 <ChatInput
                   ref={inputRef}
@@ -1188,7 +1188,7 @@ export const ThreadMessages = ({
                   />
 
                   {/* ChatInput at the bottom - only show if user is a member */}
-                  {previewCardMode ? null : isUserMember || channel?.isArchived ? (
+                  {isUserMember || channel?.isArchived ? (
                     <div className='px-3 pb-3 bg-background'>
                       <ChatInput
                         ref={inputRef}
@@ -1441,7 +1441,7 @@ export const ThreadMessages = ({
                 />
 
                 {/* ChatInput at the bottom - only show if user is a member */}
-                {previewCardMode ? null : isUserMember || channel?.isArchived ? (
+                {isUserMember || channel?.isArchived ? (
                   <div className='px-3 pb-3 bg-background'>
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
