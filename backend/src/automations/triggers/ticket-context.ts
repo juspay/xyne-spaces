@@ -1,10 +1,19 @@
 import { z } from 'zod';
 import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+
+const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
+  ChannelType.EMAIL,
+  ChannelType.SLACK,
+  ChannelType.APP,
+  ChannelType.CALL,
+]);
 
 const TicketSchema = z.object({
   id: z.string(),
+  url: z.string().url().nullable(),
   xyneId: z.string().nullable(),
   title: z.string().nullable(),
   description: z.string().nullable(),
@@ -138,6 +147,31 @@ export interface TicketLike {
   updatedAt?: Date | null;
 }
 
+/** Build an absolute support URL for a desk ticket using trusted configuration. */
+function buildTicketUrl(params: {
+  frontendUrl: string;
+  workspaceId: string;
+  channelType: string | null | undefined;
+  channelId: string;
+  xyneId: string | null | undefined;
+}): string | null {
+  const { frontendUrl, workspaceId, channelType, channelId, xyneId } = params;
+  const base = frontendUrl.trim().replace(/\/+$/, '');
+  if (
+    !base ||
+    !workspaceId ||
+    !DESK_CHANNEL_TYPES.has(channelType as ChannelType) ||
+    !channelId ||
+    !xyneId
+  ) {
+    return null;
+  }
+
+  return [base, workspaceId, 'support', channelId, xyneId]
+    .map((segment, index) => (index === 0 ? segment : encodeURIComponent(segment)))
+    .join('/');
+}
+
 export async function buildTicketContext(ticket: TicketLike): Promise<TicketContext> {
   const lastEmails = await loadLastEmails(ticket);
   const [board, project, channel, assignee, creator, group] = await Promise.all([
@@ -180,8 +214,17 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
       : Promise.resolve(null),
   ]);
 
+  const ticketUrl = buildTicketUrl({
+    frontendUrl: config.frontendUrl,
+    workspaceId: ticket.workspaceId,
+    channelType: channel?.type,
+    channelId: ticket.channelId,
+    xyneId: ticket.xyneId,
+  });
+
   const ticketRow: TicketRow = {
     id: ticket.id,
+    url: ticketUrl,
     xyneId: ticket.xyneId ?? null,
     title: ticket.title ?? null,
     description: ticket.description ?? null,

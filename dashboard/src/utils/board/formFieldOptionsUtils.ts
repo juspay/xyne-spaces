@@ -1,7 +1,7 @@
 import type { ClipboardEvent, KeyboardEvent } from 'react';
 import type { FieldEnumOption } from '@xyne/shared';
 
-export const MAX_FIELD_OPTIONS = 500;
+export const MAX_FIELD_OPTIONS = 2000;
 
 export const parseBulkOptions = (raw: string): string[] =>
   raw
