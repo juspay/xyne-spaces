@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { vespaKnowledgeIngestionService } from '@/services/vespaKnowledgeIngestionService';
-import { searchMemory, deleteMemory } from '@/services/memoryService';
+import { searchMemory, deleteMemory , ALL_WORKSPACES } from '@/services/memoryService';
 import { MemoryScope } from '@/vespa/src/types';
 import { getStorageService } from '@/services/storage';
 
@@ -180,6 +180,7 @@ export class DocumentController {
             offset: 0,
           },
           '',
+          ALL_WORKSPACES,
         );
 
         const docs = result.documents;
@@ -188,7 +189,7 @@ export class DocumentController {
           break;
         }
 
-        await Promise.all(docs.map((doc) => deleteMemory(doc.docId)));
+        await Promise.all(docs.map((doc) => deleteMemory(doc.docId, ALL_WORKSPACES)));
         totalDeleted += docs.length;
         logger.info(`[DocumentController] cleanupAllVespaMemory deleted batch=${docs.length} total=${totalDeleted}`);
 

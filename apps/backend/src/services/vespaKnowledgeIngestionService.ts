@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import removeMarkdown from 'remove-markdown';
 import { logger } from '@/utils/logger';
-import { searchMemory, insertMemory, deleteMemory } from './memoryService';
+import { searchMemory, ALL_WORKSPACES, insertMemory, deleteMemory } from './memoryService';
 import { MemoryScope, VespaDocType, type VespaMemoryDocument } from '@/vespa/src/types';
 import type { ConversationSourceAdapter } from './conversationIngestion/types';
 import type { ExtractedSOP, ExtractedFACT } from './conversationAnalysisService';
@@ -51,6 +51,7 @@ async function getAllDocumentsForSession(sessionId: string): Promise<VespaMemory
       sessionId,
     },
     '',
+    ALL_WORKSPACES,
   );
   return result.documents;
 }
@@ -70,7 +71,7 @@ async function deleteAllForSession(sessionId: string): Promise<void> {
   
   for (const doc of existingDocs) {
     try {
-      await deleteMemory(doc.docId);
+      await deleteMemory(doc.docId, ALL_WORKSPACES);
     } catch (err) {
       logger.error(`[VESPA-KNOWLEDGE] Failed to delete doc ${doc.docId}:`, err);
     }

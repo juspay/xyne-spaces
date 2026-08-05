@@ -138,7 +138,7 @@ export interface CallFilters {
  * `bind()` returns an `@placeholder` and the value rides as a separate request property, so it
  * is matched as data, never parsed as YQL. Repeated (field, value) pairs reuse one placeholder.
  */
-class VespaQueryParams {
+export class VespaQueryParams {
   private readonly placeholdersByField = new Map<string, Map<string, string>>();
 
   /**

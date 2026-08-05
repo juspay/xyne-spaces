@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { escapeYqlString } from '@/utils/yqlEscape';
+import { VespaQueryParams } from '@/vespa/src/utils/YqlBuilder';
 import { vespaClient } from '@/services/vespaSearch';
 import { NAMESPACE, CLUSTER } from '@/vespa/vespaConfig';
 import {
@@ -19,6 +19,13 @@ import { DatabaseClient } from '@/database/client';
 import removeMarkdown from 'remove-markdown';
 
 const MEMORY_SCHEMA = memorySchema;
+
+/**
+ * Passed as workspaceId by background ingestion paths whose job payload carries no workspace.
+ * Every request-serving caller passes a real workspace id; this constant exists so the small
+ * number of unscoped callers are greppable rather than implicit.
+ */
+export const ALL_WORKSPACES = '__all_workspaces__';
 
 /**
  * Strip markdown syntax to produce clean plain text
@@ -61,6 +68,7 @@ async function buildMemoryYql(params: {
   query?: string;
   scope: MemoryScope;
   userId: string;
+  workspaceId: string;
   limit: number;
   offset: number;
   docType?: VespaDocType;
@@ -73,10 +81,11 @@ async function buildMemoryYql(params: {
   parentRef?: string;
   reviewStatus?: string;
   docId?: string;
-}): Promise<string> {
-  const { query, scope, userId, limit, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, docId } = params;
+}): Promise<{ yql: string; params: VespaQueryParams }> {
+  const { query, scope, userId, workspaceId, limit, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, docId } = params;
 
   const conditions: string[] = [];
+  const queryParams = new VespaQueryParams();
 
   // Escape any value interpolated into a YQL string literal: a raw `"` or `\` in a filter
   // value (a docId/tag/repoUrl, or an ingested value such as an email subject that lands in
@@ -84,11 +93,11 @@ async function buildMemoryYql(params: {
   // The free-text `query` is NOT interpolated: it is bound as the @query parameter
   // (userInput(@query)), so it stays parameterized.
 
-  // The `contains` filters below select which of a user's cumulative memory a request is
-  // about. `scope` chooses between the caller's own documents and the shared set.
-  //
-  // Any narrowing this clause needs to apply belongs here, alongside the scope filter, and
-  // is bound through VespaQueryParams rather than interpolated — see YqlBuilder.
+
+  // Every memory query is scoped to the caller's workspace.
+  if (workspaceId !== ALL_WORKSPACES) {
+    conditions.push(`workspaceId contains ${queryParams.bind('workspaceId', workspaceId)}`);
+  }
 
   // get the email of that user
   const prisma = DatabaseClient.getInstance();
@@ -98,58 +107,58 @@ async function buildMemoryYql(params: {
 
   // Scope filter: 'my' restricts to user's own documents
   if (scope === 'my') {
-    conditions.push(`userId contains "${escapeYqlString(user?.email)}"`);
+    conditions.push(`userId contains ${queryParams.bind('userId', user?.email ?? '')}`);
   }
 
   // DocType filter
   if (docType) {
-    conditions.push(`docType contains "${escapeYqlString(docType)}"`);
+    conditions.push(`docType contains ${queryParams.bind('docType', docType)}`);
   }
 
   // DocId filter
   if (docId) {
-    conditions.push(`docId contains "${escapeYqlString(docId)}"`);
+    conditions.push(`docId contains ${queryParams.bind('docId', docId)}`);
   }
 
   // Tags filter
   if (tags && tags.length > 0) {
-    const tagConditions = tags.map((tag) => `tags contains "${escapeYqlString(tag)}"`);
+    const tagConditions = tags.map((tag) => `tags contains ${queryParams.bind('tags', tag)}`);
     conditions.push(`(${tagConditions.join(' or ')})`);
   }
 
   // RepoUrl filter
   if (repoUrl) {
-    conditions.push(`repoUrl contains "${escapeYqlString(repoUrl)}"`);
+    conditions.push(`repoUrl contains ${queryParams.bind('repoUrl', repoUrl)}`);
   }
 
   // CommitId filter (exact match)
   if (commitId) {
-    conditions.push(`commitId contains "${escapeYqlString(commitId)}"`);
+    conditions.push(`commitId contains ${queryParams.bind('commitId', commitId)}`);
   }
 
   // SessionId filter (exact match)
   if (sessionId) {
-    conditions.push(`sessionId contains "${escapeYqlString(sessionId)}"`);
+    conditions.push(`sessionId contains ${queryParams.bind('sessionId', sessionId)}`);
   }
 
   // FilePointers filter
   if (filePointers) {
-    conditions.push(`filePointers contains "${escapeYqlString(filePointers)}"`);
+    conditions.push(`filePointers contains ${queryParams.bind('filePointers', filePointers)}`);
   }
 
   // TicketId filter
   if (ticketId) {
-    conditions.push(`ticketId contains "${escapeYqlString(ticketId)}"`);
+    conditions.push(`ticketId contains ${queryParams.bind('ticketId', ticketId)}`);
   }
 
   // ParentRef filter (exact match)
   if (parentRef) {
-    conditions.push(`parentRef contains "${escapeYqlString(parentRef)}"`);
+    conditions.push(`parentRef contains ${queryParams.bind('parentRef', parentRef)}`);
   }
 
   // ReviewStatus filter
   if (reviewStatus) {
-    conditions.push(`reviewStatus contains "${escapeYqlString(reviewStatus)}"`);
+    conditions.push(`reviewStatus contains ${queryParams.bind('reviewStatus', reviewStatus)}`);
   }
 
   // Search condition (text + vector)
@@ -161,7 +170,7 @@ async function buildMemoryYql(params: {
 
   const whereClause = conditions.length > 0 ? ` where ${conditions.join(' and ')}` : ` where true`;
 
-  return `select * from sources ${MEMORY_SCHEMA}${whereClause}`;
+  return { yql: `select * from sources ${MEMORY_SCHEMA}${whereClause}`, params: queryParams };
 }
 
 /**
@@ -241,13 +250,15 @@ async function attachPullRequestsToDocuments(
 export async function searchMemory(
   request: MemorySearchRequest,
   userId: string,
+  workspaceId: string,
 ): Promise<MemorySearchResult> {
   const { query, scope, limit = 20, offset = 0, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus , includeQuery = true, includeSummary = true, docId} = request;
 
-  const yql = await buildMemoryYql({
+  const { yql, params } = await buildMemoryYql({
     query,
     scope,
     userId,
+    workspaceId,
     limit,
     offset,
     docType,
@@ -269,6 +280,7 @@ export async function searchMemory(
     offset,
     'ranking.profile': 'default_native',
     timeout: '10s',
+    ...params.toRequestProperties(),
   };
 
   // Add query and embedding input only when query is present
@@ -313,6 +325,7 @@ export async function searchMemory(
  */
 export async function getMemoryById(
   docId: string,
+  workspaceId: string,
 ): Promise<VespaMemoryDocument | null> {
   try {
     const result = await vespaClient.getDocument({
@@ -323,6 +336,13 @@ export async function getMemoryById(
     });
 
     if (!result || !result.fields) {
+      return null;
+    }
+
+    // A document from another workspace is treated as absent.
+    const docWorkspaceId = (result.fields as { workspaceId?: unknown }).workspaceId;
+    if (workspaceId !== ALL_WORKSPACES && (typeof docWorkspaceId !== 'string' || docWorkspaceId !== workspaceId)) {
+      logger.warn('[Memory] Document requested outside its workspace', { docId });
       return null;
     }
 
@@ -371,9 +391,10 @@ export async function insertMemory(doc: VespaMemoryDocument): Promise<void> {
 export async function updateMemory(
   docId: string,
   fields: MemoryUpdateFields,
+  workspaceId: string,
 ): Promise<VespaMemoryDocument | null> {
   try {
-    const oldDoc = await getMemoryById(docId);
+    const oldDoc = await getMemoryById(docId, workspaceId);
     if (!oldDoc) throw new Error(`Document ${docId} not found`);
 
     // If rawContent is being updated, auto-derive chatSummary from it
@@ -393,7 +414,7 @@ export async function updateMemory(
     );
 
     logger.info(`[Memory] In-place updated document ${docId}`, { fields: Object.keys(fields) });
-    return getMemoryById(docId);
+    return getMemoryById(docId, workspaceId);
   } catch (error) {
     logger.error(`[Memory] Error updating document ${docId}:`, error);
     throw error;
@@ -403,7 +424,12 @@ export async function updateMemory(
 /**
  * Delete a memory document from Vespa
  */
-export async function deleteMemory(docId: string): Promise<void> {
+export async function deleteMemory(docId: string, workspaceId: string): Promise<void> {
+  const existing = await getMemoryById(docId, workspaceId);
+  if (!existing) {
+    logger.warn('[Memory] Refusing delete outside the caller workspace', { docId });
+    return;
+  }
   try {
     await vespaClient.deleteDocument({
       namespace: NAMESPACE,
