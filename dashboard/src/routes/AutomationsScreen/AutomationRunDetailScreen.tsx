@@ -4,7 +4,7 @@ import { RunDetail } from '../../components/Automation/AutomationRuns/RunDetail/
 
 export default function AutomationRunDetailScreen(): ReactElement {
   const navigate = useNavigate();
-  const { id, runId } = useParams<{ id: string; runId: string }>();
+  const { id: _id, runId } = useParams<{ id: string; runId: string }>();
   if (!runId) {
     return (
       <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
