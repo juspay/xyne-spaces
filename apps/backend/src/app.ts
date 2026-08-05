@@ -201,6 +201,9 @@ import emojiRoutes from '@/routes/emojis';
 import applicationBackfillRoutes from '@/routes/applicationBackfill';
 import { appRoutes } from '@/apps';
 import { ChatController } from '@/apps/controllers/chatController';
+import { ReactionController } from '@/controllers/reactionController';
+import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
+import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
@@ -569,6 +572,55 @@ export class App {
       // Only the trusted S2S postAsUser route sets this; app-token callers never do.
       (req as Request & { isPostAsUser?: boolean }).isPostAsUser = true;
       void new ChatController().postMessage(req, res);
+    });
+    this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
+      void new ReactionController().reactAsUser(req, res);
+    });
+    this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
+          userId?: string; targetUserId?: string; workspaceId?: string;
+        };
+        if (!userId || !targetUserId || !workspaceId) {
+          res.status(400).json({ error: 'userId, targetUserId and workspaceId are required' });
+          return;
+        }
+        const channelId = await unifiedDMService.getOrCreateDirectMessage(userId, targetUserId, workspaceId);
+        res.json({ channelId });
+      } catch (err) {
+        logger.error('[getOrCreateDm] failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
+    });
+    this.app.post('/api/internal/twin-reply-draft', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const parsed = coerceTwinReplyDraft(req.body);
+        if ('error' in parsed) {
+          res.status(400).json({ error: parsed.error });
+          return;
+        }
+        const lookup = destinationNameLookup(parsed.draft);
+        if (lookup) {
+          try {
+            const prisma = DatabaseClient.getInstance();
+            if (lookup.field === 'destinationChannelName') {
+              const chan = await prisma.channel.findUnique({ where: { id: lookup.id }, select: { name: true } });
+              if (chan?.name) parsed.draft.destinationChannelName = chan.name;
+            } else {
+              const target = await prisma.user.findUnique({ where: { id: lookup.id }, select: { name: true, displayName: true } });
+              const name = target?.displayName || target?.name;
+              if (name) parsed.draft.destinationUserName = name;
+            }
+          } catch (err) {
+            logger.warn('[twin-reply-draft] destination name resolution failed', err);
+          }
+        }
+        await createTwinReplyDraft(parsed.draft);
+        res.json({ ok: true });
+      } catch (err) {
+        logger.error('[twin-reply-draft] create failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
     });
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',

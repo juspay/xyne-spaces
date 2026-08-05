@@ -27,6 +27,20 @@ import { logger } from '../utils/logger';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { unreadService } from '../services/unreadService';
+import {
+  canRecommendThreadSummary,
+  getOrGenerateThreadSummary,
+  getCachedSummary,
+  deleteCachedSummary,
+  isThreadSummaryEnabledForChannel,
+  consumeThreadRecommendation,
+  hasPendingRecommendations,
+} from '@/services/threadSummaryService';
+import {
+  getTwinReplyDraftById,
+  deleteTwinReplyDraftById,
+  type TwinReplyDraft,
+} from '@/services/twinReplyDraftService';
 import { MessagesSideEffectHandler } from '../zero/side-effects/tables/messages-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
@@ -2091,6 +2105,206 @@ export class ConversationController {
       res.status(200).json({ success: true, data });
     } catch (error) {
       logger.error('[agentProgress/get] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      if (!isThreadSummaryEnabledForChannel(conversation.channelId)) {
+        res.status(204).end();
+        return;
+      }
+
+      const result = await getOrGenerateThreadSummary(conversationId, { enforceMinMessages: false });
+      if (!result) {
+        res.status(204).end();
+        return;
+      }
+
+      res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      logger.error('[getSummary] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getRecommendation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation || !isThreadSummaryEnabledForChannel(conversation.channelId)) {
+        res.status(200).json({ success: true, recommended: false, enabled: false });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      if (!(await canRecommendThreadSummary(conversationId))) {
+        res.status(200).json({ success: true, recommended: false, enabled: true });
+        return;
+      }
+
+      const recommended = await consumeThreadRecommendation(conversationId, userId);
+      if (!recommended) {
+        res.status(200).json({ success: true, recommended: false, enabled: true });
+        return;
+      }
+
+      const cached = await getCachedSummary(conversationId);
+      const summary = cached && { content: cached.content, cached: true, asOfMessageId: cached.asOfMessageId };
+      res.status(200).json({ success: true, recommended: true, enabled: true, summary });
+
+      if (!(await hasPendingRecommendations(conversationId))) {
+        await deleteCachedSummary(conversationId);
+      }
+    } catch (error) {
+      logger.error('[getRecommendation] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+
+
+  private forwardTwinDraftAction = async (
+    draft: TwinReplyDraft,
+    action: 'approve' | 'decline',
+    actorUserId: string,
+    editedMessage?: string,
+  ): Promise<{ ok: boolean; status: number; error?: string; posted?: { channelId: string; conversationId?: string } }> => {
+    const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
+    const url = `${base}/claw/api/v1/internal/twin-draft/action`;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.internalS2sKey ? { 'x-s2s-key': config.internalS2sKey } : {}),
+        },
+        body: JSON.stringify({
+          action,
+          actorUserId,
+          ...(editedMessage !== undefined ? { editedMessage } : {}),
+          draft,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const text = await resp.text().catch(() => '');
+      if (!resp.ok) {
+        return { ok: false, status: resp.status, error: text.slice(0, 300) };
+      }
+      let posted: { channelId: string; conversationId?: string } | undefined;
+      try {
+        const parsed = JSON.parse(text) as { posted?: { channelId?: string; conversationId?: string } };
+        if (parsed?.posted?.channelId) {
+          posted = {
+            channelId: parsed.posted.channelId,
+            ...(parsed.posted.conversationId ? { conversationId: parsed.posted.conversationId } : {}),
+          };
+        }
+      } catch {
+      }
+      return { ok: true, status: 200, ...(posted ? { posted } : {}) };
+    } catch (err) {
+      logger.error('[twin-draft-action] forward to claw-auth failed:', err);
+      return { ok: false, status: 502, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  approveReplyDraft = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { draftId } = req.params;
+      const userId = req.user!.id;
+      if (!draftId) {
+        res.status(400).json({ error: 'Draft ID is required' });
+        return;
+      }
+      const draft = await getTwinReplyDraftById(draftId, userId);
+      if (!draft) {
+        res.status(404).json({ error: 'No draft to approve', code: 'NO_DRAFT' });
+        return;
+      }
+      const editedRaw = (req.body as { editedMessage?: unknown } | undefined)?.editedMessage;
+      const editedMessage = typeof editedRaw === 'string' ? editedRaw : undefined;
+
+      const result = await this.forwardTwinDraftAction(draft, 'approve', userId, editedMessage);
+      if (!result.ok) {
+        res.status(502).json({ error: 'Failed to deliver reply', detail: result.error });
+        return;
+      }
+      await deleteTwinReplyDraftById(draftId, userId);
+      res.status(200).json({ success: true, ...(result.posted ? { posted: result.posted } : {}) });
+    } catch (error) {
+      logger.error('[approveReplyDraft] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  declineReplyDraft = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { draftId } = req.params;
+      const userId = req.user!.id;
+      if (!draftId) {
+        res.status(400).json({ error: 'Draft ID is required' });
+        return;
+      }
+      const draft = await getTwinReplyDraftById(draftId, userId);
+      if (!draft) {
+        res.status(204).end(); // already gone — treat as success
+        return;
+      }
+      await this.forwardTwinDraftAction(draft, 'decline', userId); // best-effort feedback
+      await deleteTwinReplyDraftById(draftId, userId);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[declineReplyDraft] error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
