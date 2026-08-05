@@ -113,6 +113,16 @@ schema chat_container {
             index: enable-bm25
         }
 
+        # Pre-chunked description supplied by the backend. The existing
+        # `chunk_embeddings` field is a legacy scalar vector, so the true
+        # multi-vector field uses a distinct additive name.
+        field chunks type array<string> {
+            indexing: index | summary
+            index {
+                enable-bm25
+            }
+        }
+
         field isArchived type bool {
             indexing: attribute | summary
         }
@@ -144,8 +154,17 @@ schema chat_container {
         }
     }
 
+    # Per-chunk embeddings (one vector per `chunks` element). The channel name is
+    # prepended to each chunk so short chunks keep their channel context at embed time.
+    field content_chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+        indexing: input chunks | for_each { (input channelName || "") . " " . (_ || "") } | embed hf-embedder | attribute | index
+        attribute {
+            distance-metric: angular
+        }
+    }
+
     fieldset default {
-        fields: channelName, topic, description
+        fields: channelName, topic, description, chunks
     }
 
     rank-profile initial {
@@ -167,7 +186,7 @@ schema chat_container {
       }
 
       function vector_score() {
-        expression: closeness(field, chunk_embeddings)
+        expression: max(closeness(field, chunk_embeddings), closeness(field, content_chunk_embeddings))
       }
 
       function combined_nativeRank() {

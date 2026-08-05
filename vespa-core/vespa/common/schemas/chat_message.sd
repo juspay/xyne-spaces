@@ -207,7 +207,7 @@ field text_fuzzy type string {
     }
 
     function vector_score() {
-      expression: closeness(field, text_embeddings)
+      expression: max(closeness(field, text_embeddings), closeness(field, chunk_embeddings))
     }
 
     function combined_nativeRank() {

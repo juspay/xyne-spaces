@@ -45,6 +45,15 @@ schema app {
       index: enable-bm25
     }
 
+    # Pre-chunked description supplied by the backend. The app name remains in
+    # its scalar field and is added only when each chunk is embedded below.
+    field chunks type array<string> {
+      indexing: index | summary
+      index {
+        enable-bm25
+      }
+    }
+
     # User id of the creator (filter/summary only, never text-matched)
     field createdBy type string {
       indexing: attribute | summary
@@ -85,6 +94,15 @@ schema app {
     }
   }
 
+  # Per-chunk embeddings (one vector per `chunks` element). The app name is
+  # prepended to each chunk so short chunks keep their app context at embed time.
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | for_each { (input name || "") . " " . (_ || "") } | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
   # Typo-tolerant trigram fields for lexical fuzzy matching.
   field name_fuzzy type string {
     indexing: input name | tokenize | lowercase | index | summary
@@ -115,7 +133,7 @@ schema app {
   }
 
   fieldset default {
-    fields: name, description, name_fuzzy, description_fuzzy, creatorName, creatorEmail, orgName, orgName_fuzzy
+    fields: name, description, chunks, name_fuzzy, description_fuzzy, creatorName, creatorEmail, orgName, orgName_fuzzy
   }
 
   rank-profile initial {
@@ -137,7 +155,7 @@ schema app {
     }
 
     function vector_score() {
-      expression: closeness(field, text_embeddings)
+      expression: max(closeness(field, text_embeddings), closeness(field, chunk_embeddings))
     }
 
     function combined_nativeRank() {
