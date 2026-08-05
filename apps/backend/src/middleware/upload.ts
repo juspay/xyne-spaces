@@ -7,20 +7,18 @@ const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
 
 /**
- * Content types refused at upload.
+ * Content types refused at upload: things that execute as programs rather than render as
+ * content — Windows binaries, shell and PowerShell scripts, JARs and PHP. Nothing here is a
+ * legitimate attachment on this surface.
  *
- * SVG is deliberately not listed: it is a first-class image format here — custom emojis are
- * SVG — and the serving path renders it under a Content-Security-Policy of
- * `default-src 'none'; style-src 'unsafe-inline'; sandbox`, which permits neither script
- * execution nor resource loading. See setSafeInlineImageHeaders. A blocklist rather than an allowlist on purpose: this
- * surface accepts arbitrary business files, and an allowlist breaks the moment someone
- * uploads a type nobody enumerated.
+ * Markup and images are deliberately allowed. SVG is a first-class image format here (custom
+ * emojis are SVG) and is served under a Content-Security-Policy of `default-src 'none';
+ * style-src 'unsafe-inline'; sandbox`. HTML, XHTML and XML are ordinary documents and are
+ * never rendered inline: every serving path types them `application/octet-stream` with an
+ * attachment disposition, alongside `X-Content-Type-Options: nosniff`. See
+ * setSafeDownloadHeaders and setSafeInlineImageHeaders.
  */
 const BLOCKED_UPLOAD_MIME_TYPES = new Set([
-  'text/html',
-  'application/xhtml+xml',
-  'application/xml',
-  'text/xml',
   'application/x-msdownload',
   'application/x-msdos-program',
   'application/x-sh',
@@ -30,7 +28,6 @@ const BLOCKED_UPLOAD_MIME_TYPES = new Set([
 ]);
 
 const BLOCKED_UPLOAD_EXTENSIONS = new Set([
-  '.html', '.htm', '.xhtml', '.xml',
   '.exe', '.dll', '.bat', '.cmd', '.com', '.msi', '.scr',
   '.sh', '.bash', '.ps1', '.jar', '.php',
 ]);
