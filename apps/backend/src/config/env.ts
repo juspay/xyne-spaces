@@ -305,10 +305,6 @@ const envSchema = Joi.object({
   GITHUB_APP_ID: Joi.string().allow('').default(''),
   GITHUB_APP_PRIVATE_KEY: Joi.string().allow('').default(''),
   GITHUB_APP_WEBHOOK_SECRET: Joi.string().allow('').default(''),
-  GITHUB_APP_CLIENT_ID: Joi.string().allow('').default(''),
-  GITHUB_APP_CLIENT_SECRET: Joi.string().allow('').default(''),
-  GITHUB_OAUTH_CALLBACK_URL: Joi.string().allow('').default(''),
-  GITHUB_OAUTH_STATE_SECRET: Joi.string().allow('').default(''),
   // Community intake
   XYNE_COMMUNITY_URL: Joi.string().allow('').default(''),
   COMMUNITY_WORKSPACE_ID: Joi.string().allow('').default(''),
@@ -745,10 +741,6 @@ export const config = {
     appId: envVars.GITHUB_APP_ID,
     appPrivateKey: envVars.GITHUB_APP_PRIVATE_KEY,
     appWebhookSecret: envVars.GITHUB_APP_WEBHOOK_SECRET,
-    oauthClientId: envVars.GITHUB_APP_CLIENT_ID,
-    oauthClientSecret: envVars.GITHUB_APP_CLIENT_SECRET,
-    oauthCallbackUrl: envVars.GITHUB_OAUTH_CALLBACK_URL,
-    oauthStateSecret: envVars.GITHUB_OAUTH_STATE_SECRET,
   },
   community: {
     url: envVars.XYNE_COMMUNITY_URL,

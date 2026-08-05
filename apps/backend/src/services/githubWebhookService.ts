@@ -173,7 +173,7 @@ export class GitHubWebhookService {
       }),
       this.prisma.channel.findUnique({
         where: { id: c.intakeChannelId },
-        select: { projectId: true, workspaceId: true },
+        select: { projectId: true, workspaceId: true, name: true },
       }),
     ]);
     if (
@@ -211,9 +211,7 @@ export class GitHubWebhookService {
             existingTicketId,
             action,
             issue,
-            sender.id,
             repoFullName,
-            workspaceId,
             c.systemUserId
           );
         }
@@ -233,16 +231,9 @@ export class GitHubWebhookService {
       return { success: true, message: `Issue #${issue.number} closed; not tracked` };
     }
 
-    // Attribute to the real community member if they've linked their GitHub id
-    // (via the OAuth flow); otherwise the community bot. No backfill of past
-    // tickets — by design; the link only affects tickets created after linking.
-    const createdByUserId = await this.resolveActorUserId(sender.id, workspaceId, c.systemUserId);
-    if (createdByUserId !== c.systemUserId) {
-      logger.info(
-        `[GitHub-Webhook] githubId=${sender.id} is linked to community user ` +
-          `${createdByUserId}; attributing ticket to them`
-      );
-    }
+    // Community-intake tickets are always authored by the community system bot;
+    // the reporter's GitHub identity is captured in the custom fields below.
+    const createdByUserId = c.systemUserId;
 
     const description =
       (issue?.body?.trim() || '_No description provided._') +
@@ -311,55 +302,23 @@ export class GitHubWebhookService {
         `(githubIssueNumber=${issue.number}, githubReporterId=${sender?.id})`
     );
 
-    // If the reporter hasn't linked their GitHub yet, invite them to (so future
-    // issues are filed under their name). Skip if already linked — i.e. the
-    // ticket was attributed to someone other than the community bot.
-    if (createdByUserId === c.systemUserId) {
-      const startUrl = (config.github?.oauthCallbackUrl || '').replace(
-        '/oauth/callback',
-        '/oauth/start'
+    // Acknowledge the reporter on the GitHub issue and point them to the community.
+    const communityUrl = config.community?.url || '';
+    const followLine = communityUrl ? ` Follow along here: ${communityUrl}` : '';
+    const posted = await githubAppClient.postIssueComment(
+      repository.owner.login,
+      repository.name,
+      issue.number,
+      `👋 Thanks @${sender.login} — this issue is now tracked in the Xyne community ` +
+        `#${intakeChannel.name} as ${result.xyneId}.${followLine}`
+    );
+    if (posted) {
+      logger.info(
+        `[GitHub-Webhook] Posted acknowledgement comment on ${repoFullName}#${issue.number}`
       );
-      const communityUrl = config.community?.url || '';
-      if (startUrl) {
-        const futureNote =
-          `\n\n_This issue stays under the bot; linking applies to issues you open afterwards._`;
-        const steps = communityUrl
-          ? `Two quick steps:\n` +
-            `1. Join / sign in to the community: ${communityUrl}\n` +
-            `2. Then link your GitHub — once you start, finish authorizing within 15 min: ${startUrl}` +
-            futureNote
-          : `Link your GitHub — once you start, finish authorizing within 15 min: ${startUrl}` +
-            futureNote;
-        const posted = await githubAppClient.postIssueComment(
-          repository.owner.login,
-          repository.name,
-          issue.number,
-          `👋 Thanks @${sender.login}! This issue is now tracked in the Xyne community.\n\n${steps}`
-        );
-        if (posted) {
-          logger.info(
-            `[GitHub-Webhook] Posted link-invite comment on ${repoFullName}#${issue.number}`
-          );
-        }
-      }
     }
 
     return { success: true, message: `Ticket created for issue #${issue?.number}` };
-  }
-
-  /**
-   * Resolve the community user for a GitHub sender: the linked user if they've
-   * connected their GitHub id via OAuth, otherwise the provided fallback (bot).
-   */
-  private async resolveActorUserId(
-    senderId: number,
-    workspaceId: string,
-    fallbackUserId: string
-  ): Promise<string> {
-    const link = await this.prisma.userExternalToken.findFirst({
-      where: { provider: 'github', providerUserId: String(senderId), workspaceId },
-    });
-    return link?.userId ?? fallbackUserId;
   }
 
   /**
@@ -373,16 +332,14 @@ export class GitHubWebhookService {
    *
    * Routed through ticketService.updateTicket so the change writes a STATUS
    * TicketActivity row and broadcasts the kanban-count delta (same side effects
-   * as an in-app status change).
+   * as an in-app status change). Attributed to the community system bot.
    */
   private async syncTicketStatus(
     ticketId: string,
     action: 'reopened' | 'closed',
     issue: GitHubIssueEventPayload['issue'],
-    senderId: number,
     repoFullName: string,
-    workspaceId: string,
-    fallbackUserId: string
+    updatedByUserId: string
   ): Promise<{ success: boolean; message: string }> {
     // Only 'not_planned' cancels; 'completed', 'duplicate', and any unset reason
     // resolve as COMPLETED.
@@ -393,10 +350,7 @@ export class GitHubWebhookService {
           ? 'CANCELLED'
           : 'COMPLETED';
 
-    // Attribute to the linked community member if known, else the community bot.
-    const updatedBy = await this.resolveActorUserId(senderId, workspaceId, fallbackUserId);
-
-    await ticketService.updateTicket(ticketId, updatedBy, { status: newStatus });
+    await ticketService.updateTicket(ticketId, updatedByUserId, { status: newStatus });
     logger.info(
       `[GitHub-Webhook] ${repoFullName}#${issue.number} ${action} → ticket ${ticketId} status ${newStatus}`
     );
