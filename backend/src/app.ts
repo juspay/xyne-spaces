@@ -182,6 +182,7 @@ import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
@@ -790,6 +791,10 @@ export class App {
           await assignmentReactivationQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing ticket reassignment queue...');
+          await ticketReassignmentQueue.initialize();
+        })(),
+        (async () => {
           logger.info('Initializing on-call rotation queue...');
           await onCallRotationQueue.initialize();
         })(),
@@ -831,6 +836,9 @@ export class App {
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
+
+      logger.info('Initializing ticket reassignment queue...');
+      await ticketReassignmentQueue.initialize();
 
       logger.info('Initializing on-call rotation queue...');
       await onCallRotationQueue.initialize();
@@ -1004,6 +1012,9 @@ export class App {
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();
+
+      // Close ticket reassignment queue
+      await ticketReassignmentQueue.close();
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();

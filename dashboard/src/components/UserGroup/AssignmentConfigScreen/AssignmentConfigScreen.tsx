@@ -59,6 +59,7 @@ export const AssignmentConfigScreen = ({
 
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
+  const [localReassignOnUnavailable, setLocalReassignOnUnavailable] = useState<boolean>(false);
   const [localRotationInterval, setLocalRotationInterval] = useState<RotationInterval>(
     RotationInterval.WEEKLY,
   );
@@ -254,8 +255,9 @@ export const AssignmentConfigScreen = ({
     if (userGroup) {
       setLocalAutoRotationEnabled(userGroup.autoRotationEnabled ?? false);
       setLocalRotationInterval(userGroup.rotationInterval ?? RotationInterval.WEEKLY);
+      setLocalReassignOnUnavailable(userGroup.reassignOnUnavailable ?? false);
     }
-  }, [userGroup?.autoRotationEnabled, userGroup?.rotationInterval]);
+  }, [userGroup?.autoRotationEnabled, userGroup?.rotationInterval, userGroup?.reassignOnUnavailable]);
 
   const boards = allBoards || [];
 
@@ -577,6 +579,20 @@ export const AssignmentConfigScreen = ({
         );
       }
 
+      // Also update reassign-on-unavailable setting
+      const reassignOnUnavailableChanged =
+        localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
+
+      if (reassignOnUnavailableChanged) {
+        void zero.mutate(
+          mutators.assignmentConfig.toggleGroupReassignOnUnavailable({
+            userGroupId,
+            reassignOnUnavailable: localReassignOnUnavailable,
+            timestamp: Date.now(),
+          }),
+        );
+      }
+
       setHasChanges(false);
       setPendingSetMappings(null);
       setJustSaved(true);
@@ -881,6 +897,37 @@ export const AssignmentConfigScreen = ({
                     </Button>
                   </>
                 )}
+              </div>
+
+              {/* Reassign on unavailability */}
+              <div className='bg-background border border-border rounded-lg p-4'>
+                <div className='mb-4'>
+                  <h2 className='text-lg font-semibold text-foreground'>
+                    Reassign on Unavailability
+                  </h2>
+                  <p className='text-sm text-muted-foreground'>
+                    When a member of this group pauses ticket assignment, automatically hand off
+                    their open tickets to another eligible member
+                  </p>
+                </div>
+
+                <div className='flex items-center justify-between'>
+                  <div>
+                    <span className='block text-sm font-medium text-foreground'>
+                      Reassign Open Tickets
+                    </span>
+                    <p className='text-xs text-muted-foreground mt-1'>
+                      Tickets without an eligible replacement stay with the unavailable member
+                    </p>
+                  </div>
+                  <Switch
+                    checked={localReassignOnUnavailable}
+                    onCheckedChange={checked => {
+                      setLocalReassignOnUnavailable(checked);
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Board Filter */}

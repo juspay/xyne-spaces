@@ -9947,6 +9947,29 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
+      toggleGroupReassignOnUnavailable: defineMutator(
+        z.object({
+          userGroupId: z.string(),
+          reassignOnUnavailable: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { userGroupId, reassignOnUnavailable, timestamp } }) => {
+          const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+          if (!userGroup) {
+            throw new Error('User group not found');
+          }
+
+          await tx.mutate.user_groups.update({
+            id: userGroupId,
+            reassignOnUnavailable,
+            updatedAt: timestamp,
+          });
+
+          logger.info(
+            `[TOGGLE-REASSIGN-ON-UNAVAILABLE] ${reassignOnUnavailable ? 'Enabled' : 'Disabled'} reassign-on-unavailable for group ${userGroupId}.`
+          );
+        },
+      ),
     },
     repo: {
       create: defineMutator(
