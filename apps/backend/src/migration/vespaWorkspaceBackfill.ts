@@ -4,6 +4,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import vespaClient from '@/vespa/client';
 import { NAMESPACE, CLUSTER } from '@/vespa/vespaConfig';
 import {
@@ -360,18 +361,21 @@ router.post('/trigger', authMiddleware.authenticate, authorize('VESPA', AccessTy
 
     // Fire-and-forget backfill
     (async () => {
-      try {
-        for (const sc of schemas) {
-          logger.info(`[VespaBackfill] Starting backfill for schema: ${sc.schema}`);
-          await backfillSchema(sc, delayMs, stats);
-          logger.info(`[VespaBackfill] Completed schema: ${sc.schema}`);
+      // Cross-workspace sweep: runs above tenant scope by design.
+      await runAsSystem(async () => {
+        try {
+          for (const sc of schemas) {
+            logger.info(`[VespaBackfill] Starting backfill for schema: ${sc.schema}`);
+            await backfillSchema(sc, delayMs, stats);
+            logger.info(`[VespaBackfill] Completed schema: ${sc.schema}`);
+          }
+        } catch (err) {
+          stats.error = (err as Error).message;
+          logger.error(`[VespaBackfill] Job ${jobId} failed:`, err);
+        } finally {
+          stats.running = false;
         }
-      } catch (err) {
-        stats.error = (err as Error).message;
-        logger.error(`[VespaBackfill] Job ${jobId} failed:`, err);
-      } finally {
-        stats.running = false;
-      }
+      });
     })();
 
     return res.status(202).json({

@@ -3,7 +3,7 @@ import { ConversationParticipant, Prisma } from '@prisma/client';
 import { ConversationParticipation } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { ThreadListCursor, ThreadListSection } from '@/utils/threadListCursor';
-import { ACLFactory } from '@/services/pythonQuery/acl';
+import { ACLFactory } from '@/database/acl';
 import { getContextOrNull } from '@/database/tenant/context';
 
 export interface ThreadListEntry {
@@ -125,7 +125,7 @@ export class ConversationParticipantRepository extends BaseRepository<
     return conversation?.channelId;
   }
 
-  private async resolveConversationWorkspaceId(conversationId: string): Promise<string | null> {
+  private async resolveConversationWorkspaceId(conversationId: string): Promise<string> {
     const conversation = await this.db.conversation.findUniqueOrThrow({
       where: { conversationId },
       select: { workspaceId: true },
@@ -275,7 +275,7 @@ export class ConversationParticipantRepository extends BaseRepository<
     cursorParticipantId?: string
   ): Promise<ThreadListDatabaseRow[]> {
     const tenantContext = getContextOrNull();
-    if (!tenantContext || tenantContext.system) {
+    if (!tenantContext || tenantContext.actor === 'system') {
       throw new Error('Authenticated tenant context is required to list user threads');
     }
 

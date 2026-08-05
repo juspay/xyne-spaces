@@ -11,7 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
-import { tenantScopeMiddleware } from '@/database/tenant/context';
+import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
@@ -398,34 +398,34 @@ export class App {
     // Admin backfill routes (must be before generic /api routes to avoid auth conflicts)
     // Only enable when ENABLE_VESPA_BACKFILL_ROUTES environment variable is true
     if (process.env.ENABLE_VESPA_BACKFILL_ROUTES === 'true') {
-      this.app.use('/api/admin/vespa-backfill', vespaBackfillRoutes);
-      this.app.use('/migrate/api/admin/vespa-backfill', vespaBackfillRoutes);
+      this.app.use('/api/admin/vespa-backfill', workspaceScopedRoute, vespaBackfillRoutes);
+      this.app.use('/migrate/api/admin/vespa-backfill', workspaceScopedRoute, vespaBackfillRoutes);
     }
 
     // Ticket migration route (admin-only)
-    this.app.use('/api/admin/migrate-tickets-xyneid', ticketMigrationRoutes);
+    this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     // Activities backfill route (for backfilling group mention actorAction)
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
-      this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
+      this.app.use('/api/admin/activities-backfill', workspaceScopedRoute, activitiesBackfillRoutes);
     }
     // Ticket activity 'system' actor backfill — legacy literal → real automations bot User id
-    this.app.use('/api/admin/ticket-activity-system-actor-backfill', ticketActivitySystemActorBackfillRoutes);
-    this.app.use('/migrate/api/admin/ticket-activity-system-actor-backfill', ticketActivitySystemActorBackfillRoutes);
+    this.app.use('/api/admin/ticket-activity-system-actor-backfill', workspaceScopedRoute, ticketActivitySystemActorBackfillRoutes);
+    this.app.use('/migrate/api/admin/ticket-activity-system-actor-backfill', workspaceScopedRoute, ticketActivitySystemActorBackfillRoutes);
     // Activity isThreadActivity backfill
-    this.app.use('/migrate/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
-    this.app.use('/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
+    this.app.use('/migrate/api/admin/activity-thread-backfill', workspaceScopedRoute, activityThreadBackfillRoutes);
+    this.app.use('/api/admin/activity-thread-backfill', workspaceScopedRoute, activityThreadBackfillRoutes);
     // App permissions backfill — grant all permissions to all installed apps
-    this.app.use('/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
-    this.app.use('/migrate/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
+    this.app.use('/api/admin/app-permissions-backfill', workspaceScopedRoute, appPermissionsBackfillRoutes);
+    this.app.use('/migrate/api/admin/app-permissions-backfill', workspaceScopedRoute, appPermissionsBackfillRoutes);
     // App-level signing secret backfill — copy per-install secret up to the app / generate if missing
-    this.app.use('/api/admin/app-signing-secret-backfill', appSigningSecretBackfillRoutes);
-    this.app.use('/migrate/api/admin/app-signing-secret-backfill', appSigningSecretBackfillRoutes);
+    this.app.use('/api/admin/app-signing-secret-backfill', workspaceScopedRoute, appSigningSecretBackfillRoutes);
+    this.app.use('/migrate/api/admin/app-signing-secret-backfill', workspaceScopedRoute, appSigningSecretBackfillRoutes);
     // Installed app commands backfill — snapshot each app's commands into existing installs
-    this.app.use('/api/admin/installed-app-commands-backfill', installedAppCommandsBackfillRoutes);
-    this.app.use('/migrate/api/admin/installed-app-commands-backfill', installedAppCommandsBackfillRoutes);
+    this.app.use('/api/admin/installed-app-commands-backfill', workspaceScopedRoute, installedAppCommandsBackfillRoutes);
+    this.app.use('/migrate/api/admin/installed-app-commands-backfill', workspaceScopedRoute, installedAppCommandsBackfillRoutes);
     // Project tags + ticket_tag_mappings backfill from ticket_tags
-    this.app.use('/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
-    this.app.use('/migrate/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
+    this.app.use('/api/admin/project-tags-backfill', workspaceScopedRoute, projectTagsBackfillRoutes);
+    this.app.use('/migrate/api/admin/project-tags-backfill', workspaceScopedRoute, projectTagsBackfillRoutes);
     // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
     this.app.use(
       '/api/admin/external-source-displayname-backfill',
@@ -435,47 +435,47 @@ export class App {
       '/migrate/api/admin/external-source-displayname-backfill',
       externalSourceDisplayNameBackfillRoutes,
     );
-    this.app.use('/migrate/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
-    this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
-    this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
-    this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
-    this.app.use('/migrate/api/admin/channel-recap-to-recap-backfill', channelRecapToRecapBackfillRoutes);
-    this.app.use('/api/admin/channel-recap-to-recap-backfill', channelRecapToRecapBackfillRoutes);
-    this.app.use('/migrate/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
-    this.app.use('/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
-    this.app.use('/migrate/api/admin/ticket-email-count-backfill', ticketEmailCountBackfillRoutes);
-    this.app.use('/api/admin/ticket-email-count-backfill', ticketEmailCountBackfillRoutes);
-    this.app.use('/migrate/api/admin/email-read-at-backfill', emailReadAtBackfillRoutes);
-    this.app.use('/api/admin/email-read-at-backfill', emailReadAtBackfillRoutes);
-    this.app.use('/migrate/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
-    this.app.use('/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
-    this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
-    this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
-    this.app.use('/api/admin/ticket-stage-backfill', ticketStageBackfillRoutes);
-    this.app.use('/migrate/api/admin/ticket-stage-backfill', ticketStageBackfillRoutes);
-    this.app.use('/migrate/api/admin/queries-entity-type-backfill', queriesEntityTypeBackfillRoutes);
+    this.app.use('/migrate/api/admin/message-metadata-backfill', workspaceScopedRoute, messageMetadataBackfillRoutes);
+    this.app.use('/api/admin/message-metadata-backfill', workspaceScopedRoute, messageMetadataBackfillRoutes);
+    this.app.use('/migrate/api/admin/channel-recap-backfill', workspaceScopedRoute, channelRecapBackfillRoutes);
+    this.app.use('/migrate/api/admin/channel-recap-backfill', workspaceScopedRoute, channelRecapBackfillRoutes);
+    this.app.use('/migrate/api/admin/channel-recap-to-recap-backfill', workspaceScopedRoute, channelRecapToRecapBackfillRoutes);
+    this.app.use('/api/admin/channel-recap-to-recap-backfill', workspaceScopedRoute, channelRecapToRecapBackfillRoutes);
+    this.app.use('/migrate/api/admin/email-channel-unread-backfill', workspaceScopedRoute, emailChannelUnreadBackfillRoutes);
+    this.app.use('/api/admin/email-channel-unread-backfill', workspaceScopedRoute, emailChannelUnreadBackfillRoutes);
+    this.app.use('/migrate/api/admin/ticket-email-count-backfill', workspaceScopedRoute, ticketEmailCountBackfillRoutes);
+    this.app.use('/api/admin/ticket-email-count-backfill', workspaceScopedRoute, ticketEmailCountBackfillRoutes);
+    this.app.use('/migrate/api/admin/email-read-at-backfill', workspaceScopedRoute, emailReadAtBackfillRoutes);
+    this.app.use('/api/admin/email-read-at-backfill', workspaceScopedRoute, emailReadAtBackfillRoutes);
+    this.app.use('/migrate/api/admin/automation-series-id-backfill', workspaceScopedRoute, automationSeriesIdBackfillRoutes);
+    this.app.use('/api/admin/automation-series-id-backfill', workspaceScopedRoute, automationSeriesIdBackfillRoutes);
+    this.app.use('/api/admin/set-updated-at-time', workspaceScopedRoute, setUpdatedAtTimeRoutes);
+    this.app.use('/api/admin/ticket-metadata-backfill', workspaceScopedRoute, ticketMetadataBackfillRoutes);
+    this.app.use('/api/admin/ticket-stage-backfill', workspaceScopedRoute, ticketStageBackfillRoutes);
+    this.app.use('/migrate/api/admin/ticket-stage-backfill', workspaceScopedRoute, ticketStageBackfillRoutes);
+    this.app.use('/migrate/api/admin/queries-entity-type-backfill', workspaceScopedRoute, queriesEntityTypeBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)
-    this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
-    this.app.use('/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
-    this.app.use('/migrate/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
-    this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
-    this.app.use('/migrate/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
-    this.app.use('/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
-    this.app.use('/migrate/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
-    this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
-    this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
+    this.app.use('/api/admin/ticket-duplicate-backfill', workspaceScopedRoute, ticketDuplicateBackfillRoutes);
+    this.app.use('/api/admin/desk-metrics-backfill', workspaceScopedRoute, deskMetricsBackfillRoutes);
+    this.app.use('/migrate/api/admin/desk-metrics-backfill', workspaceScopedRoute, deskMetricsBackfillRoutes);
+    this.app.use('/api/admin/conversation-participant-backfill', workspaceScopedRoute, conversationParticipantBackfillRoutes);
+    this.app.use('/migrate/api/admin/conversation-participant-backfill', workspaceScopedRoute, conversationParticipantBackfillRoutes);
+    this.app.use('/api/admin/call-participant-count-backfill', workspaceScopedRoute, callParticipantCountBackfillRoutes);
+    this.app.use('/migrate/api/admin/call-participant-count-backfill', workspaceScopedRoute, callParticipantCountBackfillRoutes);
+    this.app.use('/migrate/api/admin/form-field-sequence-backfill', workspaceScopedRoute, formFieldSequenceBackfillRoutes);
+    this.app.use('/api/admin/form-field-sequence-backfill', workspaceScopedRoute, formFieldSequenceBackfillRoutes);
     // Dual-write sequence number backfill (same handler, new router)
-    this.app.use('/api/admin/dual-write-sequence-number-backfill', dualWriteSequenceNumberBackfillRoutes);
-    this.app.use('/migrate/api/admin/dual-write-sequence-number-backfill', dualWriteSequenceNumberBackfillRoutes);
+    this.app.use('/api/admin/dual-write-sequence-number-backfill', workspaceScopedRoute, dualWriteSequenceNumberBackfillRoutes);
+    this.app.use('/migrate/api/admin/dual-write-sequence-number-backfill', workspaceScopedRoute, dualWriteSequenceNumberBackfillRoutes);
     // Product insights recluster route (admin-only)
-    this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
-    this.app.use('/api/admin/gmail-watch-renewal', gmailWatchRenewalRoutes);
-    this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
-    this.app.use('/migrate/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
-    this.app.use('/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
-    this.app.use('/migrate/api/admin/workspace-id-backfill', workspaceIdBackfillRoutes);
-    this.app.use('/migrate/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
-    this.app.use('/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
+    this.app.use('/api/admin/product-insights-recluster', workspaceScopedRoute, productInsightsReclusterRoutes);
+    this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
+    this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', workspaceScopedRoute, onCallSetNumbersBackfillRoutes);
+    this.app.use('/migrate/api/admin/dm-channel-project-backfill', workspaceScopedRoute, dmChannelProjectBackfillRoutes);
+    this.app.use('/api/admin/dm-channel-project-backfill', workspaceScopedRoute, dmChannelProjectBackfillRoutes);
+    this.app.use('/migrate/api/admin/workspace-id-backfill', workspaceScopedRoute, workspaceIdBackfillRoutes);
+    this.app.use('/migrate/api/admin/notification-settings-backfill', workspaceScopedRoute, notificationSettingsBackfillRoutes);
+    this.app.use('/api/admin/notification-settings-backfill', workspaceScopedRoute, notificationSettingsBackfillRoutes);
     this.app.use('/api/admin/ai-provisioning-backfill', aiProvisioningBackfillRoutes);
     this.app.use('/migrate/api/admin/ai-provisioning-backfill', aiProvisioningBackfillRoutes);
 
@@ -639,7 +639,7 @@ export class App {
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
-    
+
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes

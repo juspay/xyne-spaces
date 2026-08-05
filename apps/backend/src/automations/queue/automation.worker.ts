@@ -2,7 +2,7 @@ import type Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { automationQueue, type AutomationJobData } from './automation.queue';
 import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
@@ -82,7 +82,7 @@ class AutomationWorker {
       return;
     }
 
-    await runWithContext({ userId: 'automation', workspaceId }, () =>
+    await runAsServiceActor('automation', workspaceId, () =>
       this.runJob(job, execution),
     );
   }

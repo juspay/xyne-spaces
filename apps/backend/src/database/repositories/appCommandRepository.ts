@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { CommandType, CommandAccessibility } from '@xyne/shared';
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 
 export { CommandType, CommandAccessibility };
 
@@ -209,7 +209,7 @@ export class AppCommandRepository {
     }
 
     // Denormalized tenant key sourced from the ambient tenant context.
-    const ws = getContextOrNull()?.workspaceId;
+    const ws = currentWorkspaceId();
     if (!ws) {
       throw new Error('workspaceId required: no tenant context');
     }

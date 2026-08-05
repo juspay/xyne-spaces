@@ -293,10 +293,11 @@ export class UserManagementController {
         try {
           if (action === 'grant') {
             const result = await userManagementService.grantUserResourceAccess(
-              id,
-              resourceName,
-              accessType
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -304,9 +305,9 @@ export class UserManagementController {
             }
           } else {
             const result = await userManagementService.revokeUserResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -942,10 +943,11 @@ export class UserManagementController {
         try {
           if (action === 'grant') {
             const result = await userManagementService.grantGroupResourceAccess(
-              id,
-              resourceName,
-              accessType
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -953,9 +955,9 @@ export class UserManagementController {
             }
           } else {
             const result = await userManagementService.revokeGroupResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {

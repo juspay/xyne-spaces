@@ -93,61 +93,64 @@ export class AppSigningSecretBackfillController {
       for (const app of apps) {
         summary.appsProcessed += 1;
         try {
-          const data: Prisma.AppsUpdateInput = {};
+          // Maintenance sweep: resolves and fills every app in the workspace, above the
+          // operator's own row scope.
+        const data: Prisma.AppsUpdateInput = {};
 
-          if (app.signingSecret === '') {
-            const install = await db.installedApps.findFirst({
-              where: { appId: app.id, signingSecret: { not: null } },
-              select: { signingSecret: true },
-              orderBy: { id: 'asc' },
-            });
-            // Already-encrypted value moves as-is; generate only if no install had a (non-empty) secret.
-            const copied = install?.signingSecret && install.signingSecret.length > 0 ? install.signingSecret : null;
-            data.signingSecret = copied ?? (await encrypt(crypto.randomBytes(32).toString('hex')));
-            if (copied) summary.signingSecretCopied += 1;
-            else summary.signingSecretGenerated += 1;
-          }
+        if (app.signingSecret === '') {
+          const install = await db.installedApps.findFirst({
+            where: { appId: app.id, signingSecret: { not: null } },
+            select: { signingSecret: true },
+            orderBy: { id: 'asc' },
+          });
+          // Already-encrypted value moves as-is; generate only if no install had a (non-empty) secret.
+          const copied = install?.signingSecret && install.signingSecret.length > 0 ? install.signingSecret : null;
+          data.signingSecret = copied ?? (await encrypt(crypto.randomBytes(32).toString('hex')));
+          if (copied) summary.signingSecretCopied += 1;
+          else summary.signingSecretGenerated += 1;
+        }
 
-          if (app.webhookUrl === null) {
-            const install = await db.installedApps.findFirst({
-              where: { appId: app.id, webhookUrl: { not: null } },
-              select: { webhookUrl: true },
-              orderBy: { id: 'asc' },
-            });
-            if (install?.webhookUrl) {
-              data.webhookUrl = install.webhookUrl;
-              summary.webhookCopied += 1;
-            }
+        if (app.webhookUrl === null) {
+          const install = await db.installedApps.findFirst({
+            where: { appId: app.id, webhookUrl: { not: null } },
+            select: { webhookUrl: true },
+            orderBy: { id: 'asc' },
+          });
+          if (install?.webhookUrl) {
+            data.webhookUrl = install.webhookUrl;
+            summary.webhookCopied += 1;
           }
+        }
 
-          if (app.scope === '') {
-            data.scope = DEFAULT_SCOPE;
-            summary.scopeSet += 1;
-          }
+        if (app.scope === '') {
+          data.scope = DEFAULT_SCOPE;
+          summary.scopeSet += 1;
+        }
 
-          if (app.orgId === '') {
-            // Derive the owning org from the creator's workspace.
-            const user = await db.user.findUnique({
-              where: { id: app.createdBy },
-              select: { workspaceId: true },
-            });
-            const workspace = user?.workspaceId
-              ? await db.workspace.findUnique({
-                  where: { id: user.workspaceId },
-                  select: { orgId: true },
-                })
-              : null;
-            if (workspace?.orgId) {
-              data.orgId = workspace.orgId;
-              summary.orgIdSet += 1;
-            } else {
-              summary.orgIdUnresolved += 1;
-            }
+        if (app.orgId === '') {
+          // Derive the owning org from the creator's workspace.
+          const user = await db.user.findUnique({
+            where: { id: app.createdBy },
+            select: { workspaceId: true },
+          });
+          const workspace = user?.workspaceId
+            ? await db.workspace.findUnique({
+                where: { id: user.workspaceId },
+                select: { orgId: true },
+              })
+            : null;
+          if (workspace?.orgId) {
+            data.orgId = workspace.orgId;
+            summary.orgIdSet += 1;
+          } else {
+            summary.orgIdUnresolved += 1;
           }
+        }
 
-          if (!options.dryRun && Object.keys(data).length > 0) {
-            await db.apps.update({ where: { id: app.id }, data });
-          }
+        if (!options.dryRun && Object.keys(data).length > 0) {
+          await db.apps.update({ where: { id: app.id }, data });
+        }
+
         } catch (error) {
           summary.errors += 1;
           logger.warn(`${TAG} Failed to backfill app`, {

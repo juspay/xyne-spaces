@@ -206,6 +206,7 @@ export class ScheduleCallController {
           recurringSeriesId: series.id,
           organizerId: userId,
           userIds: recurringParticipantUserIds,
+          workspaceId: req.user!.workspaceId!,
           tx,
         });
 
@@ -214,6 +215,7 @@ export class ScheduleCallController {
             recurringSeriesId: series.id,
             organizerId: userId,
             externalInvitees: normalizedExternalInvitees,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -788,6 +790,7 @@ export class ScheduleCallController {
             recurringSeriesId: seriesId,
             organizerId: userId,
             userIds: recurringParticipantUserIds,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -797,6 +800,7 @@ export class ScheduleCallController {
             recurringSeriesId: seriesId,
             organizerId: userId,
             externalInvitees: normalizedExternalInvitees,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }

@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 import { logger } from '@/utils/logger';
 
@@ -526,9 +527,10 @@ class TeamIntelligenceOrgRepository {
           userId: true,
         },
       }),
-      db.channel.findMany({
+      // Resolves names for ids already in the result set, so it runs above the caller's own scope.
+      withWorkspaceScope(() => db.channel.findMany({
         select: { id: true, name: true },
-      }),
+      })),
       db.ticket.findMany({
         where: {
           createdAt: { gte: rangeStart, lte: rangeEnd },

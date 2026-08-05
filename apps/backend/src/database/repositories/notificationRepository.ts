@@ -1,10 +1,11 @@
 import { BaseRepository } from './base';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { Notification, NotificationPreference, BrowserNotificationSubscription } from '@prisma/client';
 import { NotificationType, NotificationStatus, NotificationDeliveryMethod } from '@xyne/shared';
+import { currentWorkspaceId } from '@/database/tenant/context';
 
 // Define create/update input types
 type NotificationCreateInput = {
+  workspaceId: string;
   userId: string;
   type: NotificationType;
   title: string;
@@ -26,8 +27,7 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
   }
 
   async create(data: NotificationCreateInput): Promise<Notification> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
-    return this.db.notification.create({ data: { ...data, workspaceId } as any });
+    return this.db.notification.create({ data });
   }
 
   async findById(id: string): Promise<Notification | null> {
@@ -143,6 +143,7 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
 
 // Define types for NotificationPreference
 type NotificationPreferenceCreateInput = {
+  workspaceId: string;
   userId: string;
   notificationType: string;
   browserEnabled?: boolean;
@@ -158,8 +159,8 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
   }
 
   async create(data: NotificationPreferenceCreateInput): Promise<NotificationPreference> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
-    return this.db.notificationPreference.create({ data: { ...data, workspaceId } as any });
+    // `as any` bridges the pre-existing notificationType string<->enum mismatch only.
+    return this.db.notificationPreference.create({ data: data as any });
   }
 
   async findById(id: string): Promise<NotificationPreference | null> {
@@ -193,7 +194,10 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
       slackEnabled: boolean;
     }
   ): Promise<NotificationPreference> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: userId });
+    const workspaceId = currentWorkspaceId();
+    if (!workspaceId) {
+      throw new Error('workspaceId required: no tenant context');
+    }
     return this.db.notificationPreference.upsert({
       where: {
         userId_notificationType: {
@@ -214,6 +218,7 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
 
 // Define types for BrowserNotificationSubscription
 type BrowserNotificationSubscriptionCreateInput = {
+  workspaceId: string;
   userId: string;
   endpoint: string;
   p256dh: string;
@@ -231,8 +236,7 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
   }
 
   async create(data: BrowserNotificationSubscriptionCreateInput): Promise<BrowserNotificationSubscription> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
-    return this.db.browserNotificationSubscription.create({ data: { ...data, workspaceId } as any });
+    return this.db.browserNotificationSubscription.create({ data });
   }
 
   async findById(id: string): Promise<BrowserNotificationSubscription | null> {
@@ -277,7 +281,19 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
     auth: string;
     userAgent?: string;
   }): Promise<BrowserNotificationSubscription> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
+    // The upsert keys on the globally unique endpoint; reject when the endpoint already
+    // maps to a different user so ownership cannot be reassigned.
+    const existing = await this.db.browserNotificationSubscription.findUnique({
+      where: { endpoint: data.endpoint },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== data.userId) {
+      throw new Error('Push subscription endpoint already belongs to another user');
+    }
+    const workspaceId = currentWorkspaceId();
+    if (!workspaceId) {
+      throw new Error('workspaceId required: no tenant context');
+    }
     return this.db.browserNotificationSubscription.upsert({
       where: { endpoint: data.endpoint },
       update: {
