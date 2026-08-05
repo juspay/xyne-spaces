@@ -88,6 +88,7 @@ export class DraftMessagesACL extends BaseACL<'draft_messages'> {
   }
 
   async canUpsert(args: UpsertValue<TableSchema<'draft_messages'>>, tx: Transaction<Schema>): Promise<void> {
+    assertWorkspaceMatch(this.ctx, args.workspaceId as string, 'draft_messages');
     const row = await tx.run(zql.draft_messages.where('id', args.id).one());
     if (row) {
       await this.canUpdate(args, tx);
@@ -108,17 +109,4 @@ export class DraftMessagesACL extends BaseACL<'draft_messages'> {
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'draft_messages');
   }
 
-  async canUpsert(args: UpsertValue<TableSchema<'draft_messages'>>, tx: Transaction<Schema>): Promise<void> {
-    // Draft messages are owner-scoped: gate on both the incoming owner and the
-    // existing row's owner.
-    assertWorkspaceMatch(this.ctx, args.workspaceId as string, 'draft_messages');
-    if (args.userId && args.userId !== this.ctx.userID) {
-      throw new MutationACLError('Draft message upsert failed: cannot upsert a draft for another user', 'draft_messages');
-    }
-    const existing = await tx.run(zql.draft_messages.where('id', args.id).one());
-    if (existing && existing.userId !== this.ctx.userID) {
-      throw new MutationACLError('Draft message upsert failed: cannot modify a draft you do not own', 'draft_messages');
-    }
-    await this.ensureChannelAccess(existing ? existing.channelId : args.channelId, tx);
-  }
 }

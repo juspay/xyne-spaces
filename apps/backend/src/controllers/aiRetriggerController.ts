@@ -12,6 +12,7 @@ import { autoDraftQueue } from '../queues/autoDraftQueue.js';
 import { redisService } from '../services/redisService.js';
 import { logger } from '../utils/logger.js';
 import { withWorkspaceScope } from '../database/tenant/context.js';
+import { AutoDraftMode } from '@xyne/shared';
 
 const COOLDOWN_SECONDS = 10 * 60;
 const LOCK_TTL_SECONDS = 120;
@@ -53,7 +54,7 @@ export class AiRetriggerController {
     return {
       classification: !!config?.enabled,
       priority: !!config?.priorityClassificationEnabled,
-      autoDraft: pref?.autoDraftMode === 'DRAFT',
+      autoDraft: pref?.autoDraftMode === AutoDraftMode.DRAFT,
     };
   }
 

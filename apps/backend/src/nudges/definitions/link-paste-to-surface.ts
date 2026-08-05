@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
+import { NudgeKind, SurfaceAreaType, SurfaceLinkKind } from '@xyne/shared';
 import type {
   NudgeDefinition,
   ActivityEventNudgePayload,
@@ -83,11 +83,11 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
           description: `Auto-link from shared URL`,
           actions: {
             actionType: 'CREATE_SURFACE_LINK',
-            sourceType: 'MESSAGE',
+            sourceType: SurfaceAreaType.MESSAGE,
             sourceId: messageId,
             targetType: ref.targetType,
             targetId: ref.targetId,
-            linkKind: 'RELATES_TO',
+            linkKind: SurfaceLinkKind.RELATES_TO,
             projectId,
           },
         });

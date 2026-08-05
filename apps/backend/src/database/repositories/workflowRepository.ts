@@ -1,5 +1,5 @@
 import { Workflow, WorkflowExecution, WorkflowStep } from '@prisma/client';
-import { AttachmentEntityType } from '@xyne/shared';
+import { AttachmentEntityType, WorkflowExecutionMode } from '@xyne/shared';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { DatabaseClient } from '@/database/client';
 import {logger} from '@/utils/logger';
@@ -217,7 +217,7 @@ export class WorkflowRepository {
   }
 
   // Set execution mode
-  async setExecutionMode(executionId: string, mode: 'AUTOMATIC' | 'MANUAL'): Promise<void> {
+  async setExecutionMode(executionId: string, mode: WorkflowExecutionMode): Promise<void> {
     await prisma.workflowExecution.update({
       where: { id: executionId },
       data: { mode }

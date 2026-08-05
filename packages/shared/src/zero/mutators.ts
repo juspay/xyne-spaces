@@ -4802,7 +4802,7 @@ export const mutators = defineMutators({
 
             const normalizedApprovers = (stage.approvers ?? []).map(entry => ({
               approverId: entry.approverId,
-              approverType: entry.approverType === 'ROLE' ? ApproverType.ROLE : ApproverType.USER,
+              approverType: entry.approverType === ApproverType.ROLE ? ApproverType.ROLE : ApproverType.USER,
             }));
             if (stage.approverIds && stage.approverIds.length > 0) {
               for (const approverId of stage.approverIds) {

@@ -597,7 +597,7 @@ export class TicketRepository {
             conversationId: currentTicket.conversationId,
             senderId: updatedBy,
             content: statusMessage,
-            activityType: 'STATUS',
+            activityType: ActivityType.STATUS,
             workspaceId: currentTicket.workspaceId,
             isAutomation: source === ActivitySource.AUTOMATION,
           },

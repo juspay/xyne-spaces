@@ -8,6 +8,7 @@ import { WorkflowType, WorkflowExecutionStatus, isActiveStatus } from '@/workflo
 import { buildPRWorkflowContext } from './prWorkflowContextBuilder';
 import { randomUUID } from 'crypto';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { MessageType, PRStatus } from '@xyne/shared';
 
 interface ProcessedComment {
   text: string;
@@ -376,7 +377,7 @@ export class XyneCommentService {
           sourceBranchName: pr.sourceBranchName || workflowBranch,
           destinationBranchName: pr.destinationBranchName || '',
           repositoryUrl: pr.repositoryUrl || '',
-          status: 'OPEN',
+          status: PRStatus.OPEN,
           ticketId: ticketId,
           date: new Date(),
         },
@@ -405,7 +406,7 @@ export class XyneCommentService {
             workspaceId: ticket.workspaceId,
             senderId: ticket.createdBy || 'system',
             content: ``,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
             metadata: messageMetadata,
           },
         });

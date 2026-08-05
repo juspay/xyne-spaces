@@ -59,7 +59,7 @@ import { BaseTicketType,
   AttachmentEntityType,
   ChannelType,
   ActivityType,
-  TicketReferenceRelation, MessageType } from '@xyne/shared';
+  TicketReferenceRelation, MessageType, ConversationParticipation } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -276,7 +276,7 @@ export class TicketController {
           senderId: createdBy,
           workspaceId: channelWorkspaceId,
           content: messageContent || `Ticket created: ${title}`,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           showInChannel: false,
           metadata: {
             messageSubtype,
@@ -317,13 +317,13 @@ export class TicketController {
           conversationId,
           userId: createdBy,
           workspaceId: channelWorkspaceId,
-          participationType: 'MENTIONED',
+          participationType: ConversationParticipation.MENTIONED,
           isSubscribed: true,
           joinedAt: now,
           channelId,
         },
         update: {
-          participationType: 'MENTIONED',
+          participationType: ConversationParticipation.MENTIONED,
           isSubscribed: true,
         },
       });
@@ -767,13 +767,13 @@ export class TicketController {
               conversationId,
               userId,
               workspaceId: existingConversationWorkspaceId,
-              participationType: 'MENTIONED',
+              participationType: ConversationParticipation.MENTIONED,
               isSubscribed: true,
               joinedAt: new Date(),
               channelId,
             },
             update: {
-              participationType: 'MENTIONED',
+              participationType: ConversationParticipation.MENTIONED,
               isSubscribed: true,
             },
           });
@@ -909,13 +909,13 @@ export class TicketController {
               conversationId,
               userId: userId,
               workspaceId: newConversationWorkspaceId,
-              participationType: 'MENTIONED',
+              participationType: ConversationParticipation.MENTIONED,
               isSubscribed: true,
               joinedAt: new Date(),
               channelId: ticket.channelId,
             },
             update: {
-              participationType: 'MENTIONED',
+              participationType: ConversationParticipation.MENTIONED,
               isSubscribed: true,
             },
           });

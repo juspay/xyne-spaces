@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import EditAppForm from '../EditAppForm/EditAppForm';
 import { useUser } from '../../../hooks/useUsers';
+import { AccessType } from '@xyne/shared';
+import type { UserPermission } from '../../../machines/stateMachine';
 
 interface AppRow extends Record<string, unknown> {
   id: string;
@@ -56,7 +58,7 @@ interface AppsTableProps {
   onGetJwtToken?: (appId: string) => Promise<string>;
   onGetSigningSecret?: (appId: string) => Promise<string>;
   onUploadPicture?: (appId: string, file: File) => Promise<void>;
-  userPermissions: Array<{ resourceName: string; accessType: string }>;
+  userPermissions: UserPermission[];
   isInstalling?: boolean;
   isUpdatingApp?: boolean;
   // Promote ORG -> GLOBAL (marketplace). Shown on org-view apps when the user is a XYNE-APPS admin.
@@ -95,9 +97,9 @@ export const AppsTable = ({
   const isInstalledView = dataSource === 'install';
   const appAccessLevel = useMemo(() => {
     const appPerms = userPermissions.filter(p => p.resourceName === 'XYNE-APPS');
-    if (appPerms.some(p => p.accessType === 'ADMIN')) return 'ADMIN';
-    if (appPerms.some(p => p.accessType === 'WRITE')) return 'WRITE';
-    if (appPerms.some(p => p.accessType === 'READ')) return 'READ';
+    if (appPerms.some(p => p.accessType === AccessType.ADMIN)) return 'ADMIN';
+    if (appPerms.some(p => p.accessType === AccessType.WRITE)) return 'WRITE';
+    if (appPerms.some(p => p.accessType === AccessType.READ)) return 'READ';
     return null;
   }, [userPermissions]);
 

@@ -9,7 +9,7 @@ import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
-import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
 import '../types/express';
@@ -143,7 +143,7 @@ export class AuthV2Controller {
       name: googleUserData.name,
       picture: googleUserData.picture,
       workspaceId,
-      authProvider: 'GOOGLE',
+      authProvider: AuthProvider.GOOGLE,
     });
 
     // Create session
@@ -2052,7 +2052,7 @@ export class AuthV2Controller {
           create: {
             orgId: existingOrgId,
             email: userData.email.toLowerCase(),
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
           },
           update: {
             leftAt: null,

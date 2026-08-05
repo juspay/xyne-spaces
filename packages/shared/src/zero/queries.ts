@@ -1,5 +1,5 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
-import { BaseTicketType } from '../tickets/types.js';
+import { BaseTicketType } from './types.js';
 import { defineQuery } from './acl/define-query.js';
 import {
   BoardType,
@@ -36,6 +36,7 @@ import {
   TicketReferenceRelation,
   DelayedMessageStatus,
   RecapEntityType,
+  UserResponsibility,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -356,7 +357,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.prReviewers?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'PR_REVIEWER')
+        .where('userResponsibility', UserResponsibility.PR_REVIEWER)
         .where('userId', 'IN', filters.prReviewers ?? []),
     );
   }
@@ -364,7 +365,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.qaAssigned?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'QA')
+        .where('userResponsibility', UserResponsibility.QA)
         .where('userId', 'IN', filters.qaAssigned ?? []),
     );
   }

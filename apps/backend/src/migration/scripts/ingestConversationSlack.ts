@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType, MessageType } from '@xyne/shared';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType, MessageType, OrgRole, UserStatus } from '@xyne/shared';
 import { UserRepository } from '../../database/repositories/users';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
@@ -114,7 +114,7 @@ export const findOrCreateUser = async (
         data: {
           orgId: workspace.orgId,
           email: userEmail,
-          role: 'MEMBER',
+          role: OrgRole.MEMBER,
         },
         select: { memberId: true },
       });
@@ -167,7 +167,7 @@ const installAppForWorkspace = async (
   let orgMember = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
   if (!orgMember) {
     orgMember = await db.orgMember.create({
-      data: { email, orgId: workspace.orgId, role: 'MEMBER' },
+      data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
       select: { memberId: true },
     });
   }
@@ -179,7 +179,7 @@ const installAppForWorkspace = async (
       providerUserId: `xyne-app-${appId}-${workspaceId}`,
       authProvider: AuthProvider.API_KEY,
       userType: UserType.APP,
-      status: 'ACTIVE',
+      status: UserStatus.ACTIVE,
       workspace: { connect: { id: workspaceId } },
       orgMember: { connect: { memberId: orgMember.memberId } },
     },

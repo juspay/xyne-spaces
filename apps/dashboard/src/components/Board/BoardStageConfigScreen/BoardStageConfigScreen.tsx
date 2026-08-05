@@ -25,7 +25,15 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../../../components/ui/dropdown-menu';
-import { TicketStatusV2, PRStatusEvent, FormContextType, BoardType } from '@xyne/shared';
+import {
+  TicketStatusV2,
+  PRStatusEvent,
+  FormContextType,
+  BoardType,
+  ApproverType,
+  ReenterMode,
+  VisitSlaMode,
+} from '@xyne/shared';
 import { toast } from 'sonner';
 import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import type { StageNode as Stage, StageCondition } from './BoardStageConfigScreen.types';
@@ -527,7 +535,7 @@ const BoardStageConfigScreen = ({
         readonly id: string;
         readonly userId: string | null;
         readonly roleId: string | null;
-        readonly approverType: 'USER' | 'ROLE' | null;
+        readonly approverType: ApproverType | null;
         readonly stageId: string;
       }[];
       readonly formContextMappings?: readonly {
@@ -812,11 +820,11 @@ const BoardStageConfigScreen = ({
         formId: string | null;
         requiresApproval: boolean | null;
         requestApprovalOnEntry?: boolean | null;
-        visitSlaMode: string | null;
+        visitSlaMode: VisitSlaMode | null;
         fixedEtaHours: number | null;
-        onReenter: string | null;
+        onReenter: ReenterMode | null;
         transitionApprovers?: readonly {
-          approverType?: string | null;
+          approverType?: ApproverType | null;
           userId: string | null;
           roleId: string | null;
         }[];
@@ -846,21 +854,21 @@ const BoardStageConfigScreen = ({
                   userId: string | null;
                   roleId: string | null;
                 }) => {
-                  const type = a.approverType ?? 'USER';
+                  const type = a.approverType ?? ApproverType.USER;
                   if (type === 'ROLE') {
                     return a.roleId
-                      ? { approverId: a.roleId, approverType: 'ROLE' as const }
+                      ? { approverId: a.roleId, approverType: ApproverType.ROLE as const }
                       : null;
                   }
-                  return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+                  return a.userId
+                    ? { approverId: a.userId, approverType: ApproverType.USER as const }
+                    : null;
                 },
               )
-              .filter(
-                (x): x is { approverId: string; approverType: 'USER' | 'ROLE' } => x !== null,
-              ),
-            visitSlaMode: t.visitSlaMode ?? 'STAGE_DEFAULT',
+              .filter((x): x is { approverId: string; approverType: ApproverType } => x !== null),
+            visitSlaMode: t.visitSlaMode ?? VisitSlaMode.STAGE_DEFAULT,
             fixedEtaHours: t.fixedEtaHours,
-            onReenter: t.onReenter ?? 'RESET',
+            onReenter: t.onReenter ?? ReenterMode.RESET,
           });
         }
       }
@@ -961,11 +969,15 @@ const BoardStageConfigScreen = ({
         prStatuses,
         approvers: (s.approvers ?? [])
           .map(a => {
-            const type = a.approverType ?? 'USER';
-            if (type === 'ROLE') {
-              return a.roleId ? { approverId: a.roleId, approverType: 'ROLE' as const } : null;
+            const type = a.approverType ?? ApproverType.USER;
+            if (type === ApproverType.ROLE) {
+              return a.roleId
+                ? { approverId: a.roleId, approverType: ApproverType.ROLE as const }
+                : null;
             }
-            return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+            return a.userId
+              ? { approverId: a.userId, approverType: ApproverType.USER as const }
+              : null;
           })
           .filter((x): x is ApproverEntry => x !== null),
         formId: s.formContextMappings?.[0]?.formId || '',
@@ -1107,8 +1119,8 @@ const BoardStageConfigScreen = ({
         const newMeta: TransitionMeta = {
           requiresApproval: false,
           approvers: [],
-          visitSlaMode: 'STAGE_DEFAULT',
-          onReenter: 'RESET',
+          visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
+          onReenter: ReenterMode.RESET,
           ...existing,
           ...meta,
         };
@@ -1588,7 +1600,7 @@ const BoardStageConfigScreen = ({
         formId?: string | null;
         requiresApproval?: boolean;
         requestApprovalOnEntry?: boolean;
-        approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+        approvers?: Array<{ approverId: string; approverType: ApproverType }>;
         visitSlaMode?: string;
         fixedEtaHours?: number | null;
         onReenter?: string;

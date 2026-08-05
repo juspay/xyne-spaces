@@ -151,7 +151,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     await this.validateString(data.senderId, 'senderId');
     
     // Content is required unless there are attachments OR it's a SYSTEM message with metadata
-    const isSystemMessageWithMetadata = data.msgType === 'SYSTEM' && data.metadata;
+    const isSystemMessageWithMetadata = data.msgType === MessageType.SYSTEM && data.metadata;
     if (!data.hasAttachment && !isSystemMessageWithMetadata && (!data.content || data.content.trim() === '')) {
       throw new Error('content is required when no attachments are present');
     }

@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
+import { ActivityClassification, ActivityClassificationJobType, UserStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { currentWorkspaceId, withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
@@ -673,7 +673,7 @@ export class ActivityService {
         where: {
           orgMemberId: memberId,
           leftAt: null,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
         },
         select: {
           id: true,

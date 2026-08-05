@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { AppPermissionStatus } from '@xyne/shared';
 
 export interface AppPermissionsBackfillConfig {
   batchSize: number;
@@ -96,7 +97,7 @@ export class AppPermissionsBackfillService {
                 installedAppId: installation.id,
                 workspaceId: installation.workspaceId,
                 permissionId: p.id,
-                status: 'APPROVED',
+                status: AppPermissionStatus.APPROVED,
               })),
               skipDuplicates: true,
             });

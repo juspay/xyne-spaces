@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -980,7 +980,7 @@ export class CallRepository {
             workspaceId,
             senderId: 'system',
         content: isHeadless ? 'Recording started' : `${initiatorName} started a call`,
-        msgType: 'SYSTEM',
+        msgType: MessageType.SYSTEM,
         showInChannel: isHeadless ? true : false,
         metadata: {
           isCallMessage: true,
@@ -1069,7 +1069,7 @@ export class CallRepository {
             workspaceId: resolvedWorkspaceId,
             senderId: 'system',
             content: `${initiatorName} started a call`,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
             showInChannel: false,
             metadata: {
               isCallMessage: true,
@@ -1281,7 +1281,7 @@ export class CallRepository {
             workspaceId: wsId,
             senderId: 'system',
             content: `${user?.displayName || user?.name || 'Someone'} started a call`,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
             showInChannel: false,
             metadata: {
               isCallMessage: true,

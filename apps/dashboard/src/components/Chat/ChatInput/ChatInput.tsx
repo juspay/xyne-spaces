@@ -19,6 +19,7 @@ import {
   Conversation,
   ChannelType,
   BaseTicketType,
+  CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
@@ -61,7 +62,7 @@ import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMen
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
-import type { AppShortcutWithApp, CommandAccessibility } from '../../../services/Apps/appsService';
+import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
@@ -196,8 +197,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     useEffect(() => {
       const isThread = !!conversation?.conversationId;
       const filter: { commandAccessibility?: CommandAccessibility } = isThread
-        ? { commandAccessibility: 'THREAD' }
-        : { commandAccessibility: 'CHAT' };
+        ? { commandAccessibility: CommandAccessibility.THREAD }
+        : { commandAccessibility: CommandAccessibility.CHAT };
       appsService
         .getChannelCommands(channelId, filter)
         .then(cmds =>
@@ -341,14 +342,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           senderId: string;
           senderName: string;
           content: string;
-          msgType: string;
+          msgType: MessageType;
           createdAt: Date;
         };
         type: string;
         timestamp: Date;
       }): void => {
         // Check if this is a SYSTEM message (typing, reactions, etc.)
-        if (data.message.msgType === 'SYSTEM') {
+        if (data.message.msgType === MessageType.SYSTEM) {
           try {
             const content = JSON.parse(data.message.content) as TypingUpdatedContent;
 

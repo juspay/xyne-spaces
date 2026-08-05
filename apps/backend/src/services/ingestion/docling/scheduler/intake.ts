@@ -9,7 +9,7 @@
  * Inserts the pending_split row; the splitter takes over.
  */
 import { db } from '@/database/client';
-import { IngestionStatus } from '@xyne/shared';
+import { IngestionStatus, AttachmentEntityType } from '@xyne/shared';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
@@ -39,7 +39,7 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
   if (!item) return false;
 
   const attachment = await db.messageAttachment.findFirst({
-    where: { entityId: item.id, entityType: 'COLLECTION' },
+    where: { entityId: item.id, entityType: AttachmentEntityType.COLLECTION },
   });
   if (!attachment?.url) return false;
   if (!isPdf(attachment.mimetype, item.name)) return false;

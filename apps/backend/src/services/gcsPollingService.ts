@@ -18,7 +18,7 @@
  */
 
 import { logger } from '@/utils/logger';
-import { MessageType } from '@xyne/shared';
+import { MessageType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { config } from '@/config/env';
@@ -326,8 +326,8 @@ export class GcsPollingService {
         conversationId: conversation.conversationId,
         projectId: this.projectId,
         boardId: this.boardId,
-        priority: 'MEDIUM',
-        statusV2: 'TODO',
+        priority: TicketPriority.MEDIUM,
+        statusV2: TicketStatusV2.TODO,
         messageContent: `Ticket has been created, triggering workflow now.`
       });
       logger.info(`[GCS_POLLING] Created ticket ${ticket.xyneId} (${ticket.id})`);

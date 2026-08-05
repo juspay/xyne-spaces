@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
+import { NotificationLevel } from '@xyne/shared';
 
 type BackfillOptions = {
   batchSize: number;
@@ -55,8 +56,8 @@ export class NotificationSettingsBackfillController {
         where: {
           isDeleted: false,
           OR: [
-            { desktopNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
-            { mobileNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
+            { desktopNotificationLevel: { in: [NotificationLevel.ALL, NotificationLevel.THREADS_ONLY] } },
+            { mobileNotificationLevel: { in: [NotificationLevel.ALL, NotificationLevel.THREADS_ONLY] } },
           ],
         },
         select: {
@@ -74,8 +75,8 @@ export class NotificationSettingsBackfillController {
       for (const row of rows) {
         summary.processed += 1;
 
-        const hasTargetDesktop = row.desktopNotificationLevel === 'ALL' || row.desktopNotificationLevel === 'THREADS_ONLY';
-        const hasTargetMobile = row.mobileNotificationLevel === 'ALL' || row.mobileNotificationLevel === 'THREADS_ONLY';
+        const hasTargetDesktop = row.desktopNotificationLevel === NotificationLevel.ALL || row.desktopNotificationLevel === NotificationLevel.THREADS_ONLY;
+        const hasTargetMobile = row.mobileNotificationLevel === NotificationLevel.ALL || row.mobileNotificationLevel === NotificationLevel.THREADS_ONLY;
 
         if (!hasTargetDesktop && !hasTargetMobile) {
           summary.skipped += 1;

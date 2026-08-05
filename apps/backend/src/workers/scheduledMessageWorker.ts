@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { MessageType, AuthProvider, UserStatus, UserType } from '@xyne/shared';
+import { MessageType, AuthProvider, UserStatus, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
@@ -83,7 +83,7 @@ class ScheduledMessageWorker {
           data: {
             email: botEmail,
             orgId: workspace.orgId,
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
           },
           select: { memberId: true },
         });

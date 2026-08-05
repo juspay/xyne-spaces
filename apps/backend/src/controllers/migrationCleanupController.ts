@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
+import { UserStatus } from '@xyne/shared';
 
 const BATCH_SIZE = 50;
 const BATCH_GAP_MS = 3_000; // 3 seconds between batches
@@ -125,7 +126,7 @@ export class MigrationCleanupController {
       // so we can roll the per-table counts up by workspace in code.
       const inactiveUsers = await runAsSystem(() =>
         db.user.findMany({
-          where: { status: 'INACTIVE', ...(workspaceId ? { workspaceId } : {}) },
+          where: { status: UserStatus.INACTIVE, ...(workspaceId ? { workspaceId } : {}) },
           select: { id: true, workspaceId: true },
         }),
       );

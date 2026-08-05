@@ -1,7 +1,7 @@
 import { apiInstance } from '../clients/apiClient';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
-import { CallType, MeetingStatus, type HostControls } from '@xyne/shared';
+import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 
 // ============================================================================
@@ -771,11 +771,11 @@ export class CallService {
     from: Date,
     to: Date,
   ): Promise<{
-    calendarVisibility: 'PUBLIC' | 'PRIVATE';
+    calendarVisibility: CalendarVisibility;
     calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
   }> {
     const response = await apiInstance.get<{
-      calendarVisibility: 'PUBLIC' | 'PRIVATE';
+      calendarVisibility: CalendarVisibility;
       calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
     }>(`/calls/user/${userId}/scheduled`, {
       params: { from: from.toISOString(), to: to.toISOString() },

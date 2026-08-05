@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType, ActivityClassification } from '@xyne/shared';
+import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -72,7 +72,7 @@ export class CanvasController {
             canvasId,
             workspaceId: req.user!.workspaceId!,
             userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
           },

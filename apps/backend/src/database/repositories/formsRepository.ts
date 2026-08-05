@@ -857,7 +857,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     fieldPairs: Array<{ fieldName: string; value: string | null | undefined }>
   ): Promise<UpsertTicketFormFieldsResult> {
     const formMapping = await this.db.formContextMapping.findFirst({
-      where: { contextId: boardId, contextType: 'BOARD', entityType: 'TICKET' },
+      where: { contextId: boardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
     });
     const ticketWorkspaceId = await resolveWorkspaceIdFromModel(this.db, 'ticket', { id: ticketId });
 
@@ -904,7 +904,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         continue;
       }
 
-      const isMulti = field.fieldType === 'MULTI_SELECT' || field.fieldType === 'USER';
+      const isMulti = field.fieldType === FormFieldType.MULTI_SELECT || field.fieldType === FormFieldType.USER;
       const actualFieldValue = isMulti ? [valueStr] : valueStr;
 
       await this.db.formEntityValues.upsert({
@@ -974,8 +974,8 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const formMapping = await this.db.formContextMapping.findFirst({
       where: {
         contextId: boardId,
-        contextType: 'BOARD',
-        entityType: 'TICKET',
+        contextType: FormContextType.BOARD,
+        entityType: FormEntityType.TICKET,
       },
       select: { formId: true },
     });

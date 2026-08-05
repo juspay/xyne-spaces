@@ -7,7 +7,7 @@ import type {
   NudgeBuildContextRuntime,
 } from '../types';
 import { EMPTY_ACTIVITY_CONTEXT } from '../types';
-import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
+import { NudgeKind, SurfaceAreaType, SurfaceLinkKind } from '@xyne/shared';
 
 export const forwardMessageLink: NudgeDefinition<
   ActivityEventNudgePayload,
@@ -62,11 +62,11 @@ export const forwardMessageLink: NudgeDefinition<
         description: 'Auto-link from forwarded message',
         actions: {
           actionType: 'CREATE_SURFACE_LINK',
-          sourceType: 'MESSAGE',
+          sourceType: SurfaceAreaType.MESSAGE,
           sourceId: messageId,
           targetType: 'MESSAGE',
           targetId: originalMessageId,
-          linkKind: 'RELATES_TO',
+          linkKind: SurfaceLinkKind.RELATES_TO,
           projectId,
         },
       },

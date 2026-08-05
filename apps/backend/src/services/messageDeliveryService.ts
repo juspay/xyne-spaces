@@ -1,5 +1,5 @@
 import { conversationService } from '@/services/conversationService';
-import { AttachmentEntityType, MessageType } from '@xyne/shared';
+import { AttachmentEntityType, MessageType, DelayedMessageStatus } from '@xyne/shared';
 import type { UploadedFileResult } from '@/services/fileUploadService';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -179,7 +179,7 @@ async function cleanupSourceTransaction(
     await tx.delayedMessage.update({
       where: { id: sourceId },
       data: {
-        status: 'SENT',
+        status: DelayedMessageStatus.SENT,
         sentAt: new Date(timestamp),
       },
     });
