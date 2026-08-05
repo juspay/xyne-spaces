@@ -19,7 +19,7 @@ export class UserAssignmentStateService {
         where: { userId },
         select: { userGroupId: true },
       });
-      return mappings.map(m => m.userGroupId);
+      return mappings.map((m) => m.userGroupId);
     } catch (error) {
       logger.error(`❌ [ASSIGNMENT-STATE] Error getting user group IDs:`, error);
       throw error;
@@ -31,10 +31,12 @@ export class UserAssignmentStateService {
    * Stores current state in Redis, sets all groups to inactive, and schedules restoration
    * @param userId - User ID
    * @param unavailableUntil - Timestamp when user will be available again
+   * @param reassignExistingTickets - Whether to hand off current open tickets for this pause
    */
   async setUnavailableForAssignment(
     userId: string,
-    unavailableUntil: number
+    unavailableUntil: number,
+    reassignExistingTickets = false
   ): Promise<string[]> {
     try {
       // Get all user groups the user belongs to
@@ -55,7 +57,7 @@ export class UserAssignmentStateService {
 
       // Build state backup: only store groups where onCall === true OR isActiveForAssignment === true
       const stateBackup: Record<string, { onCall: boolean; isActiveForAssignment: boolean }> = {};
-      
+
       for (const state of currentStates) {
         if (state.onCall || state.isActiveForAssignment) {
           stateBackup[state.userGroupId] = {
@@ -83,7 +85,6 @@ export class UserAssignmentStateService {
         },
       });
 
-
       // Update UserPresence with assignmentUnavailableUntil
       // UserPresence should already exist (created during login via ensureUserPresence)
       await this.prisma.userPresence.update({
@@ -97,13 +98,15 @@ export class UserAssignmentStateService {
       // Schedule restoration job (single job per user)
       await assignmentReactivationQueue.scheduleReactivation(userId, unavailableUntil);
 
-      // For any group configured to reassign this member's open tickets while they're
-      // unavailable, hand the work off to a queue instead of scanning tickets inline here -
-      // keeps this (synchronous, user-facing) toggle call cheap regardless of backlog size.
-      const reassignGroups = await this.prisma.userGroup.findMany({
-        where: { id: { in: userGroupIds }, reassignOnUnavailable: true },
-        select: { id: true },
-      });
+      // Pausing always excludes the user from new auto-assignment. Existing tickets are
+      // only handed off when the user requests it for this pause and the group's admin
+      // configuration permits it.
+      const reassignGroups = reassignExistingTickets
+        ? await this.prisma.userGroup.findMany({
+            where: { id: { in: userGroupIds }, reassignOnUnavailable: true },
+            select: { id: true },
+          })
+        : [];
 
       for (const group of reassignGroups) {
         try {
@@ -154,7 +157,10 @@ export class UserAssignmentStateService {
       });
 
       const currentStateMap = new Map(
-        currentStates.map(s => [s.userGroupId, { onCall: s.onCall, isActiveForAssignment: s.isActiveForAssignment }])
+        currentStates.map((s) => [
+          s.userGroupId,
+          { onCall: s.onCall, isActiveForAssignment: s.isActiveForAssignment },
+        ])
       );
 
       // Denormalized tenant key for any newly-created state rows.
@@ -167,7 +173,7 @@ export class UserAssignmentStateService {
       // - Only groups with active state (onCall or isActiveForAssignment) are stored in backup.
       // - If current state is active (manual override), keep it and skip backup restoration.
       // - Otherwise, restore from backup if available.
-      const restorePromises = userGroupIds.map(userGroupId => {
+      const restorePromises = userGroupIds.map((userGroupId) => {
         const backup = stateBackup?.[userGroupId];
         const current = currentStateMap.get(userGroupId);
 
@@ -231,7 +237,9 @@ export class UserAssignmentStateService {
       // Delete Redis backup
       await redisService.deleteAssignmentStateBackup(userId);
 
-      logger.info(`▶️ [ASSIGNMENT-STATE] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`);
+      logger.info(
+        `▶️ [ASSIGNMENT-STATE] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`
+      );
       return userGroupIds;
     } catch (error) {
       logger.error(`❌ [ASSIGNMENT-STATE] Error setting user available:`, error);

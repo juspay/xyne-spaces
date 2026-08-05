@@ -257,7 +257,11 @@ export const AssignmentConfigScreen = ({
       setLocalRotationInterval(userGroup.rotationInterval ?? RotationInterval.WEEKLY);
       setLocalReassignOnUnavailable(userGroup.reassignOnUnavailable ?? false);
     }
-  }, [userGroup?.autoRotationEnabled, userGroup?.rotationInterval, userGroup?.reassignOnUnavailable]);
+  }, [
+    userGroup?.autoRotationEnabled,
+    userGroup?.rotationInterval,
+    userGroup?.reassignOnUnavailable,
+  ]);
 
   const boards = allBoards || [];
 
@@ -899,25 +903,26 @@ export const AssignmentConfigScreen = ({
                 )}
               </div>
 
-              {/* Reassign on unavailability */}
+              {/* Allow reassignment on unavailability */}
               <div className='bg-background border border-border rounded-lg p-4'>
                 <div className='mb-4'>
                   <h2 className='text-lg font-semibold text-foreground'>
-                    Reassign on Unavailability
+                    Allow Reassignment on Unavailability
                   </h2>
                   <p className='text-sm text-muted-foreground'>
-                    When a member of this group pauses ticket assignment, automatically hand off
-                    their open tickets to another eligible member
+                    Let members of this group choose whether to hand off their existing open tickets
+                    when they pause ticket assignment
                   </p>
                 </div>
 
                 <div className='flex items-center justify-between'>
                   <div>
                     <span className='block text-sm font-medium text-foreground'>
-                      Reassign Open Tickets
+                      Allow Existing-Ticket Reassignment
                     </span>
                     <p className='text-xs text-muted-foreground mt-1'>
-                      Tickets without an eligible replacement stay with the unavailable member
+                      Members can opt in from the pause dialog. If no eligible replacement exists,
+                      their tickets stay assigned to them
                     </p>
                   </div>
                   <Switch
