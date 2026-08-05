@@ -7,7 +7,7 @@
   "scripts": {
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
-    "db:setup:local": "pnpm run prisma:generate",
+    "db:setup:local": "dotenv -e .env.local --override -- pnpm run prisma:migrate:deploy && pnpm run prisma:generate",
     "build": "pnpm run prisma:generate && tsc",
     "dev": "dotenv -e .env.local --override -- sh -c 'NODE_ENV=development tsx watch src/index.ts'",
     "start": "tsx dist/index.js",

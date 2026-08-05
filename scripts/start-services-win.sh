@@ -118,11 +118,13 @@ cd "$REPO_ROOT"
 echo -e "${BLUE}🔐 Applying encryption migrations...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U xyne -d xyne_dev_db -c \
-    "GRANT CONNECT ON DATABASE xyne_dev_db TO xyne_enc; CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION xyne_enc; ALTER SCHEMA encryption OWNER TO xyne_enc;"
+    "GRANT CONNECT ON DATABASE xyne_dev_db TO xyne_enc; CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION xyne_enc; ALTER SCHEMA encryption OWNER TO xyne_enc; GRANT USAGE, CREATE ON SCHEMA encryption TO xyne_enc; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA encryption TO xyne_enc; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA encryption TO xyne_enc; ALTER DEFAULT PRIVILEGES IN SCHEMA encryption GRANT ALL PRIVILEGES ON TABLES TO xyne_enc; ALTER DEFAULT PRIVILEGES IN SCHEMA encryption GRANT ALL PRIVILEGES ON SEQUENCES TO xyne_enc;"
 cd "$REPO_ROOT/apps/encryption"
-pnpm run prisma:generate
 pnpm run db:setup:local
 cd "$REPO_ROOT"
+$COMPOSE_CMD -f docker-compose.dev.yml exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U xyne -d xyne_dev_db -c \
+    "GRANT CONNECT ON DATABASE xyne_dev_db TO xyne_enc; CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION xyne_enc; ALTER SCHEMA encryption OWNER TO xyne_enc; GRANT USAGE, CREATE ON SCHEMA encryption TO xyne_enc; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA encryption TO xyne_enc; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA encryption TO xyne_enc; ALTER DEFAULT PRIVILEGES IN SCHEMA encryption GRANT ALL PRIVILEGES ON TABLES TO xyne_enc; ALTER DEFAULT PRIVILEGES IN SCHEMA encryption GRANT ALL PRIVILEGES ON SEQUENCES TO xyne_enc;"
 
 # --- STEP 7: Start Zero Cache ---
 echo -e "${BLUE}🚀 Starting Zero Cache...${NC}"

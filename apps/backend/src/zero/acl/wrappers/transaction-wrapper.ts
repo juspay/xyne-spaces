@@ -193,7 +193,7 @@ export function wrapTransactionWithEncryption(
               event: 'crypto_mutation_decrypt_run_error',
               error: error instanceof Error ? error.message : String(error),
             });
-            return result;
+            throw new Error('Failed to decrypt database query result');
           }
         };
       }

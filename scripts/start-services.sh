@@ -439,6 +439,11 @@ ensure_encryption_schema() {
 GRANT CONNECT ON DATABASE xyne_dev_db TO ${ENC_DB_USER};
 CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION ${ENC_DB_USER};
 ALTER SCHEMA encryption OWNER TO ${ENC_DB_USER};
+GRANT USAGE, CREATE ON SCHEMA encryption TO ${ENC_DB_USER};
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA encryption TO ${ENC_DB_USER};
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA encryption TO ${ENC_DB_USER};
+ALTER DEFAULT PRIVILEGES IN SCHEMA encryption GRANT ALL PRIVILEGES ON TABLES TO ${ENC_DB_USER};
+ALTER DEFAULT PRIVILEGES IN SCHEMA encryption GRANT ALL PRIVILEGES ON SEQUENCES TO ${ENC_DB_USER};
 EOSQL
 }
 
@@ -699,10 +704,10 @@ fi
 echo -e "${BLUE}Setting up encryption database schema...${NC}"
 ensure_encryption_schema
 cd "$REPO_ROOT/apps/encryption"
-pnpm run prisma:generate
 pnpm run db:setup:local
-echo -e "${GREEN}  Encryption database schema ready${NC}"
 cd "$REPO_ROOT"
+ensure_encryption_schema
+echo -e "${GREEN}  Encryption database schema ready${NC}"
 
 # Start zero-cache
 echo -e "${BLUE}🚀 Starting zero-cache...${NC}"

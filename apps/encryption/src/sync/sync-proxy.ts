@@ -358,6 +358,7 @@ function createSyncProxy(clientWs: WebSocket, req: IncomingMessage): void {
             });
           } else {
             reportDecryptFailure(conn, error);
+            throw new Error('Failed to decrypt upstream sync data');
           }
         }
       }

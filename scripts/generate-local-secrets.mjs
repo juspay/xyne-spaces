@@ -75,13 +75,23 @@ function syncSharedSecret(key) {
   setValue(encryptionPath, key, sharedValue);
 }
 
+function readBoolean(envPath, key) {
+  return readValue(envPath, key).toLowerCase() === "true";
+}
+
+function encryptionEnabled() {
+  return ["ZERO_CLIENT_ENCRYPTION_ENABLED", "API_CLIENT_ENCRYPTION_ENABLED", "ENABLE_DB_ENCRYPTION"].some(
+    (key) => readBoolean(backendPath, key) || readBoolean(encryptionPath, key),
+  );
+}
+
 syncSharedSecret("JWT_SECRET");
 syncSharedSecret("ENC_S2S_KEY");
 
 setValue(backendPath, "ZERO_AUTH_SECRET", randomHex(48));
 setValue(backendPath, "ENCRYPTION_KEY", randomHex(32));
 
-if ((readValue(encryptionPath, "KMS_ENC_PROVIDER") || "env") === "env") {
+if (encryptionEnabled() && (readValue(encryptionPath, "KMS_ENC_PROVIDER") || "env") === "env") {
   setValue(encryptionPath, "ENC_ENV_MASTER_KEY_HEX", randomHex(32));
 }
 
