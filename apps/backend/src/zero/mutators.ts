@@ -5560,9 +5560,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error("ETA cannot be set to a past date");
           }
 
-          // Normalize the Mobius release id: trim, and treat empty string as
-          // clearing the link (null). Enforce the one-release-one-ticket rule
-          // with a friendly error before the DB unique constraint would fire.
+          // Normalize (empty → null) and enforce one release per ticket.
           if (params.mobiusReleaseId !== undefined) {
             const normalized = params.mobiusReleaseId ? params.mobiusReleaseId.trim() : null;
             params.mobiusReleaseId = normalized;
@@ -5815,9 +5813,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           for (const field of fields) {
             if (params[field] !== undefined && params[field] !== ticket[field]) {
               updateData[field] = params[field];
-              // No field-change activity for these: kanbanPosition is noise, and
-              // mobiusReleaseId updates surface as MOBIUS_RELEASE_UPDATE activities
-              // (from the webhook/backfill) rather than a "changed field" entry.
+              // No field-change activity: mobiusReleaseId surfaces via MOBIUS_RELEASE_UPDATE.
               if (field === 'kanbanPosition' || field === 'mobiusReleaseId') continue;
               let activityType = field.toUpperCase();
               if (field === 'stageName') activityType = 'STATUS';

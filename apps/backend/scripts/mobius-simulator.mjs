@@ -1,30 +1,13 @@
 #!/usr/bin/env node
 /*
- * Mobius Simulator — fakes the Mobius side of the Xyne release-webhook integration.
+ * Mobius Simulator (dev tool) — fakes the Mobius side of the integration:
+ *   1. Emits release lifecycle events to /api/webhooks/mobius/{workspaceId}.
+ *   2. Serves the release-state / event-log APIs Xyne calls back for enrichment.
  *
- * It does TWO things at once, so a local Xyne backend behaves as if a real Mobius
- * release were rolling out:
+ * For enriched Status/Stagger lines, point the backend at this server:
+ *   MOBIUS_API_BASE_URL=http://localhost:<mockPort>   MOBIUS_API_KEY=<any>
  *
- *   1. WEBHOOK EMITTER  — POSTs release lifecycle events to
- *        {xyneBaseUrl}/api/webhooks/mobius/{workspaceId}
- *      on an interval (default 60s), walking a realistic ramp:
- *        START -> STAGGERED_UP_1 -> _25 -> _50 -> _100 -> STABILIZED   (or an ABORT/REVERT path)
- *
- *   2. RELEASE-STATE / HISTORY API  — a tiny HTTP server that answers the calls
- *      Xyne makes back for enrichment:
- *        GET /api/v2/release/{releaseId}            -> { status, staggerPercent, ... }
- *        GET /api/v1/eventLog/{releaseId}?offset=N  -> { count, results: [ ...events ] }
- *      The state advances as events fire, so each activity reflects the live stage.
- *
- * To get the enriched "Status / Stagger" lines in the ticket activity, point Xyne at
- * this server in backend/.env.local and restart the backend:
- *        MOBIUS_API_BASE_URL=http://localhost:<mockPort>
- *        MOBIUS_API_KEY=<anything-nonempty>
- * Without that, the webhook still records an activity — just without those two lines.
- *
- * Usage:  node scripts/mobius-simulator.mjs
- * Interactive: press [Enter] to fire the next event immediately, [q] then Enter to quit.
- * Requires Node 18+ (uses global fetch). No npm install needed.
+ * Usage: node scripts/mobius-simulator.mjs  (Node 18+; [Enter] fires next, [q] quits)
  */
 
 import http from 'node:http';

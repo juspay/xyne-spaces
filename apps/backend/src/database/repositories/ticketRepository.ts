@@ -694,10 +694,6 @@ export class TicketRepository {
     });
   }
 
-  /**
-   * Resolve the ticket a Mobius release is manually linked to. Uses the
-   * (workspaceId, mobiusReleaseId) unique index, so at most one ticket matches.
-   */
   async getTicketByMobiusReleaseId(mobiusReleaseId: string, workspaceId: string) {
     return await prisma.ticket.findUnique({
       where: { workspaceId_mobiusReleaseId: { workspaceId, mobiusReleaseId } }

@@ -231,12 +231,7 @@ async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
 
 router.post('/github', githubWebhookMiddleware.verify, handleGitHubWebhook);
 
-/**
- * Mobius release-update webhook: Mobius POSTs release lifecycle events here and
- * they are surfaced on the linked Xyne ticket's activity feed. Mounted under
- * /api/webhooks, so the full path Mobius calls is /api/webhooks/mobius/:workspaceId.
- * The mobius validator verifies the x-api-key header before this handler runs.
- */
+// Mobius release-update webhook: POST /api/webhooks/mobius/:workspaceId.
 async function handleMobiusWebhook(req: Request, res: Response): Promise<void> {
   try {
     const payload = req.body;
@@ -245,7 +240,6 @@ async function handleMobiusWebhook(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Extract workspaceId from URL path
     const workspaceId = req.params.workspaceId;
     if (!workspaceId) {
       logger.warn('[Mobius-Webhook] Missing workspaceId in URL path');

@@ -199,9 +199,8 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    // When a Mobius release id is newly linked to the ticket, backfill the
-    // activity feed from Mobius' event history so events that happened before
-    // the link aren't lost. Fire-and-forget; the backfill is idempotent.
+    // On a newly linked Mobius release id, backfill the feed from history
+    // (fire-and-forget, idempotent).
     const prevMobiusReleaseId = (prev as unknown as Record<string, unknown>).mobiusReleaseId;
     if (
       typeof args.mobiusReleaseId === 'string' &&
@@ -210,9 +209,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     ) {
       const releaseId = args.mobiusReleaseId;
       const workspaceId = ticket.workspaceId;
-      // Lazy import to keep mobiusWebhookService (which constructs a
-      // TicketRepository) out of the side-effects module graph — importing it
-      // statically here trips a circular-import TDZ during boot.
+      // Lazy import avoids a circular-import TDZ during boot.
       void import('@/services/mobiusWebhookService')
         .then(({ mobiusWebhookService }) =>
           mobiusWebhookService.backfillFromHistory(ticketId, releaseId, workspaceId),

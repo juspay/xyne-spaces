@@ -1842,8 +1842,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       void applyTicketUpdate(
         {
           id: ticket.id,
-          // Empty string clears the link; the mutator normalizes it to null.
-          mobiusReleaseId: next,
+          mobiusReleaseId: next, // empty string clears the link (normalized to null)
           updatedAt: Date.now(),
         },
         'Failed to update Mobius release ID',

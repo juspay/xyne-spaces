@@ -4076,8 +4076,7 @@ export const mutators = defineMutators({
         if (metadata !== undefined) updateData.metadata = metadata;
         if (isArchived !== undefined) updateData.isArchived = isArchived;
         if (kanbanPosition !== undefined) updateData.kanbanPosition = kanbanPosition;
-        // Normalize empty string to null so clearing the field removes the link
-        // (and doesn't collide on the unique index with other cleared tickets).
+        // Normalize empty string to null (clears the link).
         if (mobiusReleaseId !== undefined) {
           updateData.mobiusReleaseId = mobiusReleaseId ? mobiusReleaseId.trim() : null;
         }

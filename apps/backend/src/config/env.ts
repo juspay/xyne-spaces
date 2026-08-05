@@ -292,10 +292,6 @@ const envSchema = Joi.object({
   MOBIUS_WEBHOOK_API_KEY: Joi.string().allow('').default(''),
   MOBIUS_API_BASE_URL: Joi.string().allow('').default(''),
   MOBIUS_API_KEY: Joi.string().allow('').default(''),
-  // Optional raw Cookie header for outbound Mobius calls. Used to reach a
-  // cookie-fronted (e.g. Pomerium SSO) Mobius ingress where the app-level
-  // x-api-key isn't the gateway auth — handy for local testing against the
-  // internal SSO host. Prod uses MOBIUS_API_KEY against the direct ingress.
   MOBIUS_API_COOKIE: Joi.string().allow('').default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
@@ -738,14 +734,10 @@ export const config = {
     apiUrl: envVars.GITHUB_API_URL,
   },
   mobius: {
-    // Shared key Mobius sends on inbound webhooks (x-api-key header).
-    webhookApiKey: envVars.MOBIUS_WEBHOOK_API_KEY,
-    // Base URL + key for outbound calls to Mobius (release-state / event-log GET APIs).
-    // Base URL is env-specific (Euler prod/sandbox, HyperPG sandbox all differ).
-    apiBaseUrl: envVars.MOBIUS_API_BASE_URL,
+    webhookApiKey: envVars.MOBIUS_WEBHOOK_API_KEY, // inbound webhook x-api-key
+    apiBaseUrl: envVars.MOBIUS_API_BASE_URL, // outbound calls (env-specific)
     apiKey: envVars.MOBIUS_API_KEY,
-    // Optional Cookie header for a cookie-fronted ingress (e.g. Pomerium SSO).
-    apiCookie: envVars.MOBIUS_API_COOKIE,
+    apiCookie: envVars.MOBIUS_API_COOKIE, // optional, for a cookie-fronted ingress
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,

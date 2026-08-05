@@ -3,17 +3,8 @@ import crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { config } from '@/config/env';
 
-/**
- * Verifies inbound Mobius release-update webhooks.
- *
- * Mobius authenticates with a shared API key sent in the `x-api-key` header
- * (confirmed with the Mobius team — they use x-api-key across all their APIs
- * rather than HMAC signatures). We compare it against MOBIUS_WEBHOOK_API_KEY in
- * constant time, then parse the raw body into JSON for the handler.
- *
- * The /api/webhooks mount uses express.raw, so req.body arrives as a Buffer;
- * we JSON.parse it here after the key check passes.
- */
+// Verifies inbound Mobius webhooks: constant-time x-api-key check against
+// MOBIUS_WEBHOOK_API_KEY, then parses the raw Buffer body into JSON.
 class MobiusWebhookMiddleware {
   private readonly webhookApiKey: string;
   private readonly webhookApiKeyConfigured: boolean;
@@ -63,7 +54,6 @@ class MobiusWebhookMiddleware {
         return;
       }
 
-      // /api/webhooks is mounted with express.raw, so the body is a Buffer.
       if (Buffer.isBuffer(req.body)) {
         try {
           req.body = JSON.parse(req.body.toString('utf8'));
