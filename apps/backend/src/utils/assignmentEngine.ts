@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { UserResponsibility } from '@xyne/shared';
-import { elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from './logger';
 import type {
   UserGroupMapping,

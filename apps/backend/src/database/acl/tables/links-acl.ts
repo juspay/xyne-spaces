@@ -1,4 +1,5 @@
-import { ChannelVisibility, Prisma, PrismaClient } from '@prisma/client'
+import { ChannelVisibility } from '@xyne/shared';
+import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
 

@@ -1,6 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { TicketStatusV2 } from '@xyne/shared';
-import { elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { logger } from './logger';
 

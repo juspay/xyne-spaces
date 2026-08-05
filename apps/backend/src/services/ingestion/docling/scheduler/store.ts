@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
-import { getContextOrNull, currentWorkspaceId } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { Prisma } from '@prisma/client';
 import { IngestionStatus } from '@xyne/shared';
 import {

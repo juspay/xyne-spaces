@@ -1,6 +1,6 @@
 import { db } from '@/database/client';
 import { ChannelType, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
-import { getContextOrNull, currentWorkspaceId } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import vespaClient from '@/vespa/client';
 import { ticketSchema } from '@/vespa/src/types';

@@ -1,5 +1,5 @@
 import { DatabaseClient } from '../client';
-import { elevateToServiceActor, withWorkspaceScope } from '../tenant/context';
+import { withWorkspaceScope } from '../tenant/context';
 import { Email } from '@prisma/client';
 import { EmailType } from '@xyne/shared';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';

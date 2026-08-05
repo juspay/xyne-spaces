@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { Ticket, MessageAttachment } from '@prisma/client';
-import { getContextOrNull, currentWorkspaceId, elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
-import { TicketStatusV2, TicketPriority, AttachmentEntityType, ChannelType, ActivityType, TicketReferenceRelation } from '@xyne/shared';
+import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';

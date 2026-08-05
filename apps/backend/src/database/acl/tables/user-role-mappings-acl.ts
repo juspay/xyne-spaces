@@ -1,4 +1,5 @@
-import { Prisma, PrismaClient, AccessType } from '@prisma/client'
+import { AccessType } from '@xyne/shared';
+import { Prisma, PrismaClient, } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 

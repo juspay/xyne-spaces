@@ -1,4 +1,5 @@
-import { CanvasRole, CanvasVisibility, Prisma, PrismaClient } from '@prisma/client'
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
 

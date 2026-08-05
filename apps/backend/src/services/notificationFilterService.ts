@@ -1,7 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { parseNotificationKeywords, NotificationLevel, NotificationType } from '@xyne/shared';
-import { elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const prisma = DatabaseClient.getInstance();
 
