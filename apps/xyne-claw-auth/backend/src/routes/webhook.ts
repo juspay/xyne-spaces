@@ -4106,6 +4106,34 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     externalResultCallback = metadata?.externalResultCallback;
   }
   if (externalResultCallback) {
+    // HITL for API/service-token runs: the external caller receives its result
+    // via the callback, but a gated write (spaces-create-ticket, user-send-message,
+    // ...) still needs a human to approve/decline. Those approval cards are only
+    // posted on the normal channel path further below - which this branch returns
+    // before reaching. When the run is bound to a Spaces channel (the service
+    // token carried spaces:channels:post, so /run let channelId survive), post the
+    // cards into that channel BEFORE we tear the session down. Implicitly gated by
+    // ctx.channelId: headless runs with no bound channel skip this, exactly as before.
+    const externalPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
+    const cbCtx = ctx;
+    if (cbCtx?.channelId && cbCtx.appToken && externalPendingActions?.length) {
+      const cbAppToken = cbCtx.appToken;
+      let approvalCardsSent = 0;
+      for (const action of externalPendingActions) {
+        try {
+          const targetValidation = await pendingActionTargetValidation(action, cbCtx, cbAppToken);
+          if (targetValidation.error) {
+            clog.info(`[webhook/result] external-callback skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+            continue;
+          }
+          await postWriteApprovalAction({ action, ctx: cbCtx, token: cbAppToken, targetValidation });
+          approvalCardsSent += 1;
+        } catch (err) {
+          clog.warn(`[webhook/result] external-callback approval card failed tool=${String(action["tool"] ?? "")} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      clog.info(`[webhook/result] external-callback sent ${approvalCardsSent}/${externalPendingActions.length} write approval card(s) channelId=${cbCtx.channelId} sessionId=${sessionId}`);
+    }
     await deleteSession(sessionId);
     await sendStoredExternalResultCallback(
       externalResultCallback,
