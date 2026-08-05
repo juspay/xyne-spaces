@@ -14,6 +14,8 @@ import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
 
 export interface TicketCreatedEventPayload {
   ticketId: string;
+  formFieldChanges?: FormFieldChanges;
+  performedBy?: { id: string | null };
 }
 
 export interface TicketUpdatedEventPayload {
