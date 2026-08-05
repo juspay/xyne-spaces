@@ -1081,80 +1081,6 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const preamble = def.allowRequery ? SUBAGENT_REQUERY_PREAMBLE : SUBAGENT_PREAMBLE;
         let systemPrompt = `${preamble}${def.systemPrompt}`;
 
-        // For sandbox subagent: surface every configured repo (workdir, ports,
-        // setup steps) so the child LLM knows where things live and what's
-        // expected to be set up — no guessing /home/user/ paths or trying to
-        // re-install deps that sandbox-repo-setup already handles.
-        if (def.serverType === "custom:sandbox") {
-          const blocks: string[] = [];
-          for (const [name, cfg] of Object.entries(REPO_CONFIGS)) {
-            const installPkgs = cfg.steps
-              .filter((s: SetupStep): s is { type: "install"; packages: string[]; cmd?: string } => s.type === "install")
-              .flatMap((s) => s.packages);
-            const hasServices = cfg.steps.some((s: SetupStep) => s.type === "services");
-            const devservers = cfg.steps
-              .filter((s: SetupStep): s is { type: "devserver"; name: string; cmd: string; cwd: string } => s.type === "devserver")
-              .map((s) => {
-                const port = cfg.ports?.[s.name];
-                return port ? `${s.name} → http://localhost:${port}` : s.name;
-              });
-            const setupLines: string[] = [];
-            if (installPkgs.length > 0) setupLines.push(`  - npm install in: ${installPkgs.map((p) => `\`${p}/\``).join(", ")}`);
-            if (hasServices) setupLines.push(`  - docker compose services up (\`npm run services\`)`);
-            for (const ds of devservers) setupLines.push(`  - dev server: ${ds}`);
-            blocks.push(
-              `### ${name}\n` +
-                (cfg.repoUrl
-                  ? `- Repo: \`${cfg.repoUrl}\`\n` +
-                    `- Default base branch: \`${cfg.defaultBranch}\`\n`
-                  : `- No repository — browser-only sandbox (headless chromium + CDP + noVNC).\n`) +
-                `- Workdir in VM: \`${cfg.workDir}\`\n` +
-                `- Template: \`${cfg.template}\`\n` +
-                (setupLines.length > 0 ? `- \`sandbox-repo-setup\` auto-runs:\n${setupLines.join("\n")}\n` : "") +
-                (cfg.ports ? `- Ports: ${Object.entries(cfg.ports).map(([k, v]) => `${k}=${v}`).join(", ")}` : ""),
-            );
-          }
-          if (blocks.length > 0) {
-            systemPrompt += `\n\n## Available Repos for sandbox-repo-setup\n${blocks.join("\n\n")}\n\nWhen working on a configured repo, ALWAYS use its listed workdir (e.g. \`/workspace/xyne-spaces\`) — never \`/home/user/\` or \`/tmp\`. Dependencies are installed by \`sandbox-repo-setup\`; \`npm test\` / \`npx tsc\` / \`npm run build\` should just work without re-installing.`;
-            log.info(`[${def.name}] Repo configs injected: ${Object.keys(REPO_CONFIGS).join(", ")}`);
-          }
-        }
-
-        // For sandbox subagent: only mention `upload-pr-screenshot` when it
-        // is actually in the palette (user has a Bitbucket connection).
-        // Without this gate, an agent without Bitbucket connected sees a
-        // prompt block referencing a tool it cannot call.
-        if (def.serverType === "custom:sandbox" && tools.some((t) => /upload-pr-screenshot/.test(t.name))) {
-          systemPrompt += `\n\n## Attaching a screenshot to a Bitbucket PR\nWhen the parent task involves a Bitbucket PR (e.g. "post screenshots on PR #6339"), call \`upload-pr-screenshot\` right after \`sandbox-pw-screenshot\`. Pass \`fileData=<base64 from the [ATTACHMENT:...] block of the screenshot result>\`, plus \`projectKey\`, \`repoSlug\`, \`prId\`, and \`fileName\` (e.g. \`tc1-thread.png\`). Do NOT try to curl the Bitbucket API yourself from \`sandbox-run\` — the sandbox VM has no Bitbucket credentials; \`upload-pr-screenshot\` runs in claw-auth and uses the user's stored token.`;
-        }
-
-        // For sandbox subagent: surface any existing live sandbox session
-        // so the cold-started child LLM doesn't redo sandbox-repo-setup.
-        // Only reuse sessions on a real repo template — agent-workspace
-        // (gvisor/Nix) or the legacy kata docker-dev. Bare-warmpool VMs
-        // have no git creds or services baked in and are useless for repo
-        // work — if one is cached, ignore it so the LLM is forced to call
-        // sandbox-repo-setup.
-        if (def.serverType === "custom:sandbox" && progressCtx?.parentMeta?.conversationId) {
-          const userId = progressCtx.parentMeta.userId;
-          const conversationId = progressCtx.parentMeta.conversationId;
-          const agentSlug = progressCtx.parentMeta.agentSlug ?? "";
-          const storeKey = buildSandboxStoreKey(userId, conversationId, agentSlug);
-          const existing = storeKey ? getSandboxSession(storeKey) : undefined;
-          const isRepoTemplate = !!existing && (
-            existing.id.includes("agent-workspace") || existing.id.includes("docker-dev")
-          );
-          if (existing && isRepoTemplate) {
-            const alive = await probeSession(existing, storeKey).catch(() => false);
-            if (alive) {
-              systemPrompt += `\n\n## Active Session\nSandbox session \`${existing.id}\` is already provisioned for this conversation. Repo is at \`/workspace/xyne-spaces\` (shallow clone of default branch) and Nix-managed services (postgres :5433, redis :6379, livekit :7880, zero :4848, fake-gcs :4443, y-sweet :8080) are already pre-realized in /nix/store from the pod's prebake step.\nUse \`sandbox-run\` with \`sessionId="${existing.id}"\` for ALL commands. DO NOT call \`sandbox-repo-setup\` again unless the session has died.`;
-              log.info(`[${def.name}] Active session injected: ${existing.id}`);
-            }
-          } else if (existing) {
-            log.info(`[${def.name}] Skipping injection: cached session ${existing.id} is not a repo-template`);
-          }
-        }
-
         const childPrompt = `${systemPrompt}\n\n## Question\n${question}`;
         pushDebugEvent("session_prompt", {
           prompt: childPrompt,
@@ -1426,7 +1352,7 @@ function resolveCustomSubagentTools(
 
 /**
  * Group MCP tool groups into subagent wrappers based on serverType.
- * Also wraps custom tools that match a subagent definition (e.g. custom:sandbox).
+ * Also wraps custom tools whose `source` matches a subagent definition.
  * Write tools (from adapter's writeTools) stay as direct tools in the parent agent.
  * Server types without a matching SubagentDefinition pass through as direct tools.
  */
@@ -1497,10 +1423,12 @@ export function buildSubagentTools(
     }
   }
 
-  // Wrap custom tools that match a subagent definition (e.g. custom:sandbox)
+  // Wrap custom tools whose `source` matches a subagent definition. NOTE:
+  // sandbox tools are NOT wrapped — the sandbox subagent was removed
+  // (2026-06-14) and they mount parent-direct (see routes/run.ts).
   const remainingCustomTools: ToolDefinition[] = [];
   if (customTools) {
-    // Group custom tools by source prefix (e.g. "custom:sandbox" → "sandbox" tools)
+    // Group custom tools by their `source` label.
     const customBySource = new Map<string, ToolDefinition[]>();
     for (const t of customTools) {
       const source = (t as unknown as { source?: string }).source;
@@ -1517,21 +1445,7 @@ export function buildSubagentTools(
       const def = findSubagentDefinitionForServer(source);
       if (def && tools.length > 0) {
         const customSkills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
-        // The sandbox subagent must not see sandbox-destroy — child LLMs were
-        // calling it after errors / "to be tidy" and nuking the cached VM,
-        // forcing the next conversation turn to redo a 10-min sandbox-repo-setup.
-        // Cleanup is handled by Lifecycle.shutdownTime + idle timer; no tool needed.
-        //
-        // We compare against `slug` (the canonical identifier used in tool
-        // calls), NOT `name` (which is a human-readable label like
-        // "Sandbox Destroy Session"). Earlier code filtered by `name` which
-        // never matched — sandbox-destroy was leaking into the palette and
-        // the LLM was happily calling it, causing massive SandboxClaim
-        // churn (visible as random pods getting reaped under active
-        // sessions; xyne-kata DELETE-/sessions/:id → K8s API DELETE).
-        const filteredTools = source === "custom:sandbox"
-          ? tools.filter((t) => customToolSlug(t) !== "sandbox-destroy")
-          : tools;
+        const filteredTools = tools;
         // Custom write tools (e.g. google-sheets-create/append/update) must
         // remain parent-level approval tools. Do not put them in child LLM
         // palettes: the child can otherwise queue writes and then speak as if

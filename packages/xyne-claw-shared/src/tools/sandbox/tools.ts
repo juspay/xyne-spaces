@@ -3,6 +3,7 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
 import { readFile } from "node:fs/promises";
 import { resolve, join, sep } from "node:path";
@@ -2086,6 +2087,17 @@ export const sandboxRepoSetup: ToolDefinition = {
     // — bad-branch / repo-not-found errors pass through unchanged.
     if (isSandboxProvisioningFailure(result)) {
       const firstLine = result.split("\n")[0]?.replace(/^Error:\s*/i, "").slice(0, 160) ?? "provisioning failed";
+      // Flag-gated (SANDBOX_UNAVAILABLE_DEFER, default off): instead of silently
+      // substituting a read-only session — which lets a write-needing agent
+      // "succeed" with an unusable sandbox, conclude it cannot work, and end the
+      // run with NO retry signal (forcing a human to re-tag) — emit a stable
+      // `sandbox_unavailable` sentinel. custom-tools.ts turns this into a typed
+      // SandboxUnavailableError, run.ts ends the run with error:"sandbox_unavailable",
+      // and claw-auth run-recovery defers + auto-resumes once a SandboxClaim binds.
+      // See apps/xyne-claw/docs/sbx-availability-signal.md.
+      if (isSandboxUnavailableDeferEnabled()) {
+        return formatSandboxUnavailable(firstLine);
+      }
       const reason =
         `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
       const ro = await resolveSbxGit(repoName, context, reason);

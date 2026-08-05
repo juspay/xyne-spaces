@@ -139,6 +139,13 @@ export const CONFIG = {
   // releases (incident 2026-06-09 euler-doctor session dea1f67c).
   runRecoveryTimeoutMs: Number(process.env["RUN_RECOVERY_TIMEOUT_MS"] ?? 1_200_000),
   runRecoveryBackoffMs: Number(process.env["RUN_RECOVERY_BACKOFF_MS"] ?? 30000),
+  /** Poll cadence for a WRITE sandbox to free up. The agent-sandbox operator
+   *  keeps reconciling the (still-alive) SandboxClaim and the kata node pool may
+   *  be scaling in, so a modest fixed delay re-dispatches until one binds. */
+  sandboxRetryDelayMs: Number(process.env["SANDBOX_RETRY_DELAY_MS"] ?? 60_000),
+  /** Hard cap on sandbox_unavailable deferrals (default ~15 x 60s = 15 min of
+   *  waiting). Guards against a run parking forever if capacity never frees. */
+  maxSandboxDeferrals: Number(process.env["MAX_SANDBOX_DEFERRALS"] ?? 15),
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   fakeGcsHost: process.env["FAKE_GCS_HOST"] ?? "",

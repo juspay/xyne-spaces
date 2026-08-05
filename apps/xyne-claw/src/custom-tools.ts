@@ -13,6 +13,7 @@ import { SERVER, PATHS } from "./config.js";
 import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
+import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -287,6 +288,22 @@ export function loadCustomTools(
           result = `Error: ${errMsg}`;
         }
         log.info(`[custom-tool] ${ct.slug} result: ${result.slice(0, 300)}`);
+
+        // Sandbox-capacity deferral (flag-gated, default off): the inner catch
+        // above stringifies every tool throw and hands it to the LLM, which for a
+        // failed WRITE-sandbox provision would just give up and end the run with no
+        // retry signal. When sandbox-repo-setup emits the `sandbox_unavailable`
+        // sentinel, rethrow a typed error so it propagates to run.ts's terminal
+        // catch → run ends with error:"sandbox_unavailable" → run-recovery defers
+        // and auto-resumes. See apps/xyne-claw/docs/sbx-availability-signal.md.
+        if (
+          isSandboxUnavailableDeferEnabled() &&
+          ct.slug === "sandbox-repo-setup" &&
+          isSandboxUnavailable(result)
+        ) {
+          log.info(`[custom-tool] ${ct.slug} sandbox_unavailable — deferring run for auto-resume`);
+          throw new SandboxUnavailableError(result.slice("Error: ".length));
+        }
 
         // INSPECT marker — image goes into agent's content for self-verification
         // but is NOT pushed to allAttachments (user does not receive the file).

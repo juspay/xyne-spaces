@@ -30,6 +30,7 @@ import {
   type Todo,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
@@ -3978,6 +3979,26 @@ async function processTask(
         fastMode: fastModeForCallback,
         status: "failed",
         error: "session_locked",
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+      return;
+    }
+    // Write sandbox could not be provisioned (no warm capacity + node pool full).
+    // End the run with a terminal signal claw-auth run-recovery recognizes, so it
+    // defers and re-dispatches this same run until a SandboxClaim binds — the user
+    // does NOT need to re-tag. Gated upstream by SANDBOX_UNAVAILABLE_DEFER, so this
+    // branch only fires when the flag is on.
+    if (err instanceof SandboxUnavailableError) {
+      log(`Sandbox unavailable — queuing run for auto-resume (sessionId=${sessionId})`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "failed",
+        error: "sandbox_unavailable",
         provider: callbackProvider,
         model: callbackModel,
       });

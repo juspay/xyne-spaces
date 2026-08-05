@@ -27,6 +27,14 @@ export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, ex
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
+// The sandbox_unavailable wire contract — shared by the emitting tool, the
+// xyne-claw runtime, and claw-auth run-recovery so the token can't drift.
+export {
+  SANDBOX_UNAVAILABLE_SENTINEL,
+  isSandboxUnavailableDeferEnabled,
+  formatSandboxUnavailable,
+  isSandboxUnavailable,
+} from "./tools/sandbox/unavailable-signal.js";
 export { buildHtmlDocument, sanitizeHtmlBody } from "./tools/create-report/template.js";
 export type { HtmlTemplateInput } from "./tools/create-report/template.js";
 export {
