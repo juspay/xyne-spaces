@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserSessionKey {
+  sessionId String   @id
+  userId    String
+  wrappedKey Bytes
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("user_session_keys")
+}
+
+model OrgEncryptionConfig {
+  orgId                 String   @id
+  provider              String
+  kmsKeyRef             String
+  useCustomerManagedKey Boolean  @default(false)
+  providerConfig        Json?
+  status                String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("org_encryption_configs")
+}
+
+model OrgDataEncryptionKey {
+  dekId            String    @id
+  orgId            String
+  workspaceId      String
+  wrappedDek       Bytes
+  wrappingProvider String
+  wrappingKeyRef   String
+  status           String
+  activatedAt      DateTime
+  createdAt        DateTime  @default(now())
+  rotatedAt        DateTime?
+  deactivatedAt    DateTime?
+
+  @@index([workspaceId, status, activatedAt(sort: Desc)])
+  @@map("org_data_encryption_keys")
+}

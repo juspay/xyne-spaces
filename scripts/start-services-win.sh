@@ -5,6 +5,9 @@
 
 set -e
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -64,6 +67,11 @@ until $COMPOSE_CMD -f docker-compose.dev.yml exec -T postgres pg_isready -U xyne
 done
 echo -e " ${GREEN}✓ Ready${NC}"
 
+# Existing volumes predate encryption role setup, so reconcile it on every run.
+$COMPOSE_CMD -f docker-compose.dev.yml exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U xyne -d postgres -c \
+    "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'xyne_enc') THEN CREATE ROLE xyne_enc LOGIN PASSWORD 'xyne456' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; ELSE ALTER ROLE xyne_enc WITH LOGIN PASSWORD 'xyne456' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; END IF; END \$\$;"
+
 # Wait for fake-gcs-server (using curl from Windows)
 echo -e "${BLUE}⏳ Waiting for Fake GCS...${NC}"
 until curl -s http://localhost:4443/storage/v1/b > /dev/null 2>&1; do
@@ -83,7 +91,7 @@ echo -e "${GREEN}✓ Buckets created.${NC}"
 
 # --- STEP 6: Database Setup ---
 echo -e "${BLUE}🔄 Checking Database Schema...${NC}"
-cd apps/backend
+cd "$REPO_ROOT/apps/backend"
 
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}⚠️  Installing backend dependencies...${NC}"
@@ -105,11 +113,25 @@ pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
 #    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts "$USER_EMAIL"
 # fi
 
-cd ..
+cd "$REPO_ROOT"
+
+echo -e "${BLUE}🔐 Applying encryption migrations...${NC}"
+$COMPOSE_CMD -f docker-compose.dev.yml exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U xyne -d xyne_dev_db -c \
+    "GRANT CONNECT ON DATABASE xyne_dev_db TO xyne_enc; CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION xyne_enc; ALTER SCHEMA encryption OWNER TO xyne_enc;"
+cd "$REPO_ROOT/apps/encryption"
+pnpm run prisma:generate
+pnpm run db:setup:local
+cd "$REPO_ROOT"
 
 # --- STEP 7: Start Zero Cache ---
 echo -e "${BLUE}🚀 Starting Zero Cache...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml up -d zero-cache
+
+until curl -s http://localhost:4848/ > /dev/null 2>&1; do
+    printf "."
+    sleep 2
+done
 
 # --- STEP 8: Deploy Vespa schemas ---
 # Non-fatal: needs bun + the vespa CLI. Retry with `pnpm run services:vespa`.
@@ -123,6 +145,9 @@ if [ "${SKIP_VESPA:-0}" != "1" ] && [ -f "$VESPA_COMPOSE" ]; then
     fi
 fi
 
+echo -e "${BLUE}🔐 Starting Encryption Service...${NC}"
+$COMPOSE_CMD -f docker-compose.dev.yml up -d encryption
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ Windows Infrastructure Ready!${NC}"
@@ -130,5 +155,6 @@ echo -e "${GREEN}========================================${NC}"
 echo -e " 🗄️  PostgreSQL:   ${GREEN}localhost:5432${NC}"
 echo -e " 💾 Redis:        ${GREEN}localhost:6379${NC}"
 echo -e " 🎥 LiveKit:      ${GREEN}http://localhost:7880${NC}"
+echo -e " 🔐 Encryption:   ${GREEN}http://localhost:3012${NC}"
 echo -e " 📦 fake-gcs:     ${GREEN}http://localhost:4443${NC}"
 echo ""

@@ -12,6 +12,10 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { getDynamicHeaders } from './dynamicHeaders';
+import {
+  encryptionRequestInterceptor,
+  encryptionResponseInterceptor,
+} from '../encryptionInterceptors';
 
 // Define the base URL
 export const BASE_URL = API_BASE_URL;
@@ -75,6 +79,9 @@ const apiConfig: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   withCredentials: true,
 });
+
+// Add encryption request interceptor (must be first to encrypt before other transformations)
+apiConfig.interceptors.request.use(encryptionRequestInterceptor);
 
 // Add a request interceptor
 apiConfig.interceptors.request.use(
@@ -141,6 +148,8 @@ apiConfig.interceptors.request.use(
 );
 
 // Add a response interceptor
+apiConfig.interceptors.response.use(encryptionResponseInterceptor);
+
 apiConfig.interceptors.response.use(
   (response: AxiosResponse) => {
     // Token refresh is now handled by backend via HTTP-only cookies

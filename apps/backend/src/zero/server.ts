@@ -103,7 +103,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
         select: { role: true },
       }),
     ]);
-  
+
     // If JWT is valid but DB records missing, that's a data inconsistency - fail fast
     if (!user || !orgMember) {
       logger.error('Auth data inconsistency: JWT valid but DB records missing', {
@@ -125,7 +125,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       role: user.role,
       orgRole: orgMember.role,
     } as AuthData;
-    
+
   } catch (error) {
     logger.error('JWT verification failed:', error);
     return undefined;
@@ -234,7 +234,13 @@ export async function handleMutate(request: Request): Promise<unknown> {
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
           const mutators = createMutators(authData, mutationAsyncTasks);
-          const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
+          const wrappedTx = wrapTransactionWithACL(
+            tx,
+            context,
+            mutationVespaJobs,
+            mutationSideEffectJobs,
+            mutatorName,
+          );
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
         }).then((mutatorResult) => {
@@ -591,7 +597,8 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         tx,
         { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
         vespaJobs,
-        sideEffectJobs
+        sideEffectJobs,
+        mutation.name,
       );
       const mutator = mustGetMutator(mutators, mutation.name);
       await mutator.fn({

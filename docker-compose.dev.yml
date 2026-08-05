@@ -191,6 +191,36 @@ services:
       timeout: 3s
       retries: 10
 
+  # Encryption service and Zero sync proxy
+  encryption:
+    build:
+      context: .
+      dockerfile: apps/encryption/Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-encryption
+    env_file:
+      - path: ./apps/encryption/.env.local
+        required: false
+    environment:
+      - HOST=0.0.0.0
+      - API_PORT=3012
+      - ZERO_PROXY_PORT=3013
+      - DATABASE_URL=postgresql://xyne_enc:xyne456@postgres:5432/xyne_dev_db?schema=encryption
+      - ZERO_CACHE_UPSTREAM=http://zero-cache:4848
+      - NODE_ENV=development
+    ports:
+      - "${ENCRYPTION_BIND_PORT:-3012}:3012"
+      - "${ENCRYPTION_ZERO_PROXY_BIND_PORT:-3013}:3013"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      zero-cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3012/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   # Python Transcription Agent
   transcription-agent:
     build:

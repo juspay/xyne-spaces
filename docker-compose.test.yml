@@ -14,6 +14,23 @@ services:
       postgres:
         condition: service_healthy
 
+  encryption-migrate:
+    build:
+      context: .
+      dockerfile: apps/encryption/Dockerfile
+      target: builder
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-encryption-migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://xyne:xyne123@postgres:5432/xyne_dev_db?schema=encryption
+      PGPASSWORD: xyne123
+      JWT_SECRET: test-jwt-secret
+      ENC_S2S_KEY: test-s2s-key
+    command: sh -c "psql -h postgres -U xyne -d xyne_dev_db -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS encryption;' && pnpm exec prisma migrate deploy --schema prisma/schema.prisma"
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+
   # Backend API for testing - builds from Dockerfile.test
   # Loads .env.local as base, then .env.test overrides container-specific values
   backend:
@@ -25,6 +42,8 @@ services:
       - "${BACKEND_BIND_PORT:-0}:3001"
     env_file:
       - ./apps/backend/.env.test   # Override with container hostnames
+    environment:
+      ENCRYPTION_SERVICE_URL: http://encryption:3012
     command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
     depends_on:
       backend-migrate:
@@ -35,6 +54,8 @@ services:
         condition: service_healthy
       zero-cache:
         condition: service_healthy
+      encryption:
+        condition: service_healthy
       livekit:
         condition: service_healthy
     healthcheck:
@@ -43,6 +64,35 @@ services:
       timeout: 10s
       retries: 60
       start_period: 240s  # Kept generous; backend boot is now just fake-gcs + tsx + listen.
+
+  encryption:
+    build:
+      context: .
+      dockerfile: apps/encryption/Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-encryption
+    env_file:
+      - path: ./apps/encryption/.env.local
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      API_PORT: 3012
+      ZERO_PROXY_PORT: 3013
+      NODE_ENV: test
+      DATABASE_URL: postgresql://xyne:xyne123@postgres:5432/xyne_dev_db?schema=encryption
+      ZERO_CACHE_UPSTREAM: http://zero-cache:4848
+      JWT_SECRET: test-jwt-secret
+      ENC_S2S_KEY: test-s2s-key
+    depends_on:
+      encryption-migrate:
+        condition: service_completed_successfully
+      zero-cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3012/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
 
   # Dashboard (Frontend) for testing - builds from Dockerfile.test
   # Loads .env.local as base, then .env.test overrides container-specific values

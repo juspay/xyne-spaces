@@ -38,6 +38,7 @@ done
 if [ ${#SCHEMA_PATHS[@]} -eq 0 ]; then
     SCHEMA_PATHS=(
         "apps/backend/prisma/schema.prisma"
+        "apps/encryption/prisma/schema.prisma"
         "apps/xyne-claw-auth/backend/prisma/schema.prisma"
     )
 fi
@@ -45,6 +46,7 @@ fi
 if [ ${#MIGRATIONS_DIRS[@]} -eq 0 ]; then
     MIGRATIONS_DIRS=(
         "apps/backend/prisma/migrations"
+        "apps/encryption/prisma/migrations"
         "apps/xyne-claw-auth/backend/prisma/migrations"
     )
 fi

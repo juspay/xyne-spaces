@@ -150,6 +150,7 @@ import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
+import { initializeOrgEncryption } from '@/services/internal/encryption-client';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -224,6 +225,7 @@ export type AuthData = {
   name: string;
   displayName?: string | null;
   workspaceId: string;
+  orgId: string;
   role: string;
   orgRole: string;
   memberId: string;
@@ -1059,7 +1061,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
-          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
+          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", orgId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
@@ -13920,6 +13922,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .one(),
           );
           if (existing) throw new Error('Organization name already exists');
+
+          await initializeOrgEncryption(orgId);
 
           await tx.mutate.organizations.insert({
             orgId,

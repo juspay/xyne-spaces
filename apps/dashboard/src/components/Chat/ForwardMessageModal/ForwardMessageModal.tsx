@@ -112,7 +112,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const timestamp = Date.now();
 
         try {
-          zero.mutate(
+          await zero.mutate(
             mutators.conversations.forwardMessage({
               targetChannelId: firstTarget.id,
               originalMessageId: message.messageId,
@@ -124,7 +124,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               timestamp,
               conversationParticipantId: uuidv4(),
             }),
-          );
+          ).server;
 
           // Show success message
           logger.info(Event.MESSAGE_FORWARDED, {

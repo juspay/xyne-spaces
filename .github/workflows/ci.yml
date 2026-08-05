@@ -57,6 +57,60 @@ jobs:
       - name: Build
         run: pnpm --filter xyne-spaces-backend run build
 
+  encryption:
+    name: Encryption migrations + typecheck + build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: xyne
+          POSTGRES_PASSWORD: xyne123
+          POSTGRES_DB: xyne_dev_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xyne -d xyne_dev_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://xyne:xyne123@localhost:5432/xyne_dev_db?schema=encryption
+      JWT_SECRET: ci-jwt-secret
+      ENC_S2S_KEY: ci-s2s-secret
+      KMS_ENC_PROVIDER: env
+      ENC_ENV_MASTER_KEY_HEX: ci-enc-secret
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-encryption...
+
+      - name: Build workspace libraries
+        run: pnpm --filter @xyne/shared run build
+
+      - name: Generate Prisma client
+        run: pnpm --filter xyne-spaces-encryption run prisma:generate
+
+      - name: Apply migrations twice
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS encryption;'
+          pnpm --filter xyne-spaces-encryption run prisma:migrate:deploy
+          pnpm --filter xyne-spaces-encryption run prisma:migrate:deploy
+
+      - name: Typecheck
+        run: pnpm --filter xyne-spaces-encryption run typecheck
+
+      - name: Build
+        run: pnpm --filter xyne-spaces-encryption run build
+
   # ---------------------------------------------------------------------------
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------

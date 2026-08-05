@@ -21,6 +21,8 @@ import { isOrganizationPolicyError, organizationDomainService } from '@/services
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
+import { createId } from '@paralleldrive/cuid2';
+import { initializeOrgEncryption, provisionWorkspaceEncryptionForOrg } from '@/services/internal/encryption-client';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -928,25 +930,33 @@ export class UserService {
         throw new Error(`Organization with name "${orgName}" already exists. Please choose a different name.`);
       }
 
-      // Step 1: Create organization with temporary createdBy (will update later)
-      const organization = await this.prisma.organization.create({
-        data: {
-          name: orgName,
-          createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: Status.ACTIVE
-        }
-      });
+      const orgId = createId();
+      await initializeOrgEncryption(orgId);
 
-      // Step 2: Create workspace with temporary createdBy (will update later)
-      let workspace = await this.prisma.workspace.create({
-        data: {
-          orgId: organization.orgId,
-          name: workspaceName,
-          createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: Status.ACTIVE,
-          workspaceType: WorkspaceType.ENTERPRISE,
-          joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-        }
+      const { organization, workspace } = await this.prisma.$transaction(async (tx) => {
+        // Step 1: Create organization with temporary createdBy (will update later)
+        const organization = await tx.organization.create({
+          data: {
+            orgId,
+            name: orgName,
+            createdBy: userData.providerUserId, // Temporary: will update after user creation
+            status: Status.ACTIVE
+          }
+        });
+
+        // Step 2: Create workspace with temporary createdBy (will update later)
+        const workspace = await tx.workspace.create({
+          data: {
+            orgId: organization.orgId,
+            name: workspaceName,
+            createdBy: userData.providerUserId, // Temporary: will update after user creation
+            status: Status.ACTIVE,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
+          }
+        });
+        await provisionWorkspaceEncryptionForOrg(workspace.id, workspace.orgId);
+        return { organization, workspace };
       });
 
       // Step 3: Link workspace to organization
@@ -1121,15 +1131,19 @@ export class UserService {
     // Step 1: Create workspace under existing org with temporary createdBy
     let workspace;
     try {
-      workspace = await this.prisma.workspace.create({
-        data: {
-          orgId: org.orgId,
-          name: workspaceName,
-          createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: Status.ACTIVE,
-          workspaceType,
-          joinPolicy,
-        },
+      workspace = await this.prisma.$transaction(async (tx) => {
+        const createdWorkspace = await tx.workspace.create({
+          data: {
+            orgId: org.orgId,
+            name: workspaceName,
+            createdBy: userData.providerUserId, // Temporary: will update after user creation
+            status: Status.ACTIVE,
+            workspaceType,
+            joinPolicy,
+          },
+        });
+        await provisionWorkspaceEncryptionForOrg(createdWorkspace.id, createdWorkspace.orgId);
+        return createdWorkspace;
       });
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {

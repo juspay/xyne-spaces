@@ -16,6 +16,7 @@ import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole,
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
+import { initializeOrgEncryption, provisionWorkspaceEncryptionForOrg } from '@/services/internal/encryption-client';
 
 /**
  * Extract the hostname from an Origin header value.
@@ -59,6 +60,7 @@ export async function buildInvitationLink(params: {
   const path = `invite?workspaceId=${workspaceId}&invitationId=${invitationId}`;
   return `${baseUrl}/launch?path=${encodeURIComponent(path)}`;
 }
+import { createId } from '@paralleldrive/cuid2';
 
 export class InvitationController {
   /**
@@ -478,10 +480,22 @@ export class InvitationController {
         return;
       }
 
+      const orgId = createId();
+      try {
+        await initializeOrgEncryption(orgId);
+      } catch (error) {
+        logger.error('Failed to initialize org encryption before invitation bootstrap', {
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
       // All creation steps in one transaction — rollback automatically on any failure
       const { org, workspace } = await prisma.$transaction(async tx => {
         const org = await tx.organization.create({
           data: {
+            orgId,
             name: orgName.trim(),
             createdBy: invitedBy,
             status: Status.ACTIVE,
@@ -498,6 +512,8 @@ export class InvitationController {
             joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           },
         });
+
+        await provisionWorkspaceEncryptionForOrg(workspace.id, workspace.orgId);
 
         // DM project required for every workspace
         await tx.project.create({

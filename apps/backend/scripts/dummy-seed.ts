@@ -1266,8 +1266,6 @@ async function main() {
           {
             userId: user1.id,
             type: NotificationType.TICKET_ASSIGNMENT,
-            title: 'New ticket assigned',
-            message: 'You have been assigned to ticket XYNE-00001',
             status: NotificationStatus.UNREAD,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'ticket',
@@ -1277,8 +1275,6 @@ async function main() {
           {
             userId: user1.id,
             type: NotificationType.MENTION,
-            title: 'You were mentioned',
-            message: '@john.developer mentioned you in #general',
             status: NotificationStatus.UNREAD,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'message',
@@ -1288,8 +1284,6 @@ async function main() {
           {
             userId: user2.id,
             type: NotificationType.WORKFLOW_COMPLETION,
-            title: 'Workflow completed',
-            message: 'Workflow for ticket XYNE-00002 completed successfully',
             status: NotificationStatus.READ,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER, NotificationDeliveryMethod.EMAIL],
             relatedEntityType: 'workflow',
@@ -1299,8 +1293,6 @@ async function main() {
           {
             userId: user3.id,
             type: NotificationType.TICKET_STATUS_CHANGE,
-            title: 'Ticket status updated',
-            message: 'Ticket XYNE-00003 status changed to COMPLETED',
             status: NotificationStatus.UNREAD,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'ticket',
@@ -1310,8 +1302,6 @@ async function main() {
           {
             userId: user4.id,
             type: NotificationType.THREAD_REPLY,
-            title: 'New reply in thread',
-            message: '@lisa.qa replied to your message',
             status: NotificationStatus.DISMISSED,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'message',

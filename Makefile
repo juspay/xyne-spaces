@@ -10,6 +10,7 @@ LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
 CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
+ENCRYPTION_IMAGE_NAME ?= xyne-spaces-encryption
 SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
 SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
 
@@ -160,6 +161,21 @@ push-built-external-dashboard:
 	docker tag $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
 	docker push $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
 
+# Encryption service targets
+build-encryption:
+	$(info Building $(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f apps/encryption/Dockerfile -t $(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --load .
+
+push-encryption:
+	$(info Pushing to registry: $(NS)/$(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f apps/encryption/Dockerfile -t $(NS)/$(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --push .
+	$(info Successfully pushed: $(NS)/$(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-encryption:
+	docker rmi $(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(ENCRYPTION_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
 lint-dashboard:
 	$(info Running dashboard quality checks)
 	cd apps/dashboard && pnpm install --frozen-lockfile && pnpm run lint:errors-only && pnpm run type-check
@@ -195,11 +211,11 @@ push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend
 clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend
 
 # Combined targets
-build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-claw-all
+build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-claw-all build-encryption
 
-push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-claw-all
+push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-claw-all push-encryption
 
-clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-claw-all
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-claw-all clean-encryption
 
 test:
 	$(info Running tests for all components)
@@ -214,4 +230,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all build-encryption push-encryption clean-encryption lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

@@ -11,6 +11,7 @@ packages:
   - apps/dashboard
   - apps/dashboard-external
   - apps/electron
+  - apps/encryption
   - apps/site
   - apps/xyne-claw
   - apps/xyne-claw-auth/backend

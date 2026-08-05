@@ -27,6 +27,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // deliberate — copy to the filename shown, not a uniform one.
 const ENV_FILES = [
   ["apps/backend/.env.example", "apps/backend/.env.local"],
+  ["apps/encryption/.env.example", "apps/encryption/.env.local"],
   ["apps/dashboard/.env.example", "apps/dashboard/.env.local"],
   ["apps/xyne-claw/.env.example", "apps/xyne-claw/.env"],
   ["apps/xyne-claw-auth/backend/.env.example", "apps/xyne-claw-auth/backend/.env"],

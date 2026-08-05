@@ -396,6 +396,8 @@ done
 # init-db.sh already did the work.
 CLAW_DB_USER="${CLAW_DB_USER:-claw}"
 CLAW_DB_PASSWORD="${CLAW_DB_PASSWORD:-claw123}"
+ENC_DB_USER="${ENC_DB_USER:-xyne_enc}"
+ENC_DB_PASSWORD="${ENC_DB_PASSWORD:-xyne456}"
 
 psql_postgres() {
     $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
@@ -415,6 +417,13 @@ if ! psql_postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '${CLAW_DB_USER}
     psql_postgres -c "CREATE ROLE ${CLAW_DB_USER} LOGIN PASSWORD '${CLAW_DB_PASSWORD}';" > /dev/null
 fi
 
+if ! psql_postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '${ENC_DB_USER}'" 2>/dev/null | grep -q 1; then
+    echo -e "${YELLOW}  Creating missing role ${ENC_DB_USER}...${NC}"
+    psql_postgres -c "CREATE ROLE ${ENC_DB_USER} LOGIN PASSWORD '${ENC_DB_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;" > /dev/null
+else
+    psql_postgres -c "ALTER ROLE ${ENC_DB_USER} WITH LOGIN PASSWORD '${ENC_DB_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;" > /dev/null
+fi
+
 ensure_database "xyne_common" "xyne"
 ensure_database "claw_auth_db" "$CLAW_DB_USER"
 
@@ -423,6 +432,17 @@ ensure_database "claw_auth_db" "$CLAW_DB_USER"
 $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
     psql -v ON_ERROR_STOP=1 --username xyne --dbname xyne_common \
     -c "CREATE SCHEMA IF NOT EXISTS common AUTHORIZATION xyne;" > /dev/null
+
+ensure_encryption_schema() {
+    $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
+        psql -v ON_ERROR_STOP=1 --username xyne --dbname xyne_dev_db <<-EOSQL
+GRANT CONNECT ON DATABASE xyne_dev_db TO ${ENC_DB_USER};
+CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION ${ENC_DB_USER};
+ALTER SCHEMA encryption OWNER TO ${ENC_DB_USER};
+EOSQL
+}
+
+ensure_encryption_schema
 
 # =============================================================================
 # 7. Wait for Redis
@@ -674,6 +694,16 @@ else
     cd "$REPO_ROOT"
 fi
 
+# A first-run backend setup recreates xyne_dev_db, so repair encryption ownership
+# only after backend schema and workspace setup have completed.
+echo -e "${BLUE}Setting up encryption database schema...${NC}"
+ensure_encryption_schema
+cd "$REPO_ROOT/apps/encryption"
+pnpm run prisma:generate
+pnpm run db:setup:local
+echo -e "${GREEN}  Encryption database schema ready${NC}"
+cd "$REPO_ROOT"
+
 # Start zero-cache
 echo -e "${BLUE}🚀 Starting zero-cache...${NC}"
 $COMPOSE_CMD -f "$COMPOSE_FILE" up -d zero-cache
@@ -764,6 +794,25 @@ for i in {1..30}; do
     if [ $i -eq 30 ]; then
         echo -e "${YELLOW}  Zero cache taking longer than expected, continuing...${NC}"
         break
+    fi
+    sleep 1
+done
+
+# Encryption is owned by compose during normal bootstrap. Keep it out of dev:all
+# so only explicit `dev:core` runs a local process on ports 3012/3013.
+echo -e "${BLUE}Starting encryption service...${NC}"
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build encryption
+
+echo -e "${BLUE}Waiting for encryption service...${NC}"
+for i in {1..30}; do
+    if curl -s $CURL_TIMEOUT http://localhost:3012/health > /dev/null 2>&1; then
+        echo -e "${GREEN}  Encryption service is ready${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e "${RED}  Encryption service failed to become healthy${NC}"
+        $COMPOSE_CMD -f "$COMPOSE_FILE" logs encryption 2>/dev/null || true
+        exit 1
     fi
     sleep 1
 done
@@ -897,6 +946,7 @@ echo -e "    - xyne_common      (shared reference data)"
 echo -e "    - claw_auth_db     (claw-auth)"
 echo -e "  Redis:               ${GREEN}localhost:6379${NC}"
 echo -e "  Zero-cache:          ${GREEN}localhost:4848${NC}"
+echo -e "  Encryption:          ${GREEN}localhost:3012${NC} (Zero proxy: ${GREEN}localhost:3013${NC})"
 echo -e "  Fake GCS:            ${GREEN}localhost:4443${NC}"
 echo -e "  MinIO:               ${GREEN}localhost:9000${NC} (console: ${GREEN}localhost:9001${NC})"
 if echo "$SELECTED_FEATURES" | grep -qw "3"; then

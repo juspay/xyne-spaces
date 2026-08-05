@@ -9,6 +9,7 @@ set -e
 #   xyne_dev_db   application data       (owner: xyne, created from POSTGRES_DB)
 #   xyne_common   shared reference data  (owner: xyne)
 #   claw_auth_db  claw-auth credentials  (owner: claw)
+#   encryption schema in xyne_dev_db      (owner: xyne_enc)
 #
 # Postgres only executes /docker-entrypoint-initdb.d on an *empty* data
 # directory, so editing this file has no effect on an existing volume. To pick up
@@ -20,12 +21,19 @@ echo "Initializing Xyne Spaces databases..."
 # from a separate container with its own POSTGRES_USER.
 CLAW_USER="${CLAW_DB_USER:-claw}"
 CLAW_PASSWORD="${CLAW_DB_PASSWORD:-claw123}"
+ENC_USER="${ENC_DB_USER:-xyne_enc}"
+ENC_PASSWORD="${ENC_DB_PASSWORD:-xyne456}"
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
     DO \$\$
     BEGIN
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${CLAW_USER}') THEN
             CREATE ROLE ${CLAW_USER} LOGIN PASSWORD '${CLAW_PASSWORD}';
+        END IF;
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${ENC_USER}') THEN
+            CREATE ROLE ${ENC_USER} LOGIN PASSWORD '${ENC_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+        ELSE
+            ALTER ROLE ${ENC_USER} WITH LOGIN PASSWORD '${ENC_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
         END IF;
     END
     \$\$;
@@ -49,6 +57,12 @@ create_db() {
 
 create_db "xyne_common" "$POSTGRES_USER"
 create_db "claw_auth_db" "$CLAW_USER"
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "xyne_dev_db" <<-EOSQL
+    GRANT CONNECT ON DATABASE xyne_dev_db TO ${ENC_USER};
+    CREATE SCHEMA IF NOT EXISTS encryption AUTHORIZATION ${ENC_USER};
+    ALTER SCHEMA encryption OWNER TO ${ENC_USER};
+EOSQL
 
 # The backend's common schema lives in a named schema, not public — see
 # COMMON_DATABASE_URL's ?schema=common.

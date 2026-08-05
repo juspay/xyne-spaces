@@ -21,7 +21,7 @@ const ELECTRON_BACKEND_ZERO_URL = isProd
   ? 'https://app.spaces.xyne.juspay.net'
   : isSandBox
     ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:4848';
+    : 'http://localhost:3013';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
@@ -29,17 +29,18 @@ export const API_BASE_URL = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/api`
   : `${protocol}://${hostname}${backendPort}/api`;
 
+const zeroServerPort = isLocalhost ? ':3013' : isTestEnv ? ':3013' : '';
 export const APPS_PUBLIC_BASE_URL = isLocalhost
   ? 'http://localhost:3001/api/apps'
   : isSandBox
     ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
     : 'https://spaces.xyne.juspay.net/api/apps';
 
-// Zero Cache
-const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
-export const VITE_ZERO_SERVER = isElectronBundled
-  ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-  : `${protocol}://${hostname}${zeroCachePort}/zero`;
+export const VITE_ZERO_SERVER =
+  (import.meta.env['VITE_ZERO_SERVER'] as string | undefined) ||
+  (isElectronBundled
+    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+    : `${protocol}://${hostname}${zeroServerPort}/zero`);
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
