@@ -1,6 +1,7 @@
 import { Storage, Bucket, StorageOptions } from '@google-cloud/storage';
-import { config } from '../config/env';
-import { logger } from '../utils/logger';
+import { isPreconditionFailed, type GcsStorageConfig } from './types.js';
+
+import { logger } from './logger.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface GCSUploadOptions {
@@ -23,29 +24,22 @@ export interface GCSDeleteResult {
 }
 
 export class GCSService {
-  private static instance: GCSService;
   private storage: Storage;
   private bucket: Bucket;
   private bucketName: string;
 
-  public constructor(bucketName?: string) {
-    this.bucketName = bucketName || config.gcs.bucketName;
+  public constructor(cfg: GcsStorageConfig, bucketName?: string) {
+    this.bucketName = bucketName || cfg.bucketName;
 
-    // Use fake-gcs-server in development/test, real GCS in production
-    const isEnvTestOrDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
     const storageOptions: StorageOptions = {
-      projectId: config.gcs.projectId,
+      ...(cfg.projectId ? { projectId: cfg.projectId } : {}),
+      retryOptions: { autoRetry: true, maxRetries: 3 },
     };
 
-    if (isEnvTestOrDevelopment && config.gcs.fakeGcsHost) {
-      // Point to fake-gcs-server for local development/test (only if FAKE_GCS_HOST is set)
-      storageOptions.apiEndpoint = `http://${config.gcs.fakeGcsHost}`;
-      logger.info(`GCS Service initialized with fake-gcs-server at ${config.gcs.fakeGcsHost} for bucket: ${this.bucketName}`);
+    if (cfg.apiEndpoint) {
+      storageOptions.apiEndpoint = cfg.apiEndpoint;
+      logger.info(`GCS Service initialized with fake-gcs-server at ${cfg.apiEndpoint} for bucket: ${this.bucketName}`);
     } else {
-      // Use Application Default Credentials for authentication
-      // In GKE: Uses Workload Identity
-      // In production: Uses service account
-      // In development without FAKE_GCS_HOST: Uses real GCS with ADC
       logger.info(`GCS Service initialized with Application Default Credentials for bucket: ${this.bucketName}`);
     }
 
@@ -57,22 +51,11 @@ export class GCSService {
     return this.bucketName;
   }
 
-  public static getInstance(): GCSService {
-    if (!GCSService.instance) {
-      GCSService.instance = new GCSService();
-    }
-    return GCSService.instance;
-  }
-
-  /**
-   * Upload file buffer to GCS with proper folder structure
-   */
   async uploadFile(
     buffer: Buffer,
     options: GCSUploadOptions
   ): Promise<GCSUploadResult> {
     try {
-      // Validate inputs
       if (!buffer || buffer.length === 0) {
         throw new Error('File buffer is empty or invalid');
       }
@@ -85,7 +68,6 @@ export class GCSService {
         throw new Error('Content type is required');
       }
 
-      // Generate structured file path
       const filePath = this.generateFilePath(options);
 
       logger.info(`Uploading file to GCS: ${filePath}`, {
@@ -96,22 +78,19 @@ export class GCSService {
         scopeId: options.scopeId,
       });
 
-      // Create file object in bucket
       const file = this.bucket.file(filePath);
 
-      // Upload with metadata
       const uploadOptions = {
         metadata: {
           contentType: options.contentType,
-          cacheControl: 'public, max-age=31536000', // 1 year cache
+          cacheControl: 'public, max-age=31536000',
           ...options.metadata,
         },
-        resumable: false, // Use simple upload for files under 5MB
+        resumable: false,
       };
 
       await file.save(buffer, uploadOptions);
 
-      // Get file metadata for size
       const [metadata] = await file.getMetadata();
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
@@ -130,7 +109,6 @@ export class GCSService {
       logger.error('Failed to upload file to GCS:', error);
 
       if (error instanceof Error) {
-        // Re-throw with more context
         throw new Error(`GCS upload failed: ${error.message}`);
       }
 
@@ -138,9 +116,6 @@ export class GCSService {
     }
   }
 
-  /**
-   * Upload a readable stream directly to GCS without buffering entire file in memory.
-   */
   async uploadStream(
     stream: NodeJS.ReadableStream,
     options: GCSUploadOptions
@@ -209,15 +184,15 @@ export class GCSService {
     }
   }
 
-  /**
-   * Upload a readable stream directly to GCS at an exact path.
-   */
   async uploadStreamToPath(
     stream: NodeJS.ReadableStream,
     options: {
       path: string;
       contentType: string;
       metadata?: Record<string, string>;
+      ifNotExists?: boolean;
+      resumable?: boolean;
+      timeoutMs?: number;
     }
   ): Promise<GCSUploadResult> {
     try {
@@ -250,7 +225,11 @@ export class GCSService {
           cacheControl: 'public, max-age=31536000',
           ...options.metadata,
         },
-        resumable: true,
+        resumable: options.resumable ?? true,
+        // ifGenerationMatch: 0 = only create when the object does not exist
+        // (412 Precondition Failed otherwise).
+        ...(options.ifNotExists ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
+        ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
       });
 
       await new Promise<void>((resolve, reject) => {
@@ -266,6 +245,8 @@ export class GCSService {
         size: totalBytes,
       };
     } catch (error) {
+      if (isPreconditionFailed(error)) throw error;
+
       logger.error('Failed to stream upload to exact GCS path:', error);
 
       if (error instanceof Error) {
@@ -276,20 +257,17 @@ export class GCSService {
     }
   }
 
-  /**
-   * Upload file buffer to GCS at an exact path without any modifications
-   * Use this when you need full control over the file path
-   */
   async uploadFileV2(
     buffer: Buffer,
     options: {
       path: string;
       contentType: string;
       metadata?: Record<string, string>;
+      ifNotExists?: boolean;
+      timeoutMs?: number;
     }
   ): Promise<GCSUploadResult> {
     try {
-      // Validate inputs
       if (!buffer || buffer.length === 0) {
         throw new Error('File buffer is empty or invalid');
       }
@@ -302,7 +280,6 @@ export class GCSService {
         throw new Error('Content type is required');
       }
 
-      // Use the exact path provided, no modifications
       const filePath = options.path;
 
       logger.info(`Uploading file to GCS at exact path: ${filePath}`, {
@@ -310,22 +287,20 @@ export class GCSService {
         size: buffer.length,
       });
 
-      // Create file object in bucket
       const file = this.bucket.file(filePath);
 
-      // Upload with metadata
       const uploadOptions = {
         metadata: {
           contentType: options.contentType,
-          cacheControl: 'public, max-age=31536000', // 1 year cache
+          cacheControl: 'public, max-age=31536000',
           ...options.metadata,
         },
-        resumable: false, // Use simple upload for files under 5MB
+        resumable: false,
+        ...(options.ifNotExists ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
       };
 
       await file.save(buffer, uploadOptions);
 
-      // Get file metadata for size
       const [metadata] = await file.getMetadata();
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
@@ -341,6 +316,8 @@ export class GCSService {
 
       return result;
     } catch (error) {
+      if (isPreconditionFailed(error)) throw error;
+
       logger.error('Failed to upload file to GCS:', error);
 
       if (error instanceof Error) {
@@ -351,9 +328,6 @@ export class GCSService {
     }
   }
 
-  /**
-   * Delete file from GCS
-   */
   async deleteFile(filename: string): Promise<GCSDeleteResult> {
     try {
       if (!filename) {
@@ -364,7 +338,6 @@ export class GCSService {
 
       const file = this.bucket.file(filename);
 
-      // Check if file exists before deletion
       const [exists] = await file.exists();
       if (!exists) {
         logger.warn(`File does not exist in GCS: ${filename}`);
@@ -386,9 +359,6 @@ export class GCSService {
     }
   }
 
-  /**
-   * Generate a new signed URL for an existing file
-   */
   async generateSignedUrl(
     filename: string,
     expirationHours: number = 24
@@ -400,7 +370,6 @@ export class GCSService {
 
       const file = this.bucket.file(filename);
 
-      // Check if file exists
       const [exists] = await file.exists();
       if (!exists) {
         throw new Error(`File does not exist: ${filename}`);
@@ -423,9 +392,6 @@ export class GCSService {
     }
   }
 
-  /**
-   * Check if file exists in GCS
-   */
   async fileExists(filename: string): Promise<boolean> {
     try {
       const file = this.bucket.file(filename);
@@ -674,12 +640,18 @@ export class GCSService {
    * List files in the bucket with a given prefix.
    * Returns an array of objects with name and optional contentType metadata.
    */
-  async listFiles(prefix: string): Promise<Array<{ name: string; contentType?: string }>> {
+  async listFiles(prefix: string): Promise<Array<{ name: string; contentType?: string; size?: number; updated?: Date }>> {
     const [files] = await this.bucket.getFiles({ prefix });
-    return files.map(file => ({
-      name: file.name,
-      contentType: (file.metadata as { contentType?: string } | undefined)?.contentType,
-    }));
+    return files.map(file => {
+      const meta = file.metadata as { contentType?: string; size?: string | number; updated?: string } | undefined;
+      const size = meta?.size !== undefined ? Number(meta.size) : undefined;
+      return {
+        name: file.name,
+        contentType: meta?.contentType,
+        ...(Number.isFinite(size) ? { size } : {}),
+        ...(meta?.updated ? { updated: new Date(meta.updated) } : {}),
+      };
+    });
   }
 
   /**
@@ -725,6 +697,3 @@ export class GCSService {
     }
   }
 }
-
-// Export singleton instance for easy importing
-export const gcsService = GCSService.getInstance();

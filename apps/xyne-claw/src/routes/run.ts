@@ -119,7 +119,7 @@ import {
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
 import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
-import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../gcs.js";
+import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";

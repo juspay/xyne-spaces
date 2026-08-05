@@ -73,6 +73,8 @@ import {
 } from './supportSidebarWidth';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
+import { getApiErrorMessage } from '../../utils/apiError';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { Hashtag, Star } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -3619,10 +3621,10 @@ export const SupportTicketDetail = ({
         if (sourceTicketXyneId && channelIdParam) {
           void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
         }
-      } catch {
+      } catch (err) {
         toast.error('Unmerge Failed', {
           id: toastId,
-          description: 'Operation failed. Please try again.',
+          description: getApiErrorMessage(err, 'Operation failed. Please try again.'),
         });
       }
     },
@@ -3961,17 +3963,22 @@ export const SupportTicketDetail = ({
       }
 
       setIsArchivingTicket(true);
-      zero.mutate(
-        mutators.ticket.archiveDeskTicket({
-          id: ticket.id,
-          updatedAt: Date.now(),
-        }),
-      );
-
-      setIsArchivingTicket(false);
       setShowArchiveConfirmDialog(false);
-      toast.success('Ticket archived successfully');
-      goBackToTicketList();
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.archiveDeskTicket({
+            id: ticket.id,
+            updatedAt: Date.now(),
+          }),
+        ),
+        'Failed to archive ticket',
+      ).then(ok => {
+        setIsArchivingTicket(false);
+        if (ok) {
+          toast.success('Ticket archived successfully');
+          goBackToTicketList();
+        }
+      });
     } catch (err) {
       setIsArchivingTicket(false);
       toast.error('Failed to archive ticket', {
@@ -5468,10 +5475,10 @@ const EmailThreadItem = ({
           });
         }
       }
-    } catch {
+    } catch (err) {
       toast.error('Unmerge Failed', {
         id: toastId,
-        description: 'Operation failed. Please try again.',
+        description: getApiErrorMessage(err, 'Operation failed. Please try again.'),
       });
     } finally {
       setIsDemerging(false);

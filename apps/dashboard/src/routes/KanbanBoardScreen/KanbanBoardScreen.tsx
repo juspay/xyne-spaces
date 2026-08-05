@@ -58,6 +58,7 @@ import { useAllChannels, useChannel, useGetChannelUserStatus } from '../../hooks
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { apiInstance } from '../../services/clients/apiClient';
 import type {
   Ticket,
@@ -3107,15 +3108,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     );
 
                     // Directly update the stage for backward movement
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: backwardStageChange.ticketId,
-                        stageName: backwardStageChange.stageName,
-                        ...(backwardStageChange.newStatus && {
-                          statusV2: backwardStageChange.newStatus,
+                    void surfaceMutationError(
+                      zero.mutate(
+                        mutators.ticket.update({
+                          id: backwardStageChange.ticketId,
+                          stageName: backwardStageChange.stageName,
+                          ...(backwardStageChange.newStatus && {
+                            statusV2: backwardStageChange.newStatus,
+                          }),
+                          updatedAt: Date.now(),
                         }),
-                        updatedAt: Date.now(),
-                      }),
+                      ),
+                      'Failed to move ticket',
                     );
 
                     setShowBackwardConfirmDialog(false);

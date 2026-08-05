@@ -1068,7 +1068,7 @@ export const roomMachine = setup({
           CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
 
         const room = new Room({
-          adaptiveStream: true,
+          adaptiveStream: false,
           dynacast: true,
           videoCaptureDefaults: {
             resolution: {
