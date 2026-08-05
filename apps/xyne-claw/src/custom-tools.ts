@@ -184,7 +184,6 @@ export function loadCustomTools(
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
     else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
-    else if (ct.source === "custom:visualize") allowed = agentSlug === "ask-ai";
     else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
 
     return allowed;
