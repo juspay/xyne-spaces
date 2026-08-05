@@ -677,19 +677,12 @@ export class GoogleService {
   /**
    * One-shot: plant a starting `lastSyncCursor` on every active Gmail source.
    *
-   * Run this BEFORE the cursor-resuming ingestion path goes live. A source with no
-   * cursor falls back to the push's own historyId, and `history.list` returns records
-   * *after* that point — so the notification that triggered the first push resolves to
-   * nothing and its messages are skipped. Seeding ahead of time gives every source a
-   * real starting point, and mail arriving between the seed and the deploy is still
-   * picked up, because the cursor sits at the start of that window.
+   * Run before the cursor-resuming ingestion path ships. Without a cursor a source
+   * falls back to the push's own historyId, and `history.list` returns records *after*
+   * that — so the first push resolves to nothing and skips the mail that triggered it.
    *
-   * `overwrite` is for the pre-deploy run only, while nothing reads the column and any
-   * existing value is a stale artifact. Once ingestion resumes from the cursor,
-   * overwriting would move a desk past mail that was never ingested — so it defaults
-   * to false and should stay false from then on.
-   *
-   * `dryRun=true` reports what would change without writing.
+   * `overwrite` is safe only while nothing reads the column; afterwards it would move a
+   * desk past un-ingested mail. Hence false by default.
    */
   static async seedSyncCursors(opts: { dryRun?: boolean; overwrite?: boolean } = {}): Promise<{
     dryRun: boolean;
@@ -733,7 +726,7 @@ export class GoogleService {
         if (!dryRun) await repo.update(source.id, { lastSyncCursor: historyId });
         seeded.push({ name: source.name, from: source.lastSyncCursor, to: historyId });
       } catch (error) {
-        // One unreachable mailbox must not stop the rest of the fleet from being seeded.
+        // Collected, not thrown — one dead mailbox shouldn't stop the rest.
         skipped.push({ name: source.name, reason: getErrorMessage(error) });
       }
     }
