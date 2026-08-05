@@ -4,13 +4,13 @@
  */
 
 import { DatabaseClient } from '../client';
+import { TicketPriority } from '@xyne/shared';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import type { 
   SaveClassificationConfigBody, 
   SaveMappingBody, 
   SavePriorityClassificationConfigBody,
 } from '../../types/classification.js';
-import { TicketPriority } from '@prisma/client';
 
 export class EmailClassificationRepository {
   private db = DatabaseClient.getInstance();

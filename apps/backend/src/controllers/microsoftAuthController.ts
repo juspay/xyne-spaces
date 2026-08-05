@@ -6,14 +6,13 @@ import { UserSessionService } from '../services/userSessionService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 
-import { AuthProvider } from '@prisma/client';
 import '../types/express';
 import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
-import { WorkspaceType } from '@xyne/shared';
+import { WorkspaceType, AuthProvider } from '@xyne/shared';
 import {
   OrganizationDomainConflictError,
   PublicEmailDomainError,
@@ -513,6 +512,7 @@ export class MicrosoftAuthController {
           const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
             microsoftUserData.email,
           );
+
 
           let domainConflict = null;
           let domainConflictError = null;

@@ -1,7 +1,7 @@
 import { BaseRepository } from './base';
-import { Project, ProjectType, TicketStatusV2 } from '@prisma/client';
+import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
-import { sanitizeProjectCode } from '@xyne/shared';
+import { sanitizeProjectCode, ProjectType, TicketStatusV2 } from '@xyne/shared';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
 
 export interface CreateProjectInput {

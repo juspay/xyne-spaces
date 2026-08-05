@@ -1,4 +1,5 @@
-import { PrismaClient, PullRequests, PRStatus } from '@prisma/client';
+import { PrismaClient, PullRequests } from '@prisma/client';
+import { PRStatus } from '@xyne/shared';
 import { db } from '../client';
 import {logger} from '@/utils/logger';
 
@@ -75,7 +76,7 @@ export class PRMetricsRepository {
   private async resolvePrWorkspaceId(opts: {
     ticketId?: string | null;
     workflowExecutionId?: string | null;
-  }): Promise<string | null> {
+  }): Promise<string> {
     if (opts.ticketId) {
       const ticket = await this.prisma.ticket.findUnique({
         where: { id: opts.ticketId },

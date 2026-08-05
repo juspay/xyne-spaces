@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { TagMethod } from '@prisma/client';
-import { TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, findDuplicateTags } from '@xyne/shared';
+import { TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, findDuplicateTags, TagMethod } from '@xyne/shared';
 
 export const TagMethodSchema = z.nativeEnum(TagMethod);
 

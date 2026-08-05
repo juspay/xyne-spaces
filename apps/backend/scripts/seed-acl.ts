@@ -10,9 +10,10 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@xyne/shared';
+import { runAsSystem } from '../src/database/tenant/context';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
@@ -123,7 +124,7 @@ const DEFAULT_ADMIN_USER = {
   name: DEFAULT_ADMIN_EMAIL.split('@')[0],
   email: DEFAULT_ADMIN_EMAIL,
   authProvider: AuthProvider.EMAIL,
-  providerUserId: 'email-admin-seed-user-001',
+  providerUserId: `email-${DEFAULT_ADMIN_EMAIL}`,
   status: UserStatus.ACTIVE,
   role: WorkspaceRole.ADMIN,
 };
@@ -303,7 +304,8 @@ async function main() {
             await repositories.resourceAccess.create({
               groupId: group.id,
               resourceId: resourceId,
-              accessType: permission.accessType
+              accessType: permission.accessType,
+              workspaceId: defaultWorkspaceId
             });
             console.log(`    ✅ Granted ${permission.accessType} access to ${permission.resourceName}`);
           } catch (error) {
@@ -425,7 +427,8 @@ async function main() {
         await prisma.userGroupMapping.create({
           data: {
             userId: adminUser.id,
-            userGroupId: adminGroupId
+            userGroupId: adminGroupId,
+            workspaceId: defaultWorkspaceId
           }
         });
         console.log('  ✅ Linked admin user to ADMIN group');
@@ -452,6 +455,7 @@ async function main() {
               userId: adminUser.id,
               resourceId: resourceId,
               accessType: AccessType.ADMIN,
+              workspaceId: defaultWorkspaceId,
             },
           });
           grantedCount++;
@@ -540,7 +544,8 @@ async function main() {
             await prisma.userGroupMapping.create({
               data: {
                 userId: defaultAdminUser.id,
-                userGroupId: adminGroupId
+                userGroupId: adminGroupId,
+                workspaceId: defaultWorkspaceId
               }
             });
             console.log('  ✅ Linked default admin email user to ADMIN group');
@@ -565,6 +570,7 @@ async function main() {
                 userId: defaultAdminUser.id,
                 resourceId: resourceId,
                 accessType: AccessType.ADMIN,
+                workspaceId: defaultWorkspaceId,
               },
             });
             grantedCount++;
@@ -643,7 +649,7 @@ async function main() {
     // Step 8: Ensure all bot users are in OrgMember table
     console.log('\n🤖 Ensuring all bot users are in org_member table...');
     try {
-      const { UserType } = await import('@prisma/client');
+      const { UserType } = await import('@xyne/shared');
 
       // Find all bots (using string literal since UserType enum may not be generated yet)
       const botUsers = await prisma.user.findMany({
@@ -724,8 +730,10 @@ async function main() {
   }
 }
 
-// Execute the seeding script when run directly
-main()
+// Execute the seeding script when run directly. Run under a system tenant context so
+// audit logging works: ACLAuditLog.workspaceId is NOT NULL, and the seed creates global
+// resources before any workspace exists, so logEvent has no request-scoped tenant to read.
+runAsSystem(() => main())
   .then(() => {
     process.exit(0);
   })

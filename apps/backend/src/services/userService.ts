@@ -1,16 +1,26 @@
-import { PrismaClient, User, UserPresenceStatus, AuthProvider, ProjectType, UserStatus, WorkspaceRole, Status } from '@prisma/client';
+import { PrismaClient, User } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { grantPermissionsForRole } from './permissionMatrix';
+import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
 import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
-import { OrgRole, WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { OrgRole,
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  UserPresenceStatus,
+  AuthProvider,
+  ProjectType,
+  UserStatus,
+  WorkspaceRole,
+  Status, ChannelRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
+import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -149,7 +159,7 @@ export class UserService {
         orderBy: { createdAt: 'asc' },
       });
       return user
-        ? { authProvider: user.authProvider, providerUserId: user.providerUserId }
+        ? { authProvider: user.authProvider as AuthProvider, providerUserId: user.providerUserId }
         : null;
     } catch (error) {
       logger.error('Error finding auth identity by email:', error);
@@ -194,7 +204,7 @@ export class UserService {
       );
 
       // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
-      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, workspaceId);
+      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, user.workspaceId);
 
       // Add user to general channel
       await this.ensureUserInGeneralChannel(user);
@@ -314,7 +324,7 @@ export class UserService {
   }
 
   /**
-   * Ensure user is added to general channel
+   * Ensure user is added to the workspace's general channel
    */
   private async ensureUserInGeneralChannel(user: User): Promise<void> {
     try {
@@ -322,37 +332,17 @@ export class UserService {
         `[GENERAL_CHANNEL] Checking general channel membership for user ${user.email} (${user.id})`
       );
 
-      // Find the general channel by name
-      logger.info(`[GENERAL_CHANNEL] Looking for channel with name 'general'`);
-      const generalChannel = await repositories.channels.findByName('general');
+      const channelId = await joinUserToGeneralChannel(
+        this.prisma,
+        user.workspaceId!,
+        user.id,
+        ChannelRole.MEMBER
+      );
 
-      if (generalChannel) {
-        // Check if user is already a participant
-        const isAlreadyParticipant = await repositories.channelParticipants.isParticipant(
-          generalChannel.id,
-          user.id
-        );
-
-        if (!isAlreadyParticipant) {
-          // Add user as a member of the general channel
-          logger.info(
-            `[GENERAL_CHANNEL] Adding user ${user.email} as MEMBER to channel ${generalChannel.id}`
-          );
-          const participant = await repositories.channelParticipants.addParticipant(
-            generalChannel.id,
-            user.id,
-            'MEMBER'
-          );
-          logger.info(
-            `[GENERAL_CHANNEL] ✅ Successfully added user ${user.email} to general channel. Participant ID: ${participant.id}`
-          );
-        } else {
-          logger.info(
-            `[GENERAL_CHANNEL] ⚠️ User ${user.email} is already a participant in general channel`
-          );
-        }
+      if (channelId) {
+        logger.info(`[GENERAL_CHANNEL] ✅ Successfully added user ${user.email} to general channel ${channelId}`);
       } else {
-        logger.warn(`[GENERAL_CHANNEL] ❌ General channel not found in database`);
+        logger.warn(`[GENERAL_CHANNEL] ❌ General channel not found in workspace ${user.workspaceId}`);
       }
     } catch (channelError) {
       logger.error(
@@ -890,13 +880,24 @@ export class UserService {
       });
 
       // Grant permissions based on invitation role (fixes V2 auth zero-permissions bug)
-      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role, userData.workspaceId);
+      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role as WorkspaceRole, userData.workspaceId);
+
+      // Join the workspace's general channel (creates it when missing, e.g. legacy
+      // enterprise workspaces that predate the general-channel default)
+      await ensureGeneralChannelForWorkspace({
+        db: this.prisma,
+        workspaceId: userData.workspaceId,
+        workspaceName: workspace.name,
+        createdBy: workspace.createdBy || workspaceUser.id,
+        userId: workspaceUser.id,
+        role: ChannelRole.MEMBER,
+      });
 
       logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
       return { user: workspaceUser, isNewUser: true };
     } catch (error) {
       logger.error('Error creating workspace user:', error);
-      throw new Error('Failed to create workspace user');
+      throw error instanceof Error ? error : new Error('Failed to create workspace user');
     }
   }
 
@@ -937,7 +938,7 @@ export class UserService {
       });
 
       // Step 2: Create workspace with temporary createdBy (will update later)
-      const workspace = await this.prisma.workspace.create({
+      let workspace = await this.prisma.workspace.create({
         data: {
           orgId: organization.orgId,
           name: workspaceName,
@@ -1039,10 +1040,14 @@ export class UserService {
         workspaceName,
         createdBy: workspaceUser.id,
       });
-      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
+      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
 
       // Grant full owner resource access to the workspace owner
       await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
+
+      // Grant ORGANIZATIONS ADMIN access to the org owner (same path the org-members
+      // updateRole mutator uses when a member is promoted to ADMIN/OWNER)
+      await syncOrgResourceAdminAccess(organization.orgId, userData.email, true, workspaceUser.id);
 
       // Sync all hardcoded bots into the new workspace
       await unifiedBotUserService.syncAllBotUsers(workspace.id);
@@ -1192,7 +1197,7 @@ export class UserService {
     });
 
     workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
-    await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
+    await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
 
     // Grant full admin resource access to the workspace owner
     await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);

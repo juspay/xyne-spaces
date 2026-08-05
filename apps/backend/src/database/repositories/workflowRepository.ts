@@ -1,4 +1,5 @@
-import { Workflow, WorkflowExecution, WorkflowStep, AttachmentEntityType } from '@prisma/client';
+import { Workflow, WorkflowExecution, WorkflowStep } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { DatabaseClient } from '@/database/client';
 import {logger} from '@/utils/logger';
@@ -191,20 +192,8 @@ export class WorkflowRepository {
 
   // POST: Create new workflow step
   async createWorkflowStep(data: Omit<WorkflowStep, 'id' | 'createdAt' | 'updatedAt' | 'workspaceId'>) {
-    // Stamp the denormalized tenant key from the owning execution, falling back to the
-    // parent workflow (Workflow.workspaceId is NOT NULL). WorkflowExecution.workspaceId is
-    // nullable and null for un-backfilled executions, so resolving it directly would throw
-    // (or leak) for legacy rows; the workflow hop resolves reliably even pre-backfill.
-    const execution = await prisma.workflowExecution.findUnique({
-      where: { id: data.workflowExecutionId },
-      select: { workspaceId: true, workflow: { select: { workspaceId: true } } },
-    });
-    if (!execution) {
-      throw new Error(
-        `workspaceId required: workflow execution ${data.workflowExecutionId} not found`,
-      );
-    }
-    const workspaceId = execution.workspaceId ?? execution.workflow.workspaceId;
+    // Stamp the denormalized tenant key from the owning execution.
+    const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'workflowExecution', { id: data.workflowExecutionId });
     return await prisma.workflowStep.create({
       data: { ...data, workspaceId }
     });

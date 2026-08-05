@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { ChannelRole } from '@prisma/client';
 import {
   livekitService,
   allowedSourcesForHostControls,
@@ -11,16 +10,7 @@ import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  InvitationResponse,
-  MeetingStatus,
-  NotificationType,
-  RecordingType,
-  Prisma,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
@@ -41,6 +31,14 @@ import {
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
   ShareableEntityType,
+  ChannelRole,
+  CallOrigin,
+  CallStatus,
+  CallType,
+  InvitationResponse,
+  MeetingStatus,
+  NotificationType,
+  RecordingType,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
@@ -853,6 +851,23 @@ export class CallController {
           });
           queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
         }
+
+        // Who belongs to a call: the host, anyone invited, and the members of the
+        // channel it is happening in — a channel call is offered to the channel, so
+        // membership is the invitation. Matches assertCanViewCallRecordings. Anyone
+        // else holds a link they were never given access by, and is turned away.
+        if (!participant && call.createdByUserId !== user.id) {
+          const isChannelMember = call.channelId
+            ? await repositories.channelParticipants.isParticipant(call.channelId, user.id)
+            : false;
+          if (!isChannelMember) {
+            logger.warn(
+              `[CallController] join denied, no invitation or channel membership | callId=${callId}, userId=${user.id}`,
+            );
+            res.status(403).json({ success: false, error: 'You do not have access to this call' });
+            return;
+          }
+        }
       }
 
       // Generate access token
@@ -1460,6 +1475,11 @@ export class CallController {
         return;
       }
 
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
       if (!(await this.assertCanViewCallRecordings(callId, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -1585,6 +1605,11 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
+
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
       if (
         call.callType === CallType.HEADLESS &&
         !(await callShareService.canView(call, userId, req.user!.workspaceId))
@@ -1682,6 +1707,11 @@ export class CallController {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
         res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
       if (
@@ -1829,6 +1859,12 @@ export class CallController {
         return;
       }
 
+      const callerParticipant = await repositories.calls.findParticipant(call.id, userId);
+      if (!callerParticipant && call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'You are not a participant of this call' });
+        return;
+      }
+
       if (call.status !== 'ACTIVE') {
         res.status(400).json({ success: false, error: 'Call is not active' });
         return;
@@ -1838,8 +1874,29 @@ export class CallController {
       const invitedUserIds: string[] = [];
       const db = DatabaseClient.getInstance();
 
+      // Invitees are resolved within the caller's workspace.
+      const callerWorkspaceId = req.user?.workspaceId;
+      if (!callerWorkspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const invitableUsers = await db.user.findMany({
+        where: { id: { in: userIds as string[] }, workspaceId: callerWorkspaceId },
+        select: { id: true },
+      });
+      const invitableUserIds = new Set(invitableUsers.map(u => u.id));
+      const rejectedUserIds = (userIds as string[]).filter(id => !invitableUserIds.has(id));
+      if (rejectedUserIds.length > 0) {
+        logger.warn(
+          `[${callId}] invite_users_rejected_out_of_workspace | count=${rejectedUserIds.length} caller=${userId}`,
+        );
+      }
+
       // Process each user
       for (const targetUserId of userIds) {
+        if (!invitableUserIds.has(targetUserId)) {
+          continue;
+        }
         // Check if participant already exists
         const existingParticipant = await repositories.calls.findParticipant(call.id, targetUserId);
 
@@ -2231,6 +2288,21 @@ export class CallController {
    * channel members can view/download them even if they didn't join the call.
    * Mutating ops (start/stop/rename/delete) stay participant/starter-gated.
    */
+  /**
+   * Whether a caller belongs to a call's audience: its host, anyone who took part, or a
+   * member of the channel it happened in. A channel call is offered to the channel, so a
+   * member who could not attend can still read what came out of it.
+   */
+  private async isCallAudience(
+    call: { id: string; channelId: string | null; createdByUserId: string },
+    userId: string,
+  ): Promise<boolean> {
+    if (call.createdByUserId === userId) return true;
+    if (await repositories.calls.findParticipant(call.id, userId)) return true;
+    if (!call.channelId) return false;
+    return repositories.channelParticipants.isParticipant(call.channelId, userId);
+  }
+
   private async assertCanViewCallRecordings(callId: string, userId: string): Promise<boolean> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call) return false;

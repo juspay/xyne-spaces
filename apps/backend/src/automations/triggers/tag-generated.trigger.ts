@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger';
 import { TicketContextSchema, buildTicketContext } from './ticket-context';
 import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import type { TicketLike } from './ticket-context';
 
 export const TAG_GENERATED_EVENT = 'TAG_GENERATED';
 
@@ -95,7 +96,7 @@ export class TagGeneratedTrigger extends BaseTrigger<typeof TagGeneratedConfigSc
       : null;
 
     const ticketContext =
-      fullTicket ? await buildTicketContext(fullTicket).catch(() => null) : null;
+      fullTicket ? await buildTicketContext(fullTicket as TicketLike).catch(() => null) : null;
 
     logger.info(
       `[TAG-GENERATED] hydratePayload sourceId=${sourceId} generatedTags=${tags.length} categories=[${[...new Set(tags.map(t => t.category))].join(',')}]`,

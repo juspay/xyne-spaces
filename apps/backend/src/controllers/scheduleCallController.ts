@@ -4,7 +4,8 @@ import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, type Prisma } from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -205,6 +206,7 @@ export class ScheduleCallController {
           recurringSeriesId: series.id,
           organizerId: userId,
           userIds: recurringParticipantUserIds,
+          workspaceId: req.user!.workspaceId!,
           tx,
         });
 
@@ -213,6 +215,7 @@ export class ScheduleCallController {
             recurringSeriesId: series.id,
             organizerId: userId,
             externalInvitees: normalizedExternalInvitees,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -787,6 +790,7 @@ export class ScheduleCallController {
             recurringSeriesId: seriesId,
             organizerId: userId,
             userIds: recurringParticipantUserIds,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }
@@ -796,6 +800,7 @@ export class ScheduleCallController {
             recurringSeriesId: seriesId,
             organizerId: userId,
             externalInvitees: normalizedExternalInvitees,
+            workspaceId: req.user!.workspaceId!,
             tx,
           });
         }

@@ -1,5 +1,5 @@
-import { ChannelScopeType, ProjectType } from '@prisma/client';
 import { Request, Response } from 'express';
+import { ChannelScopeType, ProjectType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
@@ -128,6 +128,7 @@ export class DmChannelProjectBackfillController {
     }
 
     return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<void> {

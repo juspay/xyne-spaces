@@ -1,5 +1,5 @@
-import { AttachmentEntityType, MessageType } from '@prisma/client';
 import { conversationService } from '@/services/conversationService';
+import { AttachmentEntityType, MessageType } from '@xyne/shared';
 import type { UploadedFileResult } from '@/services/fileUploadService';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -48,7 +48,7 @@ async function resolveSideEffectCtx(userId: string): Promise<QueryContext> {
 
   return {
     userID: user.id,
-    workspaceId: user.workspaceId ?? '',
+    workspaceId: user.workspaceId,
     role: user.role ?? '',
     orgRole: '',
     memberId: user.orgMemberId ?? '',

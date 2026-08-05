@@ -3,7 +3,7 @@ import { ReleaseNotesService } from '@/services/releaseNotes/releaseNotesService
 import { conversationService } from '@/services/conversationService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { config } from '@/config/env';
-import { BaseTicketType, isReleaseTicket } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
@@ -11,6 +11,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { v4 as uuidv4 } from 'uuid';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface PRData {
   prId: number;
@@ -150,7 +151,7 @@ Release notes have been generated for **${ticket.title}**
           conversationId: ticket.conversationId,
           userId: xyneReleaseBot.id,
           content: messageContent,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           metadata: {
             messageSubtype: 'release_notes_generated',
             canvasUrl,
@@ -255,9 +256,12 @@ Release notes have been generated for **${ticket.title}**
       logger.info(`[CanvasService] Created release notes canvas ${canvasId} for ticket ${context.release.xyneId}`);
 
       // Email is globally unique in orgMember, single lookup is sufficient
-      const orgMember = await db.orgMember.findUnique({
-        where: { email: botUser.email },
-      });
+      // Resolves the release bot's membership, not the caller's.
+      const orgMember = await withWorkspaceScope(() =>
+        db.orgMember.findUnique({
+          where: { email: botUser.email },
+        }),
+      );
       if (!orgMember) {
         throw new Error(`Bot ${botUser.id} is not a member of any organization`);
       }

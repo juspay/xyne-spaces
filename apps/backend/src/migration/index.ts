@@ -4,6 +4,7 @@
  */
 
 import express, { Router, Request, Response } from 'express';
+import { workspaceScopedRoute } from '@/database/tenant/context';
 import slackRoutes from './slack';
 import jiraRoutes from './jira';
 import confluenceRoutes from './confluence';
@@ -28,32 +29,32 @@ router.use(express.json({ limit: '50mb', verify: rawBodyCapture }));
 router.use(express.urlencoded({ extended: true, limit: '50mb', verify: rawBodyCapture }));
 
 // Route to Slack migration
-router.use('/slack', slackRoutes);
+router.use('/slack', workspaceScopedRoute, slackRoutes);
 
 // Route to Jira migration
-router.use('/jira', jiraRoutes);
+router.use('/jira', workspaceScopedRoute, jiraRoutes);
 
 // Route to WhatsApp migration
-router.use('/whatsapp', whatsappRoutes);
+router.use('/whatsapp', workspaceScopedRoute, whatsappRoutes);
 
 // Route to Confluence migration
-router.use('/confluence', confluenceRoutes);
+router.use('/confluence', workspaceScopedRoute, confluenceRoutes);
 
 // Cleanup routes
-router.use('/cleanup', cleanupRoutes);
+router.use('/cleanup', workspaceScopedRoute, cleanupRoutes);
 
 
 // User activation routes (accessible at /migrate/api/migration/user-activation)
 router.use('/user-activation', userActivationRoutes);
 
 // Vespa workspace/orgId backfill (accessible at /migrate/api/migration/vespa-workspace-backfill)
-router.use('/vespa-workspace-backfill', vespaWorkspaceBackfillRoutes);
+router.use('/vespa-workspace-backfill', workspaceScopedRoute, vespaWorkspaceBackfillRoutes);
 
 // Role-framework backfill (accessible at /migrate/api/migration/role-framework-backfill)
-router.use('/role-framework-backfill', roleFrameworkBackfillRoutes);
+router.use('/role-framework-backfill', workspaceScopedRoute, roleFrameworkBackfillRoutes);
 
 // Admin migration utilities
-router.use('/admin', adminRoutes);
+router.use('/admin', workspaceScopedRoute, adminRoutes);
 
 // Handle unknown migration routes
 router.use('*', (req: Request, res: Response) => {

@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
-import { AuthProvider, UserStatus } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
@@ -10,7 +9,7 @@ import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
 import '../types/express';
@@ -26,6 +25,7 @@ import {
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
+import { aiProvisioningService } from '@/services/aiProvisioningService';
 
 /**
  * Result type for single workspace auto-login
@@ -1057,7 +1057,14 @@ export class AuthV2Controller {
         `[${requestId}] mobile-exchange selected via query parameter without the x-platform header (browserInitiated=${looksBrowserInitiated})`,
       );
     }
-    const isMobileNative = nativeByHeader || nativeByQuery;
+    // The native branch is only selectable by a genuine native client, which sends neither
+    // Origin nor Sec-Fetch-Site. Anything browser-initiated takes the web branch.
+    const isMobileNative = (nativeByHeader || nativeByQuery) && !looksBrowserInitiated;
+    if ((nativeByHeader || nativeByQuery) && looksBrowserInitiated) {
+      logger.warn(
+        `[${requestId}] native mobile-exchange requested from a browser-initiated request; falling back to the web branch`,
+      );
+    }
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
@@ -1483,6 +1490,18 @@ export class AuthV2Controller {
         workspaceId,
         authProvider: provider,
       });
+
+      if (isNewUser) {
+        try {
+          await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+        } catch (error) {
+          logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
+            userId: workspaceUser.id,
+            workspaceId,
+            error,
+          });
+        }
+      }
 
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
@@ -2005,9 +2024,22 @@ export class AuthV2Controller {
           picture: oauthUserData.picture,
         };
 
-        // Ensure OrgMember exists — find the org by email domain and upsert the user as MEMBER
-        const existingOrg = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
-        if (!existingOrg) {
+        // Ensure OrgMember exists — find the org by email domain, or fall back to
+        // the user's existing OrgMember record (e.g. when domain mapping is missing).
+        let existingOrgId: string | null = null;
+        const existingOrgByDomain = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
+
+        if (existingOrgByDomain) {
+          existingOrgId = existingOrgByDomain.orgId;
+        } else {
+          const existingOrgMember = await this.prisma.orgMember.findFirst({
+            where: { email: userData.email.toLowerCase(), leftAt: null },
+            select: { orgId: true },
+          });
+          existingOrgId = existingOrgMember?.orgId ?? null;
+        }
+
+        if (!existingOrgId) {
           res.status(409).json({
             error: 'No organization found',
             message: 'No organization found for your email domain. Please create an organization first.',
@@ -2015,11 +2047,10 @@ export class AuthV2Controller {
           return;
         }
 
-        const prisma = DatabaseClient.getInstance();
-        await prisma.orgMember.upsert({
+        await this.prisma.orgMember.upsert({
           where: { email: userData.email.toLowerCase() },
           create: {
-            orgId: existingOrg.orgId,
+            orgId: existingOrgId,
             email: userData.email.toLowerCase(),
             role: 'MEMBER',
           },

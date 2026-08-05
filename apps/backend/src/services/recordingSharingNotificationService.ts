@@ -1,5 +1,4 @@
-import { ActivityClassification } from '@prisma/client';
-import { EntityUserAccess, ShareableEntityType } from '@xyne/shared';
+import { EntityUserAccess, ShareableEntityType, ActivityClassification } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { activityService } from '@/services/activity/activityService';

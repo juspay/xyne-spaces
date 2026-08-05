@@ -114,6 +114,7 @@ export class NotificationSettingsBackfillController {
     }
 
     return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {

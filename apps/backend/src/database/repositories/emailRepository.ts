@@ -1,5 +1,7 @@
 import { DatabaseClient } from '../client';
-import { Email, EmailType } from '@prisma/client';
+import { Email } from '@prisma/client';
+import { EmailType } from '@xyne/shared';
+import { withWorkspaceScope } from '../tenant/context';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
@@ -94,13 +96,16 @@ export class EmailRepository {
     channelId: string,
   ): Promise<string[]> {
     if (externalMessageIds.length === 0) return [];
-    const emails = await this.db.email.findMany({
-      where: {
-        externalMessageId: { in: externalMessageIds },
-        channelId,
-      },
-      select: { externalMessageId: true },
-    });
+    // Ingestion dedupe: keyed on the target channel, not on the triggering user.
+    const emails = await withWorkspaceScope(() =>
+      this.db.email.findMany({
+        where: {
+          externalMessageId: { in: externalMessageIds },
+          channelId,
+        },
+        select: { externalMessageId: true },
+      }),
+    );
     return emails.map(e => e.externalMessageId);
   }
 

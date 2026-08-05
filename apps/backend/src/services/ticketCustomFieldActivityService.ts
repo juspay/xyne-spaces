@@ -1,5 +1,5 @@
-import { ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 

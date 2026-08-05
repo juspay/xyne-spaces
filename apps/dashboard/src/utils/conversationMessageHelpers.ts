@@ -8,7 +8,7 @@ import type { MessageWithOptionalNudgeCounts } from '../components/ui/MessageBub
  */
 export function initialMessageSummaryToMessage(
   summary: InitialMessageSummary,
-  workspaceId: string | null,
+  workspaceId: string,
 ): MessageWithOptionalNudgeCounts {
   return {
     messageId: summary.messageId,
@@ -39,7 +39,7 @@ export function initialMessageSummaryToMessage(
  * to the given userId (respects the visibleTo visibility filter).
  */
 export function getInitialMessageFromConversation(
-  conversation: { initial_message_md?: string | null; workspaceId: string | null },
+  conversation: { initial_message_md?: string | null; workspaceId: string },
   userId?: string,
 ): MessageWithOptionalNudgeCounts | null {
   const summary = parseInitialMessageMd(conversation.initial_message_md);

@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, NotificationDeliveryMethod, NotificationType, UserStatus, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -21,7 +21,21 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { logger } from '@/utils/logger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
 import { activityTrackingService } from '@/services/activityTrackingService';
-import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, parseForwardedMessageXml, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
+import { Platform,
+  serializeMessagePreviewMd,
+  serializeLinkPreviewMd,
+  parseLinkPreviewMd,
+  parseForwardedMessageXml,
+  type MessagePreviewData,
+  type TicketPreviewSnapshot,
+  ActivityClassification,
+  ActivityClassificationJobType,
+  AttachmentEntityType,
+  ChannelScopeType,
+  NotificationDeliveryMethod,
+  NotificationType,
+  UserStatus,
+  UserType, MessageType } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -37,6 +51,7 @@ import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
+import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, hasPendingRecommendations } from '@/services/threadSummaryService';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -281,7 +296,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         messageId: message.messageId,
         conversationId,
         channelId,
-        msgType: message.msgType,
+        msgType: message.msgType as MessageType,
         userId: senderId,
       });
     }
@@ -299,10 +314,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         where: { channelId },
         select: { userId: true }
       }),
-      db.userPreference.findUnique({
+      // Keyed on the sender rather than the ambient user, so it runs above the caller's own scope.
+      withWorkspaceScope(() => db.userPreference.findUnique({
         where: { userId: senderId },
         select: { allowThreadBroadcastMentions: true },
-      }),
+      })),
     ]);
 
     const channelProject = channel?.projectId
@@ -454,7 +470,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipants,
         mentionType,
         message.createdAt,
-        channel.scopeType,
+        channel.scopeType as ChannelScopeType,
         message.hasAttachment,
         dmPrefetchedData,
       );
@@ -810,6 +826,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // Queue Vespa indexing for message attachments
     await this.queueVespaIndexingForAttachments(messageId);
+
+    if (message.msgType === 'USER') {
+      this.keepThreadSummaryWarm(conversationId, channelId).catch(error => {
+        logger.error('[MessagesSideEffect] Failed to keep thread summary warm:', {
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  }
+
+  private async keepThreadSummaryWarm(conversationId: string, channelId: string): Promise<void> {
+    if (!isThreadSummaryEnabledForChannel(channelId)) return;
+    if (!(await hasPendingRecommendations(conversationId))) return;
+
+    await getOrGenerateThreadSummary(conversationId);
   }
 
   /**
@@ -1022,10 +1054,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeLinkPreviewMd(metadata);
     if (!md) return false;
 
-    await db.message.update({
+    // The message may have been posted by a bot rather than the ambient user,
+    // so the write runs above the caller's own scope.
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(conversationId);
 
@@ -1092,10 +1126,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     });
     if (!md) return;
 
-    await db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(conversationId);
 
@@ -1253,10 +1287,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeMessagePreviewMd(previewData);
     if (!md) return false;
 
-    await db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(sourceConversationId);
 
@@ -2060,17 +2094,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     content?: string,
   ): Promise<void> {
     try {
-      const recipients = await db.notification.findMany({
-        where: {
-          relatedEntityType: 'message',
-          relatedEntityId: messageId,
-          deliveryMethods: {
-            hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+      // Every recipient who was notified about this message, not just the editor, so this
+      // read is elevated — notifications are otherwise scoped to their own owner and mobile
+      // edit/delete sync would stop silently.
+      const recipients = await withWorkspaceScope(() =>
+        db.notification.findMany({
+          where: {
+            relatedEntityType: 'message',
+            relatedEntityId: messageId,
+            deliveryMethods: {
+              hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+            },
           },
-        },
-        select: { userId: true },
-        distinct: ['userId'],
-      });
+          select: { userId: true },
+          distinct: ['userId'],
+        }),
+      );
 
       await Promise.allSettled(
         recipients.map(({ userId }) =>

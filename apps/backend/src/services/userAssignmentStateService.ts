@@ -1,5 +1,4 @@
 import { DatabaseClient } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { redisService } from './redisService';
@@ -137,11 +136,16 @@ export class UserAssignmentStateService {
         currentStates.map(s => [s.userGroupId, { onCall: s.onCall, isActiveForAssignment: s.isActiveForAssignment }])
       );
 
-      // Denormalized tenant key for any newly-created state rows.
-      const ws = getContextOrNull()?.workspaceId;
-      if (!ws) {
-        throw new Error('workspaceId required: no tenant context');
-      }
+      // Denormalized tenant key for any newly-created state rows. Resolve each
+      // group's workspace directly from the UserGroup: reactivation runs in a
+      // background worker with no ambient tenant context, so getContextOrNull()
+      // would be null here (and a user can belong to groups in different
+      // workspaces, so a single ambient workspaceId would be wrong anyway).
+      const groups = await this.prisma.userGroup.findMany({
+        where: { id: { in: userGroupIds } },
+        select: { id: true, workspaceId: true },
+      });
+      const groupWorkspaceMap = new Map(groups.map(g => [g.id, g.workspaceId]));
 
       // Restore states from Redis backup.
       // - Only groups with active state (onCall or isActiveForAssignment) are stored in backup.
@@ -178,9 +182,16 @@ export class UserAssignmentStateService {
               },
             });
           } else {
+            const groupWorkspaceId = groupWorkspaceMap.get(userGroupId);
+            if (!groupWorkspaceId) {
+              logger.warn(
+                `⚠️ [ASSIGNMENT-STATE] No workspace found for user group ${userGroupId}; skipping state creation`
+              );
+              return Promise.resolve(null);
+            }
             return this.prisma.userAssignmentState.create({
               data: {
-                workspaceId: ws,
+                workspaceId: groupWorkspaceId,
                 userId,
                 userGroupId,
                 onCall: restoredOnCall,

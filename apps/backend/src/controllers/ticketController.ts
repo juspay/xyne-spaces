@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType, ActivityType, TicketReferenceRelation } from '@prisma/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { Ticket, MessageAttachment } from '@prisma/client';
+import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -49,7 +49,17 @@ import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType, FormContextType, FormEntityType, ReleaseTrackingMode, serializeTicketMd } from '@xyne/shared';
+import { BaseTicketType,
+  FormContextType,
+  FormEntityType,
+  ReleaseTrackingMode,
+  serializeTicketMd,
+  TicketStatusV2,
+  TicketPriority,
+  AttachmentEntityType,
+  ChannelType,
+  ActivityType,
+  TicketReferenceRelation, MessageType } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -125,7 +135,7 @@ export class TicketController {
         logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
-          const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+          const logWorkspaceId = workspaceId ?? currentWorkspaceId();
           if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
           if (db.vespaInsertionLogs) {
             await db.vespaInsertionLogs.create({
@@ -164,7 +174,7 @@ export class TicketController {
     }).catch(async (error) => {
       logger.error(`[TicketController] Error queuing Vespa job for ticket ${ticketId}:`, error);
       try {
-        const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+        const logWorkspaceId = workspaceId ?? currentWorkspaceId();
         if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
@@ -858,7 +868,7 @@ export class TicketController {
             conversationId,
             senderId: userId,
             content: `Ticket created in ${board?.name || 'Unknown Board'}: ${title}`,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
             metadata: { ticketId: ticket.id },
           }, initialMessageId);
           await messageMetadataService.syncInitialMessageMd(conversationId);
@@ -1232,13 +1242,13 @@ export class TicketController {
         id: ticket.id,
         title: ticket.title,
         description: ticket.description,
-        status: ticket.statusV2,
+        status: ticket.statusV2 as TicketStatusV2,
         createdBy: ticket.createdBy,
         updatedBy: ticket.updatedBy,
         assignedTo: ticket.assignedTo,
         conversationId: ticket.conversationId,
         eta: ticket.eta,
-        priority: ticket.priority,
+        priority: ticket.priority as TicketPriority,
         metadata: ticket.metadata as Record<string, any> | null,
         closedAt: ticket.closedAt,
         closedBy: ticket.closedBy,
@@ -1675,11 +1685,14 @@ export class TicketController {
     }
 
     for (const inputStep of inputSteps) {
-      const externalStepResponse = await prisma.externalStepResponse.findUnique({
-        where: {
-          workflowStepId: inputStep.id
-        }
-      });
+      // Any approver's response counts as answered, so it runs above the caller's own scope.
+      const externalStepResponse = await withWorkspaceScope(() =>
+        prisma.externalStepResponse.findUnique({
+          where: {
+            workflowStepId: inputStep.id
+          }
+        }),
+      );
 
       if (!externalStepResponse) {
         return inputStep;
@@ -1796,11 +1809,34 @@ export class TicketController {
         return;
       }
 
-      // Validate conversation exists
-      const conversation = await this.conversationRepository.findById(sourceConversationId);
+      // Validate the source conversation exists AND belongs to the caller's workspace.
+      const conversation = await this.conversationRepository.findByIdAndWorkspace(
+        sourceConversationId,
+        req.user!.workspaceId,
+      );
       if (!conversation) {
         res.status(400).json({ error: 'Source conversation not found' });
         return;
+      }
+
+      // Enforce access to the source conversation's channel (PRIVATE = participant only).
+      const sourceChannel = await this.channelRepository.findById(conversation.channelId);
+      if (!sourceChannel || sourceChannel.workspaceId !== req.user!.workspaceId) {
+        res.status(400).json({ error: 'Source conversation not found' });
+        return;
+      }
+      if (sourceChannel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId,
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - you do not have permission to access this conversation',
+            code: 'NOT_CONVERSATION_PARTICIPANT',
+          });
+          return;
+        }
       }
 
       // Determine which message to pull attachments from:
@@ -1810,6 +1846,14 @@ export class TicketController {
       if (!messageId) {
         res.json({ count: 0 });
         return;
+      }
+
+      if (sourceMessageId) {
+        const sourceMessage = await this.messageRepository.findById(sourceMessageId);
+        if (!sourceMessage || sourceMessage.conversationId !== sourceConversationId) {
+          res.status(403).json({ error: 'Access denied - message does not belong to the source conversation' });
+          return;
+        }
       }
 
       const attachments = await this.messageAttachmentRepository.findByMessageId(messageId);

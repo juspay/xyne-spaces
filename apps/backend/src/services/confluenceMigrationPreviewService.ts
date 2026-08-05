@@ -1,5 +1,5 @@
 import type { ConfluenceSectionMapping } from '@/services/confluence/confluenceImportService';
-import { CanvasVisibility } from '@prisma/client';
+import { CanvasVisibility } from '@xyne/shared';
 import { ConfluenceClient, type ConfluenceContentRestrictions, type ConfluenceUser } from '@/services/confluence/confluenceClient';
 import { resolveConfluenceCanvasVisibility, type ConfluenceRestrictionDecision } from '@/services/confluence/contentRestrictions';
 import {

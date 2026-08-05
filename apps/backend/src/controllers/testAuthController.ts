@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AccessType, AuthProvider } from '@xyne/shared';
 import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -7,7 +8,6 @@ import { UserSessionService } from '@/services/userSessionService';
 import { jwtService } from '@/services/jwtService';
 import { DatabaseClient } from '@/database/client';
 import { TestAuthSeeder } from '@/controllers/testAuthSeeder';
-import { AccessType, AuthProvider } from '@prisma/client';
 
 interface TestUserData {
   googleId: string;

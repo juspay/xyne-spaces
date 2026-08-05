@@ -10,7 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
 const VoiceShimmerMark = Mark.create({
@@ -191,6 +191,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
+      dockSlot,
     },
 
     ref,
@@ -879,7 +880,30 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             const tableNode = tableType.createChecked(null, pmRows);
             const prevScrollTop = view.dom.scrollTop;
-            dispatch(state.tr.replaceSelectionWith(tableNode));
+            const transaction = state.tr.replaceSelectionWith(tableNode);
+            const findInsertedTablePosition = (): number | null => {
+              let position: number | null = null;
+              transaction.doc.descendants((node, nodePosition) => {
+                if (position === null && node === tableNode) {
+                  position = nodePosition;
+                  return false;
+                }
+                return position === null;
+              });
+              return position;
+            };
+            const tablePosition = findInsertedTablePosition();
+
+            if (tablePosition !== null) {
+              const paragraphType = schema.nodes['paragraph'];
+              if (paragraphType) {
+                const afterTable = tablePosition + tableNode.nodeSize;
+                transaction.insert(afterTable, paragraphType.create());
+                transaction.setSelection(TextSelection.create(transaction.doc, afterTable + 1));
+              }
+            }
+
+            dispatch(transaction);
             view.dom.scrollTop = prevScrollTop;
           };
 
@@ -888,54 +912,24 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             event.preventDefault();
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlContent, 'text/html');
-            const topLevel = Array.from(doc.body.childNodes);
-            if (topLevel.length === 0) return false;
+            doc.querySelectorAll<HTMLElement>('.xyne-code-block').forEach(codeBlock => {
+              const pre = codeBlock.querySelector(':scope > pre');
+              if (pre) codeBlock.replaceWith(pre);
+            });
 
-            const extractTable = (
-              table: HTMLTableElement,
-            ): { rows: string[][]; hasHeader: boolean } => {
-              const hasHeader = !!table.querySelector('thead') || !!table.querySelector('th');
-              const rows = Array.from(table.querySelectorAll('tr'))
-                .map(tr =>
-                  Array.from(tr.querySelectorAll('td, th')).map(
-                    cell => cell.textContent?.trim() ?? '',
-                  ),
-                )
-                .filter(row => row.length > 0);
-              return { rows, hasHeader };
-            };
-            let inserted = false;
-            for (const node of topLevel) {
-              if (node.nodeType === Node.TEXT_NODE) {
-                const text = node.textContent ?? '';
-                if (text.trim()) {
-                  editor?.commands.insertContent(text);
-                  inserted = true;
-                }
-                continue;
-              }
-              if (node.nodeType !== Node.ELEMENT_NODE) continue;
-              const el = node as HTMLElement;
-
-              if (el.tagName.toLowerCase() === 'table') {
-                const { rows, hasHeader } = extractTable(el as HTMLTableElement);
-                if (rows.length === 0 || rows[0]?.length === 0) continue;
-                if (rows.reduce((sum, row) => sum + row.length, 0) > 500) {
-                  toast.error('Table content is too large', {
-                    description: 'Please paste a smaller table or copy the data as text.',
-                  });
-                  return true;
-                }
-                insertTableAtCursor(rows, hasHeader);
-                inserted = true;
-                continue;
-              }
-
-              editor?.commands.insertContent(el.outerHTML);
-              inserted = true;
+            const cellCount = Array.from(doc.querySelectorAll('table')).reduce(
+              (count, table) => count + table.querySelectorAll('td, th').length,
+              0,
+            );
+            if (cellCount > 500) {
+              toast.error('Table content is too large', {
+                description: 'Please paste a smaller table or copy the data as text.',
+              });
+              return true;
             }
 
-            return inserted;
+            editor?.commands.insertContent(doc.body.innerHTML);
+            return true;
           }
 
           const pastedText = clipboard?.getData('text');
@@ -988,8 +982,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               convertedExtension: getFileExtension(fileName),
             });
             void addDraftAttachments([file]);
-            editor?.commands.setContent('');
-            setContent('');
             return true;
           }
           return false;
@@ -1052,6 +1044,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
+        getHtml: (): string => editor?.getHTML() ?? '',
         isSuggestionOpen: (): boolean => {
           if (!editor) return false;
           const state = editor.state;
@@ -1409,6 +1402,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             {agentSlot}
           </div>
         </div>
+
+        {dockSlot}
 
         <div
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}

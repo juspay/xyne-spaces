@@ -17,14 +17,8 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
-import {
-  Conversation,
-  ConversationParticipation,
-  Message,
-  MessageType,
-  AttachmentEntityType,
-  ChannelScopeType,
-} from '@prisma/client';
+import { Conversation, Message } from '@prisma/client';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -359,7 +353,7 @@ export class ConversationService {
       const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
       if (!isParticipant && !isBot) {
         // Auto-add user as participant when they send first message
-        await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+        await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
         this.pushVespaJobForChannel(channelId, userId, channel?.workspaceId).catch((error) => {
           logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
@@ -446,6 +440,9 @@ export class ConversationService {
     if (processedFiles.length > 0) {
       // Fetch channel to get workspaceId for attachments
       const channel = await this.channelRepository.findById(channelId);
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel ${channelId} not found for attachments`);
+      }
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -460,7 +457,7 @@ export class ConversationService {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: conversation.conversationId,
-        workspaceId: channel?.workspaceId ?? '',
+        workspaceId: channel.workspaceId,
         metadata: file.metadata || {},
         ...(createdAt && { createdAt }),
       }));
@@ -546,7 +543,7 @@ export class ConversationService {
       messageId: message.messageId,
       conversationId: conversation.conversationId,
       channelId,
-      msgType: message.msgType,
+      msgType: message.msgType as MessageType,
       userId,
     });
 
@@ -598,7 +595,7 @@ export class ConversationService {
         await this.channelParticipantRepository.addParticipant(
           conversation.channelId,
           userId,
-          'MEMBER'
+          ChannelRole.MEMBER
         );
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
         this.pushVespaJobForChannel(conversation.channelId, userId).catch((error) => {
@@ -677,6 +674,9 @@ export class ConversationService {
 
     // Create attachment records if files were uploaded
     if (processedFiles.length > 0) {
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel ${conversation.channelId} not found for attachments`);
+      }
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -691,7 +691,7 @@ export class ConversationService {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: conversationId,
-        workspaceId: channel?.workspaceId ?? '',
+        workspaceId: channel.workspaceId,
         metadata: file.metadata || {},
         ...(createdAt && { createdAt }),
       }));
@@ -813,7 +813,7 @@ export class ConversationService {
       messageId: message.messageId,
       conversationId,
       content: message.content ?? undefined,
-      msgType: message.msgType,
+      msgType: message.msgType as MessageType,
       isBot,
       userId,
       createdAt: message.createdAt,
@@ -903,6 +903,9 @@ export class ConversationService {
       await this.messageAttachmentRepository.deleteByMessageId(message.messageId);
 
       // Create new attachment records
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel ${conversation.channelId} not found for attachments`);
+      }
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -917,7 +920,7 @@ export class ConversationService {
         createdBy: message.senderId,
         storageProvider: config.fileStorage.provider,
         conversationId: message.conversationId,
-        workspaceId: channel?.workspaceId ?? '',
+        workspaceId: channel.workspaceId,
         metadata: file.metadata || {},
       }));
       await this.messageAttachmentRepository.createMany(attachmentData);

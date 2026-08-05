@@ -1,6 +1,7 @@
-import { CommandType, CommandAccessibility, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { CommandType, CommandAccessibility } from '@xyne/shared';
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 
 export { CommandType, CommandAccessibility };
 
@@ -53,10 +54,10 @@ export class AppCommandRepository {
    * commandType is required — caller must specify COMMAND or SHORTCUT.
    */
   async findByAppId(appId: string, commandType: CommandType): Promise<AppCommand[]> {
-    return db.appCommand.findMany({
+    return (await db.appCommand.findMany({
       where: { appId, commandType },
       orderBy: { commandName: 'asc' },
-    });
+    })) as AppCommand[];
   }
 
   /**
@@ -122,8 +123,8 @@ export class AppCommandRepository {
       appId: appIdByInstall.get(r.installedAppId) as string,
       commandName: r.commandName,
       description: r.description,
-      commandType: r.commandType,
-      commandAccessibility: r.commandAccessibility,
+      commandType: r.commandType as CommandType,
+      commandAccessibility: r.commandAccessibility as CommandAccessibility,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));
@@ -188,7 +189,7 @@ export class AppCommandRepository {
         updatedAt: r.updatedAt,
         appName: meta?.appName ?? '',
       };
-    });
+    }) as AppCommandWithApp[];
   }
 
   /**
@@ -204,11 +205,11 @@ export class AppCommandRepository {
       where: { appId_commandName: { appId, commandName: input.commandName } },
     });
     if (existing) {
-      throw this.nameConflict(existing.commandType, input.commandName);
+      throw this.nameConflict(existing.commandType as CommandType, input.commandName);
     }
 
     // Denormalized tenant key sourced from the ambient tenant context.
-    const ws = getContextOrNull()?.workspaceId;
+    const ws = currentWorkspaceId();
     if (!ws) {
       throw new Error('workspaceId required: no tenant context');
     }
@@ -225,7 +226,7 @@ export class AppCommandRepository {
           createdAt: now,
           updatedAt: now,
         },
-      });
+      }) as AppCommand;
     } catch (error) {
       // A concurrent request inserted the same (appId, commandName) between our
       // findUnique above and this create — the DB unique constraint rejects it (P2002).
@@ -235,7 +236,7 @@ export class AppCommandRepository {
           where: { appId_commandName: { appId, commandName: input.commandName } },
         });
         if (raced) {
-          throw this.nameConflict(raced.commandType, input.commandName);
+          throw this.nameConflict(raced.commandType as CommandType, input.commandName);
         }
       }
       throw error;
@@ -257,16 +258,16 @@ export class AppCommandRepository {
       );
     }
     if (existing.commandType !== input.commandType) {
-      throw this.nameConflict(existing.commandType, input.commandName);
+      throw this.nameConflict(existing.commandType as CommandType, input.commandName);
     }
-    return db.appCommand.update({
+    return (await db.appCommand.update({
       where: { id: existing.id },
       data: {
         description: input.description,
         commandAccessibility: input.commandAccessibility,
         updatedAt: new Date(),
       },
-    });
+    })) as AppCommand;
   }
 
   private nameConflict(existingType: CommandType, commandName: string): CommandNameConflictError {

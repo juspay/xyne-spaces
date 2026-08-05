@@ -1,18 +1,17 @@
 // Bitbucket Webhook Service
 // Handles different Bitbucket webhook event types based on X-Event-Key header
 
-import { PRStatus } from '@prisma/client';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
+import { PRStatus, PRStatusEvent } from '@xyne/shared';
 import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
 import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { logger } from '@/utils/logger';
 import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhooks';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -61,7 +60,7 @@ export class BitbucketWebhookService {
     // Unauthenticated webhook (no req.user): open an explicit tenant scope from the
     // internal workspaceId in the request URL so the workspaceId stamper fills the
     // ticket_assignments / user_workload_mappings writes this event triggers downstream.
-    return runWithContext({ userId: 'bitbucket-webhook', workspaceId }, async () => {
+    return runAsServiceActor('bitbucket-webhook', workspaceId, async () => {
       try {
         logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
 
@@ -612,7 +611,7 @@ export class BitbucketWebhookService {
     await prTicketStatusSyncService.syncTicketStatusOnPRChange({
       prId: context.prId,
       prUrl: context.prUrl,
-      newStatus: trackedPr.status,
+      newStatus: trackedPr.status as PRStatus,
       prAuthor: context.prAuthor,
       prAuthorEmail: context.prAuthorEmail,
       prEvent: PRStatusEvent.DELETED,

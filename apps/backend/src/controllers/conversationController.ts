@@ -15,7 +15,8 @@ import { UserRepository } from '../database/repositories/users';
 import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
-import { Message, MessageType, AttachmentEntityType, ChannelScopeType } from '@prisma/client';
+import { Message } from '@prisma/client';
+import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -26,6 +27,20 @@ import { logger } from '../utils/logger';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { unreadService } from '../services/unreadService';
+import {
+  canRecommendThreadSummary,
+  getOrGenerateThreadSummary,
+  getCachedSummary,
+  deleteCachedSummary,
+  isThreadSummaryEnabledForChannel,
+  consumeThreadRecommendation,
+  hasPendingRecommendations,
+} from '@/services/threadSummaryService';
+import {
+  getTwinReplyDraftById,
+  deleteTwinReplyDraftById,
+  type TwinReplyDraft,
+} from '@/services/twinReplyDraftService';
 import { MessagesSideEffectHandler } from '../zero/side-effects/tables/messages-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
@@ -38,7 +53,9 @@ import {
 } from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
+import { RecentConversationsRepository } from '../database/repositories/recentConversationsRepository';
 import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
+import { serializeRecentChannelConversations } from '../serializers/recentConversationsSerializer';
 import {
   serializeConversationMessageRow,
   type SerializedConversationMessageRow,
@@ -85,6 +102,7 @@ export class ConversationController {
   private channelUserStatusRespository: ChannelUserStatusRepository;
   private conversationV3Repository: ConversationV3Repository;
   private conversationParticipantRepository: ConversationParticipantRepository;
+  private recentConversationsRepository: RecentConversationsRepository;
 
   constructor() {
     this.conversationRepository = new ConversationRepository();
@@ -97,6 +115,7 @@ export class ConversationController {
     this.channelUserStatusRespository = new ChannelUserStatusRepository();
     this.conversationV3Repository = new ConversationV3Repository();
     this.conversationParticipantRepository = new ConversationParticipantRepository();
+    this.recentConversationsRepository = new RecentConversationsRepository();
   }
 
   /**
@@ -169,7 +188,13 @@ export class ConversationController {
         return;
       }
       const channel = await this.channelRepository.findById(conversation.channelId);
-      if (channel?.visibility === 'PRIVATE') {
+      // A missing channel must deny rather than fall through: the optional chain below
+      // would read as "not PRIVATE" and skip the participant check altogether.
+      if (!channel || channel.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      if (channel.visibility === 'PRIVATE') {
         const isParticipant = await this.channelParticipantRepository.isParticipant(
           conversation.channelId,
           userId
@@ -253,6 +278,28 @@ export class ConversationController {
       res.status(200).json(serialized);
     } catch (error) {
       logger.error('Error fetching conversation by message ID:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getRecentVisitedConversations = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const days = config.recentVisitedConversations.lookbackDays;
+      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const channels =
+        await this.recentConversationsRepository.getRecentVisitedChannelConversations(
+          userId,
+          cutoff
+        );
+
+      res.status(200).json({
+        days,
+        channels: serializeRecentChannelConversations(channels),
+      });
+    } catch (error) {
+      logger.error('Error fetching recent visited conversations:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -389,9 +436,11 @@ export class ConversationController {
         return;
       }
 
-      // Check if channel exists
+      // Check if channel exists. The repository read is ACL-scoped, so a channel in
+      // another workspace already resolves to null; the explicit comparison keeps the
+      // boundary stated at the route rather than inherited from the layer below.
       const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
+      if (!channel || channel.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ error: 'Channel not found' });
         return;
       }
@@ -404,7 +453,7 @@ export class ConversationController {
       if (!isParticipant) {
         // Only auto-add for PUBLIC channels
         if (channel.visibility === 'PUBLIC') {
-          await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+          await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         } else {
           // PRIVATE channels require explicit invitation
           res.status(403).json({
@@ -450,7 +499,7 @@ export class ConversationController {
           channelId,
           conversationId: conversation.conversationId,
           senderId: userId,
-          scopeType: channel.scopeType,
+          scopeType: channel.scopeType as ChannelScopeType,
         });
 
         // Handle bot command with the new conversation ID
@@ -488,7 +537,7 @@ export class ConversationController {
         channelId,
         conversationId: conversation.conversationId,
         senderId: userId,
-        scopeType: channel.scopeType,
+        scopeType: channel.scopeType as ChannelScopeType,
       });
 
       // Create attachment records if files were uploaded
@@ -681,9 +730,11 @@ export class ConversationController {
       const { channelId } = req.params;
       const userId = req.user!.id;
 
-      // Check if channel exists
+      // Check if channel exists. The repository read is ACL-scoped, so a channel in
+      // another workspace already resolves to null; the explicit comparison keeps the
+      // boundary stated at the route rather than inherited from the layer below.
       const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
+      if (!channel || channel.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ error: 'Channel not found' });
         return;
       }
@@ -963,7 +1014,7 @@ export class ConversationController {
           await this.channelParticipantRepository.addParticipant(
             conversation.channelId,
             userId,
-            'MEMBER'
+            ChannelRole.MEMBER
           );
         } else {
           // PRIVATE channels require explicit invitation
@@ -2020,6 +2071,34 @@ export class ConversationController {
         res.status(400).json({ error: 'conversationId is required' });
         return;
       }
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      // Require the caller to have access to this conversation's channel before returning its
+      // live agent-progress. Resolve conversation -> channel and require the same workspace +
+      // membership as reading the conversation itself (PUBLIC channel = any workspace member,
+      // PRIVATE = participant).
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const progressChannel = await this.channelRepository.findById(conversation.channelId);
+      if (!progressChannel || progressChannel.workspaceId !== req.user?.workspaceId) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      if (progressChannel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(conversation.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - not a channel participant' });
+          return;
+        }
+      }
+
       const key = `agent_progress:conversation:${conversationId}`;
       const raw = await redisService.getAllHashFields(key);
 
@@ -2064,6 +2143,206 @@ export class ConversationController {
       res.status(200).json({ success: true, data });
     } catch (error) {
       logger.error('[agentProgress/get] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      if (!isThreadSummaryEnabledForChannel(conversation.channelId)) {
+        res.status(204).end();
+        return;
+      }
+
+      const result = await getOrGenerateThreadSummary(conversationId, { enforceMinMessages: false });
+      if (!result) {
+        res.status(204).end();
+        return;
+      }
+
+      res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      logger.error('[getSummary] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getRecommendation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation || !isThreadSummaryEnabledForChannel(conversation.channelId)) {
+        res.status(200).json({ success: true, recommended: false, enabled: false });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      if (!(await canRecommendThreadSummary(conversationId))) {
+        res.status(200).json({ success: true, recommended: false, enabled: true });
+        return;
+      }
+
+      const recommended = await consumeThreadRecommendation(conversationId, userId);
+      if (!recommended) {
+        res.status(200).json({ success: true, recommended: false, enabled: true });
+        return;
+      }
+
+      const cached = await getCachedSummary(conversationId);
+      const summary = cached && { content: cached.content, cached: true, asOfMessageId: cached.asOfMessageId };
+      res.status(200).json({ success: true, recommended: true, enabled: true, summary });
+
+      if (!(await hasPendingRecommendations(conversationId))) {
+        await deleteCachedSummary(conversationId);
+      }
+    } catch (error) {
+      logger.error('[getRecommendation] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+
+
+  private forwardTwinDraftAction = async (
+    draft: TwinReplyDraft,
+    action: 'approve' | 'decline',
+    actorUserId: string,
+    editedMessage?: string,
+  ): Promise<{ ok: boolean; status: number; error?: string; posted?: { channelId: string; conversationId?: string } }> => {
+    const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
+    const url = `${base}/claw/api/v1/internal/twin-draft/action`;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.internalS2sKey ? { 'x-s2s-key': config.internalS2sKey } : {}),
+        },
+        body: JSON.stringify({
+          action,
+          actorUserId,
+          ...(editedMessage !== undefined ? { editedMessage } : {}),
+          draft,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const text = await resp.text().catch(() => '');
+      if (!resp.ok) {
+        return { ok: false, status: resp.status, error: text.slice(0, 300) };
+      }
+      let posted: { channelId: string; conversationId?: string } | undefined;
+      try {
+        const parsed = JSON.parse(text) as { posted?: { channelId?: string; conversationId?: string } };
+        if (parsed?.posted?.channelId) {
+          posted = {
+            channelId: parsed.posted.channelId,
+            ...(parsed.posted.conversationId ? { conversationId: parsed.posted.conversationId } : {}),
+          };
+        }
+      } catch {
+      }
+      return { ok: true, status: 200, ...(posted ? { posted } : {}) };
+    } catch (err) {
+      logger.error('[twin-draft-action] forward to claw-auth failed:', err);
+      return { ok: false, status: 502, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  approveReplyDraft = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { draftId } = req.params;
+      const userId = req.user!.id;
+      if (!draftId) {
+        res.status(400).json({ error: 'Draft ID is required' });
+        return;
+      }
+      const draft = await getTwinReplyDraftById(draftId, userId);
+      if (!draft) {
+        res.status(404).json({ error: 'No draft to approve', code: 'NO_DRAFT' });
+        return;
+      }
+      const editedRaw = (req.body as { editedMessage?: unknown } | undefined)?.editedMessage;
+      const editedMessage = typeof editedRaw === 'string' ? editedRaw : undefined;
+
+      const result = await this.forwardTwinDraftAction(draft, 'approve', userId, editedMessage);
+      if (!result.ok) {
+        res.status(502).json({ error: 'Failed to deliver reply', detail: result.error });
+        return;
+      }
+      await deleteTwinReplyDraftById(draftId, userId);
+      res.status(200).json({ success: true, ...(result.posted ? { posted: result.posted } : {}) });
+    } catch (error) {
+      logger.error('[approveReplyDraft] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  declineReplyDraft = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { draftId } = req.params;
+      const userId = req.user!.id;
+      if (!draftId) {
+        res.status(400).json({ error: 'Draft ID is required' });
+        return;
+      }
+      const draft = await getTwinReplyDraftById(draftId, userId);
+      if (!draft) {
+        res.status(204).end(); // already gone — treat as success
+        return;
+      }
+      await this.forwardTwinDraftAction(draft, 'decline', userId); // best-effort feedback
+      await deleteTwinReplyDraftById(draftId, userId);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[declineReplyDraft] error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

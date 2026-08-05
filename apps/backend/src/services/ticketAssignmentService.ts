@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { TicketStatusV2, UserResponsibility } from '@prisma/client';
+import { TicketStatusV2, UserResponsibility } from '@xyne/shared';
 import { evaluateAllRoles, evaluateAssignmentRule, evaluateRoleSlots } from '@/utils/assignmentEngine';
 import { logger } from '@/utils/logger';
 import { syncUserWorkload } from '@/utils/workloadUtils';

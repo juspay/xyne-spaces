@@ -135,6 +135,7 @@ export class TicketMetadataBackfillController {
     }
 
     return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {

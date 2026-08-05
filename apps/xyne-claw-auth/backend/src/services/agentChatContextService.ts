@@ -99,7 +99,7 @@ interface ResolvedContextSection {
 }
 
 const MAX_CONTEXT_TOTAL = 20;
-const PER_TYPE_LIMIT = 5;
+const PER_TYPE_LIMIT = 20;
 const INLINE_THRESHOLD = 2_000;
 const TICKET_MESSAGE_LIMIT = 12;
 

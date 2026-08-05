@@ -1,0 +1,16 @@
+/* Sonner close/dismiss button overrides.
+ * Keep the toast dismiss affordance borderless across richColors states. */
+[data-sonner-toast] [data-close-button] {
+  border: 0 !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+}
+
+[data-sonner-toast] [data-close-button]:hover,
+[data-sonner-toast] [data-close-button]:focus,
+[data-sonner-toast] [data-close-button]:focus-visible {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background-color: transparent !important;
+}
