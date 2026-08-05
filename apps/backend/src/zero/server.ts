@@ -1,4 +1,4 @@
-import { mustGetQuery, mustGetMutator } from '@rocicorp/zero';
+import { mustGetQuery, mustGetMutator, type AnyCustomQuery } from '@rocicorp/zero';
 import { handleMutateRequest, handleQueryRequest } from '@rocicorp/zero/server';
 import { zeroNodePg } from '@rocicorp/zero/server/adapters/pg';
 // Zero internal APIs for fallback system (mapped via #imports in package.json)
@@ -32,6 +32,9 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+
+const mustGetBackendQuery = (name: string): AnyCustomQuery =>
+  mustGetQuery(queries as never, name) as AnyCustomQuery;
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -371,7 +374,7 @@ export async function handleQueries(request: Request): Promise<any> {
     const result = await handleQueryRequest(
       (queryName, args) => {
         capturedQueryName = queryName;
-        const query = mustGetQuery(queries, queryName);
+        const query = mustGetBackendQuery(queryName);
         const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
         return query.fn({ args, ctx: context });
       },
@@ -451,7 +454,7 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetQuery(queries, req.name);
+          const queryDef = mustGetBackendQuery(req.name);
           const query = queryDef.fn({
             args: req.args || {},
             ctx: context,
@@ -514,7 +517,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetQuery(queries, req.name);
+          const queryDef = mustGetBackendQuery(req.name);
           const query = queryDef.fn({
             args: req.args || {},
             ctx: context,

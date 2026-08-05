@@ -318,7 +318,7 @@ export class TicketRepository {
     }
 
     const oldStageName = currentTicket.stageName;
-    const oldStatusV2 = currentTicket.statusV2;
+    const oldStatusV2 = currentTicket.statusV2 as TicketStatusV2;
     const stageChanged = oldStageName !== newStageName;
 
     // Fetch current and target stages to determine movement direction
@@ -337,7 +337,7 @@ export class TicketRepository {
       throw new Error(`Target stage "${newStageName}" not found in board ${currentTicket.boardId}`);
     }
 
-    const newStatusV2 = targetStage.defaultTicketStatusV2;
+    const newStatusV2 = targetStage.defaultTicketStatusV2 as TicketStatusV2;
     const statusChanged = newStatusV2 !== oldStatusV2;
     let guardedUpdatedTicket = null;
     if (options.allowedCurrentStatuses) {

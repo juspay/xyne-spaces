@@ -1,6 +1,3 @@
--- AlterEnum
-ALTER TYPE "public"."BoardType" ADD VALUE 'FLOW';
-
 -- AlterTable
 ALTER TABLE "public"."boards" ADD COLUMN     "flowPlan" TEXT;
 

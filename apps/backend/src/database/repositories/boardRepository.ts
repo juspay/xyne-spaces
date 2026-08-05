@@ -273,10 +273,11 @@ export class BoardRepository {
   }
 
   async findBoardById(id: string): Promise<{ name: string; boardType: BoardType } | null> {
-    return await this.db.board.findUnique({
+    const board = await this.db.board.findUnique({
       where: { id },
       select: { name: true, boardType: true },
     });
+    return board ? { ...board, boardType: board.boardType as BoardType } : null;
   }
 
   async findDefaultBoardIdForProject(projectId: string): Promise<string> {

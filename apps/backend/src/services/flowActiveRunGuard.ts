@@ -1,4 +1,4 @@
-import { TicketStatusV2 } from '@prisma/client';
+import { TicketStatusV2 } from '@xyne/shared';
 
 interface UpdateWhileFlowRunActiveInput<TTransaction, TResult> {
   runTransaction: (

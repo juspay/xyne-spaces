@@ -1,4 +1,8 @@
-import { createBuilder, defineQueries } from '@rocicorp/zero';
+import {
+  createBuilder,
+  defineQueries,
+  type AnyQueryRegistry,
+} from '@rocicorp/zero';
 import {
   BaseTicketType,
   BoardType,
@@ -520,7 +524,7 @@ const applyCanvasVisibilityQueryFilter = (
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
   query.related('userStatuses', (status: any) => status.where('userId', userId));
 
-export const queries = defineQueries({
+export const queries: AnyQueryRegistry = defineQueries({
   // Conversation and Message Queries
   channelConversations: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean() }),

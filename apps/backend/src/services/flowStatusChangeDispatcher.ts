@@ -1,4 +1,4 @@
-import type { TicketStatusV2 } from '@prisma/client';
+import type { TicketStatusV2 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 export interface CommittedTicketStatusChange {

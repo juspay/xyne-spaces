@@ -1,15 +1,13 @@
+import { Prisma } from '@prisma/client';
+import { v5 as uuidv5 } from 'uuid';
 import {
   BoardType,
   ChannelVisibility,
-  MessageType,
-  Prisma,
-  TicketPriority,
-  TicketStatusV2,
-} from '@prisma/client';
-import { v5 as uuidv5 } from 'uuid';
-import {
   FLOW_STAGE_NAMES,
   FlowPlanModel,
+  MessageType,
+  TicketPriority,
+  TicketStatusV2,
   deserializeFlowPlan,
   flowDecisionOutcomeKey,
   flowGateOf,
@@ -602,7 +600,7 @@ async function getInstantiatedSteps(
       byPlanNodeId.set(flow.planNodeId, {
         ticketId: ticket.id,
         xyneId: ticket.xyneId,
-        statusV2: ticket.statusV2,
+        statusV2: ticket.statusV2 as TicketStatusV2,
         stageName: ticket.stageName,
         ...(flow.nodeSnapshot && { nodeSnapshot: flow.nodeSnapshot }),
         ...(flow.decisionOutcomes && { decisionOutcomes: flow.decisionOutcomes }),
