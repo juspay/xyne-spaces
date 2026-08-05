@@ -19,7 +19,9 @@ export function useTwinDraftBadge(conversationId?: string): TwinDraftBadge | und
       if (typeof d.metadata === 'string') {
         try {
           action = (JSON.parse(d.metadata) as { action?: TwinDraftAction }).action ?? 'reply';
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       if (!newest || d.createdAt > newest.createdAt) newest = { createdAt: d.createdAt, action };
     }
