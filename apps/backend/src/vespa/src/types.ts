@@ -208,7 +208,6 @@ export interface VespaChatContainerDocument extends VespaDocument {
   lastSyncedAt: number;
   topic: string;
   description: string;
-  chunks: string[];
   isArchived: boolean;
   memberCount: number;
 }
@@ -444,7 +443,6 @@ export interface VespaSamTranscriptDocument extends VespaDocument {
   type: string;
   duration: string;
   meetingSummary: string; // Extracted for Vespa-native embedding generation (renamed from 'summary' - reserved in Vespa)
-  chunks?: string[];      // Pre-chunked meetingSummary for chunk-level embeddings
   chapters?: string;      // JSON.stringify'd Chapter[]
   actionItems?: string;   // JSON.stringify'd ActionItem[]
   others?: string;        // JSON.stringify'd OtherItem[] — free-form insights (speaker, content, tags)
@@ -528,7 +526,6 @@ export interface VespaAppDocument {
   version: number;
   name: string;
   description: string;
-  chunks: string[];
   createdBy: string;
   creatorName: string;
   creatorEmail: string;

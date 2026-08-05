@@ -78,15 +78,6 @@ schema sam_transcript {
       indexing: index | attribute | summary
       index: enable-bm25
     }
-
-    # Pre-chunked meeting summary supplied by the backend. The other analysis
-    # fields retain their existing scalar fields and embeddings.
-    field chunks type array<string> {
-      indexing: index | summary
-      index {
-        enable-bm25
-      }
-    }
   }
 
   field meetingSummary_embeddings type tensor<bfloat16>(v[DIMS]) {
@@ -124,16 +115,8 @@ schema sam_transcript {
     }
   }
 
-  # Per-chunk embeddings (one vector per `chunks` element).
-  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
-    indexing: input chunks | embed hf-embedder | attribute | index
-    attribute {
-      distance-metric: angular
-    }
-  }
-
   fieldset default {
-    fields: meetingSummary, chapters, actionItems, others, qna, chunks, meetCode, participants, merchants
+    fields: meetingSummary, chapters, actionItems, others, qna, meetCode, participants, merchants
   }
 
   rank-profile initial {
@@ -151,7 +134,7 @@ schema sam_transcript {
     }
 
     function vector_score() {
-      expression: max(max(max(max(max(closeness(field, meetingSummary_embeddings), closeness(field, chapters_embeddings)), closeness(field, actionItems_embeddings)), closeness(field, others_embeddings)), closeness(field, qna_embeddings)), closeness(field, chunk_embeddings))
+      expression: max(max(max(max(closeness(field, meetingSummary_embeddings), closeness(field, chapters_embeddings)), closeness(field, actionItems_embeddings)), closeness(field, others_embeddings)), closeness(field, qna_embeddings))
     }
 
     function combined_nativeRank() {

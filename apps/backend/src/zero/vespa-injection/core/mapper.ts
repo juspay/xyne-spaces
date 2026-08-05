@@ -31,7 +31,6 @@ import {
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
-import { chunkPlainText } from '@/utils/vespaTextValidation';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -349,7 +348,6 @@ export const mapChannel = async (
     docId: args.id,
     channelName: channelName,
     description: args.description || '',
-    chunks: chunkPlainText(args.description || ''),
     createdAt: toTimestamp(args.createdAt),
     updatedAt: toTimestamp(args.updatedAt),
     permissions: channelParticipants,
@@ -551,7 +549,6 @@ export const mapApp = async (args: Apps): Promise<VespaAppDocument> => {
     version: args.version,
     name: args.name,
     description: args.description ?? '',
-    chunks: chunkPlainText(args.description ?? ''),
     createdBy: args.createdBy,
     creatorName: creator?.name ?? '',
     creatorEmail: creator?.email ?? '',
@@ -1368,6 +1365,26 @@ export const mapFile = async (
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
   };
+};
+
+/**
+ * Chunk a plain-text string into segments of at most `maxLen` characters,
+ * splitting on word boundaries so search snippets are coherent.
+ */
+const chunkPlainText = (text: string, maxLen = 1500): string[] => {
+  const words = text.split(/\s+/).filter(Boolean);
+  const chunks: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current.length + word.length + 1 > maxLen && current.length > 0) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [''];
 };
 
 /**

@@ -72,27 +72,6 @@ export function cleanVespaChunks(chunks: string[]): CleanedChunksResult {
 }
 
 /**
- * Chunk a plain-text string into segments of at most `maxLen` characters,
- * splitting on word boundaries so search snippets are coherent. Shared by the
- * Vespa mappers/transformers that populate `chunks` for chunk-level embeddings.
- */
-export function chunkPlainText(text: string, maxLen = 1500): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const chunks: string[] = [];
-  let current = '';
-  for (const word of words) {
-    if (current.length + word.length + 1 > maxLen && current.length > 0) {
-      chunks.push(current);
-      current = word;
-    } else {
-      current = current ? `${current} ${word}` : word;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks.length > 0 ? chunks : [''];
-}
-
-/**
  * Check if text contains any replacement characters
  */
 export function hasReplacementCharacters(input: string): boolean {
