@@ -1,5 +1,4 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
 import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent } from './redisService';
@@ -11,6 +10,7 @@ import { logger } from '@/utils/logger';
 import { authMiddleware } from '../middleware/auth';
 import { notificationService } from '@/notification-service';
 import { type NotificationData } from './notificationService';
+import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
@@ -226,12 +226,12 @@ class WebSocketService {
 
     socket.join(`user:${userId}`);
 
-    // Observe-only: log (once per window) when a socket exceeds the candidate
-    // inbound-event budget, but never drop events. Enforcement is deferred.
+    // Inbound-event budget per socket per window. Events beyond the budget are dropped;
+    // the first breach in each window is logged.
     let evtCount = 0;
     let evtWindowStart = Date.now();
     let evtWindowLogged = false;
-    const SOCKET_EVT_OBSERVE_THRESHOLD = 300;
+    const SOCKET_EVT_BUDGET = 300;
     const SOCKET_EVT_WINDOW_MS = 10_000;
     socket.use((_packet, next) => {
       const now = Date.now();
@@ -240,9 +240,12 @@ class WebSocketService {
         evtCount = 0;
         evtWindowLogged = false;
       }
-      if (++evtCount > SOCKET_EVT_OBSERVE_THRESHOLD && !evtWindowLogged) {
+      if (++evtCount > SOCKET_EVT_BUDGET && !evtWindowLogged) {
         evtWindowLogged = true;
-        logger.warn(`[WS-EVT-OBSERVE] Socket ${socket.id} (user ${userId}) exceeded ${SOCKET_EVT_OBSERVE_THRESHOLD} events in ${SOCKET_EVT_WINDOW_MS}ms (not enforced)`);
+        logger.warn(`[WS-EVT-LIMIT] Socket ${socket.id} (user ${userId}) exceeded ${SOCKET_EVT_BUDGET} events in ${SOCKET_EVT_WINDOW_MS}ms — further events in this window are dropped`);
+      }
+      if (evtCount > SOCKET_EVT_BUDGET) {
+        return;
       }
       next();
     });
@@ -295,7 +298,7 @@ class WebSocketService {
         if (!currentStatus || currentStatus.status !== 'AWAY') {
           const onlineUsers = await userStatusService.setUserStatus(
             userId,
-            UserPresenceStatus.ONLINE
+            'ONLINE'
           );
           // Send initial state directly to connecting socket (broadcast may race with socket setup)
           socket.emit('user_status_sync', {
@@ -712,7 +715,7 @@ class WebSocketService {
       logger.info(`[UPDATE-STATUS] User ${userName || userEmail} requested status change to ${status}`);
       
       // Update status in Redis and broadcast to all clients
-      await userStatusService.setUserStatus(userId, status as UserPresenceStatus);
+      await userStatusService.setUserStatus(userId, status);
       
       // Send confirmation directly to the user who changed their status
       socket.emit('user_status_updated', {
@@ -938,12 +941,15 @@ class WebSocketService {
       const { userId } = socket;
       const channels = Array.isArray(data?.channels) ? data.channels : [];
       const conversations = Array.isArray(data?.conversations) ? data.conversations : [];
-      // Observe-only: no cap enforced (see needs-design). Log large requests so
-      // real subscription counts inform the eventual bound.
-      const BULK_SUB_OBSERVE_THRESHOLD = 500;
+      // Cap enforced: a single request may not exceed this many subscriptions.
+      const BULK_SUB_MAX = 500;
       const requestedCount = channels.length + conversations.length;
-      if (requestedCount > BULK_SUB_OBSERVE_THRESHOLD) {
-        logger.warn(`[BULK-SUB-OBSERVE] Socket ${socket.id} (user ${userId}) requested ${requestedCount} subscriptions (no cap enforced)`);
+      if (requestedCount > BULK_SUB_MAX) {
+        logger.warn(`[BULK-SUB] Socket ${socket.id} (user ${userId}) requested ${requestedCount} subscriptions — capped at ${BULK_SUB_MAX}`);
+        socket.emit('subscription_error', {
+          message: `Too many subscriptions requested; the limit is ${BULK_SUB_MAX}.`,
+        });
+        return;
       }
 
       // 🔒 Authorize every requested session against the user's channel membership /

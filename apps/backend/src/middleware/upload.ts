@@ -6,6 +6,52 @@ import { AppError } from './errorHandler';
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
 
+/**
+ * Content types refused at upload. A blocklist rather than an allowlist on purpose: this
+ * surface accepts arbitrary business files, and an allowlist breaks the moment someone
+ * uploads a type nobody enumerated.
+ */
+const BLOCKED_UPLOAD_MIME_TYPES = new Set([
+  'text/html',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'application/xml',
+  'text/xml',
+  'application/x-msdownload',
+  'application/x-msdos-program',
+  'application/x-sh',
+  'application/x-shellscript',
+  'application/java-archive',
+  'application/x-httpd-php',
+]);
+
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  '.html', '.htm', '.xhtml', '.svg', '.xml',
+  '.exe', '.dll', '.bat', '.cmd', '.com', '.msi', '.scr',
+  '.sh', '.bash', '.ps1', '.jar', '.php',
+]);
+
+export function isBlockedUpload(mimetype: string | undefined, originalName: string | undefined): boolean {
+  const mime = (mimetype ?? '').split(';')[0].trim().toLowerCase();
+  if (BLOCKED_UPLOAD_MIME_TYPES.has(mime)) return true;
+  const name = (originalName ?? '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  if (dot === -1) return false;
+  return BLOCKED_UPLOAD_EXTENSIONS.has(name.slice(dot));
+}
+
+const uploadFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  if (isBlockedUpload(file.mimetype, file.originalname)) {
+    logger.warn('[UPLOAD] Rejected file type', {
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+    });
+    cb(new AppError('This file type is not allowed', 415));
+    return;
+  }
+  cb(null, true);
+};
+
 // Generic streaming storage engine for message attachments.
 // Streams directly to object storage without buffering in memory.
 const streamingStorage: multer.StorageEngine = {
@@ -96,6 +142,7 @@ const streamingStorage: multer.StorageEngine = {
 // Common multer configuration for file uploads
 export const uploadConfig = multer({
   storage: multer.memoryStorage(),
+  fileFilter: uploadFileFilter,
   limits: {
     fileSize: MAX_FILE_SIZE_BYTES,
     files: 10 // Max 10 files per request
@@ -143,17 +190,20 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
 
 export const collectionUpload = multer({
   storage: makeCollectionStreamingStorage('collectionId'),
+  fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024, files: 50 },
 });
 
 export const versionUpload = multer({
   storage: makeCollectionStreamingStorage('itemId'),
+  fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>
   multer({
     storage: streamingStorage,
+    fileFilter: uploadFileFilter,
     limits: {
       fileSize: fileSizeBytes,
       files: maxFiles,

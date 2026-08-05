@@ -45,3 +45,20 @@ export const webhookLimiter: RateLimitRequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/**
+ * Credential-facing routes: login, workspace login, org creation, password reset. Tighter
+ * than generalLimiter because repeated attempts here are rarely legitimate.
+ */
+export const authLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req): string => req.ip ?? 'unknown',
+  message: {
+    success: false,
+    error: 'Too many authentication attempts from this IP. Please try again later.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
