@@ -1,6 +1,6 @@
 import { db } from '@/database/client';
 import { config } from '@/config/env';
-import { MessageType } from '@prisma/client';
+import { MessageType } from '@xyne/shared';
 import { LLMClient, createUserMessage } from '@framework';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';

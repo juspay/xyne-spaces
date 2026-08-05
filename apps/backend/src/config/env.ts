@@ -827,6 +827,7 @@ export const config = {
     minSummaryMaxTokens: envVars.THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS as number,
     maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
     transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
+  },
   desk: {
     betaChannels: (envVars.DESK_BETA_CHANNELS as string)
       .split(',')

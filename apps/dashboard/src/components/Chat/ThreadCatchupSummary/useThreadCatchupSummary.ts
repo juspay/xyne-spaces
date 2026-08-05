@@ -39,7 +39,7 @@ function readCachedSummary(key: string | undefined): CachedSummary | undefined {
     if (typeof parsed.content === 'string' && typeof parsed.asOfMessageId === 'string') {
       return { content: parsed.content, asOfMessageId: parsed.asOfMessageId };
     }
-  } catch {}
+  } catch { /* ignore */ }
   return undefined;
 }
 
@@ -47,7 +47,7 @@ function writeCachedSummary(key: string | undefined, value: CachedSummary): void
   if (!key) return;
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 export function useThreadCatchupSummary(
