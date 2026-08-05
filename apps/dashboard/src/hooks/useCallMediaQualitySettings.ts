@@ -32,7 +32,7 @@ export const CALL_MEDIA_QUALITY_CONFIG: Record<
 
 const DEFAULT_SETTINGS: CallMediaQualitySettings = {
   videoQuality: '2160p',
-  screenShareQuality: '1080p',
+  screenShareQuality: '2160p',
 };
 
 const listeners = new Set<() => void>();
