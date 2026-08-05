@@ -230,6 +230,7 @@ export class CallParticipantCountBackfillController {
     } while (cursor);
 
     return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<void> {

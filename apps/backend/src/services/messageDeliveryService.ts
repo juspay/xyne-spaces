@@ -48,7 +48,7 @@ async function resolveSideEffectCtx(userId: string): Promise<QueryContext> {
 
   return {
     userID: user.id,
-    workspaceId: user.workspaceId ?? '',
+    workspaceId: user.workspaceId,
     role: user.role ?? '',
     orgRole: '',
     memberId: user.orgMemberId ?? '',

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -312,10 +313,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         where: { channelId },
         select: { userId: true }
       }),
-      db.userPreference.findUnique({
+      // Keyed on the sender rather than the ambient user, so it runs above the caller's own scope.
+      withWorkspaceScope(() => db.userPreference.findUnique({
         where: { userId: senderId },
         select: { allowThreadBroadcastMentions: true },
-      }),
+      })),
     ]);
 
     const channelProject = channel?.projectId
@@ -1035,10 +1037,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeLinkPreviewMd(metadata);
     if (!md) return false;
 
-    await db.message.update({
+    // The message may have been posted by a bot rather than the ambient user,
+    // so the write runs above the caller's own scope.
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(conversationId);
 
@@ -1105,10 +1109,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     });
     if (!md) return;
 
-    await db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(conversationId);
 
@@ -1266,10 +1270,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeMessagePreviewMd(previewData);
     if (!md) return false;
 
-    await db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(sourceConversationId);
 
@@ -2073,17 +2077,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     content?: string,
   ): Promise<void> {
     try {
-      const recipients = await db.notification.findMany({
-        where: {
-          relatedEntityType: 'message',
-          relatedEntityId: messageId,
-          deliveryMethods: {
-            hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+      // Every recipient who was notified about this message, not just the editor, so this
+      // read is elevated — notifications are otherwise scoped to their own owner and mobile
+      // edit/delete sync would stop silently.
+      const recipients = await withWorkspaceScope(() =>
+        db.notification.findMany({
+          where: {
+            relatedEntityType: 'message',
+            relatedEntityId: messageId,
+            deliveryMethods: {
+              hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+            },
           },
-        },
-        select: { userId: true },
-        distinct: ['userId'],
-      });
+          select: { userId: true },
+          distinct: ['userId'],
+        }),
+      );
 
       await Promise.allSettled(
         recipients.map(({ userId }) =>

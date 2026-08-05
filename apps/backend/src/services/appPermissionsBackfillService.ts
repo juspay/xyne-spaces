@@ -81,7 +81,7 @@ export class AppPermissionsBackfillService {
 
       // Process all apps in this batch concurrently
       await Promise.all(
-        batch.map(async (installation: { id: string; appId: string; workspaceId: string | null }) => {
+        batch.map(async (installation: { id: string; appId: string; workspaceId: string }) => {
           const existing = await db.installedAppPermission.findMany({
             where: { installedAppId: installation.id },
             select: { permissionId: true },

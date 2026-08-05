@@ -17,8 +17,9 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
     if (participant.userId) return [participant.userId];
 
     if (participant.userGroupId) {
+      const userGroupId = participant.userGroupId;
       const mappings = await db.userGroupMapping.findMany({
-        where: { userGroupId: participant.userGroupId },
+        where: { userGroupId },
         select: { userId: true },
       });
       return Array.from(new Set(mappings.map(m => m.userId).filter(Boolean)));

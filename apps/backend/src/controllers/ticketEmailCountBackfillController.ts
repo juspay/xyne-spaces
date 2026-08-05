@@ -145,6 +145,7 @@ export class TicketEmailCountBackfillController {
       channelsSeen,
       durationMs: Date.now() - startTime,
     });
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<Response> {

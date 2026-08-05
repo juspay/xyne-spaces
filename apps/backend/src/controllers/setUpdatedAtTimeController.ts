@@ -90,6 +90,7 @@ export class SetUpdatedAtTimeController {
     } while (cursor);
 
     return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {

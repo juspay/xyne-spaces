@@ -251,10 +251,12 @@ export class TicketStageBackfillController {
     }
 
     try {
+      // Resolves the desk channel by workspace, not by the caller's own membership — the
+      // workspaceId in the filter is the check that decides access.
       const channel = await db.channel.findFirst({
-        where: { id: options.channelId, workspaceId },
-        select: { id: true, type: true, projectId: true },
-      });
+          where: { id: options.channelId, workspaceId },
+          select: { id: true, type: true, projectId: true },
+        });
 
       if (!channel) {
         res.status(404).json({

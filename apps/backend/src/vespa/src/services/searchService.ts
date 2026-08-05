@@ -465,6 +465,9 @@ export class SearchService {
         false,
         {}
       );
+      // When enabled, effectiveWorkspaceId is passed to YqlBuilder so the top-level
+      // `workspaceId contains @ws` guard scopes the `user`/`transcript` branches to the
+      // caller's workspace. The flag is controlled remotely via Superposition.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
         false,
