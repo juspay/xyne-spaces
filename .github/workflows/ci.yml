@@ -145,6 +145,38 @@ jobs:
         run: pnpm --filter xyne-claw run typecheck
 
   # ---------------------------------------------------------------------------
+  # Env config change guard: any PR that modifies apps/backend/src/config/env.ts
+  # fails this check on purpose, so an env change can't slip through as "all
+  # checks passed" — it forces a manual look before merge. fetch-depth: 0 so we
+  # can diff against the base branch.
+  # ---------------------------------------------------------------------------
+  env-config-guard:
+    name: Env config change guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fail if env.ts is modified
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          # Reusable workflow is also called on push (no base ref) — skip there.
+          if [ -z "${BASE_REF:-}" ]; then
+            echo "Not a pull request — skipping env config guard."
+            exit 0
+          fi
+          git fetch --no-tags origin "$BASE_REF"
+          if git diff --name-only "origin/${BASE_REF}...HEAD" \
+               | grep -qx 'apps/backend/src/config/env.ts'; then
+            echo "::error file=apps/backend/src/config/env.ts::This PR modifies env.ts — env config guard fails on purpose. Get it reviewed/synced before merging."
+            exit 1
+          fi
+          echo "env.ts not modified — env config guard passed."
+
+  # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed
   # .gitleaks.toml allowlist, mirroring the Jenkins gitleaksScan() step.
   # Pinned to the same version Jenkins uses. `dir` scans files (not git
