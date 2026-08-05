@@ -29,6 +29,9 @@ import {
   syncCustomFieldValues,
   type CustomFieldWritePayload,
 } from '../services/ticketCustomFieldService';
+import { buildCreationFormFieldChanges } from '../services/ticketCustomFieldService';
+import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
+import { eventRouter } from '@/automations/engine/event-router';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
@@ -1102,6 +1105,29 @@ export class TicketController {
                   logger.error(`[Ticket Creation] Version release mapping failed for ticket ${ticket.xyneId}:`, error);
                 });
               }
+              const formFieldChanges = buildCreationFormFieldChanges(
+                formEntityValuesData.map(v => {
+                  const field = formFields.find((f: any) => f.id === v.fieldId);
+                  return {
+                    fieldId: v.fieldId,
+                    fieldName: field?.fieldName ?? v.fieldId,
+                    actualFieldValue: v.actualFieldValue,
+                  };
+                }),
+              );
+              void eventRouter.emit(
+                {
+                  type: TICKET_CREATED_EVENT,
+                  payload: {
+                    ticketId: ticket.id,
+                    formFieldChanges,
+                    performedBy: { id: userId },
+                  },
+                },
+                ticket.workspaceId,
+              ).catch(err =>
+                logger.error(`[Ticket Creation] TICKET_CREATED (formFieldChanges) emit failed for ${ticket.id}:`, err),
+              );
             }
           }
         } catch (error) {
