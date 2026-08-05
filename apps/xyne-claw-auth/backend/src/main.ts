@@ -98,7 +98,7 @@ import {
   stopBitbucketStatsBackgroundRefresh,
 } from "./services/bitbucket-stats.js";
 
-import { requireAuth, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
 import { connectDb } from "./db.js";
@@ -165,28 +165,28 @@ const BASE = "/claw/api/v1";
 // can't be forged. Was previously fully unauthenticated: anyone could POST a
 // stdio connector whose launch command the gateway then spawned (RCE).
 app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
-app.use(`${BASE}/users`, requireAuth, usersRouter);
-app.use(`${BASE}/users`, requireAuth, connectionsRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
 app.use(`${BASE}/sessions`, mcpRouter);
-app.use(`${BASE}/gateways`, requireAuth, requireClawAdmin, gatewaysRouter);
-app.use(`${BASE}/agents`, requireAuth, agentsRouter);
+app.use(`${BASE}/gateways`, requireAuth, requireNoAccessToken, requireClawAdmin, gatewaysRouter);
+app.use(`${BASE}/agents`, requireAuth, requireNoAccessToken, agentsRouter);
 app.use(`${BASE}/cli`, cliAuthRouter);
 // Public Slack ingress; authenticates itself with the per-install HMAC secret.
 app.use(`${BASE}/surfaces/slack`, slackRouter);
-app.use(`${BASE}/chain-workflows`, requireAuth, chainWorkflowsRouter);
-app.use(`${BASE}/spaces`, requireAuth, spacesRouter);
-app.use(`${BASE}/tools`, requireAuth, toolsRouter);
-app.use(`${BASE}/skills`, requireAuth, skillsRouter);
-app.use(`${BASE}/knowledge-base`, requireAuth, knowledgeBaseRouter);
-app.use(`${BASE}/subagents`, requireAuth, subagentsRouter);
-app.use(`${BASE}/sandbox`, requireAuth, sandboxRouter);
-app.use(`${BASE}/organizations`, requireAuth, organizationsRouter);
-app.use(`${BASE}/admin`, requireAuth, adminRouter);
+app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
+app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
+app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
+app.use(`${BASE}/skills`, requireAuth, requireNoAccessToken, skillsRouter);
+app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
+app.use(`${BASE}/subagents`, requireAuth, requireNoAccessToken, subagentsRouter);
+app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
+app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
+app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
 // TEMPORARY — delete this mount + the import above + the file after backfill.
-app.use(`${BASE}/admin`, requireAuth, adminBackfillSigningSecretsRouter);
-app.use(`${BASE}/dashboard`, requireAuth, dashboardRouter);
-app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
-app.use(`${BASE}/daily-brief`, requireAuth, dailyBriefRouter);
+app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
+app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
+app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
@@ -199,18 +199,18 @@ app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
 // Mounted before the per-provider routers (which now only serve authorize/callback)
 // so it owns the `/token` path. Same requireAuth guard; the handler additionally
 // requires the run's HMAC session token. See routes/oauth-token.ts.
-app.use(`${BASE}/users`, requireAuth, oauthTokenRouter);
-app.use(`${BASE}/users`, requireAuth, googleOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, oauthTokenRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, googleOAuthRouter);
 app.use(BASE, googleCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, microsoftOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, microsoftOAuthRouter);
 app.use(BASE, microsoftCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, calendlyOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, calendlyOAuthRouter);
 app.use(BASE, calendlyCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, jotformOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, jotformOAuthRouter);
 app.use(BASE, jotformCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, docusignOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, docusignOAuthRouter);
 app.use(BASE, docusignCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, egnyteOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, egnyteOAuthRouter);
 app.use(BASE, egnyteCallbackRouter);
 // requireAuth on every `/users/...` OAuth initiation router so an
 // unauthenticated request can't enumerate userIds and either start an
@@ -220,21 +220,21 @@ app.use(BASE, egnyteCallbackRouter);
 // routers stay unauthenticated because the OAuth provider hits them
 // directly with no session cookie — they self-protect by verifying the
 // `state` parameter against the in-flight session.
-app.use(`${BASE}/users`, requireAuth, miroOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, miroOAuthRouter);
 app.use(BASE, miroCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, webflowOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, webflowOAuthRouter);
 app.use(BASE, webflowCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, wixOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, wixOAuthRouter);
 app.use(BASE, wixCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, attioOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, attioOAuthRouter);
 app.use(BASE, attioCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, mailerliteOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, mailerliteOAuthRouter);
 app.use(BASE, mailerliteCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, honeycombOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, honeycombOAuthRouter);
 app.use(BASE, honeycombCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, customerioOAuthRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, customerioOAuthRouter);
 app.use(BASE, customerioCallbackRouter);
-app.use(`${BASE}/users`, requireAuth, rapidApiLinkedInRouter);
+app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
 // IMPORTANT: more-specific runStreamRouter MUST be mounted BEFORE the broader
 // runRouter at BASE. runRouter has `POST /run/:sessionId/cancel`, which would
@@ -260,29 +260,29 @@ app.use(`${BASE}/flow`, requireStrictS2S, flowActionRouter);
 // require a real user session (requireAuth derives x-user-id from the Spaces
 // cookie). The handler treats that authenticated id as the caller identity
 // instead of the spoofable body field.
-app.use(`${BASE}/app`, requireAuth, appCallbackRouter);
-app.use(`${BASE}/scheduled-jobs`, requireAuth, scheduledJobsRouter);
+app.use(`${BASE}/app`, requireAuth, requireNoAccessToken, appCallbackRouter);
+app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJobsRouter);
 // Strict S2S: the only callers are services (ask-question tool POSTs with the
 // S2S key; flow-action/app-callback import the helpers directly, not HTTP).
 // The previous per-route requireS2S cookie fallback let any logged-in user
 // read other users' pending questions by ID.
 app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
-app.use(`${BASE}/settings`, requireAuth, settingsRouter);
-app.use(`${BASE}/runs`, requireAuth, runsRouter);
-app.use(`${BASE}/metrics`, requireAuth, metricsRouter);
+app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
+app.use(`${BASE}/runs`, requireAuth, requireNoAccessToken, runsRouter);
+app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
 // Mount-level baseline auth (defense-in-depth): every memory route also has
 // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
 // future route that forgets it must still fail closed at the mount. requireAuth
 // (not requireUserAuth) because /recall-hits is an S2S callback from xyne-claw.
 // The per-request memoization in require-auth.ts makes the second layer free.
-app.use(`${BASE}/memory`, requireAuth, memoryRouter);
+app.use(`${BASE}/memory`, requireAuth, requireNoAccessToken, memoryRouter);
 app.use(`${BASE}/digital-twin`, requireUserAuth, digitalTwinRouter);
-app.use(`${BASE}/control-center`, requireAuth, controlCenterRouter);
-app.use(`${BASE}/research-agent`, requireAuth, researchAgentRouter);
-app.use(`${BASE}/evals`, requireAuth, requireClawAdmin, evalsRouter);
-app.use(`${BASE}/search-evals`, requireAuth, requireSearchEvalAccess, searchEvalsRouter);
+app.use(`${BASE}/control-center`, requireAuth, requireNoAccessToken, controlCenterRouter);
+app.use(`${BASE}/research-agent`, requireAuth, requireNoAccessToken, researchAgentRouter);
+app.use(`${BASE}/evals`, requireAuth, requireNoAccessToken, requireClawAdmin, evalsRouter);
+app.use(`${BASE}/search-evals`, requireAuth, requireNoAccessToken, requireSearchEvalAccess, searchEvalsRouter);
 // A run reads a whole channel with no per-user ACL guard — operator action only.
-app.use(`${BASE}/entity-extraction`, requireAuth, requireClawAdmin, entityExtractionRouter);
+app.use(`${BASE}/entity-extraction`, requireAuth, requireNoAccessToken, requireClawAdmin, entityExtractionRouter);
 
 // MCP Gateway routes (for backend service registration)
 app.use(`${BASE}/gateway`, mcpGatewayRouter);

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
-import { requireAuth, requireResultToken } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
@@ -312,7 +312,7 @@ export async function persistRunStreamResult(args: {
  * Spaces backend connects via SSE, and we internally handle the webhook callbacks
  * from xyne-claw, proxying them as SSE events.
  */
-publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
+publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, res: Response) => {
   const streamId = randomUUID();
   // Periodic keepalive on the frontend leg (Spaces backend ← claw-auth).
   // Started once the SSE response is open, stopped on disconnect and in the
@@ -1079,7 +1079,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
  * claw is what actually persists partial state — this endpoint just
  * triggers it.
  */
-publicRouter.post("/cancel", requireAuth, async (req: Request, res: Response): Promise<void> => {
+publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
     if (!userId) {
