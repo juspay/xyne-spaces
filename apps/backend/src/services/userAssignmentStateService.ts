@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { redisService } from './redisService';
 import type { UpdateUserPresenceInput } from '@/types/database';
 
@@ -95,8 +96,27 @@ export class UserAssignmentStateService {
       // Schedule restoration job (single job per user)
       await assignmentReactivationQueue.scheduleReactivation(userId, unavailableUntil);
 
+      // For any group configured to reassign this member's open tickets while they're
+      // unavailable, hand the work off to a queue instead of scanning tickets inline here -
+      // keeps this (synchronous, user-facing) toggle call cheap regardless of backlog size.
+      const reassignGroups = await this.prisma.userGroup.findMany({
+        where: { id: { in: userGroupIds }, reassignOnUnavailable: true },
+        select: { id: true },
+      });
+
+      for (const group of reassignGroups) {
+        try {
+          await ticketReassignmentQueue.scheduleReassignment(userId, group.id);
+        } catch (error) {
+          logger.error(
+            `❌ [ASSIGNMENT-STATE] Failed to schedule ticket reassignment for user ${userId} in group ${group.id}:`,
+            error
+          );
+        }
+      }
+
       logger.info(
-        `⏸️ [ASSIGNMENT-STATE] User ${userId} set unavailable for assignment in ${userGroupIds.length} group(s) until ${new Date(unavailableUntil).toISOString()}`
+        `⏸️ [ASSIGNMENT-STATE] User ${userId} set unavailable for assignment in ${userGroupIds.length} group(s) until ${new Date(unavailableUntil).toISOString()}${reassignGroups.length ? `; queued reassignment for ${reassignGroups.length} group(s)` : ''}`
       );
 
       return userGroupIds;
