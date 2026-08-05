@@ -47,7 +47,9 @@ export class CallParticipantsACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.CallParticipantWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    // Writes match reads: a workspace-only clause here would let any member mutate rows
+    // belonging to channels they cannot read.
+    return this.getWhereClause()
   }
 
   async canCreate(data: Prisma.CallParticipantUncheckedCreateInput): Promise<boolean> {

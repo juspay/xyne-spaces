@@ -8,9 +8,6 @@ import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper
  * Scopes rows to channels the caller can access — same predicate as
  * ChannelsACL (PUBLIC or participant, in the caller's workspace) — via the
  * emulated `channel` relation (relationMode="prisma", no DB FK).
- *
- * Without this, /api/query on `email` fell through to BaseQueryACL (no filter),
- * letting any authenticated user read private email channels by id.
  */
 export class EmailsACL extends BaseQueryACL<
   Prisma.EmailWhereInput,
@@ -48,7 +45,9 @@ export class EmailsACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.EmailWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    // Writes match reads: a workspace-only clause here would let any member mutate rows
+    // belonging to channels they cannot read.
+    return this.getWhereClause()
   }
 
   async canCreate(data: Prisma.EmailUncheckedCreateInput): Promise<boolean> {

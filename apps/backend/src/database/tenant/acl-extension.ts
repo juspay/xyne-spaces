@@ -92,12 +92,37 @@ function denyCreate(model: string, operation: string): Error {
  *
  * Not deduped — a repeat is itself the signal.
  */
-function reportForeignWorkspace(model: string, operation: string, row: unknown, ws: string): void {
+function assertSameWorkspace(model: string, operation: string, row: unknown, ws: string): void {
   if (!row || typeof row !== 'object') return;
   const given = (row as { workspaceId?: unknown }).workspaceId;
   // undefined -> stamp fills it. null -> a deliberate row on a nullable column.
   if (typeof given !== 'string' || given === ws) return;
   logger.warn('[acl] create names a different workspace', { model, operation, given, enforced: ws });
+  throw deny(model, operation, 'create names a different workspace');
+}
+
+/**
+ * workspaceId is the tenant key: once a row exists it must not move between workspaces.
+ * Applies to every write that carries a data payload, including the update half of upsert.
+ */
+function assertWorkspaceNotReassigned(
+  model: string,
+  operation: string,
+  data: unknown,
+  ws: string,
+): void {
+  const rows: unknown[] = Array.isArray(data) ? data : data != null ? [data] : [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const given = (row as { workspaceId?: unknown }).workspaceId;
+    if (given === undefined || given === null) continue;
+    const value = typeof given === 'object' && given !== null && 'set' in given
+      ? (given as { set?: unknown }).set
+      : given;
+    if (typeof value !== 'string' || value === ws) continue;
+    logger.warn('[acl] update reassigns workspaceId', { model, operation, given: value, enforced: ws });
+    throw deny(model, operation, 'workspaceId is immutable');
+  }
 }
 
 const WHERE_OPS = new Set(['findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy']);
@@ -277,13 +302,19 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             const data = (args as { data?: unknown }).data;
             const rows: unknown[] = Array.isArray(data) ? data : data != null ? [data] : [];
             for (const row of rows) {
-              reportForeignWorkspace(model, operation, row, ws);
+              assertSameWorkspace(model, operation, row, ws);
               if (acl) {
                 const ok = await acl.canCreate(row as Record<string, unknown>);
                 if (!ok) throw denyCreate(model, operation);
               }
             }
             return query(args);
+          }
+
+          // workspaceId is immutable. Checked before the mutate filter so it holds even on
+          // tables whose ACL opts out of scoping.
+          if (ctx?.actor !== 'system' && isWorkspaceScopedModel(model)) {
+            assertWorkspaceNotReassigned(model, operation, (args as { data?: unknown }).data, ws);
           }
 
           let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
@@ -295,6 +326,18 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             }
             mutateWhere = { workspaceId: ws };
           }
+
+          // A guest writes only what a guest can read: intersect the write filter with the
+          // read filter rather than relying on every table clause to restate it.
+          if (ctx?.role === 'GUEST' && acl) {
+            const guestRead = (await acl.getWhereClause()) as Record<string, unknown> | null;
+            if (guestRead && !isUnrestricted(guestRead)) {
+              mutateWhere = isUnrestricted(mutateWhere)
+                ? guestRead
+                : { AND: [mutateWhere, guestRead] };
+            }
+          }
+
           if (isUnrestricted(mutateWhere)) {
             if (isWorkspaceScopedModel(String(model))) {
               notePattern('[acl] table opted out of scoping', model, operation, { side: 'write' });
@@ -313,7 +356,12 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
 
           // Upsert: create-or-update — authorize whichever branch will actually run.
           if (isUpsert) {
-            const a = (args ?? {}) as { where?: object; create?: unknown };
+            const a = (args ?? {}) as { where?: object; create?: unknown; update?: unknown };
+            // upsert carries its payload as create/update rather than data, so the generic
+            // immutability check above does not see it.
+            if (ctx?.actor !== 'system' && isWorkspaceScopedModel(model)) {
+              assertWorkspaceNotReassigned(model, operation, a.update, ws);
+            }
             const scoped = toWhereInput(model, a.where);
             const inScope = await delegate.count({ where: { AND: [scoped, mutateWhere] } });
             if (inScope === 0) {
@@ -323,7 +371,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
                 throw deny(model, operation, 'upsert target in another workspace');
               }
               // Row doesn't exist → this upsert will insert; gate it like a create.
-              reportForeignWorkspace(model, operation, a.create, ws);
+              assertSameWorkspace(model, operation, a.create, ws);
               if (acl) {
                 const ok = await acl.canCreate((a.create ?? {}) as Record<string, unknown>);
                 if (!ok) throw denyCreate(model, operation);

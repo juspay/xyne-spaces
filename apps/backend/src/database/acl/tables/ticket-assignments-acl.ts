@@ -25,7 +25,9 @@ export class TicketAssignmentsACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.TicketAssignmentWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    // Writes match reads: a workspace-only clause here would let any member mutate rows
+    // belonging to channels they cannot read.
+    return this.getWhereClause()
   }
 
   async canCreate(data: Prisma.TicketAssignmentUncheckedCreateInput): Promise<boolean> {
