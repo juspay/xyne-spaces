@@ -10,7 +10,7 @@ import {
 import { Button } from '../ui/Button';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
-import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
+import { useChannel, useChannelParticipation } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
@@ -184,7 +184,10 @@ export const ThreadMessages = ({
   const isFocusedThread = searchParams.get('focusThread') === '1';
   const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';
 
-  const participationStatus = useGetChannelUserStatus(derivedChannelId);
+  // The initial visible-channel cache excludes closed DMs. Query the specific
+  // channel as a fallback so a subscribed thread in a closed DM is not treated
+  // as proof that the user is a non-member.
+  const participationStatus = useChannelParticipation(derivedChannelId);
   const isMember = !!participationStatus;
 
   // Single enriched query: replaces getConversationById + ticketById + conversationMessagesV2
@@ -193,7 +196,15 @@ export const ThreadMessages = ({
     () =>
       queries.threadConversationV2({
         conversationId: derivedConversationId || ' ',
-        ...(derivedChannelId ? { channelId: derivedChannelId, isMember } : {}),
+        // While membership is unresolved, omit isMember instead of passing
+        // false. The general ACL can then check channel_participants directly;
+        // passing false would reject a private DM before status hydration.
+        ...(derivedChannelId
+          ? {
+              channelId: derivedChannelId,
+              ...(isMember ? { isMember: true } : {}),
+            }
+          : {}),
       }),
     [derivedConversationId, derivedChannelId, isMember],
   );
