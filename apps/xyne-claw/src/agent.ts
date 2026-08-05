@@ -42,7 +42,8 @@ import {
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, SessionLockedError } from "./session-lock.js";
 import { gcsUploadDebugRun } from "./gcs.js";
 import { createCommandGuard } from "./command-guard.js";
-import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
+import { writeSessionSkills, deleteSessionSkills, sessionSkillsDir } from "./session-skills.js";
+import { buildHarnessOverlayTools } from "./harness-overlay-tools.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { installToolBudget } from "./tool-budget.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
@@ -1296,6 +1297,10 @@ export interface RunTaskOptions {
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
   skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
+  /** Continual-harness Phase 1: when true, register the live session-skill
+   *  overlay tools (overlay-create/update/delete-skill). Resolved from
+   *  agentConfig.continualHarness in routes/run.ts. Requires a sessionId. */
+  enableHarnessOverlay?: boolean | undefined;
   skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
   promptInjections?: PromptInjection[] | undefined;
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
@@ -1423,6 +1428,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     skills,
     skillTriggers,
     promptInjections,
+    enableHarnessOverlay,
     requiredTool,
     twinPersona,
     abortSignal,
@@ -1560,6 +1566,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       log.info(`[agent] Wrote ${skills.length} skill(s) to session-scoped ${skillsDir}`);
     }
   }
+  // Continual-harness overlay (Phase 1): when enabled, ensure THIS session's
+  // skills dir is a scanned additionalSkillPath even if no skills were passed
+  // in, so a skill the agent AUTHORS mid-run via overlay-create-skill is
+  // advertised on reload(). Per-session scope = no cross-session/user leakage.
+  if (enableHarnessOverlay && sessionId) {
+    const overlayDir = sessionSkillsDir(sessionId);
+    if (!additionalSkillPaths.includes(overlayDir)) {
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(overlayDir, { recursive: true }).catch(() => {});
+      additionalSkillPaths.push(overlayDir);
+    }
+  }
 
   // Build skill trigger + prompt injection extensions if configured
   const extensions: import("@earendil-works/pi-coding-agent").ExtensionFactory[] = [compactionExtension];
@@ -1646,6 +1664,19 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(personaSystemPrompt ? { systemPrompt: personaSystemPrompt } : {}),
   });
   await resourceLoader.reload();
+  // Live session-skill authoring tools (Continual Harness Phase 1). They write
+  // into the session overlay dir registered above and reload() the loader so
+  // pi advertises the new/updated skill. Gated by enableHarnessOverlay and a
+  // sessionId (the overlay scope) so edits can never escape this session.
+  const harnessOverlayTools =
+    enableHarnessOverlay && sessionId
+      ? buildHarnessOverlayTools({ sessionId, resourceLoader })
+      : [];
+  // customTools flowing to pi = caller tools + live overlay tools (when on).
+  const effectiveCustomTools: ToolDefinition[] | undefined =
+    harnessOverlayTools.length > 0
+      ? [...(customTools ?? []), ...harnessOverlayTools]
+      : customTools;
 
   // The read/grep/find/ls gate (createScopedToolMap below) confines the agent to
   // workingDir. Skills, however, live OUTSIDE workingDir — bundled skills under
@@ -1762,7 +1793,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // the options.
   // (Ref: pi-coding-agent/dist/core/sdk.js:157 — `allowedToolNames = options.tools`)
   const builtinAllow = ["read", "write", "grep", "find", "ls"];
-  const customToolNames = (customTools ?? []).map((t) => t.name);
+  const customToolNames = (effectiveCustomTools ?? []).map((t) => t.name);
   // Proof that the mandatory twin_deliver tool is actually in the pi payload
   // (allowlist + registered customTools) — logged for the Twin mention flow so a
   // "did it even get the tool?" question is answerable from the run logs.
@@ -1793,8 +1824,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Offload over-large custom-tool output under the persistent session dir
   // (survives the ephemeral workspace teardown + resume) when a conversation is
   // in play; fall back to the working dir for in-memory runs. See toolOutputBaseDir.
-  const cappedCustomTools = customTools
-    ? capCustomToolOutput(customTools, outputBaseDir)
+  const cappedCustomTools = effectiveCustomTools
+    ? capCustomToolOutput(effectiveCustomTools, outputBaseDir)
     : [];
   const allCustomTools = [...scopedFileTools, ...cappedCustomTools] as ToolDefinition[];
   // Opt-in: chunk + inline-tokenize every tool's result so the model can cite
