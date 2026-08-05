@@ -237,7 +237,7 @@ class CallSideEffectService {
             this.logger.info(`Triggering FCM push for user ${recipientId}, call ${call.externalId}`);
 
             await notificationService.createFCMNotification(recipientId, {
-                title: `Incoming ${call.callType === 'VIDEO' ? 'Video' : 'Audio'} Call`,
+                title: `Incoming ${call.callType === CallType.VIDEO ? 'Video' : 'Audio'} Call`,
                 message: `${callerName} is calling you`,
                 type: NotificationType.INCOMING_CALL,
                 relatedEntityType: 'call',

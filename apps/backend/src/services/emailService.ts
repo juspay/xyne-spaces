@@ -44,8 +44,7 @@ import {
   TicketPriority,
   ActivityType,
   EmailMergeMode,
-  NotificationType,
-} from '@xyne/shared';
+  NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { superpositionClient } from './superpositionClient';
@@ -553,7 +552,7 @@ export class EmailService {
     });
 
     const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
-    if (preference?.autoDraftMode !== 'DRAFT') {
+    if (preference?.autoDraftMode !== AutoDraftMode.DRAFT) {
       logger.info('[AutoDraft] skip: auto-draft not enabled for channel', {
         mode: 'autodraft',
         ticketId,
@@ -707,7 +706,7 @@ export class EmailService {
         if (existingSeed) {
           await this.prisma.emailDraft.update({
             where: { id: existingSeed.id },
-            data: { autoDraftStatus: 'GENERATING', updatedAt: new Date() },
+            data: { autoDraftStatus: AutoDraftStatus.GENERATING, updatedAt: new Date() },
           });
         } else {
           const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
@@ -718,7 +717,7 @@ export class EmailService {
               workspaceId,
               userId: null,
               draftContent: '',
-              autoDraftStatus: 'GENERATING',
+              autoDraftStatus: AutoDraftStatus.GENERATING,
             },
           });
         }
@@ -737,7 +736,7 @@ export class EmailService {
       // The seed row is ownerless, so it is resolved above the caller's own scope.
       await withWorkspaceScope(async () => {
         const seed = await this.prisma.emailDraft.findFirst({
-          where: { conversationId, userId: null, autoDraftStatus: 'GENERATING' },
+          where: { conversationId, userId: null, autoDraftStatus: AutoDraftStatus.GENERATING },
           select: { id: true, draftContent: true },
         });
         if (!seed) return;
@@ -746,7 +745,7 @@ export class EmailService {
         } else {
           await this.prisma.emailDraft.update({
             where: { id: seed.id },
-            data: { autoDraftStatus: 'READY' },
+            data: { autoDraftStatus: AutoDraftStatus.READY },
           });
         }
       });
@@ -797,7 +796,7 @@ export class EmailService {
       if (existingSeed) {
         await this.prisma.emailDraft.update({
           where: { id: existingSeed.id },
-          data: { draftContent: html, channelId, autoDraftStatus: 'READY', updatedAt: now },
+          data: { draftContent: html, channelId, autoDraftStatus: AutoDraftStatus.READY, updatedAt: now },
         });
       } else {
         const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
@@ -808,7 +807,7 @@ export class EmailService {
             workspaceId,
             userId: null,
             draftContent: html,
-            autoDraftStatus: 'READY',
+            autoDraftStatus: AutoDraftStatus.READY,
           },
         });
       }

@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
 import { IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
+import { AttachmentEntityType, ChannelScopeType, UserType } from '@xyne/shared';
 
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
@@ -265,7 +266,7 @@ export class AnalyticsRepository {
 
   private async getUsersId(workspaceId: string): Promise<string[]> {
     const users = await this.prisma.user.findMany({
-      where: { userType: 'USER', workspaceId: this.requireWorkspaceId(workspaceId) },
+      where: { userType: UserType.USER, workspaceId: this.requireWorkspaceId(workspaceId) },
       select: { id: true }
     });
     return users.map(u => u.id);
@@ -1644,7 +1645,7 @@ export class AnalyticsRepository {
     const filesSharedCount = await this.prisma.messageAttachment.count({
       where: {
         entityId: { in: validMessageIds },
-        entityType: 'CHAT',
+        entityType: AttachmentEntityType.CHAT,
         workspaceId,
         createdBy: { notIn: ['Unified Alerts', 'system'] }
       }
@@ -1988,7 +1989,7 @@ export class AnalyticsRepository {
     const channels = await this.prisma.channel.findMany({
       where: {
         id: { in: channelIds },
-        scopeType: 'DEFAULT',
+        scopeType: ChannelScopeType.DEFAULT,
         workspaceId
       },
       select: {
@@ -2026,7 +2027,7 @@ export class AnalyticsRepository {
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
     const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
     const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds }, scopeType: 'DEFAULT', workspaceId },
+      where: { id: { in: channelIds }, scopeType: ChannelScopeType.DEFAULT, workspaceId },
       select: { id: true }
     });
     const defaultChannelIds = new Set(channels.map(c => c.id));
@@ -2641,7 +2642,7 @@ export class AnalyticsRepository {
     const attachments = validMessageIds.length === 0 ? [] : await this.prisma.messageAttachment.findMany({
       where: {
         entityId: { in: validMessageIds },
-        entityType: 'CHAT',
+        entityType: AttachmentEntityType.CHAT,
         workspaceId,
         createdBy: { notIn: ['Unified Alerts', 'system'] }
       },

@@ -18,7 +18,13 @@ import {
   KeyboardSensor,
 } from '@dnd-kit/core';
 import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
-import { TicketPriority, TicketStatusV2, BoardType, TicketStageRequestStatus } from '@xyne/shared';
+import {
+  TicketPriority,
+  TicketStatusV2,
+  BoardType,
+  TicketStageRequestStatus,
+  ApproverType,
+} from '@xyne/shared';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -296,10 +302,14 @@ export const SupportKanbanBoard = ({
       formId: t.formId ?? null,
       requiresApproval: t.requiresApproval ?? false, // NULL treated as false
       approvers: (t.transitionApprovers ?? []).map(
-        (a: { userId: string | null; roleId: string | null; approverType?: string | null }) => ({
+        (a: {
+          userId: string | null;
+          roleId: string | null;
+          approverType?: ApproverType | null;
+        }) => ({
           approverId: a.userId ?? a.roleId ?? '',
           // NULL approverType (legacy rows) is treated as USER.
-          approverType: (a.approverType ?? 'USER') as 'USER' | 'ROLE',
+          approverType: a.approverType ?? ApproverType.USER,
         }),
       ),
     }));

@@ -23,7 +23,7 @@ import { serializeInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType } from '@xyne/shared';
+  NotificationType, MessageType, NotificationStatus, UserStatus } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -357,7 +357,7 @@ class NotificationService {
       const existingMessages = await repositories.messages.findMany({
         where: {
           conversationId: conversationId,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
         },
         orderBy: {
           createdAt: 'desc',
@@ -945,7 +945,7 @@ class NotificationService {
           userId,
           data.type,
           data.title,
-          (data.metadata?.scopeType !== 'DM' && data.metadata?.senderName) ? `${data.metadata.senderName}: ${data.message}` : data.message,
+          (data.metadata?.scopeType !== ChannelScopeType.DM && data.metadata?.senderName) ? `${data.metadata.senderName}: ${data.message}` : data.message,
           {
             ...data.metadata,
             relatedEntityType: data.relatedEntityType,
@@ -1873,7 +1873,7 @@ class NotificationService {
         where: {
           orgMemberId: memberId,
           leftAt: null,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
         },
         select: {
           id: true,
@@ -1892,7 +1892,7 @@ class NotificationService {
         by: ['userId'],
         where: {
           userId: { in: userIds },
-          status: { in: ['UNREAD', 'DELIVERED'] },
+          status: { in: [NotificationStatus.UNREAD, NotificationStatus.DELIVERED] },
           readAt: null,
           dismissedAt: null,
         },

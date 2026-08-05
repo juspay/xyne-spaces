@@ -3,7 +3,7 @@ import { ReleaseNotesService } from '@/services/releaseNotes/releaseNotesService
 import { conversationService } from '@/services/conversationService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { config } from '@/config/env';
-import { BaseTicketType, isReleaseTicket, MessageType } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
@@ -223,7 +223,7 @@ Release notes have been generated for **${ticket.title}**
           content: blocks as any,
           workspaceId,
           createdBy: botUser.id,
-          visibility: 'PUBLIC',
+          visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
           isCollaborative: false,
           lastEditedBy: botUser.id,
@@ -247,7 +247,7 @@ Release notes have been generated for **${ticket.title}**
           canvasId,
           userId: botUser.id,
           workspaceId,
-          role: 'VIEWER',
+          role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
         },

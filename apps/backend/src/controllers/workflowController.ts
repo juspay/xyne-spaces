@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType } from '@xyne/shared';
+import { AttachmentEntityType, MessageType, WorkflowExecutionMode } from '@xyne/shared';
 import { WorkflowRepository } from '../database/repositories/workflowRepository';
 import { DatabaseClient } from '@/database/client';
 import { workflowRestoreService } from '../workflows/services/workflow-restore-service';
@@ -553,7 +553,7 @@ export class WorkflowController {
               senderId: req.user?.id || 'system',
               workspaceId: conversation.workspaceId,
               content: ``,
-              msgType: 'SYSTEM',
+              msgType: MessageType.SYSTEM,
               metadata: messageMetadata,
             },
           });
@@ -1056,7 +1056,7 @@ export class WorkflowController {
             targetStepId: step.stepName
           }),
           ignoreDuration: 0,
-          mode: 'MANUAL',
+          mode: WorkflowExecutionMode.MANUAL,
           createdBy: execution.createdBy || null,
         });
 
@@ -1107,7 +1107,7 @@ export class WorkflowController {
           // just mark the execution as pending to trigger the agent to continue with the next steps (if any)
           await this.workflowRepository.updateWorkflowExecution(executionId, { status: 'PENDING' });
           // change mode to AUTOMATIC
-          await this.workflowRepository.setExecutionMode(executionId, 'AUTOMATIC');
+          await this.workflowRepository.setExecutionMode(executionId, WorkflowExecutionMode.AUTOMATIC);
           res.status(200).json({
             executionId,
             stepId,

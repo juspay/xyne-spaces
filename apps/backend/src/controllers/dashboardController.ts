@@ -6,8 +6,7 @@ import {
   DashboardAiCreateRequestSchema,
   QueryVisualizationType as SharedVisualizationType,
   DashboardRole,
-  DashboardVisibility,
-} from '@xyne/shared';
+  DashboardVisibility, QueryType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -259,7 +258,7 @@ export class DashboardController {
           data: {
             workspaceId: ctx.workspaceId,
             title: c.title ?? null,
-            queryType: 'external',
+            queryType: QueryType.external,
             queryJson: c.queryJson,
             visualType: c.visualType as SharedVisualizationType,
             position: c.position,

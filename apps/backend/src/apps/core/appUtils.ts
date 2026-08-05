@@ -1,5 +1,5 @@
 import { repositories } from '@/database/repositories';
-import { AuthProvider, UserType } from '@xyne/shared';
+import { AuthProvider, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
@@ -134,7 +134,7 @@ export async function installApp(appId: string, workspaceId: string) {
       const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
       if (existing) return existing;
       return db.orgMember.create({
-        data: { email, orgId: workspace.orgId, role: 'MEMBER' },
+        data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
         select: { memberId: true },
       });
     });

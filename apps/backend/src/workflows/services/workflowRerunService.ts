@@ -13,6 +13,7 @@ interface RerunResult {
   message: string;
 }
 import {logger} from '@/utils/logger';
+import { MessageType } from '@xyne/shared';
 
 /**
  * Service for handling workflow rerun operations
@@ -193,7 +194,7 @@ export class WorkflowRerunService {
         const existingMessage = await this.db.message.findFirst({
           where: {
             conversationId,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
           },
           orderBy: { createdAt: 'desc' }
         });

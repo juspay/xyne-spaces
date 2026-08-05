@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { EmailMergeMode, WorkspaceRole, DeskType } from '@xyne/shared';
+import { EmailMergeMode, WorkspaceRole, DeskType, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
 import express, { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
@@ -1186,14 +1186,14 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       const txResult = await db.$transaction(async (tx) => {
         const ch = await tx.channel.create({
           data: {
-            scopeType: 'DEFAULT',
+            scopeType: ChannelScopeType.DEFAULT,
             name: cd.name,
             description: cd.description,
             visibility: cd.visibility === 'private' ? 'PRIVATE' : 'PUBLIC',
             createdBy: cd.userId,
             workspaceId: cd.workspaceId,
             projectId: cd.projectId,
-            type: 'EMAIL',
+            type: ChannelType.EMAIL,
           },
         });
         const now = new Date();
@@ -1210,7 +1210,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           seenConversations[seenConversations.length - 1]?.createdAt ?? now;
 
         await tx.channelParticipant.create({
-          data: { channelId: ch.id, userId: cd.userId, role: 'ADMIN', workspaceId: cd.workspaceId },
+          data: { channelId: ch.id, userId: cd.userId, role: ChannelRole.ADMIN, workspaceId: cd.workspaceId },
         });
 
         await tx.channelUserStatus.create({

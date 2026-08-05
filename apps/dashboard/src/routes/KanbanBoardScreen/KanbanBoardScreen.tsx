@@ -104,6 +104,7 @@ import {
   SavedConfigEntityName,
   UserResponsibility,
   SavedConfigContextType,
+  ApproverType,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
@@ -920,10 +921,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       formId: t.formId,
       requiresApproval: t.requiresApproval ?? false, // NULL treated as false
       approvers: (t.transitionApprovers ?? []).map(
-        (a: { userId: string | null; roleId: string | null; approverType?: string | null }) => ({
+        (a: {
+          userId: string | null;
+          roleId: string | null;
+          approverType?: ApproverType | null;
+        }) => ({
           approverId: a.userId ?? a.roleId ?? '',
           // NULL approverType (legacy rows) is treated as USER.
-          approverType: (a.approverType ?? 'USER') as 'USER' | 'ROLE',
+          approverType: a.approverType ?? ApproverType.USER,
         }),
       ),
     }));

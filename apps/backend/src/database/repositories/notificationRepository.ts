@@ -82,7 +82,7 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
         userId
       },
       data: {
-        status: 'READ',
+        status: NotificationStatus.READ,
         readAt: new Date()
       }
     });
@@ -92,10 +92,10 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
     await this.db.notification.updateMany({
       where: {
         userId,
-        status: 'UNREAD'
+        status: NotificationStatus.UNREAD
       },
       data: {
-        status: 'READ',
+        status: NotificationStatus.READ,
         readAt: new Date()
       }
     });
@@ -108,7 +108,7 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
         userId
       },
       data: {
-        status: 'DISMISSED',
+        status: NotificationStatus.DISMISSED,
         dismissedAt: new Date()
       }
     });

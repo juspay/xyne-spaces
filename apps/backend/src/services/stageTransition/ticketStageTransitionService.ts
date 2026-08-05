@@ -4,7 +4,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageRequestStatus } from '@xyne/shared';
+import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageRequestStatus, ApproverType } from '@xyne/shared';
 import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
@@ -193,7 +193,7 @@ export class TicketStageTransitionService {
         const roleApproverRows = await prisma.stageApprovers.findMany({
           where: {
             transitionId: transition.id,
-            approverType: 'ROLE',
+            approverType: ApproverType.ROLE,
             roleId: { not: null },
           },
           select: { roleId: true },

@@ -18,7 +18,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -250,8 +250,8 @@ export class ConversationService {
           }
           await db.vespaInsertionLogs.create({
             data: {
-              status: 'FAILED',
-              type: 'INSERT',
+              status: VespaInsertionStatus.FAILED,
+              type: VespaOperationType.INSERT,
               entityId: channelId,
               entityType: channelSchema,
               namespace: NAMESPACE,

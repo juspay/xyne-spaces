@@ -1794,7 +1794,7 @@ export class ChannelController {
       const allChannels = await this.channelRepository.getChannelsByIds(channelIds);
 
       const docsChannels = allChannels.filter(channel =>
-        channel.scopeType === 'DEFAULT' || channel.scopeType === 'DOCUMENT'
+        channel.scopeType === ChannelScopeType.DEFAULT || channel.scopeType === ChannelScopeType.DOCUMENT
       );
 
       res.status(200).json({
@@ -1835,7 +1835,7 @@ export class ChannelController {
 
       // Filter to only include USER (1-on-1 DMs) and GROUP_DM scope types
       const dmChannels = allDMChannels.filter(channel =>
-        channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM'
+        channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM
       );
 
       if (dmChannels.length === 0) {
@@ -1911,7 +1911,7 @@ export class ChannelController {
 
         // Get DM partner info - determine who the partner is relative to current user
         let partnerInfo = null;
-        if (channel.scopeType === 'DM') {
+        if (channel.scopeType === ChannelScopeType.DM) {
           const otherParticipant = participants.find(p => p.userId !== userId);
           // If no other participant, this is a self-DM - use current user info
           if (otherParticipant?.userId) {
@@ -1923,7 +1923,7 @@ export class ChannelController {
         }
 
         let participantsName = null;
-        if (channel.scopeType === 'GROUP_DM') {
+        if (channel.scopeType === ChannelScopeType.GROUP_DM) {
           const otherParticipants = participants.filter(p => p.userId !== userId);
           participantsName = otherParticipants
             .map(p => userMap.get(p.userId)?.name)
@@ -2479,7 +2479,7 @@ export class ChannelController {
       }
 
       // 2. Validate channel is GROUP_DM
-      if (channel.scopeType !== 'GROUP_DM') {
+      if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
         res.status(400).json({
           error: 'This endpoint is only for GROUP_DM channels',
           channelScopeType: channel.scopeType

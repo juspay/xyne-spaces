@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { sanitizeProjectCode, ProjectType, ChannelRole } from '@xyne/shared';
+import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
@@ -67,8 +67,8 @@ export async function ensureGeneralChannelForWorkspace(
     channel = await db.channel.create({
       data: {
         name: 'general',
-        scopeType: 'DEFAULT',
-        visibility: 'PUBLIC',
+        scopeType: ChannelScopeType.DEFAULT,
+        visibility: ChannelVisibility.PUBLIC,
         createdBy,
         projectId: project.id,
         workspaceId,

@@ -10,8 +10,7 @@ import {
   AuthProvider,
   ChannelRole,
   CanvasRole,
-  ChannelScopeType,
-} from '@xyne/shared';
+  ChannelScopeType, OrgRole, UserStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
@@ -191,7 +190,7 @@ export class InvitationService {
         workspaceId,
         ...(invitationRole === 'GUEST'
           ? {
-              role: 'GUEST',
+              role: WorkspaceRole.GUEST,
               entityId: params.entityId,
               entityType: params.entityType,
             }
@@ -636,7 +635,7 @@ export class InvitationService {
         data: {
           orgId: invitation.orgId!,
           email: userData.email.toLowerCase(),
-          role: 'GUEST',
+          role: OrgRole.GUEST,
         },
       });
 
@@ -652,7 +651,7 @@ export class InvitationService {
           authProvider: userData.authProvider as AuthProvider,
           workspaceId: invitation.workspaceId!,
           role: invitation.role,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
           orgMemberId: activeOrgMember.memberId,
         },
       });
@@ -753,7 +752,7 @@ export class InvitationService {
             where: { id: existingWorkspaceUser.id },
             data: {
               leftAt: null,
-              status: 'ACTIVE',
+              status: UserStatus.ACTIVE,
             },
           });
           const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
@@ -769,7 +768,7 @@ export class InvitationService {
           data: {
             leftAt: null,
             role: invitation.role,
-            status: 'ACTIVE',
+            status: UserStatus.ACTIVE,
           },
         });
         logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
@@ -828,7 +827,7 @@ export class InvitationService {
           authProvider: userData.authProvider as AuthProvider,
           workspaceId: invitation.workspaceId!,
           role: invitation.role,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
           orgMemberId: orgMember.memberId,
         },
       });

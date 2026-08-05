@@ -1,7 +1,7 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
-import { MessageType, TicketStatusV2 } from '@xyne/shared';
+import { MessageType, TicketStatusV2, FormFieldType, ActivityType } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 export const OPEN_STATUSES = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED];
@@ -26,7 +26,7 @@ export interface TicketBasicInfo {
 export async function getUserFieldIds(): Promise<string[]> {
   try {
     const userFields = await db.formFields.findMany({
-      where: { fieldType: 'USER' as any },
+      where: { fieldType: FormFieldType.USER as any },
       select: { id: true },
     });
     return userFields.map(f => f.id);
@@ -233,7 +233,7 @@ export async function createEtaSystemMessage(params: {
   conversationId: string;
   content: string;
   createdAt: Date;
-  activityType: 'ETA' | 'STAGE_ETA';
+  activityType: ActivityType.ETA | ActivityType.STAGE_ETA;
   stageId?: string;
 }): Promise<void> {
   const { conversationId, content, createdAt, activityType, stageId } = params;

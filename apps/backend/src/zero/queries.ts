@@ -9,8 +9,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
-  ShareableEntityType,
-} from '@xyne/shared';
+  ShareableEntityType, UserResponsibility } from '@xyne/shared';
 import { z } from 'zod';
 import {
   CanvasVisibility,
@@ -351,7 +350,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.prReviewers?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'PR_REVIEWER')
+        .where('userResponsibility', UserResponsibility.PR_REVIEWER)
         .where('userId', 'IN', filters.prReviewers ?? []),
     );
   }
@@ -359,7 +358,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.qaAssigned?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'QA')
+        .where('userResponsibility', UserResponsibility.QA)
         .where('userId', 'IN', filters.qaAssigned ?? []),
     );
   }

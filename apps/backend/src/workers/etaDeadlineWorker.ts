@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
+import { ActivityType } from '@xyne/shared';
 import {
   getUsersToNotifyForTicket,
   getTicketBotActorId,
@@ -113,7 +114,7 @@ class EtaDeadlineWorker {
                 conversationId: ticket.conversationId!,
                 content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
                 createdAt: now,
-                activityType: 'ETA',
+                activityType: ActivityType.ETA,
               }),
             );
           }

@@ -5,8 +5,7 @@ import {
   parseDashboardConfig,
   DashboardRole,
   DashboardVisibility,
-  QueryVisualizationType,
-} from '@xyne/shared';
+  QueryVisualizationType, QueryType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 
@@ -123,7 +122,7 @@ export async function createDashboardComponent(
     const query = await tx.dynamicDashboardQuery.create({
       data: {
         title: input.title ?? null,
-        queryType: 'external',
+        queryType: QueryType.external,
         queryJson: input.queryJson as Prisma.InputJsonValue,
         visualType: input.visualType as QueryVisualizationType,
         position,

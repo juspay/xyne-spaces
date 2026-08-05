@@ -314,7 +314,7 @@ export class EmailAuthController {
           role: workspaceUser.role,
           orgRole: orgMember.role,
           memberId: orgMember.memberId,
-          authProvider: 'EMAIL',
+          authProvider: AuthProvider.EMAIL,
         },
         workspaces,
         pendingUserData: {
