@@ -475,10 +475,10 @@ export const AssignmentConfigScreen = ({
       return;
     }
 
-    performSave();
+    void performSave();
   };
 
-  const performSave = (): void => {
+  const performSave = async (): Promise<void> => {
     // Validate percentage sum equals 100 when usePercentage is enabled
     if (localUsePercentage) {
       if (localAutoRotationEnabled) {
@@ -561,19 +561,21 @@ export const AssignmentConfigScreen = ({
         {} as Record<string, string>,
       );
 
-      void zero.mutate(
-        mutators.assignmentConfig.batchUpdate({
-          userGroupId,
-          userStates,
-          boardWeight: boardWeightData,
-          expertiseMappings: expertiseMappingsData,
-          userMappings,
-          stateIds,
-          complexityScoreId: uuidv4(),
-          mappingIds,
-          timestamp: Date.now(),
-        }),
-      );
+      const pendingServerResults = [
+        zero.mutate(
+          mutators.assignmentConfig.batchUpdate({
+            userGroupId,
+            userStates,
+            boardWeight: boardWeightData,
+            expertiseMappings: expertiseMappingsData,
+            userMappings,
+            stateIds,
+            complexityScoreId: uuidv4(),
+            mappingIds,
+            timestamp: Date.now(),
+          }),
+        ).server,
+      ];
 
       // Also update rotation settings (enable/disable, interval)
       const rotationChanged =
@@ -582,14 +584,16 @@ export const AssignmentConfigScreen = ({
           localRotationInterval !== (userGroup?.rotationInterval ?? 'WEEKLY'));
 
       if (rotationChanged) {
-        void zero.mutate(
-          mutators.assignmentConfig.toggleGroupAutoRotation({
-            userGroupId,
-            autoRotationEnabled: localAutoRotationEnabled,
-            rotationInterval: localAutoRotationEnabled ? localRotationInterval : undefined,
-            rotationStartDate: localAutoRotationEnabled ? Date.now() : undefined,
-            timestamp: Date.now(),
-          }),
+        pendingServerResults.push(
+          zero.mutate(
+            mutators.assignmentConfig.toggleGroupAutoRotation({
+              userGroupId,
+              autoRotationEnabled: localAutoRotationEnabled,
+              rotationInterval: localAutoRotationEnabled ? localRotationInterval : undefined,
+              rotationStartDate: localAutoRotationEnabled ? Date.now() : undefined,
+              timestamp: Date.now(),
+            }),
+          ).server,
         );
       }
 
@@ -598,21 +602,30 @@ export const AssignmentConfigScreen = ({
         localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
 
       if (reassignOnUnavailableChanged) {
-        void zero.mutate(
-          mutators.assignmentConfig.toggleGroupReassignOnUnavailable({
-            userGroupId,
-            reassignOnUnavailable: localReassignOnUnavailable,
-            timestamp: Date.now(),
-          }),
+        pendingServerResults.push(
+          zero.mutate(
+            mutators.userGroup.update({
+              userGroupId,
+              reassignOnUnavailable: localReassignOnUnavailable,
+              timestamp: Date.now(),
+            }),
+          ).server,
         );
+      }
+
+      const serverResults = await Promise.all(pendingServerResults);
+      const failedResult = serverResults.find(result => result.type === 'error');
+      if (failedResult?.type === 'error') {
+        throw new Error(failedResult.error.message || 'Failed to save assignment configuration');
       }
 
       setHasChanges(false);
       setPendingSetMappings(null);
       setJustSaved(true);
-    } catch {
+    } catch (error) {
       toast.error('Changes not saved', {
-        description: 'Something went wrong on save. Try again.',
+        description:
+          error instanceof Error ? error.message : 'Something went wrong on save. Try again.',
         duration: 5000,
       });
     } finally {
@@ -1176,7 +1189,7 @@ export const AssignmentConfigScreen = ({
               variant='destructive'
               onClick={() => {
                 setShowDisableRotationWarning(false);
-                performSave();
+                void performSave();
               }}
               data-track-category='UserGroups'
               data-track-name='ConfirmDisableRotation'

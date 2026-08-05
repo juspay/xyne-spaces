@@ -7076,8 +7076,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
     userGroup: {
       update: defineMutator(
-        z.object({ userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), userRoleUpdates: z.record(z.string(), z.string()).optional(), timestamp: z.number() }),
-        async ({ tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp } }) => {
+        z.object({
+          userGroupId: z.string(),
+          name: z.string().optional(),
+          alias: z.string().optional(),
+          description: z.string().optional(),
+          reassignOnUnavailable: z.boolean().optional(),
+          userResponsibilityUpdates: z
+            .record(z.string(), z.nativeEnum(UserResponsibility))
+            .optional(),
+          userRoleUpdates: z.record(z.string(), z.string()).optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            userGroupId,
+            name,
+            alias,
+            description,
+            reassignOnUnavailable,
+            userResponsibilityUpdates,
+            userRoleUpdates,
+            timestamp,
+          },
+        }) => {
           // Get all user groups to check for duplicates in a single query
           const allUserGroups = await tx.run(zql.user_groups);
 
@@ -7112,6 +7135,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(name !== undefined && { name }),
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
+            ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
             updatedAt: timestamp,
           });
 
@@ -10193,29 +10217,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // so users don't need to reconfigure when re-enabling
             logger.info(`[TOGGLE-ROTATION] Disabled rotation for group ${userGroupId} (set mappings preserved)`);
           }
-        },
-      ),
-      toggleGroupReassignOnUnavailable: defineMutator(
-        z.object({
-          userGroupId: z.string(),
-          reassignOnUnavailable: z.boolean(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args: { userGroupId, reassignOnUnavailable, timestamp } }) => {
-          const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-          if (!userGroup) {
-            throw new Error('User group not found');
-          }
-
-          await tx.mutate.user_groups.update({
-            id: userGroupId,
-            reassignOnUnavailable,
-            updatedAt: timestamp,
-          });
-
-          logger.info(
-            `[TOGGLE-REASSIGN-ON-UNAVAILABLE] ${reassignOnUnavailable ? 'Enabled' : 'Disabled'} reassign-on-unavailable for group ${userGroupId}.`
-          );
         },
       ),
     },
