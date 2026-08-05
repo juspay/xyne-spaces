@@ -250,6 +250,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               aclWhere = { workspaceId: ws };
             } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(aclWhere, ws)) {
               aclWhere = { AND: [aclWhere, { workspaceId: ws }] };
+              notePattern('[acl] clause wider than the workspace', model, operation, { side: 'read' });
             }
             const scalarDefault = isWorkspaceOnly(aclWhere, ws);
 
@@ -355,6 +356,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             mutateWhere = { workspaceId: ws };
           } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(mutateWhere, ws)) {
             mutateWhere = { AND: [mutateWhere, { workspaceId: ws }] };
+            notePattern('[acl] clause wider than the workspace', model, operation, { side: 'write' });
           }
 
           // Bulk ops accept a non-unique/relational where — AND the mutate filter directly.
