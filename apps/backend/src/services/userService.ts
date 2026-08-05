@@ -98,8 +98,11 @@ export class UserService {
    */
   async findUserByEmail(email: string, workspaceId: string): Promise<User | null> {
     try {
-      return await this.prisma.user.findUnique({
-        where: { email_workspaceId: { email, workspaceId } }
+      return await this.prisma.user.findFirst({
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          workspaceId,
+        }
       });
     } catch (error) {
       logger.error('Error finding user by email:', error);
@@ -128,7 +131,11 @@ export class UserService {
     }
     try {
       const result = await this.prisma.user.updateMany({
-        where: { email, authProvider, providerUserId: oldProviderUserId },
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          authProvider,
+          providerUserId: oldProviderUserId,
+        },
         data: { providerUserId: newProviderUserId },
       });
       if (result.count > 0) {
@@ -154,7 +161,7 @@ export class UserService {
   ): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
     try {
       const user = await this.prisma.user.findFirst({
-        where: { email },
+        where: { email: { equals: email, mode: 'insensitive' } },
         select: { authProvider: true, providerUserId: true },
         orderBy: { createdAt: 'asc' },
       });
@@ -178,8 +185,8 @@ export class UserService {
 
       // Fetch existing orgMember by email to get memberId
       // orgMember should already exist (created during invitation or org setup)
-      const orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
+      const orgMember = await this.prisma.orgMember.findFirst({
+        where: { email: { equals: userData.email, mode: 'insensitive' } },
         select: { memberId: true }
       });
 
@@ -606,7 +613,7 @@ export class UserService {
       logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
       const workspaceUsers = await this.prisma.user.findMany({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
           status: UserStatus.ACTIVE,
           leftAt: null,
         },
@@ -634,7 +641,7 @@ export class UserService {
 
       const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
         where: {
-          email: email,
+          email: { equals: email, mode: 'insensitive' },
           status: 'APPROVED',
         },
         orderBy: { updatedAt: 'desc' },
@@ -720,13 +727,13 @@ export class UserService {
     try {
       const userCount = await this.prisma.user.count({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
         },
       });
 
       const activeCount = await this.prisma.user.count({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
           status: UserStatus.ACTIVE,
           leftAt: null,
         },
@@ -810,14 +817,14 @@ export class UserService {
       const invitation = await this.prisma.invitation.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email
+          email: { equals: userData.email, mode: 'insensitive' },
         }
       });
 
       // Find if there's an existing user with this email in the org
       const existingOrgUsers = await this.prisma.user.findMany({
         where: {
-          email: userData.email,
+          email: { equals: userData.email, mode: 'insensitive' },
           workspace: {
             orgId: workspace.orgId
           }
@@ -828,7 +835,7 @@ export class UserService {
       const approvedJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email,
+          email: { equals: userData.email, mode: 'insensitive' },
           status: 'APPROVED',
         },
         orderBy: { updatedAt: 'desc' },
@@ -841,8 +848,8 @@ export class UserService {
       const role = invitation?.role || 'MEMBER';
 
       // Fetch existing orgMember by email
-      let orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
+      let orgMember = await this.prisma.orgMember.findFirst({
+        where: { email: { equals: userData.email, mode: 'insensitive' } },
         select: { memberId: true }
       });
 
