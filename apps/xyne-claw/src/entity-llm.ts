@@ -52,13 +52,6 @@ const ENTITY_MAX_RETRIES = Number(process.env["ENTITY_LLM_MAX_RETRIES"] ?? 1);
 const ENTITY_TOTAL_BUDGET_MS =
   ENTITY_TIMEOUT_MS * (ENTITY_MAX_RETRIES + 1) + 5_000 * ENTITY_MAX_RETRIES;
 
-// Surfaced at boot so a bad override is caught by reading one log line, rather
-// than by watching a run die 300s at a time.
-log.info(
-  `[entity-llm] model=${ENTITY_MODEL} attemptTimeout=${ENTITY_TIMEOUT_MS}ms ` +
-    `retries=${ENTITY_MAX_RETRIES} worstCase=${Math.round(ENTITY_TOTAL_BUDGET_MS / 1000)}s ` +
-    `slotWait=${Math.round(ENTITY_SLOT_WAIT_MS / 1000)}s concurrency=${ENTITY_MAX_CONCURRENT}`,
-);
 
 /**
  * Entity extraction is background work; a live agent turn is not. Even inside
@@ -91,6 +84,15 @@ const ENTITY_MAX_CONCURRENT = Math.max(
  * can log, count and retry sanely.
  */
 const ENTITY_SLOT_WAIT_MS = Number(process.env["ENTITY_LLM_SLOT_WAIT_MS"] ?? 45_000);
+
+// Surfaced at boot so a bad override is caught by reading one log line, rather
+// than by watching a run die 300s at a time. Declared here, below every value
+// it reads, since these are const bindings and not hoisted.
+log.info(
+  `[entity-llm] model=${ENTITY_MODEL} attemptTimeout=${ENTITY_TIMEOUT_MS}ms ` +
+    `retries=${ENTITY_MAX_RETRIES} worstCase=${Math.round(ENTITY_TOTAL_BUDGET_MS / 1000)}s ` +
+    `slotWait=${Math.round(ENTITY_SLOT_WAIT_MS / 1000)}s concurrency=${ENTITY_MAX_CONCURRENT}`,
+);
 
 let entityActive = 0;
 const entityWaiters: Array<() => void> = [];
