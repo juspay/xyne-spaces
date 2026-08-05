@@ -70,6 +70,14 @@ export class ExternalSourceRepository {
     });
   }
 
+  /** Find the most recently updated active source of a type owned by a user. */
+  async findActiveByOwnerAndSourceType(ownerUserId: string, sourceType: string) {
+    return await this.db.externalSource.findFirst({
+      where: { ownerUserId, sourceType, isActive: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
   /**
    * Create external source
    * @param data.credentials - Encrypted credentials string (use encrypt() from encryptionService)

@@ -88,6 +88,21 @@ export interface RegenerateRecordingSummaryResult {
   detailedSummaryCanvasId: string | null;
 }
 
+export interface ExportRecordingGoogleDocResult {
+  documentId: string;
+  documentUrl: string;
+}
+
+export interface RecordingGoogleDocComposeContext {
+  canExport: boolean;
+  unavailableReason?: string;
+  summary: string | null;
+}
+
+interface GoogleRecordingDocConnectionResponse {
+  authUrl: string;
+}
+
 export interface BulkDeleteRecordingsResult {
   success: boolean;
   deleted: string[];
@@ -187,7 +202,7 @@ class RecordingService {
       {
         isHeadless: true,
         callType: 'AUDIO',
-        sttModel: params?.sttModel || 'azure',
+        sttModel: params?.sttModel || 'google',
       },
     );
 
@@ -254,6 +269,31 @@ class RecordingService {
         summaryTemplateId,
       });
     return response.data;
+  }
+
+  async exportGoogleDoc(callId: string): Promise<ExportRecordingGoogleDocResult> {
+    const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
+      `/calls/recordings/${callId}/export-google-doc`,
+    );
+    return response.data;
+  }
+
+  async getGoogleDocComposeContext(callId: string): Promise<RecordingGoogleDocComposeContext> {
+    const response = await apiInstance.get<{ success: true } & RecordingGoogleDocComposeContext>(
+      `/calls/recordings/${callId}/google-doc-compose-context`,
+    );
+    return response.data;
+  }
+
+  async connectGoogleDoc(
+    returnPath: string,
+    platform: 'electron' | 'web' = 'web',
+  ): Promise<string> {
+    const response = await apiInstance.post<GoogleRecordingDocConnectionResponse>(
+      '/integrations/google/connect/recording-doc/init',
+      { returnPath, platform },
+    );
+    return response.data.authUrl;
   }
 
   async grantRecordingAccess(
