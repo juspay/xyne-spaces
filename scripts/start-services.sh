@@ -554,6 +554,23 @@ fi
 # replaces placeholder/empty values, so re-running it never clobbers a real secret.
 node "$REPO_ROOT/scripts/generate-local-secrets.mjs"
 
+# Keep the backend worker aligned with the interactive Search selection. Use the
+# final START_VESPA value so a failed Vespa startup also disables its consumer.
+if [ "${START_VESPA:-0}" = "1" ]; then
+    VESPA_WORKER_ENABLED="true"
+else
+    VESPA_WORKER_ENABLED="false"
+fi
+
+if grep -q '^ENABLE_VESPA_WORKER=' .env.local 2>/dev/null; then
+    sed -i.bak "s/^ENABLE_VESPA_WORKER=.*/ENABLE_VESPA_WORKER=${VESPA_WORKER_ENABLED}/" .env.local
+    rm -f .env.local.bak
+else
+    echo "ENABLE_VESPA_WORKER=${VESPA_WORKER_ENABLED}" >> .env.local
+fi
+export ENABLE_VESPA_WORKER="$VESPA_WORKER_ENABLED"
+echo -e "${BLUE}  ENABLE_VESPA_WORKER=${ENABLE_VESPA_WORKER} (Search feature)${NC}"
+
 # Migrate COMMON_DATABASE_URL port from 5434 → 5433 (consolidated postgres)
 if grep -q "localhost:5434" .env.local 2>/dev/null; then
     echo -e "${YELLOW}  Migrating COMMON_DATABASE_URL from port 5434 to 5433 (consolidated postgres)...${NC}"
