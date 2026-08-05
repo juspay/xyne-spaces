@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
@@ -14,6 +15,8 @@ import { LibraryToolbarPortal } from './components/LibraryToolbarSlot';
 import { useCategoryFilter } from './hooks/useCategoryFilter';
 
 const AgentsV2 = ({ query }: { query: string }): ReactElement => {
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { data, isLoading, isError, refetch } = useClawAuthAgents();
   const agents = useMemo(() => data ?? [], [data]);
 
@@ -85,7 +88,7 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
           items: section.agents.map(agent => (
             <LibraryCard
               key={agent.id}
-              to={`/claw-agents/agents/${agent.slug}?tab=persona`}
+              to={prefixWs(`/ai/library/agent/${agent.slug}?tab=persona`)}
               testId='claw-agent-card'
               icon={<LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} />}
               name={agent.name}

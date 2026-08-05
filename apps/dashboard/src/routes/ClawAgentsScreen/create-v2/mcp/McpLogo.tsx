@@ -1,12 +1,13 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 
 const MCP_ICON_BASE = '/assets/mcp';
-const MCP_SVG_ONLY = new Set(['gmail', 'google-drive', 'sequentialthinking', 'xyne-spaces']);
+const EXTENSIONS = ['png', 'svg'] as const;
 const MCP_TRANSPARENT = new Set(['xyne-spaces']);
 
-const SIZE: Record<'sm' | 'lg', string> = {
+const SIZE: Record<'sm' | 'md' | 'lg', string> = {
   sm: 'size-7 rounded-lg p-1 text-[10px]',
+  md: 'size-10 rounded-lg p-1.5 text-xs',
   lg: 'size-11 rounded-xl p-2 text-xs',
 };
 
@@ -23,12 +24,16 @@ export function McpLogo({
 }: {
   type: string;
   name: string;
-  size?: 'sm' | 'lg';
+  size?: keyof typeof SIZE;
 }): ReactElement {
-  const [errored, setErrored] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => setAttempt(0), [type]);
+
+  const extension = EXTENSIONS[attempt];
   const background = MCP_TRANSPARENT.has(type) ? 'bg-transparent' : 'bg-card';
 
-  if (errored || !type) {
+  if (!type || !extension) {
     return (
       <div
         className={cn(
@@ -45,10 +50,11 @@ export function McpLogo({
 
   return (
     <img
-      src={`${MCP_ICON_BASE}/${type}.${MCP_SVG_ONLY.has(type) ? 'svg' : 'png'}`}
+      key={extension}
+      src={`${MCP_ICON_BASE}/${type}.${extension}`}
       alt=''
       aria-hidden='true'
-      onError={() => setErrored(true)}
+      onError={() => setAttempt(next => next + 1)}
       className={cn(
         'shrink-0 border border-border object-contain shadow-sm',
         SIZE[size],
