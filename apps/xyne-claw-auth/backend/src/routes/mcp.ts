@@ -7,7 +7,7 @@ import { listToolsForUser, callTool } from "../mcp/runner.js";
 import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
-import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
+import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import type { Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
@@ -1355,6 +1355,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     }
     if (serverType === "bitbucket" && tool === "get-pr-comments") {
       const result = await handleGetPrComments(credentials, params ?? {});
+      res.json({ success: true, data: result });
+      return;
+    }
+    if (serverType === "bitbucket" && tool === "list-pull-requests") {
+      const result = await handleListPullRequests(credentials, params ?? {});
       res.json({ success: true, data: result });
       return;
     }
