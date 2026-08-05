@@ -139,7 +139,7 @@ async function createButtonMessage(params: {
   content: string;
   prId: number;
   prUrl: string;
-  workspaceId?: string;
+  workspaceId: string;
   threadLink?: {
     projectKey: string;
     repositorySlug: string;
@@ -155,7 +155,7 @@ async function createButtonMessage(params: {
       data: {
         messageId,
         conversationId: params.conversationId,
-        ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+        workspaceId: params.workspaceId,
         senderId: params.botUserId,
         content: params.content,
         msgType: MessageType.BOT,
@@ -341,7 +341,7 @@ async function postOrUpdateApprovalButton(params: ApprovalButtonParams): Promise
       content,
       prId,
       prUrl,
-      ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
+      workspaceId: ticket.workspaceId,
     });
     logger.info(`[PR-Check-Approval] Created approval button ${messageId} for PR #${prId} in ticket ${ticketId}`);
   }
