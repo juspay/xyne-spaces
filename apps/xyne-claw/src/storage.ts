@@ -1,37 +1,49 @@
 /**
- * Direct GCS access for session archive/restore.
+ * Direct object-storage access for session archive/restore.
  *
  * Why this exists: session archive/restore normally round-trips through
  * claw-auth's S2S endpoint (`/internal/sessions/archive` + `/restore`). During a
  * claw-auth rollout that endpoint is unreachable (`503 no healthy upstream`), so
  * archiving fails exactly when runs are being SIGTERM-killed and need to be
  * checkpointed for recovery (prod incident 2026-06-09T08:14–08:22). This module
- * lets xyne-claw read/write GCS DIRECTLY so the critical path no longer depends
- * on claw-auth being up. `session-store.ts` uses it as the PRIMARY path and
- * falls back to the claw-auth round-trip when it's unavailable.
+ * lets xyne-claw read/write the store DIRECTLY so the critical path no longer
+ * depends on claw-auth being up. `session-store.ts` uses it as the PRIMARY path
+ * and falls back to the claw-auth round-trip when it's unavailable.
  *
- * Auth: `@google-cloud/storage` with Application Default Credentials — Workload
+ * Storage goes through the shared @xyne/storage provider factory — GCS or S3
+ * selected by STORAGE.provider (STORAGE_PROVIDER env), same as claw-auth and
+ * the Spaces backend. GCS auth: Application Default Credentials — Workload
  * Identity on GKE, `gcloud auth application-default login` / service-account
- * JSON locally (same credential chain claw-auth uses). When no credentials are
- * resolvable at all, every function degrades (returns false/null) and callers
- * ride the claw-auth fallback; the failure is sticky so we don't pay a probe
- * timeout on every archive.
+ * JSON locally. When no credentials are resolvable at all, every function
+ * degrades (returns false/null) and callers ride the claw-auth fallback; the
+ * failure is sticky so we don't pay a probe timeout on every archive.
  *
  * Object layout MUST stay byte-identical to claw-auth's sessions-archive.ts:
- *   gs://{GCS_BUCKET_NAME}/claw-sessions/{conversationId}/{relativePath}
+ *   {bucket}/claw-sessions/{conversationId}/{relativePath}
  */
 
 import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createWriteStream } from "node:fs";
-import { Storage } from "@google-cloud/storage";
-import { GCS } from "./config.js";
+import {
+  createStorageService,
+  isPreconditionFailed,
+  setStorageLogger,
+  type StorageService,
+} from "@xyne/storage";
+import { GCS, STORAGE } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("gcs");
 
-const BUCKET = GCS.bucketName;
+setStorageLogger({
+  info: (msg, ...meta) => log.info(msg, ...meta),
+  warn: (msg, ...meta) => log.warn(msg, ...meta),
+  error: (msg, ...meta) => log.error(msg, ...meta),
+});
+
+const BUCKET = STORAGE.provider === "s3" ? STORAGE.s3BucketName : GCS.bucketName;
 // MUST equal SESSION_PREFIX in claw-auth/routes/sessions-archive.ts.
 const SESSION_PREFIX = "claw-sessions";
 // Per-run debugger snapshots live OUTSIDE the session prefix on purpose:
@@ -48,7 +60,9 @@ const DEBUG_RUN_PREFIX = "claw-debug-runs";
 // Source of truth for "did this finish?", independent of the lossy callback.
 const RESULT_MARKER_PREFIX = "claw-results";
 
-const GCS_TIMEOUT_MS = 15_000;
+// Per-request write timeout. SIGTERM drain gives the pod ~30s; a hung upload
+// must fail fast enough for the claw-auth fallback to still run within it.
+const STORAGE_TIMEOUT_MS = 15_000;
 
 export interface SessionFile {
   path: string;
@@ -64,37 +78,50 @@ export interface SessionArchiveObject {
 // Sticky: once we learn there are no usable credentials (local dev without
 // ADC), stop trying — mirrors the old metadata-server probe behavior.
 let credentialsUnavailable = false;
-let storage: Storage | null = null;
+let storage: StorageService | null = null;
 
 export function gcsDirectConfigured(): boolean {
   return BUCKET.length > 0 && !credentialsUnavailable;
 }
 
-function getStorage(): Storage | null {
+function getStorage(): StorageService | null {
   if (!gcsDirectConfigured()) return null;
   if (!storage) {
-    storage = new Storage({
-      retryOptions: { autoRetry: true, maxRetries: 3 },
-      // apiEndpoint also flips the SDK into customEndpoint mode, which is what
-      // lets the emulator work without any credentials at all.
-      ...(GCS.fakeHost ? { apiEndpoint: GCS.fakeHost } : {}),
-    });
-    if (GCS.fakeHost) log.info(`[gcs] using fake-gcs-server at ${GCS.fakeHost} bucket=${BUCKET}`);
+    storage = createStorageService(
+      {
+        provider: STORAGE.provider,
+        gcs: {
+          bucketName: GCS.bucketName,
+          // apiEndpoint also flips the SDK into customEndpoint mode, which is
+          // what lets the emulator work without any credentials at all.
+          ...(GCS.fakeHost ? { apiEndpoint: GCS.fakeHost } : {}),
+        },
+        s3: {
+          region: STORAGE.s3Region,
+          bucketName: STORAGE.s3BucketName,
+          ...(STORAGE.s3Endpoint ? { endpoint: STORAGE.s3Endpoint } : {}),
+          ...(STORAGE.s3AccessKeyId
+            ? { accessKeyId: STORAGE.s3AccessKeyId, secretAccessKey: STORAGE.s3SecretAccessKey }
+            : {}),
+        },
+      },
+      BUCKET,
+    );
   }
   return storage;
 }
 
 /**
  * ADC resolution failures (no metadata server, no gcloud login, no key file)
- * mean direct GCS can never work in this process — disable it so callers stop
- * paying the probe cost and go straight to the claw-auth fallback. Anything
- * else (network blip, 5xx, IAM denial) stays retryable per call.
+ * mean direct storage can never work in this process — disable it so callers
+ * stop paying the probe cost and go straight to the claw-auth fallback.
+ * Anything else (network blip, 5xx, IAM denial) stays retryable per call.
  */
 function noteIfCredsError(err: unknown): void {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/could not load the default credentials|unable to detect.*project|metadata/i.test(msg)) {
+  if (/could not load the default credentials|unable to detect.*project|metadata|Could not load credentials/i.test(msg)) {
     credentialsUnavailable = true;
-    log.warn("[gcs] no application default credentials — direct GCS disabled (using claw-auth fallback)");
+    log.warn("[gcs] no application default credentials — direct storage disabled (using claw-auth fallback)");
   }
 }
 
@@ -109,12 +136,12 @@ function sessionPrefix(conversationId: string): string {
 // Cap concurrent uploads so the SIGTERM mass-flush (every active session at
 // once) doesn't open an unbounded number of streams.
 const UPLOAD_CONCURRENCY = 4;
-// Above this, use the SDK's resumable protocol (recommended cutoff ~8 MiB);
-// below it the extra session-initiation round-trip isn't worth it.
+// Above this, use GCS's resumable protocol (recommended cutoff ~8 MiB); below
+// it the extra session-initiation round-trip isn't worth it. S3 ignores this.
 const RESUMABLE_THRESHOLD_BYTES = 8 * 1024 * 1024;
 
 export interface SessionDiskFile {
-  /** Relative path inside the session dir (becomes the GCS object suffix). */
+  /** Relative path inside the session dir (becomes the object suffix). */
   path: string;
   /** Absolute path on local disk to stream from. */
   absPath: string;
@@ -125,15 +152,8 @@ export interface GcsUploadSessionOptions {
   createOnly?: boolean;
 }
 
-function isPreconditionFailed(err: unknown): boolean {
-  const code = (err as { code?: unknown })?.code;
-  const status = (err as { status?: unknown })?.status;
-  const statusCode = (err as { statusCode?: unknown })?.statusCode;
-  return code === 412 || status === 412 || statusCode === 412;
-}
-
 /**
- * Stream every session file from DISK to GCS. Returns true only on FULL
+ * Stream every session file from DISK to storage. Returns true only on FULL
  * success. Streaming (vs. the old read-all-into-base64) means memory use is
  * O(concurrency × chunk), not O(session size) — huge sessions used to die in
  * collectSessionFiles with "Invalid string length" before upload even began.
@@ -145,18 +165,18 @@ export async function gcsUploadSessionFromDisk(
 ): Promise<boolean> {
   const client = getStorage();
   if (!client) return false;
-  const bucket = client.bucket(BUCKET);
   try {
     const queue = [...files];
     let failed = false;
     const worker = async (): Promise<void> => {
       for (let f = queue.shift(); f && !failed; f = queue.shift()) {
         try {
-          await bucket.upload(f.absPath, {
-            destination: objectName(conversationId, f.path),
+          await client.uploadStreamToPath(createReadStream(f.absPath), {
+            path: objectName(conversationId, f.path),
+            contentType: "application/octet-stream",
             resumable: f.sizeBytes > RESUMABLE_THRESHOLD_BYTES,
-            timeout: GCS_TIMEOUT_MS,
-            ...(options.createOnly ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
+            timeoutMs: STORAGE_TIMEOUT_MS,
+            ...(options.createOnly ? { ifNotExists: true } : {}),
           });
         } catch (err) {
           failed = true; // stop the other workers draining the queue
@@ -182,10 +202,11 @@ export async function gcsUploadDebugRun(storeKey: string, fileName: string, data
   const client = getStorage();
   if (!client) return false;
   try {
-    await client
-      .bucket(BUCKET)
-      .file(`${DEBUG_RUN_PREFIX}/${storeKey}/${fileName}`)
-      .save(data, { resumable: false, timeout: GCS_TIMEOUT_MS, contentType: "application/json" });
+    await client.uploadFileV2(data, {
+      path: `${DEBUG_RUN_PREFIX}/${storeKey}/${fileName}`,
+      contentType: "application/json",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
     return true;
   } catch (err) {
     noteIfCredsError(err);
@@ -203,7 +224,7 @@ export async function gcsListDebugRuns(storeKey: string): Promise<string[] | nul
   if (!client) return null;
   const prefix = `${DEBUG_RUN_PREFIX}/${storeKey}/`;
   try {
-    const [files] = await client.bucket(BUCKET).getFiles({ prefix });
+    const files = await client.listFiles(prefix);
     return files.map((f) => f.name.slice(prefix.length)).filter(Boolean);
   } catch (err) {
     noteIfCredsError(err);
@@ -217,11 +238,7 @@ export async function gcsDownloadDebugRun(storeKey: string, fileName: string): P
   const client = getStorage();
   if (!client) return null;
   try {
-    const [buf] = await client
-      .bucket(BUCKET)
-      .file(`${DEBUG_RUN_PREFIX}/${storeKey}/${fileName}`)
-      .download();
-    return buf;
+    return await client.getFileBuffer(`${DEBUG_RUN_PREFIX}/${storeKey}/${fileName}`);
   } catch (err) {
     noteIfCredsError(err);
     log.warn(`[gcs] debug-run download failed for ${storeKey}/${fileName}:`, err instanceof Error ? err.message : String(err));
@@ -234,10 +251,11 @@ export async function gcsUploadResultMarker(idempotencyKey: string, data: Buffer
   const client = getStorage();
   if (!client) return false;
   try {
-    await client
-      .bucket(BUCKET)
-      .file(`${RESULT_MARKER_PREFIX}/${idempotencyKey}.json`)
-      .save(data, { resumable: false, timeout: GCS_TIMEOUT_MS, contentType: "application/json" });
+    await client.uploadFileV2(data, {
+      path: `${RESULT_MARKER_PREFIX}/${idempotencyKey}.json`,
+      contentType: "application/json",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
     return true;
   } catch (err) {
     noteIfCredsError(err);
@@ -250,15 +268,13 @@ export async function gcsUploadResultMarker(idempotencyKey: string, data: Buffer
 export async function gcsDownloadResultMarker(idempotencyKey: string): Promise<Buffer | null> {
   const client = getStorage();
   if (!client) return null;
+  const markerPath = `${RESULT_MARKER_PREFIX}/${idempotencyKey}.json`;
   try {
-    const [buf] = await client
-      .bucket(BUCKET)
-      .file(`${RESULT_MARKER_PREFIX}/${idempotencyKey}.json`)
-      .download();
-    return buf;
+    // A missing marker is the common case (run not finished) — not an error,
+    // so probe existence first instead of letting the read fail noisily.
+    if (!(await client.fileExists(markerPath))) return null;
+    return await client.getFileBuffer(markerPath);
   } catch (err) {
-    // A missing marker is the common case (run not finished) — not an error.
-    if ((err as { code?: number }).code === 404) return null;
     noteIfCredsError(err);
     log.warn(`[gcs] result-marker download failed for ${idempotencyKey}:`, err instanceof Error ? err.message : String(err));
     return null;
@@ -266,24 +282,22 @@ export async function gcsDownloadResultMarker(idempotencyKey: string): Promise<B
 }
 
 /**
- * Newest `updated` timestamp (epoch ms) across a session's GCS objects —
+ * Newest `updated` timestamp (epoch ms) across a session's objects —
  * a cheap freshness probe (metadata-only list, no downloads) used by
  * ensureFreshSession() to decide whether the local PVC copy is stale
  * (last turn ran on another pod). Returns:
  *   - epoch ms of the newest object on success
- *   - 0 when GCS is reachable and no archive exists
+ *   - 0 when storage is reachable and no archive exists
  *   - null on error/disabled — caller treats freshness as unknown
  */
 export async function gcsSessionUpdatedAt(conversationId: string): Promise<number | null> {
   const client = getStorage();
   if (!client) return null;
   try {
-    // NOTE: no `fields` filter — restricting to items(updated) leaves the
-    // SDK's File.metadata undefined and the probe throws (prod 2026-06-12).
-    const [files] = await client.bucket(BUCKET).getFiles({ prefix: sessionPrefix(conversationId) });
+    const files = await client.listFiles(sessionPrefix(conversationId));
     let newest = 0;
     for (const f of files) {
-      const t = f.metadata?.updated ? Date.parse(f.metadata.updated) : NaN;
+      const t = f.updated?.getTime() ?? NaN;
       if (Number.isFinite(t) && t > newest) newest = t;
     }
     return newest;
@@ -295,26 +309,23 @@ export async function gcsSessionUpdatedAt(conversationId: string): Promise<numbe
 }
 
 /**
- * List every archived session file directly from GCS. Returns null on
- * error/disabled, [] when GCS is reachable and no archive exists.
+ * List every archived session file directly from storage. Returns null on
+ * error/disabled, [] when storage is reachable and no archive exists.
  */
 export async function gcsListSessionObjects(conversationId: string): Promise<SessionArchiveObject[] | null> {
   const client = getStorage();
   if (!client) return null;
   const prefix = sessionPrefix(conversationId);
   try {
-    const [files] = await client.bucket(BUCKET).getFiles({ prefix });
+    const files = await client.listFiles(prefix);
     return files
       .map((f) => {
         const rel = f.name.slice(prefix.length);
         if (!rel) return null;
-        const sizeRaw = f.metadata?.size;
-        const sizeBytes = typeof sizeRaw === "number" ? sizeRaw : Number(sizeRaw ?? 0);
-        const updatedMs = f.metadata?.updated ? Date.parse(f.metadata.updated) : 0;
         return {
           path: rel,
-          sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : 0,
-          updatedMs: Number.isFinite(updatedMs) ? updatedMs : 0,
+          sizeBytes: Number.isFinite(f.size) ? (f.size as number) : 0,
+          updatedMs: f.updated?.getTime() ?? 0,
         };
       })
       .filter((f): f is SessionArchiveObject => f !== null);
@@ -326,9 +337,9 @@ export async function gcsListSessionObjects(conversationId: string): Promise<Ses
 }
 
 /**
- * List + stream every session file directly from GCS into `destDir`. Returns:
+ * List + stream every session file directly from storage into `destDir`. Returns:
  *   - "restored" when at least one file was downloaded and size-verified
- *   - "missing" when GCS is reachable and no archive exists
+ *   - "missing" when storage is reachable and no archive exists
  *   - null on error/disabled — the caller falls back to claw-auth/PVC
  */
 export async function gcsRestoreSessionToDisk(
@@ -339,8 +350,7 @@ export async function gcsRestoreSessionToDisk(
   if (!client) return null;
   const prefix = sessionPrefix(conversationId);
   try {
-    const bucket = client.bucket(BUCKET);
-    const [files] = await bucket.getFiles({ prefix });
+    const files = await client.listFiles(prefix);
     const sessionFiles = files.filter((f) => f.name.slice(prefix.length));
     if (sessionFiles.length === 0) return "missing";
 
@@ -355,11 +365,10 @@ export async function gcsRestoreSessionToDisk(
           if (!rel || rel.includes("..") || rel.startsWith("/")) continue;
           const dest = path.join(tmpDir, rel);
           await mkdir(path.dirname(dest), { recursive: true });
-          await pipeline(f.createReadStream(), createWriteStream(dest));
+          await pipeline(await client.createReadStream(f.name), createWriteStream(dest));
           const actual = (await stat(dest)).size;
-          const expectedRaw = f.metadata?.size;
-          const expected = typeof expectedRaw === "number" ? expectedRaw : Number(expectedRaw ?? actual);
-          if (Number.isFinite(expected) && actual !== expected) {
+          const expected = Number.isFinite(f.size) ? (f.size as number) : actual;
+          if (actual !== expected) {
             throw new Error(`size mismatch for ${rel}: expected ${expected}, got ${actual}`);
           }
         }
@@ -383,7 +392,7 @@ export async function gcsRestoreSessionToDisk(
  * Legacy direct restore helper. Kept for call sites that still need the
  * base64 manifest shape; runtime restore uses gcsRestoreSessionToDisk().
  *
- * List + download every session file directly from GCS. Returns:
+ * List + download every session file directly from storage. Returns:
  *   - an array (possibly EMPTY = no archive exists) on success
  *   - null on error/disabled — the caller falls back to claw-auth
  */
@@ -392,12 +401,12 @@ export async function gcsRestoreSession(conversationId: string): Promise<Session
   if (!client) return null;
   const prefix = sessionPrefix(conversationId);
   try {
-    const [files] = await client.bucket(BUCKET).getFiles({ prefix });
+    const files = await client.listFiles(prefix);
     const out: SessionFile[] = [];
     for (const f of files) {
       const rel = f.name.slice(prefix.length);
       if (!rel) continue; // the prefix placeholder object, if any
-      const [buf] = await f.download();
+      const buf = await client.getFileBuffer(f.name);
       out.push({ path: rel, contentBase64: buf.toString("base64") });
     }
     return out;

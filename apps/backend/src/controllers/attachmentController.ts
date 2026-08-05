@@ -6,7 +6,7 @@ import {
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { storageService, getStorageService } from '../services/storage/index';
-import { normalizeStoragePath } from '../services/storage/pathUtils';
+import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
 import { MessageAttachment } from '@prisma/client';
