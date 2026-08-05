@@ -4,8 +4,7 @@
 
 import { Request, Response } from 'express';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
-import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository.js';
-import { ChannelRepository } from '../database/repositories/channelRepository.js';
+import { assertChannelMembership, assertDeskOwner } from '@/utils/channelMembership';
 import { EmailChannelPreferenceRepository } from '../database/repositories/emailChannelPreferenceRepository.js';
 import { DatabaseClient } from '../database/client.js';
 import { emailClassificationQueue } from '../queues/emailClassificationQueue.js';
@@ -25,8 +24,6 @@ type AccessResult =
 
 export class AiRetriggerController {
   private repo = new EmailClassificationRepository();
-  private channelRepo = new ChannelRepository();
-  private channelParticipantRepo = new ChannelParticipantRepository();
   private prefRepo = new EmailChannelPreferenceRepository();
   private prisma = DatabaseClient.getInstance();
 
@@ -35,33 +32,13 @@ export class AiRetriggerController {
     channelId: string,
     requireManageAccess = false,
   ): Promise<AccessResult> {
-    const userId = req.user?.id;
-    const workspaceId = req.user?.workspaceId;
-
-    if (!userId || !workspaceId) {
-      return { ok: false, status: 401, error: 'Authentication required' };
-    }
-
-    const channel = await this.channelRepo.findById(channelId);
-    if (!channel || channel.workspaceId !== workspaceId) {
-      return { ok: false, status: 404, error: 'Channel not found' };
-    }
-
-    const isParticipant = await this.channelParticipantRepo.isParticipant(channelId, userId);
-    if (!isParticipant) {
-      return { ok: false, status: 403, error: 'Not a member of this channel' };
-    }
-
-    if (!requireManageAccess) {
-      return { ok: true, userId };
-    }
+    const access = await assertChannelMembership(req, channelId);
+    if (!access.ok) return access;
+    if (!requireManageAccess) return { ok: true, userId: access.userId };
 
     const preference = await this.repo.findRawPreferenceByChannelId(channelId);
-    if (channel.createdBy === userId || preference?.ownerUserId === userId) {
-      return { ok: true, userId };
-    }
-
-    return { ok: false, status: 403, error: 'Only the desk owner can retrigger AI' };
+    const owned = assertDeskOwner(access, preference?.ownerUserId, 'Only the desk owner can retrigger AI');
+    return owned.ok ? { ok: true, userId: access.userId } : owned;
   }
 
   private async readFeatures(channelId: string): Promise<{

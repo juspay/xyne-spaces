@@ -8,8 +8,8 @@
 import { Request, Response } from 'express';
 import { deskMetricsRepository } from '../database/repositories/deskMetricsRepository.js';
 import { EmailChannelPreferenceRepository } from '../database/repositories/emailChannelPreferenceRepository.js';
-import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository.js';
 import { ChannelRepository } from '../database/repositories/channelRepository.js';
+import { assertChannelMembership } from '@/utils/channelMembership';
 import {
   aggregateDeskMetrics,
   type DeskMetricsContribution,
@@ -32,31 +32,14 @@ type CustomFieldFilterArg = {
 
 export class DeskMetricsController {
   private channelRepo = new ChannelRepository();
-  private channelParticipantRepo = new ChannelParticipantRepository();
   private preferenceRepo = new EmailChannelPreferenceRepository();
 
   private async assertChannelAccess(
     req: Request,
     channelId: string,
   ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-    const userId = req.user?.id;
-    const workspaceId = req.user?.workspaceId;
-
-    if (!userId || !workspaceId) {
-      return { ok: false, status: 401, error: 'Authentication required' };
-    }
-
-    const channel = await this.channelRepo.findById(channelId);
-    if (!channel || channel.workspaceId !== workspaceId) {
-      return { ok: false, status: 404, error: 'Channel not found' };
-    }
-
-    const isParticipant = await this.channelParticipantRepo.isParticipant(channelId, userId);
-    if (!isParticipant) {
-      return { ok: false, status: 403, error: 'Not a member of this channel' };
-    }
-
-    return { ok: true };
+    const access = await assertChannelMembership(req, channelId);
+    return access.ok ? { ok: true } : access;
   }
 
   private parseMetricsQuery(
