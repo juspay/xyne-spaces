@@ -22,6 +22,7 @@ import { Calendar, Check, User } from 'lucide-react';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import {
   AssigneeCellEditor,
   StatusCellEditor,
@@ -204,8 +205,11 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           return;
         }
       }
-      zero.mutate(
-        mutators.ticket.update({ id: ticketId, stageName: toStageName, updatedAt: Date.now() }),
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.update({ id: ticketId, stageName: toStageName, updatedAt: Date.now() }),
+        ),
+        'Failed to update stage',
       );
     },
     [zero],
@@ -275,12 +279,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           const oldValue = typeof params.oldValue === 'string' ? params.oldValue : '';
 
           if (newTitle && newTitle !== oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                title: newTitle,
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  title: newTitle,
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update title',
             );
           } else if (!newTitle) {
             params.node?.setDataValue('title', oldValue);
@@ -419,12 +426,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         },
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                assignedTo: typeof params.newValue === 'string' ? params.newValue : undefined,
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  assignedTo: typeof params.newValue === 'string' ? params.newValue : undefined,
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update assignee',
             );
           }
         },
@@ -478,12 +488,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         cellEditor: StatusCellEditor,
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                statusV2: String(params.newValue),
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  statusV2: String(params.newValue),
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update status',
             );
           }
         },
@@ -517,12 +530,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         cellEditor: PriorityCellEditor,
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                priority: params.newValue as Ticket['priority'],
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  priority: params.newValue as Ticket['priority'],
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update priority',
             );
           }
         },
@@ -600,15 +616,18 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           const toRemove = oldTagNames.filter(t => !newTagNames.includes(t));
           toAdd.forEach(tagName => {
             if (params.data) {
-              zero.mutate(
-                mutators.ticketTagV2.create({
-                  ticketId: params.data.id,
-                  tagId: uuidv4(),
-                  projectTagId: uuidv4(),
-                  mappingId: uuidv4(),
-                  projectId: params.data.projectId,
-                  tagName,
-                }),
+              void surfaceMutationError(
+                zero.mutate(
+                  mutators.ticketTagV2.create({
+                    ticketId: params.data.id,
+                    tagId: uuidv4(),
+                    projectTagId: uuidv4(),
+                    mappingId: uuidv4(),
+                    projectId: params.data.projectId,
+                    tagName,
+                  }),
+                ),
+                'Failed to add tag',
               );
             }
           });
@@ -616,7 +635,10 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           toRemove.forEach(tagName => {
             const tag = oldTags.find(t => t.name === tagName);
             if (tag?.id) {
-              zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id }));
+              void surfaceMutationError(
+                zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id })),
+                'Failed to remove tag',
+              );
             }
           });
           return false;
