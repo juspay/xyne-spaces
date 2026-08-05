@@ -8,11 +8,29 @@ import {
   REPO_CONFIGS,
 } from "../sandbox/index.js";
 import { generateSceneHtml } from "./scene-html.js";
-import type { Storyboard, VideoScene } from "./storyboard.js";
+import {
+  computeSegmentSeconds,
+  isAnimatedScene,
+  type ManimScene,
+  type D2Scene,
+  type Storyboard,
+  type VideoScene,
+} from "./storyboard.js";
 
 const WORK_DIR = "/home/nixuser/workspace/.video-explainer";
 export const OUTPUT_PATH = "/home/nixuser/workspace/results/explainer.mp4";
 const AUTH_URL_DEFAULT = "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003";
+
+// Canonical output geometry. Every scene — static screenshot, Manim clip, or
+// D2 reveal — is normalized to exactly this before concatenation so the
+// concat demuxer never sees a resolution/SAR/fps mismatch.
+const WIDTH = 1920;
+const HEIGHT = 1080;
+const FPS = 30;
+const CANVAS = "#07111f";
+// Nominal on-screen time per D2 board before the next fades in. Narration
+// still governs the final segment length via computeSegmentSeconds.
+const D2_STEP_SECONDS = 2.4;
 
 interface TtsEnvelope {
   success?: boolean;
@@ -25,6 +43,7 @@ export interface SceneTiming {
   kind: VideoScene["kind"];
   narrationSeconds: number;
   segmentSeconds: number;
+  animationSeconds?: number;
 }
 
 function authUrl(context: ToolExecutionContext): string {
@@ -60,6 +79,19 @@ async function run(session: Session, command: string, timeoutMs = 60_000): Promi
     throw new Error(detail);
   }
   return result.stdout.trim();
+}
+
+async function probeSeconds(session: Session, mediaPath: string, label: string): Promise<number> {
+  const output = await run(
+    session,
+    `ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 '${mediaPath}'`,
+    30_000,
+  );
+  const seconds = Number.parseFloat(output);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`ffprobe could not measure ${label}`);
+  }
+  return seconds;
 }
 
 async function requestNarration(
@@ -150,6 +182,13 @@ async function shipMermaidRuntime(session: Session): Promise<boolean> {
   return true;
 }
 
+// ffmpeg filter that fits arbitrary source geometry into the canonical frame
+// without cropping: letterbox onto a CANVAS-colored 1920x1080, square pixels,
+// 30fps.
+const FIT_FILTER =
+  `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,` +
+  `pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${CANVAS},setsar=1,fps=${FPS}`;
+
 async function sceneCode(
   session: Session,
   context: ToolExecutionContext,
@@ -215,6 +254,95 @@ async function renderScene(
   );
 }
 
+/**
+ * Render a Manim scene, in THIS sandbox, to a silent clip normalized to the
+ * canonical frame. `source` is written to a file (never shelled); only the
+ * validated `scene` identifier is interpolated into the command line.
+ */
+async function renderManim(session: Session, scene: ManimScene, index: number): Promise<string> {
+  const scriptPath = `${WORK_DIR}/manim-${index}.py`;
+  const mediaDir = `${WORK_DIR}/manim-${index}-media`;
+  const outPath = `${WORK_DIR}/anim-${index}.mp4`;
+  await session.files.write(scriptPath, Buffer.from(scene.source));
+  await run(
+    session,
+    `command -v manim >/dev/null 2>&1 || { echo "manim is missing from the studio image" >&2; exit 44; }; ` +
+      `cd '${WORK_DIR}' && manim --renderer=cairo -r ${WIDTH},${HEIGHT} --fps ${FPS} ` +
+      `--media_dir '${mediaDir}' -o out --format mp4 '${scriptPath}' ${scene.scene}`,
+    600_000,
+  );
+  const raw = await run(session, `find '${mediaDir}' -name 'out.mp4' | head -1`);
+  if (!raw) throw new Error(`manim produced no output for scene ${index + 1}`);
+  await run(
+    session,
+    `ffmpeg -y -i '${raw}' -vf "${FIT_FILTER}" -an -pix_fmt yuv420p '${outPath}'`,
+    180_000,
+  );
+  return outPath;
+}
+
+/**
+ * Render an ordered set of D2 boards to a silent progressive-reveal clip,
+ * entirely offline: d2 (layout+SVG) → rsvg-convert (raster) → ffmpeg. No
+ * headless browser and no network, so it runs in the sealed studio image.
+ */
+async function renderD2(session: Session, scene: D2Scene, index: number): Promise<string> {
+  const clips: string[] = [];
+  for (const [step, source] of scene.steps.entries()) {
+    const d2Path = `${WORK_DIR}/d2-${index}-${step}.d2`;
+    const svgPath = `${WORK_DIR}/d2-${index}-${step}.svg`;
+    const pngPath = `${WORK_DIR}/d2-${index}-${step}.png`;
+    const clipPath = `${WORK_DIR}/d2-${index}-${step}.mp4`;
+    await session.files.write(d2Path, Buffer.from(source));
+    await run(
+      session,
+      `command -v d2 >/dev/null 2>&1 || { echo "d2 is missing from the studio image" >&2; exit 45; }; ` +
+        `D2_LAYOUT=dagre d2 --pad 48 '${d2Path}' '${svgPath}'`,
+      120_000,
+    );
+    await run(
+      session,
+      `command -v rsvg-convert >/dev/null 2>&1 || { echo "rsvg-convert is missing from the studio image" >&2; exit 46; }; ` +
+        `rsvg-convert -w ${WIDTH} -h ${HEIGHT} --keep-aspect-ratio -b '${CANVAS}' '${svgPath}' -o '${pngPath}'`,
+      120_000,
+    );
+    await run(
+      session,
+      `ffmpeg -y -loop 1 -t ${D2_STEP_SECONDS} -i '${pngPath}' ` +
+        `-vf "${FIT_FILTER},fade=t=in:st=0:d=0.4" -an -pix_fmt yuv420p '${clipPath}'`,
+      120_000,
+    );
+    clips.push(clipPath);
+  }
+  const outPath = `${WORK_DIR}/anim-${index}.mp4`;
+  if (clips.length === 1) {
+    await run(session, `cp '${clips[0]}' '${outPath}'`);
+    return outPath;
+  }
+  const concat = clips.map((clip) => `file '${clip}'`).join("\n");
+  await session.files.write(`${WORK_DIR}/d2-${index}-concat.txt`, Buffer.from(`${concat}\n`));
+  await run(
+    session,
+    `ffmpeg -y -f concat -safe 0 -i '${WORK_DIR}/d2-${index}-concat.txt' ` +
+      `-c:v libx264 -preset medium -pix_fmt yuv420p '${outPath}'`,
+    180_000,
+  );
+  return outPath;
+}
+
+async function renderAnimation(
+  session: Session,
+  scene: ManimScene | D2Scene,
+  index: number,
+): Promise<{ clipPath: string; animationSeconds: number }> {
+  const clipPath =
+    scene.kind === "manim"
+      ? await renderManim(session, scene, index)
+      : await renderD2(session, scene, index);
+  const animationSeconds = await probeSeconds(session, clipPath, `animation for scene ${index + 1}`);
+  return { clipPath, animationSeconds };
+}
+
 export async function composeVideo(
   session: Session,
   context: ToolExecutionContext,
@@ -232,37 +360,62 @@ export async function composeVideo(
 
   const timings: SceneTiming[] = [];
   for (const [index, scene] of storyboard.scenes.entries()) {
-    await renderScene(session, context, storyboard, scene, index, mermaidShipped);
+    // Render the visual: a screenshot for static scenes, a silent clip for
+    // animated ones. Both engines run in THIS same sandbox.
+    let animationSeconds = 0;
+    let clipPath: string | undefined;
+    if (isAnimatedScene(scene)) {
+      const animation = await renderAnimation(session, scene, index);
+      clipPath = animation.clipPath;
+      animationSeconds = animation.animationSeconds;
+    } else {
+      await renderScene(session, context, storyboard, scene, index, mermaidShipped);
+    }
+
+    // Narration is fetched by the runtime (not the sandbox) and injected as a
+    // file, so the box never needs network.
     const audioPath = `${WORK_DIR}/scene-${index}.mp3`;
     await session.files.write(
       audioPath,
       await requestNarration(context, scene.narration, storyboard.voice),
     );
-    const durationOutput = await run(
-      session,
-      `ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 '${audioPath}'`,
-      30_000,
-    );
-    const narrationSeconds = Number.parseFloat(durationOutput);
-    if (!Number.isFinite(narrationSeconds) || narrationSeconds <= 0) {
-      throw new Error(`ffprobe could not measure narration for scene ${index + 1}`);
-    }
-    const segmentSeconds = narrationSeconds + 0.8;
+    const narrationSeconds = await probeSeconds(session, audioPath, `narration for scene ${index + 1}`);
+
+    // Narration-first: the longer of narration/animation plus a fixed tail.
+    const segmentSeconds = computeSegmentSeconds(narrationSeconds, animationSeconds);
     const captionPath = `${WORK_DIR}/scene-${index}.ass`;
     await session.files.write(captionPath, Buffer.from(captionFile(scene.narration, segmentSeconds)));
-    await run(
-      session,
-      `ffmpeg -y -loop 1 -i '${WORK_DIR}/scene-${index}.png' -i '${audioPath}' ` +
-        `-vf "subtitles='${captionPath}'" ` +
-        `-af apad -t ${segmentSeconds.toFixed(3)} -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p ` +
-        `-c:a aac -b:a 192k '${WORK_DIR}/segment-${index}.mp4'`,
-      120_000,
-    );
+
+    if (clipPath) {
+      // Animated: freeze the last frame to fill the segment (video never
+      // truncates the voice), pad the audio with trailing silence.
+      const stopDuration = Math.max(0, segmentSeconds - animationSeconds);
+      await run(
+        session,
+        `ffmpeg -y -i '${clipPath}' -i '${audioPath}' ` +
+          `-filter_complex "[0:v]tpad=stop_mode=clone:stop_duration=${stopDuration.toFixed(3)},` +
+          `subtitles='${captionPath}',fps=${FPS}[v];[1:a]apad[a]" ` +
+          `-map "[v]" -map "[a]" -t ${segmentSeconds.toFixed(3)} ` +
+          `-c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -b:a 192k '${WORK_DIR}/segment-${index}.mp4'`,
+        180_000,
+      );
+    } else {
+      await run(
+        session,
+        `ffmpeg -y -loop 1 -i '${WORK_DIR}/scene-${index}.png' -i '${audioPath}' ` +
+          `-vf "subtitles='${captionPath}'" ` +
+          `-af apad -t ${segmentSeconds.toFixed(3)} -r ${FPS} -c:v libx264 -preset medium -pix_fmt yuv420p ` +
+          `-c:a aac -b:a 192k '${WORK_DIR}/segment-${index}.mp4'`,
+        120_000,
+      );
+    }
+
     timings.push({
       scene: index + 1,
       kind: scene.kind,
       narrationSeconds: Number(narrationSeconds.toFixed(2)),
       segmentSeconds: Number(segmentSeconds.toFixed(2)),
+      ...(animationSeconds > 0 ? { animationSeconds: Number(animationSeconds.toFixed(2)) } : {}),
     });
   }
 
