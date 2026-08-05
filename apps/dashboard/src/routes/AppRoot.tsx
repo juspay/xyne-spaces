@@ -207,7 +207,7 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/AILibraryScreen';
-import McpDetailV2 from './ClawAgentsScreen/library/McpDetailV2';
+import McpDetailV2 from './ClawAgentsScreen/detail-v2/mcp/McpDetailV2';
 import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
