@@ -297,7 +297,7 @@ export class AuthController {
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
           });
 
-          sessionId = session.id;
+          sessionId = session.refreshToken;
           const sessionEndTime = Date.now();
           logger.info(`✅ [${requestId}] Session created in ${sessionEndTime - sessionStartTime}ms`);
         } catch (sessionError) {
@@ -354,7 +354,6 @@ export class AuthController {
       logger.info(`✅ [${requestId}] === OAuth Exchange Complete (JSON) ===`);
       res.status(200).json({
         success: true,
-        sessionId,
         user: {
           id: user.id,
           googleId: user.providerUserId,
@@ -412,7 +411,7 @@ export class AuthController {
       }
 
       // Find session by ID
-      const session = await this.userSessionService.getSessionById(sessionId);
+      const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
       
       if (!session || !session.user) {
         res.status(401).json({
@@ -689,7 +688,7 @@ export class AuthController {
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
           });
           
-          sessionId = session.id;
+          sessionId = session.refreshToken;
           logger.info(`✅ [${requestId}] Session created`);
         } catch (sessionError) {
           logger.info(`❌ [${requestId}] Session creation failed:`, sessionError);
@@ -778,7 +777,7 @@ export class AuthController {
       logger.info(`[REFRESH] Found session ID`);
 
       // Find session by ID
-      const session = await this.userSessionService.getSessionById(sessionId);
+      const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
 
       if (!session || !session.user) {
         logger.warn(`[REFRESH] Session not found in database`);

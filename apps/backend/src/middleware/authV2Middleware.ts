@@ -77,7 +77,7 @@ class AuthV2Middleware {
         return false;
       }
 
-      const session = await this.userSessionService.getSessionById(sessionId);
+      const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
 
       if (!session || !session.user) {
         logger.warn(`[AUTH] [Auto-Refresh] Session check failed: Session or user not found`, {

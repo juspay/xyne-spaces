@@ -581,7 +581,7 @@ export class AuthMiddleware {
       }
       // Find session by ID
       logger.info(`[AUTH] refreshTokenBySession fetching session`);
-      const session = await this.userSessionService.getSessionById(sessionId);
+      const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
 
       if (!session || !session.user) {
         logger.warn(`[AUTH] refreshTokenBySession failed: session or session user not found`, {

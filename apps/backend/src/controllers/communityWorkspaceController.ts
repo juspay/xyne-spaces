@@ -278,7 +278,7 @@ export class CommunityWorkspaceController {
     const sessionId = req.cookies?.user_session_id;
     if (!sessionId) return null;
 
-    const session = await this.userSessionService.getSessionById(sessionId);
+    const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
     if (
       !session ||
       !session.user ||

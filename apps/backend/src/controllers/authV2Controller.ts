@@ -170,7 +170,7 @@ export class AuthV2Controller {
           ipAddress: req.ip || req.connection.remoteAddress || undefined,
         });
 
-        sessionId = session.id;
+        sessionId = session.refreshToken;
       } catch (sessionError) {
         logger.error(`[performSingleWorkspaceAutoLogin] Session creation failed:`, sessionError);
       }
@@ -704,7 +704,7 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] Found session ID`);
 
-      const session = await this.userSessionService.getSessionById(sessionId);
+      const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
 
       if (!session || !session.user) {
         logger.warn(`[${requestId}] Session not found in database`);
@@ -1057,7 +1057,14 @@ export class AuthV2Controller {
         `[${requestId}] mobile-exchange selected via query parameter without the x-platform header (browserInitiated=${looksBrowserInitiated})`,
       );
     }
-    const isMobileNative = nativeByHeader || nativeByQuery;
+    // The native branch is only selectable by a genuine native client, which sends neither
+    // Origin nor Sec-Fetch-Site. Anything browser-initiated takes the web branch.
+    const isMobileNative = (nativeByHeader || nativeByQuery) && !looksBrowserInitiated;
+    if ((nativeByHeader || nativeByQuery) && looksBrowserInitiated) {
+      logger.warn(
+        `[${requestId}] native mobile-exchange requested from a browser-initiated request; falling back to the web branch`,
+      );
+    }
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
@@ -1334,7 +1341,7 @@ export class AuthV2Controller {
       
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
-        await this.userSessionService.revokeSession(sessionId);
+        await this.userSessionService.revokeSessionByRefreshToken(sessionId);
       }
 
       // Clear global session cookie
@@ -1437,7 +1444,7 @@ export class AuthV2Controller {
          */
         logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but session ${existingSessionId} found - using auto-login flow`);
         
-        const session = await this.userSessionService.getSessionById(existingSessionId);
+        const session = await this.userSessionService.getSessionByRefreshToken(existingSessionId);
         if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
           res.status(401).json({
             error: 'Invalid session',
@@ -1539,7 +1546,7 @@ export class AuthV2Controller {
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
           });
 
-          sessionId = session.id;
+          sessionId = session.refreshToken;
           logger.info(`[LOGIN-WORKSPACE] Session created`);
         } catch (sessionError) {
           logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
@@ -1724,7 +1731,7 @@ export class AuthV2Controller {
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
           });
 
-          sessionId = session.id;
+          sessionId = session.refreshToken;
           logger.info(`[CREATE-ORG] Session created`);
         } catch (sessionError) {
           logger.error(`[CREATE-ORG] Session creation failed:`, sessionError);
@@ -1897,7 +1904,7 @@ export class AuthV2Controller {
       // Verify session exists and is valid
       let validSessionId: string | null = null;
       if (sessionId) {
-        const currentSession = await this.userSessionService.getSessionById(sessionId);
+        const currentSession = await this.userSessionService.getSessionByRefreshToken(sessionId);
         if (currentSession && currentSession.status === 'ACTIVE') {
           validSessionId = currentSession.id;
           logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
@@ -2087,7 +2094,7 @@ export class AuthV2Controller {
               deviceInfo,
               ipAddress: req.ip || req.connection.remoteAddress || undefined,
             });
-            sessionId = session.id;
+            sessionId = session.refreshToken;
           } catch (sessionError) {
             logger.error(`[CREATE-WORKSPACE-PENDING] Session creation failed:`, sessionError);
           }
@@ -2232,7 +2239,7 @@ export class AuthV2Controller {
       // Get global session cookie
       const sessionId = req.cookies?.user_session_id;
       
-      const currentSession = sessionId ? await this.userSessionService.getSessionById(sessionId) : null;
+      const currentSession = sessionId ? await this.userSessionService.getSessionByRefreshToken(sessionId) : null;
 
       let newSessionId: string | null = null;
       if (currentSession?.refreshToken) {

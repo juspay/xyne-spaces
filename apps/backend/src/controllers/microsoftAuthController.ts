@@ -634,7 +634,7 @@ export class MicrosoftAuthController {
               ipAddress: req.ip || req.socket.remoteAddress || undefined,
             });
 
-            sessionId = session.id;
+            sessionId = session.refreshToken;
             logger.info(`[${requestId}] Session created`);
           } catch (sessionError) {
             logger.error(`[${requestId}] Error creating user session:`, sessionError);
@@ -1057,7 +1057,7 @@ export class MicrosoftAuthController {
               ipAddress: req.ip || req.socket.remoteAddress || undefined,
             });
 
-            sessionId = session.id;
+            sessionId = session.refreshToken;
             logger.info(`[${requestId}] Session created`);
           } catch (sessionError) {
             logger.error(`[${requestId}] Error creating user session:`, sessionError);
@@ -1173,7 +1173,7 @@ export class MicrosoftAuthController {
             ipAddress: req.ip || req.socket.remoteAddress || undefined,
           });
 
-          sessionId = session.id;
+          sessionId = session.refreshToken;
           logger.info(`[${requestId}] Session created`);
         } catch (sessionError) {
           logger.error(`[${requestId}] Error creating user session:`, sessionError);
@@ -1432,7 +1432,7 @@ export class MicrosoftAuthController {
             ipAddress: req.ip || req.socket.remoteAddress || undefined,
           });
 
-          sessionId = session.id;
+          sessionId = session.refreshToken;
           logger.info(`[${requestId}] Session created`);
         } catch (sessionError) {
           logger.error(`[${requestId}] Error creating user session:`, sessionError);

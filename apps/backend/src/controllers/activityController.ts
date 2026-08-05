@@ -33,7 +33,7 @@ export class ActivityController {
       const sessionId = req.authenticatedSessionId;
       if (sessionId) {
         try {
-          const session = await this.userSessionService.getSessionById(sessionId);
+          const session = await this.userSessionService.getSessionByRefreshToken(sessionId);
           if (session?.deviceInfo) {
             // deviceInfo is stored as JSON string, parse and extract platform
             const deviceInfoObj = typeof session.deviceInfo === 'string' 

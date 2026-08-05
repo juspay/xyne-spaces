@@ -96,10 +96,9 @@ export class EmailAuthController {
       }
 
       if (!orgMember.passwordHash) {
-        // EMAIL user who was invited but password isn't set yet
-        res.status(403).json({
-          error: 'Password not set',
-          message: 'Please use forgot password to set your password.',
+        res.status(401).json({
+          error: 'Invalid credentials',
+          message: 'Email or password is incorrect',
         });
         return;
       }
@@ -287,7 +286,7 @@ export class EmailAuthController {
         maxAge: 24 * 60 * 60 * 1000,
       });
 
-      res.cookie('user_session_id', session.id, {
+      res.cookie('user_session_id', session.refreshToken, {
         ...cookieBase,
         maxAge: 30 * 24 * 60 * 60 * 1000,
       });

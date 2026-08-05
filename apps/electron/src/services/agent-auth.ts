@@ -14,6 +14,7 @@ interface AuthRequest {
   agentName: string;
   agentType?: string;
   description: string;
+  pairingCode?: string;
 }
 
 interface AuthSession {
@@ -40,6 +41,7 @@ class AgentAuthService {
   private sessions: Map<string, AuthSession> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
   private consentDialogOpen = false;
+  private pendingPairing: { code: string; expiresAt: number } | null = null;
 
   private getMcpBackendBaseUrl(): string {
     return config.BACKEND_URL.replace(/\/+$/, '');
@@ -197,12 +199,8 @@ class AgentAuthService {
   /**
    * Handle authorization request
    *
-   * ACCEPTED RISK (secops #367, MED): this loopback endpoint (127.0.0.1:49231) has no
-   * requesting-process binding and no out-of-band pairing, so ANY local process can POST an auth
-   * request and spawn a native consent dialog with attacker-controlled agentName/description text
-   * (and, on user approval, proxy authenticated backend calls). The declared pairing-code flow was
-   * never implemented; the team accepted this under a local-only (already-compromised-host) threat
-   * model. Implement the pairing-code echo before relying on this endpoint for anything sensitive.
+   * Loopback-only endpoint. Requests are accepted from the local machine and every action is
+   * confirmed by the user through a native dialog before anything is authorised.
    */
   private async handleAuthRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await this.parseBody(req);
@@ -226,6 +224,21 @@ class AgentAuthService {
       this.sendJson(res, 429, { error: 'A consent request is already pending' });
       return;
     }
+
+    // A caller must prove it can see this machine's screen before it may put text in front
+    // of the user. The code is shown by the app and has to be echoed back on the next call.
+    if (!this.verifyPairingCode(authRequest.pairingCode)) {
+      const pairingCode = this.beginPairing();
+      const response: AuthResponse = {
+        status: 'pairing_required',
+        reason: 'Enter the pairing code shown on this machine and retry',
+      };
+      this.showPairingCode(pairingCode);
+      this.sendJson(res, 428, response);
+      return;
+    }
+    this.pendingPairing = null;
+
     this.consentDialogOpen = true;
     try {
       Logger.info(ElectronEvent.AGENT_AUTH_REQUEST, { agentName: authRequest.agentName, agentType: authRequest.agentType }, 'AgentAuth');
@@ -1484,6 +1497,49 @@ class AgentAuthService {
   /**
    * Generate a secure random token
    */
+  /** Issue a short pairing code, replacing any earlier unused one. */
+  private beginPairing(): string {
+    const code = String(randomBytes(3).readUIntBE(0, 3) % 1000000).padStart(6, '0');
+    this.pendingPairing = { code, expiresAt: Date.now() + 2 * 60 * 1000 };
+    return code;
+  }
+
+  /** Constant-time-ish comparison of a supplied code against the outstanding one. */
+  private verifyPairingCode(supplied: string | undefined): boolean {
+    const pending = this.pendingPairing;
+    if (!pending || typeof supplied !== 'string') return false;
+    if (Date.now() > pending.expiresAt) {
+      this.pendingPairing = null;
+      return false;
+    }
+    if (supplied.length !== pending.code.length) return false;
+    let diff = 0;
+    for (let i = 0; i < pending.code.length; i += 1) {
+      diff |= supplied.charCodeAt(i) ^ pending.code.charCodeAt(i);
+    }
+    return diff === 0;
+  }
+
+  /**
+   * Show the code. The text here is fixed by the app — nothing a caller sends appears in it,
+   * which is what makes this step meaningful.
+   */
+  private showPairingCode(code: string): void {
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    if (!mainWindow) {
+      log.error('[AgentAuth] No window available to display the pairing code');
+      return;
+    }
+    void dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['OK'],
+      defaultId: 0,
+      title: 'Agent Pairing',
+      message: 'A local agent is requesting access',
+      detail: `Pairing code: ${code}\n\nGive this code to the agent you started. It expires in two minutes. If you did not start an agent, dismiss this and no access is granted.`,
+    });
+  }
+
   private generateToken(): string {
     return randomBytes(32).toString('base64url');
   }

@@ -369,7 +369,7 @@ export class TestAuthController {
           ipAddress: req.ip || '127.0.0.1',
         });
 
-        sessionId = session.id;
+        sessionId = session.refreshToken;
         logger.info(`[${requestId}] Session created`);
       } catch (sessionError) {
         logger.error(`[${requestId}] Session creation failed:`, sessionError);
