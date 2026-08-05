@@ -85,13 +85,9 @@ class MacKeychainService implements IKeychain {
         await writeFileAsync(certPath, certPem);
 
         try {
-            // ACCEPTED RISK (secops #289, MED): the P12 is encrypted with a static 'changeit'
-            // passphrase, but it guards nothing — the .p12 is a per-call temp file in os.tmpdir(),
-            // written, immediately `security import`ed, and unlink()ed in the finally below, so the
-            // passphrase only has to survive the moment between export and import on the same host.
-            // Anyone who can read the temp file already has the raw key/cert in this process. Kept
-            // static so the export (-passout) and import (-P) agree; switch to a random passphrase
-            // if the P12 is ever persisted or moved off-host.
+            // The bundle is a per-call temp file in os.tmpdir(), imported immediately and removed
+            // in the finally below. The passphrase is fixed so the export and import agree; use a
+            // random one per enrollment if the bundle is ever persisted or moved off-host.
             // openssl pkcs12 -export -in cert.pem -inkey key.pem -out identity.p12 -passout pass:changeit -name "label"
             const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
             await execAsync(p12Cmd);
@@ -181,7 +177,7 @@ class MacKeychainService implements IKeychain {
         try {
             // Check if certificate with same Common Name already exists.
             // execFile (no shell) — the CommonName is parsed out of an attacker-supplied cert and
-            // MUST NOT be interpolated into a shell command (secops #362).
+            // Never interpolated into a shell command.
             const { stdout: subjectOut } = await execFileAsync(OPENSSL, ['x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline']);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
 

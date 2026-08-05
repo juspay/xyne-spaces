@@ -30,6 +30,72 @@ export class WorkflowController {
     this.workflowRepository = new WorkflowRepository();
   }
 
+  private async authorizeExecution(
+    req: Request,
+    res: Response,
+    executionId: string
+  ): Promise<boolean> {
+    const callerWorkspaceId = req.user?.workspaceId;
+    if (!callerWorkspaceId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return false;
+    }
+
+    const prisma = DatabaseClient.getInstance();
+    const execution = await prisma.workflowExecution.findUnique({
+      where: { id: executionId },
+      select: { id: true, workspaceId: true, workflow: { select: { workspaceId: true } } },
+    });
+
+    const ownerWorkspaceId = execution?.workflow?.workspaceId ?? execution?.workspaceId ?? null;
+    if (!execution || !ownerWorkspaceId || ownerWorkspaceId !== callerWorkspaceId) {
+      if (execution) {
+        logger.warn(
+          `[WorkflowController] Cross-workspace execution access blocked: ${executionId} (${ownerWorkspaceId}) by user ${req.user?.id} (${callerWorkspaceId})`
+        );
+      }
+      res.status(404).json({ error: 'Workflow execution not found' });
+      return false;
+    }
+    return true;
+  }
+
+  private async authorizeStep(req: Request, res: Response, stepId: string): Promise<boolean> {
+    const callerWorkspaceId = req.user?.workspaceId;
+    if (!callerWorkspaceId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return false;
+    }
+
+    const prisma = DatabaseClient.getInstance();
+    const step = await prisma.workflowStep.findUnique({
+      where: { id: stepId },
+      select: {
+        id: true,
+        workspaceId: true,
+        workflowExecution: {
+          select: { workspaceId: true, workflow: { select: { workspaceId: true } } },
+        },
+      },
+    });
+
+    const ownerWorkspaceId =
+      step?.workflowExecution?.workflow?.workspaceId ??
+      step?.workflowExecution?.workspaceId ??
+      step?.workspaceId ??
+      null;
+    if (!step || !ownerWorkspaceId || ownerWorkspaceId !== callerWorkspaceId) {
+      if (step) {
+        logger.warn(
+          `[WorkflowController] Cross-workspace step access blocked: ${stepId} (${ownerWorkspaceId}) by user ${req.user?.id} (${callerWorkspaceId})`
+        );
+      }
+      res.status(404).json({ error: 'Workflow step not found' });
+      return false;
+    }
+    return true;
+  }
+
   /**
    * Copy parent execution's agentic step data to new execution for rerun scenarios.
    * Loads from parent's Redis/GCS storage and copies to new execution's storage.
@@ -657,6 +723,7 @@ export class WorkflowController {
   updateWorkflowExecution = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
+      if (!(await this.authorizeExecution(req, res, id))) return;
       const updateData = req.body;
 
       const execution = await this.workflowRepository.updateWorkflowExecution(id, updateData);
@@ -791,6 +858,7 @@ export class WorkflowController {
   updateWorkflowStep = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
+      if (!(await this.authorizeStep(req, res, id))) return;
       const updateData = req.body;
 
       // Convert data to JSON string if it's an object
@@ -826,11 +894,21 @@ export class WorkflowController {
   restoreWorkflowExecution = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
       const { stepId } = req.body;
 
       // Validate required fields
       if (!stepId) {
         res.status(400).json({ error: 'stepId is required (DB ID of INPUT step)' });
+        return;
+      }
+
+      const restoreStep = await this.workflowRepository.getWorkflowStepById(stepId);
+      if (!restoreStep || restoreStep.workflowExecutionId !== executionId) {
+        logger.warn(
+          `[WorkflowController] Restore step ${stepId} does not belong to execution ${executionId}; rejecting restore`
+        );
+        res.status(404).json({ error: 'Step not found' });
         return;
       }
 
@@ -864,6 +942,7 @@ export class WorkflowController {
   rerunWorkflowFromStart = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
 
       // Use workflow rerun service
       const result = await workflowRerunService.rerunFromExecution(executionId);
@@ -895,6 +974,7 @@ export class WorkflowController {
   continueAgenticStep = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
       const { stepId, message } = req.body;
 
       // Validate required fields
@@ -906,6 +986,14 @@ export class WorkflowController {
       // Get the step to find its stepName for the Redis channel
       const step = await this.workflowRepository.getWorkflowStepById(stepId);
       if (!step) {
+        res.status(404).json({ error: 'Step not found' });
+        return;
+      }
+
+      if (step.workflowExecutionId !== executionId) {
+        logger.warn(
+          `[WorkflowController] Step ${stepId} does not belong to execution ${executionId}; rejecting continue`
+        );
         res.status(404).json({ error: 'Step not found' });
         return;
       }
@@ -1169,6 +1257,7 @@ export class WorkflowController {
   pauseWorkflowExecution = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
 
       // Import workflowManager dynamically to avoid circular dependencies
       const { workflowManager } = await import('../workflows/services/workflowManager');
@@ -1215,6 +1304,7 @@ export class WorkflowController {
   resumeWorkflowExecution = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
 
       // Import workflowManager dynamically to avoid circular dependencies
       const { workflowManager } = await import('../workflows/services/workflowManager');
@@ -1261,6 +1351,7 @@ export class WorkflowController {
   cancelWorkflowExecution = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
 
       // Import workflowManager dynamically to avoid circular dependencies
       const { workflowManager } = await import('../workflows/services/workflowManager');
@@ -1542,6 +1633,7 @@ export class WorkflowController {
   setExecutionMode = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
+      if (!(await this.authorizeExecution(req, res, executionId))) return;
       const { mode } = req.body;
 
       // Validate required fields
