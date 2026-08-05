@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { webhookLimiter } from '@/middleware/rateLimiters';
+import { webhookLimiter, generalLimiter, authLimiter } from '@/middleware/rateLimiters';
 import morgan from 'morgan';
 
 import { config } from '@/config/env';
@@ -167,6 +167,7 @@ import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
 import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
 import teamIntelligenceRoutes from '@/team-intelligence/routes';
+import telepresenceMonitoringRoutes from '@/telepresence-monitoring/routes';
 import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
 import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
 import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
@@ -332,6 +333,10 @@ export class App {
     this.app.use('/api/livekit', livekitWebhookRoutes);
 
     // Body parsing for all other routes (10mb limit)
+    // Global rate limit. Webhook and auth routes carry their own limiter mounted earlier;
+    // this is the backstop for everything else.
+    this.app.use('/api', generalLimiter);
+
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -368,6 +373,7 @@ export class App {
 
     // Team intelligence sync route (S2S auth - called by Mettle)
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
+    this.app.use('/api/telepresence-monitoring', telepresenceMonitoringRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
     this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
@@ -491,8 +497,8 @@ export class App {
     }
 
     // Apply general rate limiter to all API routes from this point onward
-    this.app.use('/api/auth', authRoutes);
-    this.app.use('/api/v2/auth', authV2Routes);
+    this.app.use('/api/auth', authLimiter, authRoutes);
+    this.app.use('/api/v2/auth', authLimiter, authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
     this.app.use('/api/public/users', publicUserRoutes);
