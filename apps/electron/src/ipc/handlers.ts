@@ -115,7 +115,7 @@ function isPreviewSenderTrusted(event: IpcMainEvent): boolean {
   return trusted;
 }
 
-// XYNE Issues 348/393/396 (CWE-862): the privileged handlers gated with this
+// The privileged handlers gated with this
 // helper act on the authenticated session — wipe cookies, set telemetry
 // identity, write persisted settings. Only honor them from the trusted main
 // window's top-level frame, so a sub-frame, webview, or untrusted origin cannot
@@ -177,7 +177,7 @@ export function setupIpcHandlers(): void {
   // browserPanelActor OPEN event.
   ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (event, url: string) => {
     if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    // XYNE Issue 348: only sync auth cookies for first-party Xyne origins.
+    // Only sync auth cookies for first-party Xyne origins.
     let host: string;
     try {
       host = new URL(url).hostname.toLowerCase();
@@ -214,7 +214,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('set-user-email', (event, email: string) => {
     if (!isMainWindowSender(event)) return;
-    // XYNE Issue 393: validate the email format before applying it to logger
+    // Validate the email format before applying it to logger
     // identity so a compromised renderer cannot poison telemetry.
     if (
       typeof email === 'string' &&
