@@ -39,7 +39,7 @@ const log = createLogger("verify-spaces-signature");
 
 // Secure by default: fail-closed unless an operator explicitly opts into the
 // `warn` grace-period mode.
-const MODE = (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "warn").toLowerCase();
+const MODE = (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "enforce").toLowerCase();
 const ENFORCE = MODE !== "warn";
 
 function parseGcmBundle(blob: string): [string, string, string] | null {

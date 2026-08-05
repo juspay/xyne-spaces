@@ -143,7 +143,15 @@ const envSchema = Joi.object({
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
   LIVEKIT_API_KEY: Joi.string().allow('').default(''),
-  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
+  LIVEKIT_API_SECRET: Joi.string()
+    .allow('')
+    .default('')
+    .when('NODE_ENV', {
+      is: Joi.string().valid('production', 'staging'),
+      then: Joi.string().invalid('devsecret').messages({
+        'any.invalid': 'LIVEKIT_API_SECRET must not be the published development secret',
+      }),
+    }),
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
@@ -337,7 +345,7 @@ const envSchema = Joi.object({
   VESPA_CONFIG_SERVER_URL: Joi.string().uri().default('http://127.0.0.1:19071'),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
-  MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
+  MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(false),
   // XYNE Claw Integration (Ask AI v2)
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
