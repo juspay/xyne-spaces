@@ -5,6 +5,7 @@ export const TimeRange = {
   THIS_WEEK: 'this-week',
   LAST_WEEK: 'last-week',
   THIS_MONTH: 'this-month',
+  PREVIOUS_MONTH: 'previous-month',
 } as const;
 
 export type TimeRange = (typeof TimeRange)[keyof typeof TimeRange];
@@ -140,6 +141,14 @@ export const getDateRange = (timeRange: TimeRange): { from: string; to: string }
     case TimeRange.THIS_MONTH: {
       const fromDate = startOfMonth(today);
       return { from: format(fromDate, 'yyyy-MM-dd'), to: format(today, 'yyyy-MM-dd') };
+    }
+    case TimeRange.PREVIOUS_MONTH: {
+      const previousMonthEnd = subDays(startOfMonth(today), 1);
+      const previousMonthStart = startOfMonth(previousMonthEnd);
+      return {
+        from: format(previousMonthStart, 'yyyy-MM-dd'),
+        to: format(previousMonthEnd, 'yyyy-MM-dd'),
+      };
     }
     default: {
       const now = format(today, 'yyyy-MM-dd');

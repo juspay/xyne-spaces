@@ -161,18 +161,18 @@ const TeamIntelligenceSidebar = ({
       />
 
       <div className='flex-1 overflow-auto flex flex-col p-3 gap-1'>
-        {/* Org Insights — top-level leaf item */}
+        {/* Organization leadership — top-level leaf item */}
         <SidebarItems
-          label='Org Digest'
+          label='Founder Brief'
           to='/team-intelligence'
           isActive={isOrgView}
           onClick={handleNav}
           prefixIcon={SparklesIcon}
         />
 
-        {/* Team Insights — collapsible with all teams */}
+        {/* Team leadership — collapsible with all teams */}
         {teams.length > 0 ? (
-          <SidebarItems label='Team Insights' defaultExpanded>
+          <SidebarItems label='Manager Briefs' defaultExpanded>
             {teams?.map(team => {
               const teamColorHex = getTeamColor(team.name).primary;
 

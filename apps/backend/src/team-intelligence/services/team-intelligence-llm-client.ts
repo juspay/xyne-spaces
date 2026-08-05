@@ -20,9 +20,22 @@ export function createTeamIntelligenceLlmClient(): LLMClient | null {
       config: {
         apiKey,
         baseUrl,
-        timeout: appConfig.llm.requestTimeoutMs,
+        // Team Intelligence uses a dedicated timeout (defaults to the global
+        // LLM_REQUEST_TIMEOUT_MS, but can be raised or set to 0 for no timeout)
+        // so long-running summary calls aren't cut off, without changing the
+        // timeout for other LLM consumers.
+        timeout: appConfig.llm.teamIntelligenceRequestTimeoutMs,
       },
     },
     defaultModel: appConfig.workflow.defaultModelName,
+    // Section-level fallback owns Team Intelligence recovery. Keeping provider
+    // retries to one attempt prevents a long LLM timeout from multiplying into
+    // several hidden waits inside every section call.
+    retry: {
+      maxAttempts: 1,
+      baseDelay: 0,
+      maxDelay: 0,
+      exponentialBackoff: false,
+    },
   });
 }

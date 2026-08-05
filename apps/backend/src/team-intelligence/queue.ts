@@ -25,23 +25,18 @@ class TeamIntelligenceQueue {
           lazyConnect: false,
         },
         defaultJobOptions: {
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
-          },
+          attempts: 1,
           removeOnComplete: true,
           removeOnFail: { count: 100 },
         },
         settings: {
-          // LLM-backed user-summary jobs can run for several minutes (multiple
-          // LLM calls with retries). Keep the lock generous and allow a couple
-          // of stalled reclaims before giving up, so slow-but-healthy jobs are
-          // not false-failed. Bull renews the lock while the process is alive;
-          // stalls only happen on actual worker death.
-          lockDuration: 300000,
-          stalledInterval: 120000,
-          maxStalledCount: 2,
+          // LLM-backed user-summary jobs can legitimately run longer than a
+          // normal queue task, especially when large evidence is chunked.
+          // Keep the lock above the configured Team Intelligence LLM timeout so
+          // Bull does not lose ownership while a healthy worker is waiting on I/O.
+          lockDuration: 30 * 60 * 1000,
+          stalledInterval: 5 * 60 * 1000,
+          maxStalledCount: 3,
         },
       });
 
@@ -118,10 +113,15 @@ class TeamIntelligenceQueue {
         return;
       }
 
-      logger.error(
-        `[TEAM-INTEL-QUEUE] Job ${job.id} failed batchId=${job.data.batchId} userEmail=${job.data.userEmail}:`,
-        err
-      );
+      const configuredAttempts = job.opts.attempts ?? 1;
+      const message =
+        `[TEAM-INTEL-QUEUE] Job ${job.id} attempt ${job.attemptsMade}/${configuredAttempts} failed ` +
+        `batchId=${job.data.batchId} userEmail=${job.data.userEmail}`;
+      if (job.attemptsMade >= configuredAttempts) {
+        logger.error(`${message}; no attempts remain:`, err);
+      } else {
+        logger.warn(`${message}; retry scheduled:`, err);
+      }
     });
 
     this.queue.on('stalled', (job) => {

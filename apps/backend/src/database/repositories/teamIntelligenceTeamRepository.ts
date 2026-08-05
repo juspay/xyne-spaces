@@ -1,7 +1,5 @@
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
-import { RecapEntityType, TicketStatusV2 } from '@xyne/shared';
 
 export interface TeamBulletsDateRangeFilters {
   from: Date;
@@ -68,6 +66,20 @@ export interface TeamUsageSummaryResult {
   totalPrCount: number;
   totalCommitCount: number;
   aiUsages: TeamAiUsageAggregate;
+}
+
+export interface TeamLeadershipSnapshotsDateRangeFilters {
+  from: Date;
+  to: Date;
+  teamId: string;
+}
+
+export interface TeamLeadershipSnapshotsDateRangeResult {
+  from: string;
+  to: string;
+  teamId: string;
+  teamName: string;
+  snapshots: Record<string, unknown>[];
 }
 
 export interface TeamChannelRecapChannelCandidate {
@@ -169,6 +181,8 @@ class TeamIntelligenceTeamRepository {
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
         teamId,
+        status: 'COMPLETED',
+        contentUrl: { not: null },
       },
       orderBy: [{ reportDate: 'desc' }, { createdAt: 'desc' }],
       select: {
@@ -220,6 +234,74 @@ class TeamIntelligenceTeamRepository {
       total,
       totalPages,
       bullets: paginatedBullets,
+    };
+  }
+
+  async getTeamLeadershipSnapshotsByDate(
+    filters: TeamLeadershipSnapshotsDateRangeFilters
+  ): Promise<TeamLeadershipSnapshotsDateRangeResult> {
+    const { from, to, teamId } = filters;
+    const rangeStart = new Date(from);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+    const rangeEnd = new Date(to);
+    rangeEnd.setUTCHours(23, 59, 59, 999);
+
+    const rows = await db.teamIntelligenceTeamSummaryV2.findMany({
+      where: {
+        reportDate: { gte: rangeStart, lte: rangeEnd },
+        teamId,
+      },
+      orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        id: true,
+        batchId: true,
+        reportDate: true,
+        teamId: true,
+        teamName: true,
+        status: true,
+        totalUsers: true,
+        completedUsers: true,
+        failedUsers: true,
+        errorMessage: true,
+        contentUrl: true,
+        completedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const snapshots = await Promise.all(rows.map(async (row) => {
+      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+        teamSummary?: Record<string, unknown>;
+        summaryMetadata?: Record<string, unknown>;
+      }>(null, row.contentUrl);
+      return {
+        id: row.id,
+        batchId: row.batchId,
+        reportDate: row.reportDate.toISOString().slice(0, 10),
+        teamId: row.teamId,
+        teamName: row.teamName,
+        status: row.status,
+        processingCoverage: {
+          expectedMembers: row.totalUsers,
+          completedUserSummaries: row.completedUsers,
+          failedUserSummaries: row.failedUsers,
+        },
+        errorMessage: row.errorMessage,
+        summary: content?.teamSummary ?? null,
+        summaryMetadata: content?.summaryMetadata ?? null,
+        completedAt: row.completedAt?.toISOString() ?? null,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      };
+    }));
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      teamId,
+      teamName: rows[0]?.teamName ?? 'No Team',
+      snapshots,
     };
   }
 
@@ -378,7 +460,7 @@ class TeamIntelligenceTeamRepository {
     const grouped = await db.recap.groupBy({
       by: ['entityId'],
       where: {
-        entityType: RecapEntityType.CHANNEL,
+        entityType: 'CHANNEL',
         recapDate: {
           gte: rangeStart,
           lte: rangeEnd,
@@ -402,20 +484,17 @@ class TeamIntelligenceTeamRepository {
     }
 
     const channelIds = grouped.map((item) => item.entityId);
-    // Resolves names for ids already in the result set, so it runs above the caller's own scope.
-    const channels = await withWorkspaceScope(() =>
-      db.channel.findMany({
-        where: {
-          id: {
-            in: channelIds,
-          },
+    const channels = await db.channel.findMany({
+      where: {
+        id: {
+          in: channelIds,
         },
-        select: {
-          id: true,
-          name: true,
-        },
-      }),
-    );
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
 
@@ -471,7 +550,7 @@ class TeamIntelligenceTeamRepository {
     const [total, recaps, channels] = await Promise.all([
       db.recap.count({
         where: {
-          entityType: RecapEntityType.CHANNEL,
+          entityType: 'CHANNEL',
           entityId: {
             in: channelIds,
           },
@@ -483,7 +562,7 @@ class TeamIntelligenceTeamRepository {
       }),
       db.recap.findMany({
         where: {
-          entityType: RecapEntityType.CHANNEL,
+          entityType: 'CHANNEL',
           entityId: {
             in: channelIds,
           },
@@ -503,7 +582,7 @@ class TeamIntelligenceTeamRepository {
           userId: true,
         },
       }),
-      withWorkspaceScope(() => db.channel.findMany({
+      db.channel.findMany({
         where: {
           id: {
             in: channelIds,
@@ -513,7 +592,7 @@ class TeamIntelligenceTeamRepository {
           id: true,
           name: true,
         },
-      })),
+      }),
     ]);
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
@@ -594,12 +673,12 @@ class TeamIntelligenceTeamRepository {
         skip: (page - 1) * limit,
         take: limit,
       }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.COMPLETED } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.TODO } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.STARTED } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.PAUSED } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.CANCELLED } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, eta: { lt: now }, statusV2: { in: [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED] } } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'COMPLETED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'TODO' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'STARTED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'PAUSED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'CANCELLED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, eta: { lt: now }, statusV2: { in: ['TODO', 'STARTED', 'PAUSED'] } } }),
     ]);
 
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);

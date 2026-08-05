@@ -19,7 +19,7 @@ const envSchema = Joi.object({
   HOST: Joi.string().default('localhost'),
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
   ALLOWED_MEDIA_ORIGINS: Joi.string().default(
-    'http://localhost:5173/,xyne-spaces://./,xyne-spaces-dev://./,xyne-spaces-sandbox://./'
+    'https://spaces.xyne.juspay.net/,http://localhost:5173/,xyne-spaces://./,xyne-spaces-dev://./,xyne-spaces-sandbox://./'
   ),
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
@@ -41,7 +41,7 @@ const envSchema = Joi.object({
   // addition to the existing channel-scoped app delivery) so the twin fires for
   // @mentions in any channel it isn't a member of. Empty string disables the
   // extra twin delivery. Prod: digital-twin@app.xyne.ai.
-  DIGITAL_TWIN_APP_EMAIL: Joi.string().allow('').default(''),
+  DIGITAL_TWIN_APP_EMAIL: Joi.string().allow('').default('digital-twin@app.xyne.ai'),
   GOOGLE_CLIENT_ID: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   // Email sender configuration (Google OAuth2 via nodemailer)
@@ -92,12 +92,14 @@ const envSchema = Joi.object({
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
+  TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
+  TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
+  TEAM_INTELLIGENCE_ORG_JOB_CONCURRENCY: Joi.number().integer().min(1).default(1),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
-  ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
   AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
@@ -107,13 +109,12 @@ const envSchema = Joi.object({
   LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
   LITELLM_CHANGED_BY: Joi.string().default('external-system:xyne-spaces-external'),
-  ORG_DEFAULT_MODELS: Joi.string().allow('').default('kimi-latest,private-large'),
   BACKEND_URL: Joi.string().default('http://localhost:3001'),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default('http://localhost:5173'),
   FRONTEND_URL: Joi.string().default('http://localhost:5173'),
   FOLLOW_HEADER_REDIRECTION: Joi.boolean().default(true),
-  TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
+  TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default('juspay.net,juspay.io'),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
@@ -121,13 +122,13 @@ const envSchema = Joi.object({
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
   SLACK_MIGRATION_FINAL_MESSAGE: Joi.string().allow('').default(''), // Custom message appended to the final migration notification
-  SLACK_MIGRATION_LOG_CHANNEL_ID: Joi.string().allow('').default(''), // Slack channel ID for migration progress/error logs (defaults to #slack-migration-update)
-  SLACK_MIGRATION_CREATOR_EMAIL: Joi.string().email().allow('').default(''), // Service-account email used to create migrated Slack channels
+  SLACK_MIGRATION_LOG_CHANNEL_ID: Joi.string().allow('').default('C0B312E4RNV'), // Slack channel ID for migration progress/error logs (defaults to #slack-migration-update)
+  SLACK_MIGRATION_CREATOR_EMAIL: Joi.string().email().allow('').default('siraj.shaik@juspay.in'), // Service-account email used to create migrated Slack channels
   // Google Sheets — Nightly Slack Migration
   // Uses GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (config.email). Only needs a refresh token with Sheets scope.
   // One-time setup: https://developers.google.com/oauthplayground → scope: https://www.googleapis.com/auth/spreadsheets
   MIGRATION_SHEETS_REFRESH_TOKEN: Joi.string().allow('').default(''), // OAuth2 refresh token with spreadsheets scope
-  MIGRATION_SHEET_ID: Joi.string().allow('').default(''), // Google Spreadsheet ID
+  MIGRATION_SHEET_ID: Joi.string().allow('').default('1_lljpA7-FKUrrU6x9j7E3-HeTeRDXB_BxHToKSh6WLo'), // Google Spreadsheet ID
   ENABLE_SLACK_MIGRATION_WORKER: Joi.boolean().default(false), // Toggle nightly migration cron on/off
   // Per-workspace Slack bot config (JSON keyed by Xyne workspaceId). Falls back to flat vars if empty.
   MIGRATION_SLACK_BOT_CONFIGS: Joi.string().allow('').default('{}'),
@@ -136,10 +137,10 @@ const envSchema = Joi.object({
   SLACK_MIGRATION_CLEANUP_CRON: Joi.string().default('30 1 * * *'), // Cleanup cron (default: 7 AM IST = 01:30 UTC)
   SLACK_MIGRATION_NOTIFICATIONS_ENABLED: Joi.boolean().default(true), // Enable/disable Slack postMessage notifications during migration
   SYNC_DM_CONCURRENCY: Joi.number().integer().min(1).default(3), // Max DMs/group-DMs migrated in parallel (/sync-dm)
-  SYNC_DM_LOG_CHANNEL: Joi.string().allow('').default(''), // Default Slack channel for /sync-dm updates; per-workspace override via MIGRATION_SLACK_BOT_CONFIGS[].syncDmLogChannelId
+  SYNC_DM_LOG_CHANNEL: Joi.string().allow('').default('C0BCN9BDQMN'), // Default Slack channel for /sync-dm updates; per-workspace override via MIGRATION_SLACK_BOT_CONFIGS[].syncDmLogChannelId
   // Zoho Integration
   // SAM Service Configuration
-  SAM_BASE_URL: Joi.string().uri().default(''),
+  SAM_BASE_URL: Joi.string().uri().default('https://joinus.juspay.in/api'),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
   LIVEKIT_API_KEY: Joi.string().allow('').default(''),
@@ -162,34 +163,19 @@ const envSchema = Joi.object({
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
   // LiteLLM Configuration for AI Agents
-  LITELLM_BASE_URL: Joi.string().default(''),
+  LITELLM_BASE_URL: Joi.string().default('https://grid.ai.juspay.net/'),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-latest'),
-  ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
-  // Org-level framing prepended to the mention-extraction prompt, so the model
-  // knows whose data it is reading. Fixes identity-relative errors like listing
-  // the org itself as an external ORGANISATION, and sharpens ORG vs MERCHANT.
-  ENTITY_EXTRACTION_ORG_CONTEXT: Joi.string()
-    .allow('')
-    .default(
-      'The data belongs to Juspay, a payments orchestration company. Juspay routes and ' +
-        'processes online transactions for its merchant clients across many payment gateways, ' +
-        'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
-        'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
-        'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
-        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
-    ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
   // call per ingested document. Disable independently of the shared LiteLLM config.
   DOCUMENT_OUTLINE_ENABLED: Joi.boolean().default(true),
-  IMAGE_GENERATION_ENDPOINT: Joi.string().default(''),
-  IMAGE_GENERATION_MODEL: Joi.string().default(''),
+  IMAGE_GENERATION_ENDPOINT: Joi.string().default('https://grid.ai.juspay.net/v1/images/generations'),
+  IMAGE_GENERATION_MODEL: Joi.string().default('open-image'),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
-  CALL_LITELLM_MODEL: Joi.string().default(''),
-  ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
+  CALL_LITELLM_MODEL: Joi.string().default('glm-latest'),
+  ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default('glm-latest'),
   PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default('0 2 * * *'),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
   // Working Hours Configuration (in IST)
@@ -203,11 +189,20 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
-  RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
-  TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
+  TICKET_DESC_CLEAN_MODEL: Joi.string().default('glm-flash-experimental'),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  // Team Intelligence has its own LLM timeout so it can run longer (or
+  // indefinitely) than the global LLM_REQUEST_TIMEOUT_MS without affecting
+  // streaming-retry / activity-classification paths. Set to 0 to disable the
+  // timeout entirely (let the call run until LiteLLM responds).
+  TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  TEAM_INTELLIGENCE_LLM_GLOBAL_CONCURRENCY: Joi.number().integer().min(1).default(8),
+  TEAM_INTELLIGENCE_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_USER_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_TEAM_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_ORG_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
   // Dynamic Dashboard tunables
   DASHBOARD_AI_SSE_PING_INTERVAL_MS: Joi.number().default(20000),
   DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(30),
@@ -227,7 +222,7 @@ const envSchema = Joi.object({
   QUERY_ROUTING_KEY: Joi.string().allow('').default(''),
   // Outage Verification API Configuration
   OUTAGE_VERIFICATION_AUTH_KEY: Joi.string().allow('').default(''),
-  OUTAGE_VERIFICATION_EMAIL: Joi.string().allow('').default(''),
+  OUTAGE_VERIFICATION_EMAIL: Joi.string().allow('').default('dashboard.user@juspay.in'),
   // Channel ID for the global outage alerts channel
   OUTAGE_ALERT_CHANNEL_ID: Joi.string().allow('').default(''),
   // UPI Analytics Bot API Configuration
@@ -249,19 +244,20 @@ const envSchema = Joi.object({
   // API-support CSAT sync API Key (for S2S authentication) — shared by any external system posting CSAT results
   API_SUPPORT_CSAT_API_KEY: Joi.string().allow('').default(''),
   // Mettle API Configuration (for fetching employee details)
-  METTLE_API_BASE_URL: Joi.string().uri().default(''),
+  METTLE_API_BASE_URL: Joi.string().uri().default('https://sandbox.mettle.juspay.in'),
   METTLE_TOKEN: Joi.string().allow('').default(''),
   // Superposition Configuration
   SUPERPOSITION_ENDPOINT: Joi.string().uri().default('http://localhost:9999'),
   SUPERPOSITION_TOKEN: Joi.string().allow('').default('123456'),
   SUPERPOSITION_ORG_ID: Joi.string().allow('').default('localorg'),
   SUPERPOSITION_WORKSPACE_ID: Joi.string().allow('').default('test'),
-  SUPERPOSITION_LOTUS_WORKSPACE_ID: Joi.string().allow('').default('lotus'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
   // Jenkins Configuration
-  JENKINS_BASE_URL: Joi.string().uri().default(''),
-  JENKINS_JOB_PATH: Joi.string().default(''),
+  JENKINS_BASE_URL: Joi.string()
+    .uri()
+    .default('https://jenkins.internal.svc.k8s.office.mum.juspay.net'),
+  JENKINS_JOB_PATH: Joi.string().default('/job/xyne/job/xyne-spaces'),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
   // OpenCode Configuration
@@ -275,8 +271,8 @@ const envSchema = Joi.object({
   // Default workflow executor when not specified
   DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default('xyne-code'),
   // Default model ID for config sync service
-  DEFAULT_MODEL_ID: Joi.string().default(''),
-  DEFAULT_MODEL_NAME: Joi.string().default(''),
+  DEFAULT_MODEL_ID: Joi.string().default('litellm-glm-latest'),
+  DEFAULT_MODEL_NAME: Joi.string().default('glm-latest'),
   // Default workspace ID for integrations that need it
   DEFAULT_WORKSPACE_ID: Joi.string().allow('').default(''),
   // oh-my-opencode Plugin Configuration
@@ -294,7 +290,9 @@ const envSchema = Joi.object({
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
-  BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
+  BITBUCKET_BASE_URL: Joi.string()
+    .allow('')
+    .default('https://bitbucket.juspay.net/rest/api/latest'),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
@@ -306,35 +304,28 @@ const envSchema = Joi.object({
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
   // Pulse Integration
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
-  PULSE_API_URL: Joi.string().uri().default(''),
+  PULSE_API_URL: Joi.string().uri().default('https://sandbox.portal.juspay.in'),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
-  // Thread catch-up summary — comma-separated channel IDs, or "all" for every channel (empty = disabled everywhere)
-  THREAD_SUMMARY_ENABLED_CHANNELS: Joi.string().allow('').default(''),
-  THREAD_SUMMARY_MIN_MESSAGES: Joi.number().integer().min(0).default(6),
-  THREAD_SUMMARY_MESSAGE_LIMIT: Joi.number().integer().min(1).default(300),
-  THREAD_SUMMARY_LLM_TIMEOUT_MS: Joi.number().integer().min(1).default(300000),
-  THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
-  THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
-  THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
-  DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
-  JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
+  JUSPAY_JIRA_BASEURL: Joi.string().uri().default('https://juspay.atlassian.net'),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default('https://docs.google.com/spreadsheets/d/1DugRamYhHt_9ZqnU-otpgEeAtlp4C3BRzAhAaYe7Jbg/export?format=csv'),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
   JIRA_MIGRATION_BATCH_DELAY_MS: Joi.number().integer().min(0).max(600000).default(5000),
-  JIRA_MIGRATION_REPORT_CANVAS_CHANNEL_ID: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_REPORT_CANVAS_CHANNEL_ID: Joi.string().allow('').default('cmpqmwnjn1ews111m54ksnk78'),
   // Confluence migration configuration
   CONFLUENCE_BASE_URL: Joi.string().allow('').default(''),
   CONFLUENCE_EMAIL: Joi.string().allow('').default(''),
   CONFLUENCE_API_TOKEN: Joi.string().allow('').default(''),
   CONFLUENCE_AUTH_TOKEN: Joi.string().allow('').default(''),
-  CONFLUENCE_MIGRATION_FALLBACK_EMAIL: Joi.string().email().default(''),
+  CONFLUENCE_MIGRATION_FALLBACK_EMAIL: Joi.string().email().default('xyne.spaces@juspay.in'),
   CONFLUENCE_IMPORT_BATCH_SIZE: Joi.number().integer().min(1).default(50),
   CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS: Joi.number().integer().min(0).default(5000),
   // Bit-Bot Integration
@@ -408,13 +399,6 @@ const envSchema = Joi.object({
   KB_INGESTION_QUEUE_PRIORITY: Joi.number().default(2),
   KB_INGESTION_OCR_PRIORITY: Joi.number().default(200),
   ATTACHMENT_OCR_PRIORITY: Joi.number().default(100),
-  // Name-only file feed: insert just the file name first (highest priority) so it
-  // is searchable in cmd+K within seconds, then a full feed enriches the same doc
-  // with parsed content. FILE_NAME_ONLY_FEED_ENABLED gates the two-job behavior;
-  // FILE_NAME_ONLY_FEED_PRIORITY is the BullMQ priority for the name-only job
-  // (lower = higher; delete=1, so 1 puts it at the top).
-  FILE_NAME_ONLY_FEED_ENABLED: Joi.boolean().default(true),
-  FILE_NAME_ONLY_FEED_PRIORITY: Joi.number().default(1),
   // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
@@ -533,6 +517,7 @@ export const config = {
     litellmBaseUrl: envVars.LITELLM_BASE_URL,
     litellmModel: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     requestTimeoutMs: envVars.LLM_REQUEST_TIMEOUT_MS,
+    teamIntelligenceRequestTimeoutMs: envVars.TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS,
     // Call-specific LiteLLM config (falls back to main litellm if not set)
     callLitellmApiKey: envVars.CALL_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     callLitellmModel: envVars.CALL_LITELLM_MODEL,
@@ -571,6 +556,16 @@ export const config = {
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
+  teamIntelligence: {
+    userJobConcurrency: envVars.TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY as number,
+    teamJobConcurrency: envVars.TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY as number,
+    orgJobConcurrency: envVars.TEAM_INTELLIGENCE_ORG_JOB_CONCURRENCY as number,
+    llmGlobalConcurrency: envVars.TEAM_INTELLIGENCE_LLM_GLOBAL_CONCURRENCY as number,
+    sectionConcurrency: envVars.TEAM_INTELLIGENCE_SECTION_CONCURRENCY as string,
+    userSectionConcurrency: envVars.TEAM_INTELLIGENCE_USER_SECTION_CONCURRENCY as string,
+    teamSectionConcurrency: envVars.TEAM_INTELLIGENCE_TEAM_SECTION_CONCURRENCY as string,
+    orgSectionConcurrency: envVars.TEAM_INTELLIGENCE_ORG_SECTION_CONCURRENCY as string,
+  },
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
@@ -578,23 +573,16 @@ export const config = {
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
-    enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
     requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
-    communityWorkspaceUserBudget:
-      (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
-    enterpriseWorkspaceUserBudget:
-      (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    communityWorkspaceUserBudget: (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    enterpriseWorkspaceUserBudget: (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
     litellmManagementBaseUrl:
       (envVars.LITELLM_MANAGEMENT_BASE_URL as string) || (envVars.LITELLM_BASE_URL as string),
     litellmManagementAdminKey: envVars.LITELLM_MANAGEMENT_ADMIN_KEY as string,
     litellmChangedBy: envVars.LITELLM_CHANGED_BY as string,
-    orgDefaultModels: (envVars.ORG_DEFAULT_MODELS as string)
-      .split(',')
-      .map((m: string) => m.trim())
-      .filter(Boolean),
   },
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
@@ -615,8 +603,8 @@ export const config = {
     : [],
   slackIgnoredBotIds: envVars.SLACK_IGNORED_BOT_IDS
     ? envVars.SLACK_IGNORED_BOT_IDS.split(',')
-        .map((id: string) => id.trim())
-        .filter(Boolean)
+      .map((id: string) => id.trim())
+      .filter(Boolean)
     : [],
   slackMigrationFinalMessage: envVars.SLACK_MIGRATION_FINAL_MESSAGE
     ? Buffer.from(envVars.SLACK_MIGRATION_FINAL_MESSAGE, 'base64').toString('utf-8')
@@ -669,14 +657,6 @@ export const config = {
   ysweet: {
     url: envVars.Y_SWEET_URL,
   },
-  entityExtraction: {
-    model: envVars.ENTITY_EXTRACTION_MODEL,
-    // A single extraction call takes 20-75s on this endpoint. Raising this
-    // makes calls contend and time out rather than finish faster.
-    concurrency: envVars.ENTITY_EXTRACTION_CONCURRENCY,
-    orgContext: envVars.ENTITY_EXTRACTION_ORG_CONTEXT,
-  },
-
   litellm: {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
@@ -752,7 +732,6 @@ export const config = {
     token: envVars.SUPERPOSITION_TOKEN,
     orgId: envVars.SUPERPOSITION_ORG_ID,
     workspaceId: envVars.SUPERPOSITION_WORKSPACE_ID,
-    lotusWorkspaceId: envVars.SUPERPOSITION_LOTUS_WORKSPACE_ID,
     pollingInterval: envVars.SUPERPOSITION_POLLING_INTERVAL,
     timeout: envVars.SUPERPOSITION_TIMEOUT,
   },
@@ -807,13 +786,6 @@ export const config = {
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS,
   },
-  pendingOAuthTokens: {
-    redisKeyPrefix: 'pendingauth:oauth:',
-    ttlSeconds: 10 * 60,
-  },
-  recentVisitedConversations: {
-    lookbackDays: envVars.RECENT_VISITED_LOOKBACK_DAYS,
-  },
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)
     enabledChannels: (envVars.PULSE_ENABLED_CHANNELS as string)
@@ -822,25 +794,6 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
-  },
-  threadSummary: {
-    // Comma-separated channel IDs that have the AI thread catch-up summary enabled, or "all" for every channel (empty = disabled everywhere)
-    enabledChannels: (envVars.THREAD_SUMMARY_ENABLED_CHANNELS as string)
-      .split(',')
-      .map((s: string) => s.trim())
-      .filter(Boolean),
-    minMessages: envVars.THREAD_SUMMARY_MIN_MESSAGES as number,
-    messageLimit: envVars.THREAD_SUMMARY_MESSAGE_LIMIT as number,
-    llmTimeoutMs: envVars.THREAD_SUMMARY_LLM_TIMEOUT_MS as number,
-    minSummaryMaxTokens: envVars.THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS as number,
-    maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
-    transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
-  },
-  desk: {
-    betaChannels: (envVars.DESK_BETA_CHANNELS as string)
-      .split(',')
-      .map((s: string) => s.trim())
-      .filter(Boolean),
   },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
@@ -909,10 +862,6 @@ export const config = {
     queuePriority: envVars.KB_INGESTION_QUEUE_PRIORITY as number,
     ocrPriority: envVars.KB_INGESTION_OCR_PRIORITY as number,
     attachmentOcrPriority: envVars.ATTACHMENT_OCR_PRIORITY as number,
-  },
-  fileNameOnlyFeed: {
-    enabled: envVars.FILE_NAME_ONLY_FEED_ENABLED as boolean,
-    queuePriority: envVars.FILE_NAME_ONLY_FEED_PRIORITY as number,
   },
   doclingScheduler: {
     enabled: envVars.DOCLING_ASYNC_SCHEDULER_ENABLED as boolean,

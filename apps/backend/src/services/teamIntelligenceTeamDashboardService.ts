@@ -36,6 +36,15 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
+  async getTeamLeadershipSnapshots(input: { from: Date; to: Date; teamId: string }) {
+    try {
+      return await teamIntelligenceTeamRepository.getTeamLeadershipSnapshotsByDate(input);
+    } catch (error) {
+      logger.error('[TeamIntelligenceTeam] getTeamLeadershipSnapshots failed', { error, input });
+      throw error;
+    }
+  }
+
   async getPrByDate(input: { from: Date; to: Date; prId: number }) {
     try {
       return await teamIntelligenceTeamRepository.getPrByDate({
