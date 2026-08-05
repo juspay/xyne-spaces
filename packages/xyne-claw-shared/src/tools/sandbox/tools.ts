@@ -2086,6 +2086,17 @@ export const sandboxRepoSetup: ToolDefinition = {
     // — bad-branch / repo-not-found errors pass through unchanged.
     if (isSandboxProvisioningFailure(result)) {
       const firstLine = result.split("\n")[0]?.replace(/^Error:\s*/i, "").slice(0, 160) ?? "provisioning failed";
+      // Flag-gated (SANDBOX_UNAVAILABLE_DEFER, default off): instead of silently
+      // substituting a read-only session — which lets a write-needing agent
+      // "succeed" with an unusable sandbox, conclude it cannot work, and end the
+      // run with NO retry signal (forcing a human to re-tag) — emit a stable
+      // `sandbox_unavailable` sentinel. custom-tools.ts turns this into a typed
+      // SandboxUnavailableError, run.ts ends the run with error:"sandbox_unavailable",
+      // and claw-auth run-recovery defers + auto-resumes once a SandboxClaim binds.
+      // See apps/xyne-claw/docs/sbx-availability-signal.md.
+      if (process.env["SANDBOX_UNAVAILABLE_DEFER"] === "true") {
+        return `Error: sandbox_unavailable: the writable dev sandbox could not be provisioned (${firstLine}). This run is being queued and will resume automatically when capacity frees — no need to re-tag.`;
+      }
       const reason =
         `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
       const ro = await resolveSbxGit(repoName, context, reason);

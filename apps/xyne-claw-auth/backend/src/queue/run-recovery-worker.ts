@@ -92,6 +92,8 @@ interface RunRecoveryState {
   lastError: string | null;
   /** Count of session_locked deferrals (see deferLockContentionRetry). */
   lockDeferrals?: number;
+  /** Count of sandbox_unavailable deferrals (see deferSandboxRetry). */
+  sandboxDeferrals?: number;
   /** Count of explicit drain handoffs for this root run. Caps deploy crash-loop ping-pong. */
   handoffsUsed?: number;
   dispatchPayload: RecoveryDispatchPayload;
@@ -150,6 +152,16 @@ function isSessionLockedFailure(error?: string | null): boolean {
   return error === "session_locked" || error?.includes("session_locked") === true;
 }
 
+/** A writable dev sandbox could not be provisioned: the agent-sandbox operator
+ *  had no warm capacity to bind AND the kata node pool was at max nodes. Emitted
+ *  by sandbox-repo-setup → run.ts as error:"sandbox_unavailable". Unlike
+ *  session_locked (a peer run holds this conversation's lock), capacity here is
+ *  owned by the operator + node autoscaler, so we defer and re-dispatch the same
+ *  run until a SandboxClaim binds. */
+function isSandboxUnavailableFailure(error?: string | null): boolean {
+  return error === "sandbox_unavailable" || error?.includes("sandbox_unavailable") === true;
+}
+
 /** Scheduled fires use a one-shot `scheduled_<jobId>_<ts>` conversationId. The
  *  mid-run FIFO for such a key is NEVER drained (no inbound message targets it
  *  and /scheduled-jobs/:id/result has no drain), so lock-contended scheduled
@@ -187,6 +199,33 @@ async function deferLockContentionRetry(
   await saveState(state);
   await scheduleDispatch(state.rootSessionId, "session_locked — waiting for lock holder", delayMs);
   log.info(`[run-recovery] lock contention deferred root=${state.rootSessionId} deferral=${state.lockDeferrals}/${MAX_LOCK_DEFERRALS} retryInMs=${delayMs}`);
+  return true;
+}
+
+/** Poll cadence for a write sandbox to free up. The agent-sandbox operator keeps
+ *  reconciling the (still-alive) SandboxClaim and the node pool may be scaling in,
+ *  so a modest fixed delay re-dispatches until one binds. */
+const SANDBOX_RETRY_DELAY_MS = Number(process.env["SANDBOX_RETRY_DELAY_MS"] ?? 60_000);
+/** Hard cap on sandbox_unavailable deferrals (~15 × 60s = 15 min of waiting).
+ *  Guards against a run parking forever if capacity never frees. */
+const MAX_SANDBOX_DEFERRALS = Number(process.env["MAX_SANDBOX_DEFERRALS"] ?? 15);
+
+/** Re-schedule a run that could not get a write sandbox, WITHOUT consuming a
+ *  retry attempt — same idempotency guarantee as deferLockContentionRetry
+ *  (dispatchRetry's runAlreadyCompleted marker prevents a double run if the
+ *  original later completes). Returns false when the deferral cap is hit so the
+ *  caller can exhaust with a clear message. */
+async function deferSandboxRetry(
+  state: RunRecoveryState,
+  delayMs: number = SANDBOX_RETRY_DELAY_MS,
+): Promise<boolean> {
+  state.sandboxDeferrals = (state.sandboxDeferrals ?? 0) + 1;
+  if (state.sandboxDeferrals > MAX_SANDBOX_DEFERRALS) return false;
+  state.retryScheduled = true;
+  state.lastHeartbeatAt = Date.now();
+  await saveState(state);
+  await scheduleDispatch(state.rootSessionId, "sandbox_unavailable — waiting for write capacity", delayMs);
+  log.info(`[run-recovery] sandbox unavailable deferred root=${state.rootSessionId} deferral=${state.sandboxDeferrals}/${MAX_SANDBOX_DEFERRALS} retryInMs=${delayMs}`);
   return true;
 }
 
@@ -928,6 +967,16 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
 
   if (state.status !== "running") {
     return { retried: false, exhausted: state.status === "exhausted", rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+  }
+
+  if (status === "failed" && isSandboxUnavailableFailure(error)) {
+    state.lastError = error ?? null;
+    await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+    if (await deferSandboxRetry(state)) {
+      return { retried: true, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+    }
+    await markExhausted(state, "sandbox_unavailable (no write capacity after max deferrals)");
+    return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries, terminalDrop: true };
   }
 
   if (status === "failed" && isSessionLockedFailure(error)) {
