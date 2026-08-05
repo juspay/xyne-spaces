@@ -7,12 +7,13 @@ import type {
   NudgeBuildContextRuntime,
 } from '../types';
 import { EMPTY_ACTIVITY_CONTEXT } from '../types';
+import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
 
 export const deleteMessageCleanup: NudgeDefinition<
   ActivityEventNudgePayload,
   NudgeEvaluationContext
 > = {
-  kind: 'DELETE_MESSAGE_CLEANUP',
+  kind: NudgeKind.DELETE_MESSAGE_CLEANUP,
   mode: 'implicit',
   trigger: {
     subscribesTo: ['MESSAGE.DELETED'],
@@ -21,7 +22,7 @@ export const deleteMessageCleanup: NudgeDefinition<
       return typeof meta.messageId === 'string' && meta.messageId.length > 0;
     },
   },
-  direction: { from: 'MESSAGE', to: 'MESSAGE' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE },
 
   async buildContext(
     _payload: ActivityEventNudgePayload,
@@ -34,7 +35,7 @@ export const deleteMessageCleanup: NudgeDefinition<
       source: {
         sourceId: null,
         projectId: null,
-        sourceType: 'MESSAGE',
+        sourceType: SurfaceAreaType.MESSAGE,
       },
       activityContext: EMPTY_ACTIVITY_CONTEXT,
     };
@@ -55,7 +56,7 @@ export const deleteMessageCleanup: NudgeDefinition<
         description: 'Clean up surface links and nudges for deleted message',
         actions: {
           actionType: 'DELETE_SURFACE_LINKS',
-          sourceType: 'MESSAGE',
+          sourceType: SurfaceAreaType.MESSAGE,
           sourceId: messageId,
         },
       },

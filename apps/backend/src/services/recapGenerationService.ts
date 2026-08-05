@@ -11,6 +11,7 @@ import {
 } from '../agents/summariser';
 import { AgentsConfig } from '../agents/config';
 import { calculateUnreadCount } from '../utils/recapUtils';
+import { ChannelScopeType, RecapEntityType } from '@xyne/shared';
 
 interface RecapSummary {
   points: Array<{
@@ -219,7 +220,7 @@ export class RecapGenerationService {
     const channels = await db.channel.findMany({
       where: {
         id: { in: channelIds },
-        scopeType: 'DEFAULT',
+        scopeType: ChannelScopeType.DEFAULT,
       },
       select: {
         id: true,
@@ -452,7 +453,7 @@ export class RecapGenerationService {
 
     // Find existing record and update, or create new one
     const existing = await db.recap.findFirst({
-      where: { entityId: channelId, entityType: 'CHANNEL', recapDate: normalizedDate, userId },
+      where: { entityId: channelId, entityType: RecapEntityType.CHANNEL, recapDate: normalizedDate, userId },
     });
 
     if (existing) {
@@ -467,7 +468,7 @@ export class RecapGenerationService {
       });
       await db.recap.create({
         data: {
-          entityType: 'CHANNEL',
+          entityType: RecapEntityType.CHANNEL,
           entityId: channelId,
           recapDate: normalizedDate,
           summary: summaryData,

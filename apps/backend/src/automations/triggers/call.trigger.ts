@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CallType } from '@prisma/client';
+import { CallType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';

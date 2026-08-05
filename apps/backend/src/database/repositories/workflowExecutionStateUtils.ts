@@ -19,7 +19,7 @@ export type WorkflowExecutionWithState = WorkflowExecution & {
  * Resolve the workspaceId to denormalize onto a WorkflowExecutionState row from
  * its owning WorkflowExecution (1:1 via workflowExecutionId).
  */
-async function resolveExecutionWorkspaceId(workflowExecutionId: string): Promise<string | null> {
+async function resolveExecutionWorkspaceId(workflowExecutionId: string): Promise<string> {
   const execution = await prisma.workflowExecution.findUnique({
     where: { id: workflowExecutionId },
     select: { workspaceId: true },

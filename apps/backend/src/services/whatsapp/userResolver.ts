@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { UserRepository } from '@/database/repositories/users';
-import { AuthProvider, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AuthProvider, OrgRole } from '@xyne/shared';
 
 export interface WhatsAppNameEmailMapping {
   whatsappName: string;
@@ -45,7 +46,7 @@ async function findOrCreateWorkspaceUser(
           data: {
             orgId: workspace.orgId,
             email: normalizedEmail,
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
           },
           select: { memberId: true },
         });

@@ -47,7 +47,7 @@ export function McpIdentity({
   verified,
   gap = 'default',
   muted = false,
-  weight = 'semibold',
+  weight = 'medium',
   trailing,
 }: McpIdentityProps): ReactElement {
   return (

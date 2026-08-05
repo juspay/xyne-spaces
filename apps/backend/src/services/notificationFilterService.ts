@@ -1,7 +1,7 @@
 import { DatabaseClient } from '@/database/client';
-import { NotificationLevel, NotificationType } from '@prisma/client';
 import { logger } from '@/utils/logger';
-import { parseNotificationKeywords } from '@xyne/shared';
+import { parseNotificationKeywords, NotificationLevel, NotificationType } from '@xyne/shared';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -74,6 +74,14 @@ export async function prefetchFilterData(
   userIds: string[],
   channelId: string,
 ): Promise<PrefetchedFilterData> {
+  // Reads notification state for every recipient, not just the caller.
+  return withWorkspaceScope(() => prefetchFilterDataInner(userIds, channelId));
+}
+
+async function prefetchFilterDataInner(
+  userIds: string[],
+  channelId: string,
+): Promise<PrefetchedFilterData> {
   if (userIds.length === 0) {
     return { channelStatuses: new Map(), presences: new Map(), preferences: new Map() };
   }
@@ -116,7 +124,7 @@ export async function prefetchFilterData(
   ]);
 
   return {
-    channelStatuses: new Map(statuses.map(({ userId, ...rest }) => [userId, rest])),
+    channelStatuses: new Map(statuses.map(({ userId, ...rest }) => [userId, rest as ChannelStatusRow])),
     presences:       new Map(presences.map(p => [p.userId, p.notificationsPausedUntil])),
     // notificationKeywords is stringified JSON at rest (TEXT column); parse to
     // string[] | undefined so downstream keyword matching stays typed and safe.
@@ -124,10 +132,10 @@ export async function prefetchFilterData(
       const parsed = parseNotificationKeywords(notificationKeywords);
       return [
         userId,
-        {
+        ({
           ...rest,
           notificationKeywords: parsed.length > 0 ? parsed : undefined,
-        },
+        }) as UserPreferenceRow,
       ];
     })),
   };
@@ -316,6 +324,19 @@ export async function filterUsers(
   prefetchedData?: PrefetchedFilterData,
   isGroupDM: boolean = false,
 ): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
+  // Reads notification state for every candidate recipient, not just the caller.
+  return withWorkspaceScope(() => filterUsersInner(userIds, channelId, isDMChannel, context, options, prefetchedData, isGroupDM));
+}
+
+async function filterUsersInner(
+  userIds: string[],
+  channelId: string,
+  isDMChannel: boolean = false,
+  context: NotificationContext = 'mention',
+  options: FilterUsersOptions = {},
+  prefetchedData?: PrefetchedFilterData,
+  isGroupDM: boolean = false,
+): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
   const desktopUsers: string[] = [];
   const mobileUsers: string[] = [];
 
@@ -372,9 +393,9 @@ export async function filterUsers(
       }),
     ]);
 
-    channelStatusMap = new Map(channelStatuses.map(({ userId, ...rest }) => [userId, rest]));
+    channelStatusMap = new Map(channelStatuses.map(({ userId, ...rest }) => [userId, rest as ChannelStatusRow]));
     globalPauseMap   = new Map(userPresences.map(p => [p.userId, p.notificationsPausedUntil]));
-    userPrefMap      = new Map(userPreferences.map(({ userId, ...rest }) => [userId, rest]));
+    userPrefMap      = new Map(userPreferences.map(({ userId, ...rest }) => [userId, rest as UserPreferenceRow]));
   }
 
   for (const userId of userIds) {
@@ -536,6 +557,15 @@ export async function filterGlobalUsers(
   notificationType: NotificationType,
   context: NotificationContext = 'channel_message',
 ): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
+  // Reads notification state for every candidate recipient, not just the caller.
+  return withWorkspaceScope(() => filterGlobalUsersInner(userIds, notificationType, context));
+}
+
+async function filterGlobalUsersInner(
+  userIds: string[],
+  notificationType: NotificationType,
+  context: NotificationContext = 'channel_message',
+): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
   const desktopUsers: string[] = [];
   const mobileUsers: string[] = [];
 
@@ -605,8 +635,8 @@ export async function filterGlobalUsers(
     const mobileLevel =
       pref?.globalMobileNotificationLevel ?? pref?.globalDesktopNotificationLevel ?? DEFAULT_GLOBAL_PREFS.globalMobileNotificationLevel;
 
-    const globalDesktop = isLevelAllowed(desktopLevel, context);
-    const globalMobile  = isLevelAllowed(mobileLevel, context);
+    const globalDesktop = isLevelAllowed(desktopLevel as NotificationLevel, context);
+    const globalMobile  = isLevelAllowed(mobileLevel as NotificationLevel, context);
     if (globalDesktop) desktopUsers.push(userId);
     if (globalMobile)  mobileUsers.push(userId);
     emitDecisionTrace(userId, {

@@ -16,7 +16,8 @@ import {
   callSchema,
   SubApp,
 } from '@/vespa/src/types';
-import { AttachmentEntityType, ChannelType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AttachmentEntityType, ChannelType } from '@xyne/shared';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 
 type BackfillFilters = {
@@ -476,7 +477,7 @@ export class AdminBackfillController {
             SELECT t.id, t."workspaceId"
             FROM "tickets" t
             JOIN "channels" ch ON ch.id = t."channelId"
-            WHERE ch.type = ${ChannelType.EMAIL}::"ChannelType"
+            WHERE ch.type = ${ChannelType.EMAIL}
             ${cutoffTime && fromTime
               ? Prisma.sql`AND t."updatedAt" >= ${fromTime} AND t."updatedAt" <= ${cutoffTime}`
               : cutoffTime
@@ -1273,13 +1274,13 @@ export class AdminBackfillController {
       // Execute backfill asynchronously in the background (fire and forget)
       // No await here - let it run independently
       AdminBackfillController.executeBackfillInBackground(
-        schemasToBackfill,
-        backfillJobId,
-        queueName,
-        cutoffTime,
-        fromTime,
-        filters,
-      )
+          schemasToBackfill,
+          backfillJobId,
+          queueName,
+          cutoffTime,
+          fromTime,
+          filters,
+        )
         .catch((error) => {
           logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
         });
@@ -1405,7 +1406,7 @@ export class AdminBackfillController {
     }
   }
 
-  
+
   /**
    * Get queue jobs with pagination and state filter
    * Query params: page, limit, state (waiting|active|delayed|completed|failed|all)
@@ -1531,7 +1532,7 @@ export class AdminBackfillController {
           queue.clean(0, 'wait'), 
           queue.clean(0, 'active') ,  
           queue.clean(0, 'delayed'),
-         
+
         ]);
       } else {
         // queue.clean supports 'completed' and 'failed'
@@ -1560,5 +1561,5 @@ export class AdminBackfillController {
       } as ApiResponse);
     }
   }
-  
+
 }

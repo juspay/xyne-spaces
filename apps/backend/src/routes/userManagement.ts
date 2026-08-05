@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { userManagementController } from '../controllers/userManagementController';
+import { workspaceScopedRoute } from '@/database/tenant/context';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.get('/users/:id/access', userManagementController.getUserAccess);
 router.put('/users/:id/access', userManagementController.updateUserAccess);
 
 // Update user status (activate/deactivate)
-router.patch('/users/:id/status', userManagementController.updateUserStatus);
+router.patch('/users/:id/status', workspaceScopedRoute, userManagementController.updateUserStatus);
 
 // Get all resources
 router.get('/resources', userManagementController.getAllResources);
@@ -34,22 +35,22 @@ router.get('/groups/:id', userManagementController.getGroupById);
 router.post('/groups', userManagementController.createGroup);
 
 // Update a user group
-router.put('/groups/:id', userManagementController.updateGroup);
+router.put('/groups/:id', workspaceScopedRoute, userManagementController.updateGroup);
 
 // Delete a user group
-router.delete('/groups/:id', userManagementController.deleteGroup);
+router.delete('/groups/:id', workspaceScopedRoute, userManagementController.deleteGroup);
 
 // Deactivate a user group (soft delete)
-router.patch('/groups/:id/deactivate', userManagementController.deactivateGroup);
+router.patch('/groups/:id/deactivate', workspaceScopedRoute, userManagementController.deactivateGroup);
 
 // Reactivate a user group
-router.patch('/groups/:id/reactivate', userManagementController.reactivateGroup);
+router.patch('/groups/:id/reactivate', workspaceScopedRoute, userManagementController.reactivateGroup);
 
 // Assign user to group
-router.post('/groups/:groupId/users/:userId', userManagementController.assignUserToGroup);
+router.post('/groups/:groupId/users/:userId', workspaceScopedRoute, userManagementController.assignUserToGroup);
 
 // Remove user from group (assigns to default group)
-router.delete('/groups/:groupId/users/:userId', userManagementController.removeUserFromGroup);
+router.delete('/groups/:groupId/users/:userId', workspaceScopedRoute, userManagementController.removeUserFromGroup);
 
 // ==================== GROUP PERMISSION MANAGEMENT ROUTES ====================
 

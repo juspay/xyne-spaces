@@ -1,5 +1,6 @@
 import type { Query } from '@rocicorp/zero';
-import { type Schema, type Context } from '../../schema';
+import type { Schema, Context } from '../../schema';
+import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
@@ -25,13 +26,25 @@ export class RecapsACL extends BaseQueryACL<'recaps'> {
       );
     }
 
-    // Users can see recaps where:
-    // 1. They are the userId (personal recaps)
-    // 2. OR it's a base recap (userId IS NULL)
-    return query.where(({ cmp, or }) =>
+    // Base recaps (userId IS NULL): only visible when their channel is in the caller's
+    // workspace AND the channel is PUBLIC or the caller is a participant.
+    // Custom recaps (userId = userID): only visible to the owning user.
+    return query.where(({ or, cmp, and, exists }) =>
       or(
-        cmp('userId', '=', this.ctx.userID),
-        cmp('userId', 'IS', null)
+        and(
+          cmp('userId', 'IS', null),
+          exists('channel', (ch) =>
+            ch
+              .where('workspaceId', '=', this.ctx.workspaceId)
+              .where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
+                or2(
+                  cmp2('visibility', '=', ChannelVisibility.PUBLIC),
+                  exists2('participants', (p) => p.where('userId', this.ctx.userID))
+                )
+              )
+          )
+        ),
+        cmp('userId', '=', this.ctx.userID)
       )
     );
   }

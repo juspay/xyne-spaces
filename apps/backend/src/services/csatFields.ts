@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import { ActivityType, Prisma } from '@prisma/client';
-import { FormFieldType, FormContextType, FormEntityType } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
+import { FormFieldType, FormContextType, FormEntityType, ActivityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
@@ -38,7 +38,7 @@ const CSAT_FIELD_DEFS: Array<{ fieldName: string; fieldType: FormFieldType; fiel
  */
 export async function ensureCsatFormFields(boardId: string, workspaceId: string, createdBy: string): Promise<void> {
   const mapping = await db.formContextMapping.findFirst({
-    where: { contextId: boardId, contextType: 'BOARD', entityType: 'TICKET' },
+    where: { contextId: boardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
   });
 
   const provisionNewForm = async (): Promise<void> => {
@@ -52,7 +52,7 @@ export async function ensureCsatFormFields(boardId: string, workspaceId: string,
     });
     try {
       await db.formContextMapping.create({
-        data: { id: randomUUID(), contextId: boardId, contextType: 'BOARD', entityType: 'TICKET', formId: form.id, workspaceId },
+        data: { id: randomUUID(), contextId: boardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET, formId: form.id, workspaceId },
       });
       logger.info(`[csat] provisioned new ticket form with CSAT fields | boardId=${boardId} formId=${form.id}`);
     } catch (err) {

@@ -34,6 +34,7 @@ import {
   Flag,
   SidebarRightOpen,
   ChevronDown,
+  File02Text,
   EnvelopeDefault,
   Hashtag,
 } from '@xyne/icons';
@@ -57,6 +58,7 @@ import {
 import { SummaryGenerationPanel } from './components/SummaryGenerationPanel';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
+import { GoogleDocPreviewModal } from './components/GoogleDocPreviewModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -114,6 +116,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
+  const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
+  const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [pendingSummaryTemplateId, setPendingSummaryTemplateId] =
     useState<BuiltinRecordingSummaryTemplateId | null>(null);
@@ -125,6 +130,36 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+
+  const exportGoogleDoc = async (): Promise<void> => {
+    if (!recording || isExportingGoogleDoc) return;
+
+    // Opening synchronously keeps this user-initiated navigation from being blocked by browsers.
+    const documentWindow = window.open('', '_blank');
+    if (documentWindow) documentWindow.opener = null;
+
+    setIsExportingGoogleDoc(true);
+    try {
+      const { documentUrl } = await recordingService.exportGoogleDoc(recording.externalId);
+      if (documentWindow) {
+        documentWindow.location.assign(documentUrl);
+      } else {
+        window.open(documentUrl, '_blank', 'noopener,noreferrer');
+      }
+      toast.success('Google Doc created');
+      setShowGoogleDocPreviewModal(false);
+    } catch (error) {
+      documentWindow?.close();
+      toast.error('Failed to export to Google Docs', {
+        description: axios.isAxiosError<{ error?: string }>(error)
+          ? (error.response?.data?.error ?? error.message)
+          : 'Please try again.',
+      });
+      throw error;
+    } finally {
+      setIsExportingGoogleDoc(false);
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -143,6 +178,30 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     params.delete('recordingEmailConnected');
     params.delete('recordingEmailError');
+    const search = params.toString();
+    void navigate(
+      { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
+      { replace: true, state: location.state as RecordingNavState | null },
+    );
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const connected = params.get('recordingGoogleDocConnected') === 'true';
+    const connectionError = params.get('recordingGoogleDocError');
+    if (!connected && !connectionError) return;
+
+    if (connected) {
+      toast.success('Google Docs connected');
+      setGoogleDocPreviewNonce(nonce => nonce + 1);
+      setShowGoogleDocPreviewModal(true);
+    }
+    if (connectionError) {
+      toast.error('Google Docs connection failed. Please try again.');
+      setShowGoogleDocPreviewModal(true);
+    }
+    params.delete('recordingGoogleDocConnected');
+    params.delete('recordingGoogleDocError');
     const search = params.toString();
     void navigate(
       { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
@@ -442,7 +501,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const selected = RECORDING_SUMMARY_TEMPLATES.find(
         template => template.id === result.summaryTemplateId,
       );
-      toast.success(`${selected?.name ?? 'Recording'} summary generated`);
+      toast.success(
+        selected?.id === 'default'
+          ? 'Default summary generated'
+          : `${selected?.name ?? 'Recording'} summary generated`,
+      );
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
@@ -466,6 +529,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
     { enabled: !!recording?.messageId },
   );
 
+  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
+  // reaches this screen through the store until the detail is refetched.
+  const notesCanvasId =
+    (isLive && recording?.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
+    recording?.notesCanvasId ??
+    null;
+
   /**
    * A note-taker recording has no channel, message or conversation — it is created
    * from a LiveKit webhook rather than posted anywhere — so none of those can gate
@@ -474,23 +544,58 @@ export default function RecordingDetailV2Screen(): ReactElement {
    * as the recordings list does.
    */
   const handleAskAI = useCallback((): void => {
+    if (!recording) return;
     const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
-    const hasThreadContext = !!recording?.conversationId || attachmentIds.length > 0;
+    const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
+    const canvasSelections = [
+      ...(recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: recording.detailedSummaryCanvasId,
+              canvasId: recording.detailedSummaryCanvasId,
+              title: `${recording.title || 'Recording'} summary`,
+            },
+          ]
+        : []),
+      ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: notesCanvasId,
+              canvasId: notesCanvasId,
+              title: `${recording.title || 'Recording'} notes`,
+            },
+          ]
+        : []),
+    ];
 
     xyneAIActor.send({
       type: 'OPEN',
       startFreshChat: true,
       contextType: 'general',
-      ...(recording?.channelId ? { channelId: recording.channelId } : {}),
+      initialContextSelections: {
+        recordings: [
+          {
+            // `id` is the canonical Call id. `externalId` is only the public
+            // recording-route id, so using it here would make Claw fail to
+            // resolve the attached call.
+            id: recording.id,
+            title: recording.title || 'Recording',
+            ...(recording.channelId ? { channelId: recording.channelId } : {}),
+            ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
+            externalId: recording.externalId,
+          },
+        ],
+        canvases: canvasSelections,
+      },
       threadInfo: hasThreadContext
         ? {
-            conversationId: recording?.conversationId ?? '',
-            previewText: recording?.title || 'Recording Transcript',
+            conversationId: recording.conversationId ?? '',
+            previewText: recording.title || 'Recording Transcript',
             ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
           }
         : null,
     });
-  }, [recording, message]);
+  }, [recording, message, notesCanvasId]);
 
   const transcriptText =
     speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
@@ -546,11 +651,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
     );
   }
 
-  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
-  // reaches this screen through the store until the detail is refetched.
-  const notesCanvasId =
-    (isLive && recording.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
-    recording.notesCanvasId;
   // The player replaces the read-only timeline once there is audio to scrub.
   const showAudioPlayer = !isLive && !!recording.hasRecording;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
@@ -732,6 +832,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
                         <EnvelopeDefault className='size-4 text-muted-foreground' />
                         Post to email
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setShowGoogleDocPreviewModal(true)}
+                        disabled={isExportingGoogleDoc}
+                        className='rounded-lg px-2.5 py-2'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='export_recording_google_doc'
+                      >
+                        <File02Text className='size-4 text-muted-foreground' />
+                        {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : null}
@@ -843,6 +953,25 @@ export default function RecordingDetailV2Screen(): ReactElement {
           <PostRecordingToEmailModal
             recording={recording}
             onClose={() => setShowPostToEmailModal(false)}
+          />
+        </Dialog>
+      )}
+
+      {isOwner && showGoogleDocPreviewModal && hasDetailedSummary && (
+        <Dialog
+          open={showGoogleDocPreviewModal}
+          onOpenChange={open => !open && setShowGoogleDocPreviewModal(false)}
+          title='Preview Google Doc'
+          description='Review the recording summary before creating a Google Doc.'
+          className='max-w-[760px] overflow-hidden rounded-xl p-0'
+          testId='google-doc-preview-dialog'
+        >
+          <GoogleDocPreviewModal
+            key={googleDocPreviewNonce}
+            recording={recording}
+            onClose={() => setShowGoogleDocPreviewModal(false)}
+            onExport={exportGoogleDoc}
+            isExporting={isExportingGoogleDoc}
           />
         </Dialog>
       )}

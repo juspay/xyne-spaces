@@ -13,14 +13,14 @@ import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
 import { parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
-import { ReleaseTrackingMode, VCSProviderType } from '@xyne/shared';
+import { ReleaseTrackingMode, VCSProviderType, MessageType } from '@xyne/shared';
 
 async function postLoadingMessage(conversationId: string, userId: string): Promise<string> {
   const message = await conversationService.addMessageToConversation({
     conversationId,
     userId,
     content: `<p><strong>Analyzing commits...</strong></p><p><em>Please wait while we analyze the commits and detect affected applications.</em></p>`,
-    msgType: 'SYSTEM',
+    msgType: MessageType.SYSTEM,
     metadata: {
       messageSubtype: 'commit_analysis_loading',
       isLoading: true,
@@ -473,7 +473,7 @@ export class CommitAnalysisController {
         conversationId: parentTicket.conversationId,
         userId,
         content: parentSummaryContent,
-        msgType: 'SYSTEM',
+        msgType: MessageType.SYSTEM,
         metadata: {
           messageSubtype: 'commit_analysis_report',
           fromSubTicket: true,

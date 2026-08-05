@@ -1,4 +1,5 @@
-import { CanvasRole, CanvasVisibility, Prisma, type User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReleaseReport, ReleaseReportChange } from '@xyne/shared';
 import { db } from '@/database/client';

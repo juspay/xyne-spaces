@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
+import { WorkspaceRole, AuthProvider } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
-import { WorkspaceRole } from '@prisma/client';
 import { DatabaseClient, db } from '@/database/client';
 import {logger} from '@/utils/logger';
 import { grantPermissionsForRole } from '../services/permissionMatrix';
@@ -47,7 +47,7 @@ export const createUser = async (req: Request, res: Response) => {
         name,
         email,
         providerUserId,
-        authProvider: 'API_KEY',
+        authProvider: AuthProvider.API_KEY,
         workspace: { connect: { id: workspaceId } },
         orgMember: { connect: { memberId: orgMember.memberId } },
       },

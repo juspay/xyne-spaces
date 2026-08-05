@@ -1,8 +1,5 @@
-import {
-  Prisma,
-  TicketStatusV2,
-  UserResponsibility,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, UserResponsibility } from '@xyne/shared';
 import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
 
 const SUPPORT_TICKET_TYPE = 'Support';
@@ -24,7 +21,7 @@ export type KanbanFormFieldGroup = {
 export type KanbanGroupBy = 'none' | 'assignee' | 'status' | 'priority' | KanbanFormFieldGroup;
 
 export type KanbanTicketFilters = {
-  priority?: import('@prisma/client').TicketPriority[];
+  priority?: TicketPriority[];
   assignee?: string[];
   userGroups?: string[];
   createdBy?: string[];

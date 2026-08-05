@@ -7,6 +7,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
+import { VespaInsertionStatus } from '@xyne/shared';
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -140,7 +141,7 @@ export class VespaWorker {
 					entityType,
 					workspaceId,
 					type: VespaOperationType[job.data.jobType],
-					status: 'FAILED',
+					status: VespaInsertionStatus.FAILED,
 					namespace: this.namespace,
 					errorMessage: `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
 					errorDetails: JSON.stringify({

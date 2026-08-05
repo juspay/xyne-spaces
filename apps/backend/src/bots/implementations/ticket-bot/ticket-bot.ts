@@ -17,7 +17,8 @@ import { workflowRegistry } from '@/workflows/registry/workflowRegistry';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ConversationSummarizationService } from '@/services/conversationSummarizationService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, OrgRole, MessageType } from '@xyne/shared';
+import type { CreateMessageInput } from '@/database/repositories/messageRepository';
 
 // Define types for the bot
 type TicketBotInput = {
@@ -329,7 +330,7 @@ Provide a concise but informative summary:`;
               const botMessages: string[] = [];
 
               messages.forEach((msg: any) => {
-                if (msg.msgType === 'BOT' && isBotMessage(msg.content)) {
+                if (msg.msgType === MessageType.BOT && isBotMessage(msg.content)) {
                   const botContent = extractBotContent(msg.content);
                   const filteredBotContent = filterTicketBotCommands(botContent);
                   if (filteredBotContent) {
@@ -527,7 +528,7 @@ Provide a concise but informative summary:`;
             data: {
               email: botEmail,
               orgId: workspace.orgId,
-              role: 'MEMBER',
+              role: OrgRole.MEMBER,
             }
           });
           logger.info(`[TicketBot] Created orgMember for bot: ${orgMember.memberId}`);
@@ -553,12 +554,12 @@ Provide a concise but informative summary:`;
         conversationId: context.conversationId,
         senderId: botId,
         content: JSON.stringify(ticketFlowJson),
-        msgType: 'BOT' as const,
+        msgType: MessageType.BOT as const,
         hasAttachment: false
       };
       logger.info(`[TicketBot] Creating message with data:`, messageData);
 
-      const createdMessage = await repositories.messages.create(messageData);
+      const createdMessage = await repositories.messages.create(messageData as CreateMessageInput);
       logger.info(`[TicketBot] Message created in database:`, createdMessage.messageId);
 
       // Broadcast the message to frontend

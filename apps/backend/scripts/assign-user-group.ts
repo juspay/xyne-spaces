@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 
-import { PrismaClient, WorkspaceRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { WorkspaceRole, AuthProvider, OrgRole, UserStatus } from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
@@ -69,7 +70,7 @@ async function assignUserToGroup() {
         data: {
           email,
           orgId: defaultWorkspace.orgId,
-          role: 'MEMBER',
+          role: OrgRole.MEMBER,
           passwordHash,
         }
       });
@@ -79,9 +80,9 @@ async function assignUserToGroup() {
         data: {
           email,
           name: name || 'Developer',
-          authProvider: 'GOOGLE',
+          authProvider: AuthProvider.GOOGLE,
           providerUserId: `dev-${email.replace(/[^a-zA-Z0-9]/g, '-')}`,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
           workspaceId: defaultWorkspace.id,
           role: WorkspaceRole.MEMBER,
           orgMemberId: orgMember.memberId,

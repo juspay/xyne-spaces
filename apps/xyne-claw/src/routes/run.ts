@@ -49,7 +49,7 @@ import {
   renderTemplate,
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
-import { fetchLiteLLMWithRetry } from "../litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
@@ -119,7 +119,7 @@ import {
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
 import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
-import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../gcs.js";
+import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";

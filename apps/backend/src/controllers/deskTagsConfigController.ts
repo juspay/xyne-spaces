@@ -1,11 +1,10 @@
 import { Request, Response } from 'express';
-import { ChannelRole, TagMethod } from '@prisma/client';
 import { tagService, TagsConfigShapeSchema, invalidateTagConfigCache, DEFAULT_DESK_EMAIL_CONFIG } from '@/tags';
 import { deskEmailConfigKey, DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { getGroupedTagsWithConfig } from '@/tags/presentation';
 import type { TagsConfigShape } from '@/tags';
 import { logger } from '../utils/logger';
-import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, ChannelRole, TagMethod } from '@xyne/shared';
 import { db } from '@/database/client';
 import { TagServiceError } from '@/tags/service';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';

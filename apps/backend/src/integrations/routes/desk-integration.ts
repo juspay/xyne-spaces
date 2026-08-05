@@ -40,6 +40,7 @@ import {
 } from './google-auth';
 import { getBackendUrl } from '@/utils/publicUrls';
 import { MICROSOFT_OAUTH_SCOPES } from '@/services/microsoftDeskService';
+import { ChannelRole, DeskType } from '@xyne/shared';
 
 const TAG = '[DeskIntegration]';
 const router = express.Router();
@@ -68,7 +69,7 @@ async function assertChannelOwner(channelId: string, userId: string): Promise<vo
   if (pref?.ownerUserId === userId) return;
 
   const participant = await db.channelParticipant.findFirst({
-    where: { channelId, userId, role: 'ADMIN' },
+    where: { channelId, userId, role: ChannelRole.ADMIN },
     select: { id: true },
   });
   if (participant) return;
@@ -376,7 +377,7 @@ router.post(
         where: { channelId },
         select: { deskType: true, dlEmail: true },
       });
-      if (!pref || pref.deskType !== 'DL' || !pref.dlEmail) {
+      if (!pref || pref.deskType !== DeskType.DL || !pref.dlEmail) {
         res.status(400).json({ error: 'Channel is not a DL desk or has no DL email configured' });
         return;
       }

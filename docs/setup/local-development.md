@@ -23,6 +23,11 @@ The steps run serially and the chain stops at the first failure, so a broken ste
 never masked by a later one. Every step is idempotent — env files and real secrets are
 never overwritten — so it is safe to re-run on an existing checkout.
 
+The full `up`/`bootstrap` flow, services, development, and dashboard validation commands run
+through [Xyne Doctor](xyne-doctor.md). On a real nonzero exit it can prepare redacted context and
+hand the failure to Claude Code or Codex; Ctrl-C and non-interactive runs keep their normal exit
+behavior.
+
 Expect a few minutes on the first run while container images download. When it
 finishes, open **http://localhost:5173**.
 
@@ -38,7 +43,7 @@ cd xyne-spaces
 pnpm install
 ```
 
-One install covers all 20 workspace packages. There is no per-package install step —
+One install covers all 21 workspace packages. There is no per-package install step —
 if you find yourself running `pnpm install` inside `apps/backend`, something is wrong.
 
 ## 2. Environment files
@@ -91,12 +96,14 @@ secrets you have added are never overwritten.
 pnpm run build:shared
 ```
 
-This compiles `@xyne/shared`, `@xyne/icons`, and `agentic-framework`. **Do this before
-anything else** — the backend and dashboard import these from their built `dist/`, so
-a missing build shows up as unresolved-import errors rather than a clear message.
+This compiles `@xyne/shared`, `@xyne/icons`, `agentic-framework`, and
+`@xyne/litellm-client`. **Do this before anything else** — the applications import
+these from their built `dist/`, so a missing build shows up as unresolved-import
+errors rather than a clear message.
 
 Re-run it whenever you change code in `packages/shared`, `packages/icons`, or
-`packages/framework`. For an ongoing loop, watch instead:
+`packages/framework`, or `packages/litellm-client`. For an ongoing loop, watch
+instead:
 
 ```bash
 pnpm --filter @xyne/shared run watch

@@ -10,9 +10,22 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, OrgRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType, OrgLLMServiceAccountProvider, OrgLLMServiceAccountPurpose, OrgLLMServiceAccountCredentialStatus } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  OrgLLMServiceAccountProvider,
+  OrgLLMServiceAccountPurpose,
+  OrgLLMServiceAccountCredentialStatus,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  OrgRole,
+  ProjectType,
+} from '@xyne/shared';
 import { encrypt } from '../src/services/encryptionService';
 
 const prisma = new PrismaClient();
@@ -248,7 +261,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');

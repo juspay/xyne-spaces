@@ -218,7 +218,8 @@ import {
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
-import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
+import { API_BASE_URL } from '../../config';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
@@ -1547,10 +1548,9 @@ const SupportScreen = (): ReactElement => {
   }, []);
 
   const handleMergeSelectedTickets = useCallback(
-    async (parentTicketId: string): Promise<void> => {
-      if (selectedTickets.size < 2) return;
+    async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
+      if (ticketIds.length < 2) return;
       try {
-        const ticketIds = Array.from(selectedTickets.keys());
         await Promise.all(
           ticketIds
             .filter(id => id !== parentTicketId)
@@ -1618,7 +1618,7 @@ const SupportScreen = (): ReactElement => {
       const response = await channelService.createChannel(
         formData,
         channelType || 'EMAIL',
-        emailDeskOpts ?? { deskType: 'EMAIL' },
+        emailDeskOpts ?? { deskType: DeskType.EMAIL },
       );
       return response;
     },
@@ -1657,7 +1657,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'SLACK',
-        emailDeskOpts: { deskType: 'SLACK', slackChannelId },
+        emailDeskOpts: { deskType: DeskType.SLACK, slackChannelId },
       });
       return;
     }
@@ -1670,7 +1670,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'APP',
-        emailDeskOpts: { deskType: 'APP', installedAppId },
+        emailDeskOpts: { deskType: DeskType.APP, installedAppId },
       });
       return;
     }
@@ -1692,7 +1692,7 @@ const SupportScreen = (): ReactElement => {
         await createChannelMutation.mutateAsync({
           ...rest,
           channelType: 'CALL',
-          emailDeskOpts: { deskType: 'CALL' },
+          emailDeskOpts: { deskType: DeskType.CALL },
         });
       })();
       return;
@@ -1706,7 +1706,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'EMAIL',
-        emailDeskOpts: { deskType: 'DL', dlEmail },
+        emailDeskOpts: { deskType: DeskType.DL, dlEmail },
       });
       return;
     }
@@ -3451,6 +3451,7 @@ export const SupportTicketDetail = ({
     ticketId?: string;
   }>();
   const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
+  const shareableOrigin = useShareableOrigin();
   const { workspaceId, userID } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
@@ -4364,7 +4365,7 @@ export const SupportTicketDetail = ({
                           toast.error('Cannot copy link');
                           return;
                         }
-                        const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
                         void navigator.clipboard
                           .writeText(url)
                           .then(() => toast.success('Link copied'))

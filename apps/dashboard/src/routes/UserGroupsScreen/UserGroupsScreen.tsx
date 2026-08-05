@@ -16,6 +16,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useHasResourceAccess, usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { searchUserGroups } from './UserGroupsScreen.utils';
+import { AccessType } from '@xyne/shared';
 
 const UserGroupsScreen = (): ReactElement => {
   const zero = useZero();
@@ -32,7 +33,7 @@ const UserGroupsScreen = (): ReactElement => {
   const canCreateUserGroup = permissions.some(
     permission =>
       permission.resourceName === 'USER-GROUPS' &&
-      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
+      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
   );
 
   const loading = !userGroupsHydrated;

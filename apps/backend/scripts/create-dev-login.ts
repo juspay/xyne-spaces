@@ -18,7 +18,8 @@
  * Re-running with the same email resets that account's password rather than failing.
  */
 
-import { PrismaClient, AuthProvider, UserStatus, WorkspaceRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AuthProvider, UserStatus, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
@@ -88,7 +89,7 @@ async function main() {
   } else {
     try {
       const member = await prisma.orgMember.create({
-        data: { email, orgId, role: 'OWNER', passwordHash },
+        data: { email, orgId, role: OrgRole.OWNER, passwordHash },
         select: { memberId: true },
       });
       memberId = member.memberId;

@@ -1,8 +1,8 @@
 import { notificationService } from '@/services/notificationService';
+import { NotificationType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { ChannelUserStatusPreviousValue, SideEffectJobConfig } from '../types';
 import { logger } from '@/utils/logger';
-import { NotificationType } from '@prisma/client';
 
 
 /**

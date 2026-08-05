@@ -4,12 +4,12 @@
  */
 
 import { logger } from '../../utils/logger';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType, MessageType, OrgRole, UserStatus } from '@xyne/shared';
 import { UserRepository } from '../../database/repositories/users';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType} from '@prisma/client';
 import crypto from 'crypto';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
 import {
@@ -114,7 +114,7 @@ export const findOrCreateUser = async (
         data: {
           orgId: workspace.orgId,
           email: userEmail,
-          role: 'MEMBER',
+          role: OrgRole.MEMBER,
         },
         select: { memberId: true },
       });
@@ -167,7 +167,7 @@ const installAppForWorkspace = async (
   let orgMember = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
   if (!orgMember) {
     orgMember = await db.orgMember.create({
-      data: { email, orgId: workspace.orgId, role: 'MEMBER' },
+      data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
       select: { memberId: true },
     });
   }
@@ -179,7 +179,7 @@ const installAppForWorkspace = async (
       providerUserId: `xyne-app-${appId}-${workspaceId}`,
       authProvider: AuthProvider.API_KEY,
       userType: UserType.APP,
-      status: 'ACTIVE',
+      status: UserStatus.ACTIVE,
       workspace: { connect: { id: workspaceId } },
       orgMember: { connect: { memberId: orgMember.memberId } },
     },
@@ -465,7 +465,7 @@ export async function ingestConversationSlack(
           channelId,
           userId: resolvedUserId,
           content,
-          msgType: 'USER',
+          msgType: MessageType.USER,
           uploadedFiles: downloadedAttachments,
           isBot: false,
           createdAt,
@@ -484,7 +484,7 @@ export async function ingestConversationSlack(
           conversationId,
           userId: resolvedUserId,
           content,
-          msgType: 'USER',
+          msgType: MessageType.USER,
           uploadedFiles: downloadedAttachments,
           replyBroadcast: replyBroadcast ?? false,
           isBot: false,

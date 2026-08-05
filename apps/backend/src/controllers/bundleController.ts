@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { Storage, StorageOptions } from '@google-cloud/storage';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { getStorageService } from '@/services/storage';
 import path from 'path';
 
 // MIME type mapping for common frontend assets
@@ -33,30 +33,8 @@ const MIME_TYPES: Record<string, string> = {
  * Controller for serving frontend bundles from GCS
  */
 export class BundleController {
-  private static storage: Storage;
-  private static bundleBucketName: string;
-
-  static {
-    // Use fake-gcs-server in development, real GCS in production
-    const isDevelopment = config.env === 'development';
-    const storageOptions: StorageOptions = {
-      projectId: config.gcs.projectId,
-    };
-
-    if (isDevelopment) {
-      // Point to fake-gcs-server for local development
-      storageOptions.apiEndpoint = `http://${config.gcs.fakeGcsHost}`;
-      logger.info(`Bundle controller using fake-gcs-server at ${config.gcs.fakeGcsHost}`);
-    } else {
-      logger.info(`Bundle controller using real GCS with Application Default Credentials`);
-    }
-
-    this.storage = new Storage(storageOptions);
-
-    // Use a dedicated bucket for frontend bundles
-    this.bundleBucketName = config.gcs.bundleBucketName;
-
-    logger.info(`Bundle controller initialized with bucket: ${this.bundleBucketName}`);
+  private static storage() {
+    return getStorageService(config.gcs.bundleBucketName);
   }
 
   /**
@@ -106,18 +84,16 @@ export class BundleController {
         userAgent: req.get('user-agent'),
       });
 
-      const bucket = this.storage.bucket(this.bundleBucketName);
-      const file = bucket.file(gcsPath);
+      const storage = this.storage();
 
       // Check if file exists
-      const [exists] = await file.exists();
+      const exists = await storage.fileExists(gcsPath);
 
       if (!exists) {
         // If specific file doesn't exist and path doesn't have extension, try serving index.html (for SPA routing)
         if (!path.extname(filePath)) {
           const indexPath = `${branchName}/index.html`;
-          const indexFile = bucket.file(indexPath);
-          const [indexExists] = await indexFile.exists();
+          const indexExists = await storage.fileExists(indexPath);
 
           if (indexExists) {
             logger.info(`Serving index.html for SPA route: ${filePath}`);
@@ -125,7 +101,7 @@ export class BundleController {
             res.setHeader('Content-Type', contentType);
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
-            indexFile.createReadStream().pipe(res);
+            (await storage.createReadStream(indexPath)).pipe(res);
             return;
           }
         }
@@ -153,11 +129,11 @@ export class BundleController {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       }
 
-      // Stream file from GCS to response
-      file
-        .createReadStream()
-        .on('error', (error) => {
-          logger.error(`Error streaming bundle file from GCS: ${gcsPath}`, error);
+      // Stream file from storage to response
+      const stream = await storage.createReadStream(gcsPath);
+      stream
+        .on('error', (error: Error) => {
+          logger.error(`Error streaming bundle file from storage: ${gcsPath}`, error);
           if (!res.headersSent) {
             res.status(500).json({
               success: false,

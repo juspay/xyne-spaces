@@ -1,0 +1,235 @@
+import { useMemo, type ReactElement } from 'react';
+import { Loader2 } from 'lucide-react';
+import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { BrowseBuiltinToolsDialog } from '../../create-v2/builtin/BrowseBuiltinToolsDialog';
+import {
+  disableEntry as disableBuiltinEntry,
+  isEntryEnabled as isBuiltinEnabled,
+  selectedTools as selectedBuiltinTools,
+} from '../../create-v2/builtin/builtinCatalog';
+import { useBuiltinCatalog } from '../../create-v2/builtin/useBuiltinCatalog';
+import { BrowseMcpsDialog } from '../../create-v2/mcp/BrowseMcpsDialog';
+import {
+  disableEntry as disableMcpEntry,
+  humanizeToolName,
+  isEntryEnabled as isMcpEnabled,
+  selectedTools as selectedMcpTools,
+} from '../../create-v2/mcp/mcpCatalog';
+import { useMcpCatalog } from '../../create-v2/mcp/useMcpCatalog';
+import { BrowseSubagentsDialog } from '../../create-v2/subagent/BrowseSubagentsDialog';
+import { disableSubagent, isSubagentSelected } from '../../create-v2/subagent/subagentCatalog';
+import { useSubagentCatalog } from '../../create-v2/subagent/useSubagentCatalog';
+import { DetailLockedNote, DetailSection, ReadOnlyBadge } from '../DetailPrimitives';
+import { DetailListCard, type DetailListItem } from '../DetailListCard';
+import { useAgentToolSelection, type ManageSectionId } from './useAgentToolSelection';
+
+const LOCK_NOTE = 'Only the owner, a contributor, or an admin can change this agent’s tools.';
+
+function toolCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'tool' : 'tools'}`;
+}
+
+function ManageButton({ label, onClick }: { label: string; onClick: () => void }): ReactElement {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      aria-label={label}
+      data-track-category='Claw Agents'
+      data-track-name='Agent detail v2: manage tools'
+      className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
+    >
+      Manage
+    </button>
+  );
+}
+
+export function AgentToolsTabV2({
+  agent,
+  canEdit,
+}: {
+  agent: Agent;
+  canEdit: boolean;
+}): ReactElement {
+  const tools = useAgentToolSelection(agent);
+  const subagents = useSubagentCatalog();
+  const mcp = useMcpCatalog();
+  const builtin = useBuiltinCatalog();
+
+  const { saved } = tools;
+
+  const subagentItems = useMemo<DetailListItem[]>(
+    () =>
+      subagents.entries
+        .filter(entry => isSubagentSelected(saved, entry))
+        .map(entry => ({
+          key: entry.name,
+          iconType: entry.serverType,
+          name: entry.name,
+          description: entry.description,
+        })),
+    [subagents.entries, saved],
+  );
+
+  const mcpItems = useMemo<DetailListItem[]>(
+    () =>
+      mcp.entries
+        .filter(entry => isMcpEnabled(saved, entry))
+        .map(entry => {
+          const picked = selectedMcpTools(saved, entry);
+          return {
+            key: entry.slug,
+            iconType: entry.iconType,
+            name: entry.label,
+            description:
+              entry.description || picked.map(tool => humanizeToolName(tool.name)).join(', '),
+            meta: toolCountLabel(picked.length),
+          };
+        }),
+    [mcp.entries, saved],
+  );
+
+  const builtinItems = useMemo<DetailListItem[]>(
+    () =>
+      builtin.entries
+        .filter(entry => isBuiltinEnabled(saved, entry))
+        .map(entry => {
+          const picked = selectedBuiltinTools(saved, entry);
+          return {
+            key: entry.source,
+            iconType: '',
+            name: entry.label,
+            description: picked.map(tool => humanizeToolName(tool.name)).join(', '),
+            meta: toolCountLabel(picked.length),
+          };
+        }),
+    [builtin.entries, saved],
+  );
+
+  const note = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
+
+  /** Manage opens the same browse dialog the create flow uses; read-only says why. */
+  const trailingFor = (label: string, section: ManageSectionId): ReactElement =>
+    canEdit ? (
+      <ManageButton label={`Manage ${label}`} onClick={() => tools.openManage(section)} />
+    ) : (
+      <ReadOnlyBadge />
+    );
+
+  return (
+    <div className='flex w-full flex-col gap-8'>
+      <DetailSection
+        label='Subagents'
+        info='Specialists this agent can delegate a whole task to'
+        trailing={trailingFor('subagents', 'subagents')}
+        trailingAlign='end'
+      >
+        <DetailListCard
+          items={subagentItems}
+          loading={subagents.loading}
+          emptyLabel='No subagents added yet.'
+          canEdit={canEdit}
+          note={note}
+          removeLabel={item => `Remove ${item.name}`}
+          onRemove={item => {
+            const entry = subagents.entries.find(candidate => candidate.name === item.key);
+            if (!entry) return;
+            tools.commit(disableSubagent(saved, entry), `${item.name} removed`);
+          }}
+        />
+      </DetailSection>
+
+      <DetailSection
+        label='MCP Tools'
+        info='Tools this agent calls directly on connected integrations'
+        trailing={trailingFor('MCP tools', 'mcp')}
+        trailingAlign='end'
+      >
+        <DetailListCard
+          items={mcpItems}
+          loading={mcp.loading}
+          emptyLabel='No MCP tools added yet.'
+          canEdit={canEdit}
+          note={note}
+          removeLabel={item => `Remove ${item.name}`}
+          onRemove={item => {
+            const entry = mcp.entries.find(candidate => candidate.slug === item.key);
+            if (!entry) return;
+            tools.commit(disableMcpEntry(mcp.entries, saved, entry), `${item.name} removed`);
+          }}
+        />
+      </DetailSection>
+
+      <DetailSection
+        label='Built-In tools'
+        info='Tools that ship with the platform, no connection needed'
+        trailing={trailingFor('built-in tools', 'builtin')}
+        trailingAlign='end'
+      >
+        <DetailListCard
+          items={builtinItems}
+          loading={builtin.loading}
+          emptyLabel='No built-in tools added yet.'
+          canEdit={canEdit}
+          note={note}
+          removeLabel={item => `Remove ${item.name}`}
+          onRemove={item => {
+            const entry = builtin.entries.find(candidate => candidate.source === item.key);
+            if (!entry) return;
+            tools.commit(disableBuiltinEntry(saved, entry), `${item.name} removed`);
+          }}
+        />
+      </DetailSection>
+
+      {tools.saving && (
+        <span className='flex items-center gap-2 text-xs font-normal leading-4 text-muted-foreground'>
+          <Loader2 className='size-3.5 animate-spin' aria-hidden />
+          Saving…
+        </span>
+      )}
+
+      <BrowseSubagentsDialog
+        open={tools.manage === 'subagents'}
+        onOpenChange={open => {
+          if (!open) tools.closeManage();
+        }}
+        catalog={subagents.entries}
+        loading={subagents.loading}
+        isError={subagents.isError}
+        onRetry={subagents.refetch}
+        selection={tools.draft}
+        onSelectionChange={tools.setDraft}
+        suggested={[]}
+      />
+
+      <BrowseMcpsDialog
+        open={tools.manage === 'mcp'}
+        onOpenChange={open => {
+          if (!open) tools.closeManage();
+        }}
+        catalog={mcp.entries}
+        connectedServerIds={mcp.connectedServerIds}
+        loading={mcp.loading}
+        isError={mcp.isError}
+        onRetry={mcp.refetch}
+        selection={tools.draft}
+        onSelectionChange={tools.setDraft}
+        suggested={[]}
+      />
+
+      <BrowseBuiltinToolsDialog
+        open={tools.manage === 'builtin'}
+        onOpenChange={open => {
+          if (!open) tools.closeManage();
+        }}
+        catalog={builtin.entries}
+        loading={builtin.loading}
+        isError={builtin.isError}
+        onRetry={builtin.refetch}
+        selection={tools.draft}
+        onSelectionChange={tools.setDraft}
+        suggested={[]}
+      />
+    </div>
+  );
+}

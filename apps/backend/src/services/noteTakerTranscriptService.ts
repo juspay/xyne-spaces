@@ -1,4 +1,4 @@
-import { Prisma, TagMethod, type Call } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -6,10 +6,11 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry, type MarkedItem } from '@/services/transcriptService';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
+import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 import type { BuiltinRecordingSummaryTemplateId } from '@/services/recordingSummaryTemplates';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No
@@ -423,11 +424,11 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Generate the detailed summary and create/update its canvas, exactly like
-   * the conversation-based flow — except we stop right there. Returns the canvas
-   * and selected template ids (or null on failure) for processTranscript to
-   * fold into its single combined Call write. No channel, no message —
-   * workspaceId comes straight off the Call record.
+   * Generate the detailed summary and create/update its canvas. A brand-new
+   * canvas is created from the first content delta and attached directly to the
+   * Call so the recording UI can watch later Y-Sweet writes live. Regeneration
+   * keeps the previous good canvas until the replacement is complete. No
+   * channel or message is created — workspaceId comes from the Call record.
    */
   private async generateDetailedSummaryCanvas(
     call: Call,
@@ -436,7 +437,8 @@ class NoteTakerTranscriptService {
   ): Promise<DetailedSummaryCanvasResult | null> {
     const callId = call.externalId;
 
-    if (!call.workspaceId) {
+    const workspaceId = call.workspaceId;
+    if (!workspaceId) {
       logger.warn(`[${callId}] detailed_summary_skipped`, { reason: 'no_workspace', path: 'note_taker' });
       return null;
     }
@@ -452,11 +454,188 @@ class NoteTakerTranscriptService {
         segments: new Map(segments.map(s => [s.n, s])),
       };
 
-      const generated = await callDocumentService.generateRecordingSummary(
-        numberedTranscript,
-        callId,
-        templateId,
-      );
+      const latestCall = await repositories.calls.findByExternalId(callId);
+      const resolvedCallTitle = latestCall?.title ?? call.title;
+      const xyneAutomaticBotPromise = unifiedBotUserService
+        .getBotByBotId('xyne-automatic', workspaceId)
+        .catch(error => {
+          logger.error(`[${callId}] detailed_summary_bot_lookup_failed`, {
+            path: 'note_taker',
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        });
+
+      // Regeneration deliberately keeps the last good canvas visible until the
+      // replacement is complete. Only a brand-new recording summary streams.
+      const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
+      if (existingCanvas) {
+        const generated = await callDocumentService.generateRecordingSummary(
+          numberedTranscript,
+          callId,
+          templateId,
+        );
+        if (!generated) {
+          logger.error(`[${callId}] detailed_summary_skipped`, {
+            reason: 'generation_failed',
+            path: 'note_taker',
+          });
+          return null;
+        }
+
+        const xyneAutomaticBot = await xyneAutomaticBotPromise;
+        if (!xyneAutomaticBot) {
+          logger.error(`[${callId}] detailed_summary_skipped`, {
+            reason: 'bot_not_found',
+            path: 'note_taker',
+          });
+          return null;
+        }
+
+        const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
+          callId,
+          generated.summary,
+          xyneAutomaticBot.id,
+          null,
+          null,
+          call.startedAt,
+          call.createdByUserId,
+          resolvedCallTitle,
+          citationCtx,
+          workspaceId,
+        );
+        if (!canvasId) {
+          logger.error(`[${callId}] detailed_summary_skipped`, {
+            reason: 'canvas_update_failed',
+            path: 'note_taker',
+          });
+          return null;
+        }
+
+        return { canvasId, summaryTemplateId: generated.template.id };
+      }
+
+      const SYNC_INTERVAL_MS = 300;
+      const sleepMs = (ms: number): Promise<void> =>
+        new Promise(resolve => setTimeout(resolve, ms));
+      let latestMarkdown = '';
+      let renderedMarkdown = '';
+      let newCanvasId: string | null = null;
+      let canvasInitialization: Promise<void> | null = null;
+      let canvasInitializationError: Error | null = null;
+      const getCanvasInitializationError = (): Error | null => canvasInitializationError;
+      let writerActive = false;
+      let writerLoop: Promise<void> | null = null;
+
+      const flushLatest = async (): Promise<void> => {
+        if (!newCanvasId || latestMarkdown === renderedMarkdown) return;
+
+        const snapshot = latestMarkdown;
+        const synced = await callDocumentService.syncStreamingDetailedSummaryCanvas(
+          newCanvasId,
+          snapshot,
+          citationCtx,
+        );
+        if (synced) {
+          renderedMarkdown = snapshot;
+        } else {
+          logger.warn(`[${callId}] recording_summary_canvas_stream_sync_failed`, {
+            canvas_id: newCanvasId,
+          });
+        }
+      };
+
+      const startWriter = (): void => {
+        if (writerLoop) return;
+        writerActive = true;
+        writerLoop = (async (): Promise<void> => {
+          while (writerActive) {
+            await flushLatest();
+            await sleepMs(SYNC_INTERVAL_MS);
+          }
+        })();
+      };
+
+      const ensureStreamingCanvas = async (
+        firstMarkdown: string,
+        startLiveWriter = true,
+      ): Promise<void> => {
+        if (canvasInitialization || canvasInitializationError) {
+          if (canvasInitialization) await canvasInitialization;
+          return;
+        }
+
+        canvasInitialization = (async (): Promise<void> => {
+          const xyneAutomaticBot = await xyneAutomaticBotPromise;
+          if (!xyneAutomaticBot) {
+            throw new Error('Xyne Automatic bot not found');
+          }
+
+          const canvasId = await callDocumentService.createDetailedSummaryCanvas(
+            callId,
+            firstMarkdown,
+            xyneAutomaticBot.id,
+            null,
+            null,
+            call.startedAt,
+            call.createdByUserId,
+            resolvedCallTitle,
+            citationCtx,
+            workspaceId,
+            { deferInsertSideEffects: true },
+          );
+          if (!canvasId) {
+            throw new Error('Failed to create detailed summary canvas');
+          }
+
+          // Publish the id as soon as the initial Y-Sweet document exists. The
+          // V2 recording screen observes this metadata through Zero and mounts
+          // its collaborative editor while later chunks are still arriving.
+          const currentCall = await repositories.calls.findByExternalId(callId);
+          const currentMetadata =
+            currentCall?.metadata &&
+            typeof currentCall.metadata === 'object' &&
+            !Array.isArray(currentCall.metadata)
+              ? (currentCall.metadata as Record<string, unknown>)
+              : {};
+          await repositories.calls.update(call.id, {
+            metadata: { ...currentMetadata, detailedSummaryCanvasId: canvasId },
+          });
+
+          newCanvasId = canvasId;
+          renderedMarkdown = firstMarkdown;
+          logger.info(`[${callId}] recording_summary_canvas_stream_started`, {
+            canvas_id: canvasId,
+          });
+          if (startLiveWriter) startWriter();
+        })().catch(error => {
+          canvasInitializationError =
+            error instanceof Error ? error : new Error(String(error));
+          logger.error(`[${callId}] recording_summary_canvas_initialization_failed`, {
+            error: canvasInitializationError.message,
+          });
+        });
+
+        await canvasInitialization;
+      };
+
+      let generated: Awaited<ReturnType<typeof callDocumentService.generateRecordingSummary>>;
+      try {
+        generated = await callDocumentService.generateRecordingSummary(
+          numberedTranscript,
+          callId,
+          templateId,
+          async accumulated => {
+            latestMarkdown = accumulated;
+            await ensureStreamingCanvas(accumulated);
+          },
+        );
+      } finally {
+        writerActive = false;
+        if (writerLoop) await writerLoop;
+        await flushLatest();
+      }
+
       if (!generated) {
         logger.error(`[${callId}] detailed_summary_skipped`, {
           reason: 'generation_failed',
@@ -465,30 +644,50 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', call.workspaceId);
-      if (!xyneAutomaticBot) {
-        logger.error(`[${callId}] detailed_summary_skipped`, { reason: 'bot_not_found', path: 'note_taker' });
+      // Defensive fallback for providers that return final content without any
+      // content delta. There is no live writer to start because generation is done.
+      if (!newCanvasId && !canvasInitializationError) {
+        latestMarkdown = generated.summary;
+        await ensureStreamingCanvas(generated.summary, false);
+      }
+
+      const initializationFailure = getCanvasInitializationError();
+      if (initializationFailure || !newCanvasId) {
+        logger.error(`[${callId}] detailed_summary_skipped`, {
+          reason: initializationFailure?.message ?? 'canvas_create_failed',
+          path: 'note_taker',
+        });
         return null;
       }
 
-      const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
-        callId,
+      const xyneAutomaticBot = await xyneAutomaticBotPromise;
+      if (!xyneAutomaticBot) {
+        logger.error(`[${callId}] detailed_summary_skipped`, {
+          reason: 'bot_not_found',
+          path: 'note_taker',
+        });
+        return null;
+      }
+
+      const finalized = await callDocumentService.finalizeDetailedSummaryCanvas(
+        newCanvasId,
         generated.summary,
         xyneAutomaticBot.id,
         null,
-        null,
+        callId,
         call.startedAt,
-        call.createdByUserId,
-        call.title,
+        resolvedCallTitle,
         citationCtx,
-        call.workspaceId,
       );
-      if (!canvasId) {
-        logger.error(`[${callId}] detailed_summary_skipped`, { reason: 'canvas_create_failed', path: 'note_taker' });
+      if (!finalized) {
+        logger.error(`[${callId}] detailed_summary_skipped`, {
+          reason: 'canvas_finalize_failed',
+          path: 'note_taker',
+        });
         return null;
       }
 
-      return { canvasId, summaryTemplateId: generated.template.id };
+      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',

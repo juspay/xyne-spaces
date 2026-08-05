@@ -1,6 +1,6 @@
 import { Router } from 'express';
+import { CallStatus } from '@xyne/shared';
 import type { Request, Response, NextFunction } from 'express';
-import { CallStatus } from '@prisma/client';
 import { callLobbyController } from '@/controllers/callLobbyController';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';

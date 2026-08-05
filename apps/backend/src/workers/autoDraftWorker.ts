@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { autoDraftQueue, type AutoDraftJobData } from '@/queues/autoDraftQueue';
 import { emailService } from '@/services/emailService';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 class AutoDraftWorker {
   private isInitialized = false;
@@ -45,8 +45,7 @@ class AutoDraftWorker {
       throw new Error(`AutoDraftWorker: channel ${channelId} not found or has no workspaceId`);
     }
 
-    const dispatched = await runWithContext(
-      { userId: 'auto-draft-worker', workspaceId: channel.workspaceId },
+    const dispatched = await runAsServiceActor('auto-draft-worker', channel.workspaceId,
       () => emailService.retriggerAutoDraftForTicket(ticketId),
     );
 

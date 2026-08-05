@@ -1,8 +1,4 @@
-export enum Platform {
-  WEB = 'WEB',
-  ELECTRON = 'ELECTRON',
-  MOBILE = 'MOBILE',
-}
+import type { Platform } from '../zero/types.js';
 
 // UserActivity type for API responses
 export interface UserActivity {
@@ -30,13 +26,6 @@ export interface UserActivityResponse {
     hasMore: boolean;
     nextCursor: string | null;
   };
-}
-
-export enum TriggerType {
-  CLICK = 'CLICK',
-  CHANGE = 'SELECTION_CHANGE',
-  BLUR = 'INPUT_CHANGE',
-  DB_MUTATION = 'DB_MUTATION',
 }
 
 export interface ActivityEventPayload {

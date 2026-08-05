@@ -1,6 +1,6 @@
-import { FormContextType, FormEntityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { resolveParentOption, isFieldActive } from '@xyne/shared';
+import { resolveParentOption, isFieldActive, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
@@ -87,7 +87,7 @@ export const validateUserCustomFieldReferences = async (
   }>,
   workspaceId: string,
 ): Promise<void> => {
-  const userFieldEntries = fieldValues.filter(fieldValue => fieldValue.fieldType === 'USER');
+  const userFieldEntries = fieldValues.filter(fieldValue => fieldValue.fieldType === FormFieldType.USER);
   if (userFieldEntries.length === 0) return;
 
   const userIds = Array.from(

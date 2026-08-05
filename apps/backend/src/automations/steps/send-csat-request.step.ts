@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
@@ -9,7 +10,6 @@ import { csatTokenService } from '@/services/csatTokenService';
 import { logger } from '@/utils/logger';
 import { emailService } from '@/services/emailService';
 import { config as appConfig } from '@/config/env';
-import { ActivityType } from '@prisma/client';
 
 const SendCsatRequestConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)).describe('The ticket to request a satisfaction rating for.'),

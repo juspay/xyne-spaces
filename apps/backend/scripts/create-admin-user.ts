@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 
-import { PrismaClient, AccessType, WorkspaceRole, AuthProvider, UserStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AccessType, WorkspaceRole, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -63,7 +64,7 @@ async function createAdminUser() {
         data: {
           email,
           orgId: defaultOrg.orgId,
-          role: 'OWNER',
+          role: OrgRole.OWNER,
         },
       });
       console.log('✅ Created OrgMember as OWNER');

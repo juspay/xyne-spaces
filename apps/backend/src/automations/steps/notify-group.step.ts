@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { NotificationType } from '@prisma/client';
+import { NotificationType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';

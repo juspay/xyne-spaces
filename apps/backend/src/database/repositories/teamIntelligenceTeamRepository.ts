@@ -1,5 +1,7 @@
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import { RecapEntityType, TicketStatusV2 } from '@xyne/shared';
 
 export interface TeamBulletsDateRangeFilters {
   from: Date;
@@ -376,7 +378,7 @@ class TeamIntelligenceTeamRepository {
     const grouped = await db.recap.groupBy({
       by: ['entityId'],
       where: {
-        entityType: 'CHANNEL',
+        entityType: RecapEntityType.CHANNEL,
         recapDate: {
           gte: rangeStart,
           lte: rangeEnd,
@@ -400,17 +402,20 @@ class TeamIntelligenceTeamRepository {
     }
 
     const channelIds = grouped.map((item) => item.entityId);
-    const channels = await db.channel.findMany({
-      where: {
-        id: {
-          in: channelIds,
+    // Resolves names for ids already in the result set, so it runs above the caller's own scope.
+    const channels = await withWorkspaceScope(() =>
+      db.channel.findMany({
+        where: {
+          id: {
+            in: channelIds,
+          },
         },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
+        select: {
+          id: true,
+          name: true,
+        },
+      }),
+    );
 
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
 
@@ -466,7 +471,7 @@ class TeamIntelligenceTeamRepository {
     const [total, recaps, channels] = await Promise.all([
       db.recap.count({
         where: {
-          entityType: 'CHANNEL',
+          entityType: RecapEntityType.CHANNEL,
           entityId: {
             in: channelIds,
           },
@@ -478,7 +483,7 @@ class TeamIntelligenceTeamRepository {
       }),
       db.recap.findMany({
         where: {
-          entityType: 'CHANNEL',
+          entityType: RecapEntityType.CHANNEL,
           entityId: {
             in: channelIds,
           },
@@ -498,7 +503,7 @@ class TeamIntelligenceTeamRepository {
           userId: true,
         },
       }),
-      db.channel.findMany({
+      withWorkspaceScope(() => db.channel.findMany({
         where: {
           id: {
             in: channelIds,
@@ -508,7 +513,7 @@ class TeamIntelligenceTeamRepository {
           id: true,
           name: true,
         },
-      }),
+      })),
     ]);
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
@@ -589,12 +594,12 @@ class TeamIntelligenceTeamRepository {
         skip: (page - 1) * limit,
         take: limit,
       }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'COMPLETED' } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'TODO' } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'STARTED' } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'PAUSED' } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'CANCELLED' } }),
-      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, eta: { lt: now }, statusV2: { in: ['TODO', 'STARTED', 'PAUSED'] } } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.COMPLETED } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.TODO } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.STARTED } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.PAUSED } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: TicketStatusV2.CANCELLED } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, eta: { lt: now }, statusV2: { in: [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED] } } }),
     ]);
 
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);

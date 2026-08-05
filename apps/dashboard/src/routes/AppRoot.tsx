@@ -158,7 +158,6 @@ import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserG
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
-import CommunityWorkspaceInviteRedirect from './CommunityWorkspaceInvite/CommunityWorkspaceInviteRedirect';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
 import { useShortcutById } from '../shortcuts';
@@ -211,6 +210,8 @@ import AILibraryScreen from './AIScreen/AILibraryScreen';
 import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
+import AIAgentDetailScreen from './AIScreen/AIAgentDetailScreen';
+import AIAgentEditScreen from './AIScreen/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import UserGuideScreen from './UserGuideScreen';
@@ -376,6 +377,11 @@ const AppRoot = (): ReactElement => {
   const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
+  const xyneAIInitialContextSelections = useSelector(
+    xyneAIActor,
+    state => state.context.initialContextSelections,
+  );
+  const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
@@ -601,6 +607,8 @@ const AppRoot = (): ReactElement => {
                             threadInfo={xyneAIThreadInfo}
                             startFreshChat={xyneAIStartFreshChat}
                             canvasInfo={xyneAICanvasInfo}
+                            initialContextSelections={xyneAIInitialContextSelections}
+                            contextOpenNonce={xyneAIContextOpenNonce}
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
@@ -746,6 +754,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      initialContextSelections={xyneAIInitialContextSelections}
+                      contextOpenNonce={xyneAIContextOpenNonce}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
@@ -773,6 +783,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      initialContextSelections={xyneAIInitialContextSelections}
+                      contextOpenNonce={xyneAIContextOpenNonce}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
@@ -831,6 +843,8 @@ export const router = createBrowserRouter([
                   { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
                   { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
                   { path: 'library/skill/create', element: <AISkillCreateScreen /> },
+                  { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
+                  { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
                   {
                     element: <AISectionLayout />,
@@ -1533,10 +1547,6 @@ export const router = createBrowserRouter([
       {
         path: '/invite',
         element: <AcceptInvitation />,
-      },
-      {
-        path: '/community/join',
-        element: <CommunityWorkspaceInviteRedirect />,
       },
       {
         path: '/community',

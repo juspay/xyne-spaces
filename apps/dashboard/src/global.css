@@ -2711,6 +2711,16 @@ img.inline-emoji,
   padding-left: 6px !important;
 }
 
+[data-component="MessageBubble"] .bot-markdown-content {
+  margin: 0 !important;
+}
+[data-component="MessageBubble"] .bot-markdown-content p {
+  padding-left: 0 !important;
+}
+[data-component="MessageBubble"] .bot-markdown-content p:last-child {
+  margin-bottom: 0 !important;
+}
+
 .bot-markdown-content ol,
 .bot-markdown-content-call-summary ol {
   /* Enough inline space for 2–3 digit markers (10+) — default outside markers + narrow
@@ -4459,4 +4469,11 @@ img.inline-emoji,
 ::highlight(xyne-find-active) {
   background-color: var(--search-result-active-bg, #fb923c);
   color: inherit;
+}
+/* 
+ Virtualized message rows are transformed stacking contexts. Lift only the
+   row containing an inline edit composer so a collision-flipped emoji picker
+   can render over the following message rows.  */
+[data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
+  z-index: 10;
 }

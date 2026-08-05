@@ -1,3 +1,4 @@
+import { CallType } from '@xyne/shared';
 export interface ScreenSource {
   id: string;
   name: string;
@@ -38,7 +39,7 @@ export interface ElectronAPI {
     callId: string;
     callerName: string;
     callerEmail: string;
-    callType: 'AUDIO' | 'VIDEO';
+    callType: CallType;
     callerPicture?: string;
   }) => void;
   closeCallNotification: (callId: string) => void;
