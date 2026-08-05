@@ -4268,6 +4268,7 @@ export const mutators = defineMutators({
         name: z.string().optional(),
         alias: z.string().optional(),
         description: z.string().optional(),
+        reassignOnUnavailable: z.boolean().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4277,13 +4278,23 @@ export const mutators = defineMutators({
       async ({
         tx,
         ctx,
-        args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp },
+        args: {
+          userGroupId,
+          name,
+          alias,
+          description,
+          reassignOnUnavailable,
+          userResponsibilityUpdates,
+          userRoleUpdates,
+          timestamp,
+        },
       }) => {
         await tx.mutate.user_groups.update({
           id: userGroupId,
           ...(name !== undefined && { name }),
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
+          ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
           updatedAt: timestamp,
         });
 
@@ -7292,25 +7303,6 @@ export const mutators = defineMutators({
           autoRotationEnabled,
           rotationInterval: autoRotationEnabled ? rotationInterval : null,
           rotationStartDate: autoRotationEnabled ? rotationStartDate : null,
-          updatedAt: timestamp,
-        });
-      },
-    ),
-    toggleGroupReassignOnUnavailable: defineMutator(
-      z.object({
-        userGroupId: z.string(),
-        reassignOnUnavailable: z.boolean(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, args: { userGroupId, reassignOnUnavailable, timestamp } }) => {
-        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-
-        await tx.mutate.user_groups.update({
-          id: userGroupId,
-          reassignOnUnavailable,
           updatedAt: timestamp,
         });
       },
