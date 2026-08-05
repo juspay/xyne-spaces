@@ -20,7 +20,7 @@ const log = createLogger("failure-curator");
  * X; the underlying cause is Y; here is the fix Z."
  */
 
-import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
