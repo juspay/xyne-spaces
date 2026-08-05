@@ -2752,9 +2752,41 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       body: JSON.stringify(dispatchPayload),
     });
 
+    // A dispatch that dies on a TRANSIENT upstream failure (envoy 502/503/504
+    // "no healthy upstream" during a claw rollout, a connection refusal against
+    // a terminating pod) is retryable — the run never started, so nothing is
+    // duplicated by trying again. Without this, a routine claw deploy turns
+    // every in-flight mention into a user-visible "I couldn't start this
+    // request: no healthy upstream" (observed prod 2026-08-05) even though a
+    // retry two seconds later would have succeeded. Mirrors the retry the /run
+    // proxy already does (routes/run.ts fetchClawRunWithRetry).
+    const DISPATCH_RETRIES = 2;
+    const DISPATCH_RETRY_DELAY_MS = 2_000;
+    const isTransientUpstream = (status: number, body: string): boolean =>
+      status === 502 || status === 503 || status === 504 ||
+      /no healthy upstream|upstream connect error|connection (refused|reset)|EAI_AGAIN|ECONNREFUSED|fetch failed/i.test(body);
+
+    const fetchRunWithRetry = async (): Promise<Awaited<ReturnType<typeof fetchRun>>> => {
+      let lastRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
+      for (let attempt = 0; attempt <= DISPATCH_RETRIES; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAY_MS));
+        const res = await fetchRun();
+        if (res.ok) return res;
+        // Peek at the body WITHOUT consuming the caller's copy.
+        const peek = await res.clone().text().catch(() => "");
+        if (!isTransientUpstream(res.status, peek)) return res;
+        lastRes = res;
+        log.warn(
+          `Dispatch attempt ${attempt + 1}/${DISPATCH_RETRIES + 1} hit transient upstream (${res.status}) for agent=${agent.slug}` +
+          (attempt < DISPATCH_RETRIES ? " — retrying" : " — giving up"),
+        );
+      }
+      return lastRes!;
+    };
+
     let runRes: Awaited<ReturnType<typeof fetchRun>>;
     try {
-      runRes = await fetchRun();
+      runRes = await fetchRunWithRetry();
     } catch (err) {
       // Dispatch never happened — free the global twin slot, and drain/free the
       // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
@@ -2878,9 +2910,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // noise), and resultForward callers get the failure via their callback.
     if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
       const refusal = body.error ?? "the run could not be started";
+      // Three shapes of refusal, three honest messages. A transient upstream
+      // failure that survived the retries above is an infra blip, not a broken
+      // agent — saying "I couldn't start this request: no healthy upstream"
+      // reads as an agent fault and tells the user nothing actionable.
       const notice = /disabled/i.test(refusal)
         ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : `⚠️ I couldn't start this request: ${refusal}`;
+        : isTransientUpstream(runRes.status, refusal)
+          ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
+          : `⚠️ I couldn't start this request: ${refusal}`;
       await spacesAppFetch("/chat/postMessage", {
         channelId: payload.channelId,
         conversationId: payload.conversationId,
