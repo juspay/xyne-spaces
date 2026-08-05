@@ -71,13 +71,19 @@ export function initializeTelemetry(): void {
     import('./perfMetrics')
       .then(
         ({
+          registerCpuSnapshotLog,
           registerMemoryGauge,
           registerHeapSnapshotLog,
+          registerLongAnimationFrameObserver,
           registerLongTaskObserver,
           registerWebVitals,
         }) => {
+          if (platformName !== 'electron') {
+            registerCpuSnapshotLog();
+          }
           registerMemoryGauge();
           registerHeapSnapshotLog();
+          registerLongAnimationFrameObserver();
           registerLongTaskObserver();
           registerWebVitals();
         },

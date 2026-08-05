@@ -37,6 +37,34 @@ function currentRouteTemplate(): string {
   }
 }
 
+function clampLogValue(value: string | null | undefined, maxLength: number = 120): string {
+  if (!value) return '';
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function getUrlOrigin(value: string | null | undefined): string {
+  if (!value) return '';
+  try {
+    return new URL(value, window.location.href).origin;
+  } catch {
+    return '';
+  }
+}
+
+function getActiveElementSummary(): Record<string, string> {
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof HTMLElement)) {
+    return {};
+  }
+
+  return {
+    activeTagName: activeElement.tagName.toLowerCase(),
+    activeRole: clampLogValue(activeElement.getAttribute('role')),
+    activeTrackName: clampLogValue(activeElement.getAttribute('data-track-name')),
+    activeTestId: clampLogValue(activeElement.getAttribute('data-testid')),
+  };
+}
+
 // --- React Profiler render duration ---
 
 let _componentRenderDuration: Histogram | null = null;
@@ -119,6 +147,7 @@ export function registerMemoryGauge(): void {
 // Cadence: 30s. With ~1000 active browsers, that's ~33 events/sec — small.
 
 let _heapSnapshotLogRegistered = false;
+let _cpuSnapshotLogRegistered = false;
 const HEAP_SNAPSHOT_INTERVAL_MS = 30_000;
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -143,14 +172,116 @@ export function registerHeapSnapshotLog(): void {
   setInterval(emit, HEAP_SNAPSHOT_INTERVAL_MS);
 }
 
+// --- CPU pressure snapshot bridge log (best-effort, Chrome-origin-trial style) ---
+//
+// Browsers generally do not expose a portable numeric CPU utilization API.
+// Where the Compute Pressure API is available, we sample its latest signal on
+// the same 30s cadence as heap snapshots and ship it through the bridge logger
+// for route/user attribution. Unsupported browsers no-op.
+
+type CpuPressureState = 'nominal' | 'fair' | 'serious' | 'critical';
+
+interface CpuPressureRecord {
+  cpuUtilization?: number;
+  cpuSpeed?: number;
+  state: CpuPressureState;
+}
+
+interface PressureObserverLike {
+  observe(source: 'cpu'): Promise<void>;
+}
+
+type PressureObserverCtor = new (
+  callback: (records: CpuPressureRecord[]) => void,
+) => PressureObserverLike;
+
+function getPressureObserverCtor(): PressureObserverCtor | undefined {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+  return (window as any).PressureObserver as PressureObserverCtor | undefined;
+}
+
+export function registerCpuSnapshotLog(): void {
+  if (_cpuSnapshotLogRegistered) return;
+
+  const PressureObserverCtor = getPressureObserverCtor();
+  if (!PressureObserverCtor) return;
+
+  _cpuSnapshotLogRegistered = true;
+
+  let latestPressure: CpuPressureRecord | null = null;
+
+  try {
+    const observer = new PressureObserverCtor(records => {
+      latestPressure = records[records.length - 1] ?? latestPressure;
+    });
+
+    void observer.observe('cpu').catch(() => {
+      // Permission denied / unsupported source; keep CPU logging disabled.
+      _cpuSnapshotLogRegistered = false;
+    });
+  } catch {
+    _cpuSnapshotLogRegistered = false;
+    return;
+  }
+
+  const emit = (): void => {
+    if (!latestPressure) return;
+
+    logger.info(Event.BROWSER_CPU_PRESSURE_SNAPSHOT, {
+      state: latestPressure.state,
+      cpuUtilization: latestPressure.cpuUtilization,
+      cpuUtilizationPercent:
+        typeof latestPressure.cpuUtilization === 'number'
+          ? Number((latestPressure.cpuUtilization * 100).toFixed(1))
+          : undefined,
+      cpuSpeed: latestPressure.cpuSpeed,
+    });
+  };
+
+  setInterval(emit, HEAP_SNAPSHOT_INTERVAL_MS);
+}
+
 // Minimal shapes for Long Tasks API (not in the TS DOM lib).
 interface LongTaskAttribution {
+  name?: string;
   containerType?: string;
   containerName?: string;
   containerSrc?: string;
 }
 interface LongTaskTiming extends PerformanceEntry {
   attribution?: LongTaskAttribution[];
+}
+
+interface LongAnimationFrameScriptTiming {
+  name?: string;
+  duration?: number;
+  startTime?: number;
+  executionStart?: number;
+  forcedStyleAndLayoutDuration?: number;
+  pauseDuration?: number;
+  sourceURL?: string;
+  sourceFunctionName?: string;
+  invoker?: string;
+  invokerType?: string;
+}
+
+interface LongAnimationFrameTiming extends PerformanceEntry {
+  renderStart?: number;
+  styleAndLayoutStart?: number;
+  firstUIEventTimestamp?: number;
+  blockingDuration?: number;
+  scripts?: LongAnimationFrameScriptTiming[];
+}
+
+interface LongAnimationFrameScriptLog {
+  callbackType: string;
+  callbackName: string;
+  functionName: string;
+  file: string;
+  executionDuration: number;
+  executionStart: number;
+  forcedStyleAndLayoutDuration: number;
+  pauseDuration: number;
 }
 
 // --- Long Tasks (main thread blocked >50ms) ---
@@ -163,6 +294,34 @@ const INP_SLOW_LOG_MS = 200;
 
 let _longTaskDuration: Histogram | null = null;
 let _longTaskObserverRegistered = false;
+let _longAnimationFrameDuration: Histogram | null = null;
+let _longAnimationFrameObserverRegistered = false;
+
+function mapLongTaskAttribution(
+  attribution: LongTaskAttribution[] | undefined,
+): Array<Record<string, string>> {
+  return (attribution ?? []).map(item => ({
+    name: item.name || '',
+    containerType: item.containerType || '',
+    containerName: item.containerName || '',
+    containerSrc: item.containerSrc || '',
+  }));
+}
+
+function mapLongAnimationFrameScripts(
+  scripts: LongAnimationFrameScriptTiming[] | undefined,
+): LongAnimationFrameScriptLog[] {
+  return (scripts ?? []).map(script => ({
+    callbackType: script.invokerType || '',
+    callbackName: script.invoker || '',
+    functionName: script.sourceFunctionName || '',
+    file: script.sourceURL || '',
+    executionDuration: Math.round(script.duration ?? 0),
+    executionStart: Math.round(script.executionStart ?? 0),
+    forcedStyleAndLayoutDuration: Math.round(script.forcedStyleAndLayoutDuration ?? 0),
+    pauseDuration: Math.round(script.pauseDuration ?? 0),
+  }));
+}
 
 export function registerLongTaskObserver(): void {
   if (_longTaskObserverRegistered) return;
@@ -186,7 +345,8 @@ export function registerLongTaskObserver(): void {
         const route = currentRouteTemplate();
         // `attribution[0]` describes the frame/container the task ran in.
         // containerType is low-cardinality (window | iframe | embed | object).
-        const attr = (entry as LongTaskTiming).attribution?.[0];
+        const attribution = (entry as LongTaskTiming).attribution;
+        const attr = attribution?.[0];
         _longTaskDuration!.record(entry.duration, {
           route,
           // eslint-disable-next-line @typescript-eslint/naming-convention -- Prometheus metric label
@@ -199,10 +359,15 @@ export function registerLongTaskObserver(): void {
         if (entry.duration >= LONG_TASK_SLOW_LOG_MS) {
           logger.info(Event.LONG_TASK_SLOW, {
             durationMs: Math.round(entry.duration),
+            entryName: entry.name || 'unknown',
             route,
+            visibilityState: document.visibilityState,
             containerType: attr?.containerType || '',
             containerName: attr?.containerName || '',
             containerSrc: attr?.containerSrc || '',
+            containerOrigin: getUrlOrigin(attr?.containerSrc),
+            attribution: mapLongTaskAttribution(attribution),
+            ...getActiveElementSummary(),
           });
         }
       }
@@ -210,6 +375,63 @@ export function registerLongTaskObserver(): void {
     observer.observe({ type: 'longtask', buffered: true });
   } catch {
     // longtask not supported in this browser
+  }
+}
+
+export function registerLongAnimationFrameObserver(): void {
+  if (_longAnimationFrameObserverRegistered) return;
+  if (typeof PerformanceObserver === 'undefined') return;
+
+  _longAnimationFrameObserverRegistered = true;
+
+  if (!_longAnimationFrameDuration) {
+    _longAnimationFrameDuration = getMeter().createHistogram('long_animation_frame_duration', {
+      description: 'Duration of long animation frames blocking rendering',
+      unit: 'ms',
+      advice: {
+        explicitBucketBoundaries: [50, 100, 150, 200, 300, 500, 1000, 2000],
+      },
+    });
+  }
+
+  try {
+    const observer = new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) {
+        const longAnimationFrame = entry as LongAnimationFrameTiming;
+        const route = currentRouteTemplate();
+        _longAnimationFrameDuration!.record(entry.duration, { route });
+
+        if (entry.duration >= LONG_TASK_SLOW_LOG_MS) {
+          const scripts = mapLongAnimationFrameScripts(longAnimationFrame.scripts);
+          const longestScript = scripts.reduce<LongAnimationFrameScriptLog | null>(
+            (currentLongest, script) =>
+              script.executionDuration > (currentLongest?.executionDuration ?? -1)
+                ? script
+                : currentLongest,
+            null,
+          );
+
+          logger.info(Event.LONG_ANIMATION_FRAME_SLOW, {
+            durationMs: Math.round(entry.duration),
+            blockingDurationMs: Math.round(longAnimationFrame.blockingDuration ?? 0),
+            startTimeMs: Math.round(entry.startTime),
+            entryName: entry.name || 'unknown',
+            route,
+            visibilityState: document.visibilityState,
+            renderStartMs: Math.round(longAnimationFrame.renderStart ?? 0),
+            styleAndLayoutStartMs: Math.round(longAnimationFrame.styleAndLayoutStart ?? 0),
+            firstUIEventTimestampMs: Math.round(longAnimationFrame.firstUIEventTimestamp ?? 0),
+            scriptCount: scripts.length,
+            longestScript: scripts.length > 1 ? (longestScript ?? undefined) : undefined,
+            scripts,
+            ...getActiveElementSummary(),
+          });
+        }
+      }
+    });
+    observer.observe({ type: 'long-animation-frame', buffered: true });
+  } catch {
+    // long-animation-frame not supported in this browser
   }
 }
 
