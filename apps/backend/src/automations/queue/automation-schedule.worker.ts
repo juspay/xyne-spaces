@@ -1,7 +1,7 @@
 import type Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import {
@@ -57,7 +57,7 @@ class AutomationScheduleWorker {
       return;
     }
 
-    await runWithContext({ userId: 'automation', workspaceId }, () =>
+    await runAsServiceActor('automation', workspaceId, () =>
       this.executor!.runExecution(executionId),
     );
   }

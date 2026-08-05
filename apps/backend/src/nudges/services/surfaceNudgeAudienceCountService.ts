@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import {
   buildSurfaceNudgeCountRowId,
@@ -128,7 +128,7 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
     });
     workspaceId = channel?.workspaceId ?? undefined;
   }
-  workspaceId ??= getContextOrNull()?.workspaceId;
+  workspaceId ??= currentWorkspaceId() ?? undefined;
   if (!workspaceId) {
     throw new Error(
       '[SurfaceNudgeAudienceCount] workspaceId required: no channel or tenant context',

@@ -33,9 +33,9 @@ export class ActivitiesBackfillController {
   ): Promise<boolean> {
     // Resolve legacy mentions to group IDs
     const allGroupIds = groupMentions.map(g => g.groupId);
-    
+
     if (allGroupIds.length === 0) return false;
-    
+
     // Check if user is in any of these groups
     const userGroupMapping = await db.userGroupMapping.findFirst({
       where: {
@@ -43,7 +43,7 @@ export class ActivitiesBackfillController {
         userGroupId: { in: allGroupIds },
       },
     });
-    
+
     return !!userGroupMapping;
   }
 
@@ -89,7 +89,7 @@ export class ActivitiesBackfillController {
 
       // Process the batch
       const messageIds = [...new Set(activities.map(a => a.messageId).filter(Boolean))] as string[];
-      
+
       // Fetch all messages for this batch
       const messages = await db.message.findMany({
         where: { messageId: { in: messageIds } },
@@ -121,7 +121,7 @@ export class ActivitiesBackfillController {
           activity.userId,
           groupMentions,
         );
-        
+
         if (isGroupMention || specialMentions.hasChannel || specialMentions.hasHere) {
           activityIdsToUpdate.push(activity.id);
           totalUpdated++;
@@ -129,9 +129,9 @@ export class ActivitiesBackfillController {
           totalSkipped++;
         }
       }
-      
+
       skip += this.BATCH_SIZE;
-      
+
       // Add delay between batches to avoid overwhelming the database
       await this.sleep(this.BATCH_DELAY_MS);
       iter++;
@@ -146,7 +146,7 @@ export class ActivitiesBackfillController {
         where: { id: { in: activityIdsToUpdate } },
         data: { actorAction: 'group_mention' },
       });
-      
+
       logger.info(`✅ Successfully updated ${result.count} activities`);
     } else {
       logger.info('ℹ️  No activities need updating');

@@ -11,7 +11,7 @@ import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -60,7 +60,7 @@ export class BitbucketWebhookService {
     // Unauthenticated webhook (no req.user): open an explicit tenant scope from the
     // internal workspaceId in the request URL so the workspaceId stamper fills the
     // ticket_assignments / user_workload_mappings writes this event triggers downstream.
-    return runWithContext({ userId: 'bitbucket-webhook', workspaceId }, async () => {
+    return runAsServiceActor('bitbucket-webhook', workspaceId, async () => {
       try {
         logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
 

@@ -1454,6 +1454,28 @@ export class ChannelController {
         return;
       }
 
+      // This endpoint returns the channel's connected desk mailbox / owner account
+      // email. Gate it with the same rule the socket layer uses (canAccessChannel):
+      // workspace boundary + participant-only for PRIVATE channels.
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const channel = await this.channelRepository.findById(channelId);
+      if (!channel || channel.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Channel not found' });
+        return;
+      }
+      if (channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Forbidden' });
+          return;
+        }
+      }
+
       res.setHeader('Cache-Control', 'private, no-cache');
 
       const source = await db.externalSource.findFirst({

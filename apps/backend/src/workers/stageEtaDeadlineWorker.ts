@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
 import {
@@ -191,8 +191,7 @@ class StageEtaDeadlineWorker {
         });
 
         if (ticket.conversationId) {
-          await runWithContext(
-            { userId: 'stage-eta-deadline-worker', workspaceId: ticket.workspaceId },
+          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId,
             () => createEtaSystemMessage({
               conversationId: ticket.conversationId!,
               content: message,

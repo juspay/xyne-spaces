@@ -107,6 +107,30 @@ export class DraftAttachmentController {
         return;
       }
 
+      // The attachmentIds are client-supplied and the upsert below keys on them
+      // (create branch pins `id`, but a colliding existing row falls through to an
+      // update). Reject any id that already resolves to a row the caller does not own
+      // as a DRAFT.
+      if (attachmentIdsArray.length > 0) {
+        const existingAttachments = await this.db.messageAttachment.findMany({
+          where: { id: { in: attachmentIdsArray } },
+          select: { id: true, uploadedByUserId: true, entityType: true },
+        });
+        const foreign = existingAttachments.find(
+          a => a.uploadedByUserId !== userId || a.entityType !== AttachmentEntityType.DRAFT,
+        );
+        if (foreign) {
+          logger.warn(
+            `Unauthorized draft attachment reuse: user ${userId} referenced attachment ${foreign.id} they do not own`,
+          );
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'One or more attachment ids reference a resource you do not own',
+          });
+          return;
+        }
+      }
+
       // Check if draft message already exists for this user+channel+conversation
       const existingDraft = await this.db.draftMessage.findFirst({
         where: {
