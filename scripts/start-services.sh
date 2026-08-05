@@ -791,6 +791,12 @@ if [ -d "packages/xyne-claw-shared" ] && [ ! -d "packages/xyne-claw-shared/node_
     cd "$REPO_ROOT"
 fi
 
+# Build litellm-client before starting xyne-claw. Its public exports point to
+# dist/, which is intentionally gitignored and must be generated locally.
+echo -e "${BLUE}🔧 Setting up litellm-client...${NC}"
+pnpm --filter @xyne/litellm-client run build
+echo -e "${GREEN}✓ litellm-client ready${NC}"
+
 # Setup xyne-claw-auth backend
 echo -e "${BLUE}🔧 Setting up xyne-claw-auth backend...${NC}"
 if [ ! -f "apps/xyne-claw-auth/backend/.env" ]; then
