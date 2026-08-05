@@ -627,6 +627,29 @@ async function loadSlackSurfaceCredentials(
   };
 }
 
+/**
+ * Mirror the per-run Slack subagent injection at the claw-auth enforcement
+ * boundary. MCP listing/call routes load the agent's stored config, not the
+ * agentConfig override forwarded to claw, so without this the virtual Slack
+ * group is created and then immediately filtered back out.
+ */
+async function withSlackSurfaceToolsConfig(
+  config: AgentToolsConfig | undefined,
+  sessionId: string,
+): Promise<AgentToolsConfig | undefined> {
+  if (!config) return undefined;
+
+  const { getSession } = await import("./webhook.js");
+  const runCtx = await getSession(sessionId).catch(() => null);
+  if (!runCtx?.slackDelivery?.surfaceAgentId || !runCtx.slackDelivery.teamId) return config;
+
+  const subagents = Array.isArray(config.subagents)
+    ? config.subagents.filter((value): value is string => typeof value === "string")
+    : [];
+  if (subagents.includes("slack")) return config;
+  return { ...config, subagents: [...subagents, "slack"] };
+}
+
 async function loadEffectiveCredentialsWithSpacesFallback(
   userId: string,
   serverType: string,
@@ -691,7 +714,9 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const spacesAppId = req.session?.spacesAppId;
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
-    const strictAgentToolsConfig = isStrictAgentToolsEnabled() ? sessionAgentTools?.toolsConfig : undefined;
+    const strictAgentToolsConfig = isStrictAgentToolsEnabled()
+      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      : undefined;
     const tenantUniqueId = resolveGatewayTenantForRequest();
     
     // User connections + global-fallback servers (servers with allowGlobalFallback
@@ -1005,7 +1030,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const spacesAppId = req.session?.spacesAppId;
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
-    const strictAgentToolsConfig = isStrictAgentToolsEnabled() ? sessionAgentTools?.toolsConfig : undefined;
+    const strictAgentToolsConfig = isStrictAgentToolsEnabled()
+      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      : undefined;
     const { serverType, tool, params, permission, backendId } = req.body as {
       serverType?: string;
       tool?: string;

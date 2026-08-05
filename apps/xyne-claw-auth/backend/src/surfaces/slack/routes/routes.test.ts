@@ -468,7 +468,17 @@ describe("Slack surfaces route", () => {
     expect(updateArgs.app_id).toBe("A-PER-AGENT");
     expect(updateArgs.manifest).toMatchObject({
       display_information: { name: "Helper Agent" },
-      oauth_config: { scopes: { bot: expect.arrayContaining(["files:write"]) } },
+      oauth_config: {
+        scopes: {
+          bot: expect.arrayContaining([
+            "channels:read",
+            "channels:history",
+            "groups:read",
+            "groups:history",
+            "files:write",
+          ]),
+        },
+      },
     });
     expect(mocks.surfaceAgentUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
