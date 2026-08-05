@@ -1001,6 +1001,99 @@ router.get("/:slug/versions/:version", async (req: Request<{ slug: string; versi
   }
 });
 
+
+// Restore the live skill (SKILL.md body + file bundle) to an older version.
+// Mirrors the agent prompt-version "activate": the user picks a historical
+// version and makes it current. Skills are append-only + shared, so instead of
+// moving a pointer backwards we cut a NEW version equal to the target
+// (source="restore") and run the normal propagation — the editor's own agents
+// auto-advance their pin; another admin's agent gets an adopt card. Owner or
+// admin only (mirrors PUT /:slug).
+router.post(
+  "/:slug/versions/:version/restore",
+  async (req: Request<{ slug: string; version: string }>, res: Response) => {
+    try {
+      const existing = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+      if (!existing) {
+        res.status(404).json({ success: false, error: "Skill not found" });
+        return;
+      }
+
+      const requesterId = getRequesterId(req);
+      if (requesterId) {
+        const admin = await isClawAdmin(requesterId);
+        const isOwner = existing.ownerUserId === requesterId;
+        if (!admin && !isOwner) {
+          res.status(403).json({ success: false, error: "Only the owner or admins can restore this skill" });
+          return;
+        }
+      }
+
+      const n = Number.parseInt(req.params.version, 10);
+      if (!Number.isFinite(n)) {
+        res.status(400).json({ success: false, error: "version must be an integer" });
+        return;
+      }
+      const target = await skillVersionRepository.findByVersion(existing.id, n);
+      if (!target) {
+        res.status(404).json({ success: false, error: "Version not found" });
+        return;
+      }
+
+      // Rebuild the file bundle from the frozen snapshot. SKILL.md is never a
+      // SkillFile row (it is Skill.content, restored just below) so it is
+      // filtered out defensively.
+      const snapFiles = Array.isArray(target.filesSnapshot)
+        ? (target.filesSnapshot as unknown as Array<{
+            relativePath?: string;
+            content?: string;
+            contentType?: string | null;
+          }>)
+        : [];
+      const restoreFiles = snapFiles
+        .filter(
+          (f) =>
+            typeof f?.content === "string" &&
+            typeof f?.relativePath === "string" &&
+            f.relativePath !== "SKILL.md",
+        )
+        .map((f) => ({
+          relativePath: String(f.relativePath),
+          content: String(f.content),
+          ...(f.contentType ? { contentType: String(f.contentType) } : {}),
+        }));
+
+      // Restore the working copy: SKILL.md body first, then the file bundle.
+      const skill = await skillRepository.update(req.params.slug, existing.orgId, {
+        content: target.content,
+      });
+      await skillRepository.replaceFiles(skill.id, restoreFiles);
+
+      // Cut a new version equal to the target and propagate like any other edit.
+      // Pass the snapshot files explicitly so the new version's bundle is byte-
+      // identical to the one being restored.
+      await recordAndPropagateSkillVersion({
+        skill: { id: skill.id, slug: skill.slug, name: skill.name, orgId: skill.orgId },
+        content: skill.content,
+        editorUserId: requesterId ?? null,
+        source: "restore",
+        files: restoreFiles.map((f) => ({
+          relativePath: f.relativePath,
+          content: f.content,
+          contentType: f.contentType ?? null,
+        })),
+        changelog: `Restored from v${target.version}`,
+      });
+
+      res.json({ success: true, data: skill });
+    } catch (err) {
+      log.error("[skills] restore version error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+
 void requireClawAdmin;
 
 export { router as skillsRouter };

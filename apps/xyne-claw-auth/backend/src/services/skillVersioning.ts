@@ -15,10 +15,6 @@ import { agentRequestRepository, userRepository } from "../repositories/index.js
 
 const log = createLogger("skill-versioning");
 
-function propagationEnabled(): boolean {
-  return process.env.SKILL_VERSION_PROPAGATION_ENABLED !== "false";
-}
-
 /**
  * Cut a new immutable version of a skill and propagate it to the agents that
  * use it (Point 3 + 4).
@@ -70,10 +66,6 @@ export async function recordAndPropagateSkillVersion(args: {
   // No new row (idempotent re-save) or the very first version → nothing to
   // propagate. New agents pick up the current version when they attach.
   if (!appended.created || appended.version.version <= 1) return;
-  if (!propagationEnabled()) {
-    log.info(`[skill-version] propagation disabled; ${args.skill.slug} left at pins unchanged (v${appended.version.version} cut)`);
-    return;
-  }
 
   try {
     await propagateNewVersion({

@@ -22,7 +22,8 @@ export type VersionSource =
   | "initial"
   | "direct_edit"
   | "files_edit"
-  | "proposal_approved";
+  | "proposal_approved"
+  | "restore";
 
 /**
  * Snapshot the live SkillFile rows for a skill into the frozen array shape used
