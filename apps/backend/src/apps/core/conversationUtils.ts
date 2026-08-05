@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
+import { db } from '@/database/client';
 import { decodeCursor, paginateResults } from './paginationUtils';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
@@ -131,6 +132,77 @@ export async function updateConversation(
     };
   } catch (error) {
     logger.error('[UPDATE-CONVERSATION] Error updating conversation:', error);
+    throw error;
+  }
+}
+
+
+/**
+ * Soft-delete an app-authored message without removing its row.
+ * The caller validates actor ownership and channel access before calling.
+ */
+export async function deleteConversationMessage(
+  messageId: string,
+  actorUserId: string,
+): Promise<ChatActionResponse> {
+  try {
+    logger.info(`[DELETE-CONVERSATION] Soft-deleting message ${messageId} by ${actorUserId}`);
+
+    const message = await repositories.messages.findById(messageId);
+    if (!message) throw new Error(`Message not found: ${messageId}`);
+
+    const conversation = await repositories.conversations.findById(message.conversationId);
+    if (!conversation) throw new Error(`Conversation not found: ${message.conversationId}`);
+
+    if (message.isDeleted) {
+      return {
+        eventType: ChatEventType.MESSAGE_DELETED,
+        conversationId: conversation.conversationId,
+        messageId: message.messageId,
+        channelId: conversation.channelId,
+        ticketId: conversation.ticketId || undefined,
+      };
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.messageAttachment.updateMany({
+        where: { entityId: messageId, entityType: 'CHAT', isDeleted: false },
+        data: { isDeleted: true },
+      });
+      await tx.message.update({
+        where: { messageId },
+        data: { isDeleted: true, content: '', hasAttachment: false, edited: false, link_preview_md: '' },
+      });
+      await tx.messageSearch.deleteMany({ where: { messageId } });
+    });
+
+    const ctx = await buildUserQueryContext(actorUserId);
+    const handler = new MessagesSideEffectHandler(ctx);
+    handler.onUpdate({
+      entityId: messageId,
+      entityType: 'messages',
+      operation: 'update',
+      previousValue: {
+        messageId: message.messageId,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        msgType: message.msgType,
+        content: message.content,
+        isDeleted: message.isDeleted,
+        channelId: conversation.channelId,
+        isThreadReply: conversation.initialMessageId !== message.messageId,
+      },
+    }).catch(err => logger.error('[DELETE-CONVERSATION] Side-effect handler error', err));
+
+    return {
+      eventType: ChatEventType.MESSAGE_DELETED,
+      conversationId: conversation.conversationId,
+      messageId: message.messageId,
+      channelId: conversation.channelId,
+      ticketId: conversation.ticketId || undefined,
+    };
+  } catch (error) {
+    logger.error('[DELETE-CONVERSATION] Error deleting message:', error);
     throw error;
   }
 }

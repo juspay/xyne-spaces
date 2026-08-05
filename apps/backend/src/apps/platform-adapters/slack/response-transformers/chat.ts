@@ -1,5 +1,6 @@
 import type { ChatActionResponse } from "@/apps/types";
 import type {
+	SlackChatDeleteResponse,
 	SlackChatPostMessageResponse,
 	SlackChatUpdateResponse,
 } from "../types";
@@ -42,4 +43,11 @@ export function transformUpdateResponse(
 			user: userId,
 		},
 	};
+}
+
+export function transformDeleteResponse(
+	result: ChatActionResponse,
+	channelId: string,
+): SlackChatDeleteResponse {
+	return { ok: true, channel: channelId, ts: result.messageId };
 }
