@@ -1,5 +1,4 @@
 import type { Request, Response } from 'express';
-import { CallType } from '@prisma/client';
 import { google } from 'googleapis';
 import z from 'zod';
 import { db } from '@/database/client';
@@ -13,6 +12,7 @@ import { markdownToPlainText } from '@/utils/markdownToPlainText';
 import { logger } from '@/utils/logger';
 
 const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
+const HEADLESS_CALL_TYPE = 'HEADLESS';
 const RecordingGoogleDocParamsSchema = z.object({
   callId: z.string().trim().min(1, 'Recording ID is required'),
 });
@@ -82,7 +82,7 @@ export class RecordingGoogleDocController {
       const call = await repositories.calls.findByExternalId(callId);
       if (
         !call ||
-        call.callType !== CallType.HEADLESS ||
+        call.callType !== HEADLESS_CALL_TYPE ||
         (call.workspaceId !== null && call.workspaceId !== workspaceId)
       ) {
         res.status(404).json({ success: false, error: 'Recording not found' });
@@ -138,7 +138,7 @@ export class RecordingGoogleDocController {
       const call = await repositories.calls.findByExternalId(callId);
       if (
         !call ||
-        call.callType !== CallType.HEADLESS ||
+        call.callType !== HEADLESS_CALL_TYPE ||
         (call.workspaceId !== null && call.workspaceId !== workspaceId)
       ) {
         res.status(404).json({ success: false, error: 'Recording not found' });
