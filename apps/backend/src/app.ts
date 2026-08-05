@@ -95,6 +95,7 @@ import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
+import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
@@ -644,6 +645,8 @@ export class App {
 
     // Generic CAC config routes
     this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
+
+    this.app.use('/api/lotus-config', authMiddleware.authenticate, lotusCacConfigRoutes);
 
     // Custom instruction routes (auth required)
     this.app.use('/api/custom-instruction', customInstructionRoutes);
