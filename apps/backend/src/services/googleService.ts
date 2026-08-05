@@ -675,6 +675,80 @@ export class GoogleService {
   }
 
   /**
+   * One-shot: plant a starting `lastSyncCursor` on every active Gmail source.
+   *
+   * Run this BEFORE the cursor-resuming ingestion path goes live. A source with no
+   * cursor falls back to the push's own historyId, and `history.list` returns records
+   * *after* that point — so the notification that triggered the first push resolves to
+   * nothing and its messages are skipped. Seeding ahead of time gives every source a
+   * real starting point, and mail arriving between the seed and the deploy is still
+   * picked up, because the cursor sits at the start of that window.
+   *
+   * `overwrite` is for the pre-deploy run only, while nothing reads the column and any
+   * existing value is a stale artifact. Once ingestion resumes from the cursor,
+   * overwriting would move a desk past mail that was never ingested — so it defaults
+   * to false and should stay false from then on.
+   *
+   * `dryRun=true` reports what would change without writing.
+   */
+  static async seedSyncCursors(opts: { dryRun?: boolean; overwrite?: boolean } = {}): Promise<{
+    dryRun: boolean;
+    overwrite: boolean;
+    seeded: Array<{ name: string; from: string | null; to: string }>;
+    skipped: Array<{ name: string; reason: string }>;
+  }> {
+    const dryRun = !!opts.dryRun;
+    const overwrite = !!opts.overwrite;
+    const repo = new ExternalSourceRepository();
+
+    const sources = await repo.findAll({
+      sourceType: ExternalSourcePlatform.GOOGLE,
+      isActive: true,
+    });
+
+    const seeded: Array<{ name: string; from: string | null; to: string }> = [];
+    const skipped: Array<{ name: string; reason: string }> = [];
+
+    for (const source of sources) {
+      if (source.lastSyncCursor && !overwrite) {
+        skipped.push({ name: source.name, reason: 'already has a cursor' });
+        continue;
+      }
+      if (!source.credentials) {
+        skipped.push({ name: source.name, reason: 'no credentials' });
+        continue;
+      }
+
+      try {
+        const historyId = await GoogleService.fromEncryptedCredentials(
+          source.credentials,
+          source.id,
+        ).getCurrentHistoryId();
+
+        if (!historyId) {
+          skipped.push({ name: source.name, reason: 'Gmail returned no historyId' });
+          continue;
+        }
+
+        if (!dryRun) await repo.update(source.id, { lastSyncCursor: historyId });
+        seeded.push({ name: source.name, from: source.lastSyncCursor, to: historyId });
+      } catch (error) {
+        // One unreachable mailbox must not stop the rest of the fleet from being seeded.
+        skipped.push({ name: source.name, reason: getErrorMessage(error) });
+      }
+    }
+
+    logger.info(`${TAG} seedSyncCursors finished`, {
+      dryRun,
+      overwrite,
+      seededCount: seeded.length,
+      skippedCount: skipped.length,
+    });
+
+    return { dryRun, overwrite, seeded, skipped };
+  }
+
+  /**
    * One-shot migration: ensure the env's shared subscription exists, then
    * delete every legacy per-source `gmail-google-<src>-push` subscription on
    * the Gmail topic. Safe to run repeatedly — idempotent on both halves.

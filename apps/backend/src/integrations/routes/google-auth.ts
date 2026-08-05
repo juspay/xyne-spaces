@@ -1198,6 +1198,41 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 });
 
 /**
+ * POST /api/integrations/google/admin/seed-sync-cursors
+ * One-shot: give every active Gmail source a starting `lastSyncCursor`, read from
+ * `users.getProfile`. Run this before the cursor-resuming ingestion path ships —
+ * without a cursor, a source's first push resolves to nothing and skips the mail
+ * that triggered it.
+ *
+ * `?dryRun=true` previews. `?overwrite=true` replaces existing cursors, which is
+ * only safe while nothing reads the column; once ingestion resumes from it,
+ * overwriting moves a desk past mail that was never ingested.
+ *
+ * Auth: requires a logged-in user. Wrap with an admin role check if the platform
+ * has one.
+ */
+router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+    const overwrite = req.query.overwrite === 'true' || req.body?.overwrite === true;
+
+    const report = await GoogleService.seedSyncCursors({ dryRun, overwrite });
+
+    logger.info(`${TAG} seed-sync-cursors finished`, {
+      dryRun: report.dryRun,
+      overwrite: report.overwrite,
+      seededCount: report.seeded.length,
+      skippedCount: report.skipped.length,
+      requestedBy: req.user?.id,
+    });
+    res.json({ success: true, ...report });
+  } catch (error: any) {
+    logger.error(`${TAG} seed-sync-cursors failed`, error);
+    res.status(500).json({ success: false, error: error?.message ?? 'Unknown error' });
+  }
+});
+
+/**
  * POST /api/integrations/google/admin/migrate-to-shared-sub
  * One-shot migration: create shared subscription if missing, then delete every
  * legacy per-source `gmail-google-<src>-push`. Idempotent. Use `?dryRun=true`
