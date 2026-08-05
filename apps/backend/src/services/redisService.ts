@@ -99,6 +99,22 @@ class RedisService {
     }
   }
 
+  async srem(key: string, ...members: string[]): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot srem - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.srem(key, ...members);
+  }
+
+  async scard(key: string): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot scard - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.scard(key);
+  }
+
   // Session participant management
   async addParticipantToSession(sessionId: string, userId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');

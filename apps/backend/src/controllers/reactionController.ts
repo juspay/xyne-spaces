@@ -4,6 +4,7 @@ import { MessageRepository } from '../database/repositories/messageRepository';
 
 import { logger } from '../utils/logger';
 import { redisService } from '../services/redisService';
+import { messageMetadataService } from '../services/messageMetadataService';
 import {
   ReactionResponse,
   GetReactionsResponse,
@@ -186,6 +187,64 @@ export class ReactionController {
       logger.info(`Reaction toggled: ${decodedEmoji} by user ${userId} on message ${messageId} (${result.added ? 'added' : 'removed'})`);
     } catch (error) {
       logger.error('Error toggling reaction:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  async reactAsUser(req: Request, res: Response): Promise<void> {
+    try {
+      const { messageId, emojiName, userId } = (req.body ?? {}) as {
+        messageId?: string;
+        emojiName?: string;
+        userId?: string;
+      };
+
+      if (!messageId || !emojiName || !userId) {
+        res.status(400).json({ error: 'messageId, emojiName and userId are required' });
+        return;
+      }
+      const emoji = emojiName.trim();
+      if (!emoji || emoji.length > 100) {
+        res.status(400).json({ error: 'Invalid emoji name' });
+        return;
+      }
+
+      try {
+        await reactionRepository.addReaction({ messageId, userId, emojiName: emoji });
+      } catch (error: any) {
+        if (error?.code !== 'P2002') throw error;
+      }
+
+      const conversationId = await messageRepository.getConversationIdByMessageId(messageId);
+      try {
+        await messageMetadataService.addReaction(messageId, emoji, userId);
+        if (conversationId) await messageMetadataService.syncInitialMessageMd(conversationId);
+      } catch (mdError) {
+        logger.error('[reactAsUser] failed to update reactions_md — emoji may not render:', mdError);
+      }
+
+      const reactions = await reactionRepository.getMessageReactions(messageId, userId);
+      res.status(200).json({ success: true, reactions });
+
+      try {
+        if (conversationId) {
+          await redisService.broadcastMessageToSession(conversationId, {
+            messageId: `reaction-${messageId}-${Date.now()}`,
+            conversationId,
+            senderId: 'system',
+            senderName: 'System',
+            content: JSON.stringify({ type: 'reaction_updated', data: reactions, messageId }),
+            msgType: 'SYSTEM',
+            createdAt: new Date(),
+          });
+        }
+      } catch (broadcastError) {
+        logger.error('Error broadcasting reactAsUser update:', broadcastError);
+      }
+
+      logger.info(`[reactAsUser] ${emoji} as user ${userId} on message ${messageId}`);
+    } catch (error) {
+      logger.error('Error in reactAsUser:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }

@@ -2711,6 +2711,16 @@ img.inline-emoji,
   padding-left: 6px !important;
 }
 
+[data-component="MessageBubble"] .bot-markdown-content {
+  margin: 0 !important;
+}
+[data-component="MessageBubble"] .bot-markdown-content p {
+  padding-left: 0 !important;
+}
+[data-component="MessageBubble"] .bot-markdown-content p:last-child {
+  margin-bottom: 0 !important;
+}
+
 .bot-markdown-content ol,
 .bot-markdown-content-call-summary ol {
   /* Enough inline space for 2–3 digit markers (10+) — default outside markers + narrow
