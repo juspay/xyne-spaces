@@ -94,7 +94,7 @@ const initialContext: RecordingState = {
   pauseStartedAt: null,
   accumulatedPausedMs: 0,
   error: null,
-  sttModel: 'azure',
+  sttModel: 'google',
   transcripts: [],
   markedMoments: [],
   pendingAutoStart: false,
