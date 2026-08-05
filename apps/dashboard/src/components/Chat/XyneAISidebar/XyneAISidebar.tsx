@@ -78,6 +78,7 @@ import {
   type ThreadInfo,
   type CanvasInfo,
   type XyneAIContext,
+  type AskAIInitialContextSelections,
   type SelectionInfo,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
@@ -107,6 +108,10 @@ interface XyneAISidebarProps {
   threadInfo?: ThreadInfo | null;
   startFreshChat?: boolean;
   canvasInfo?: CanvasInfo | null;
+  /** Context supplied by the surface that opened this Ask AI conversation. */
+  initialContextSelections?: AskAIInitialContextSelections | null;
+  /** Re-applies the supplied context on every explicit Ask AI open. */
+  contextOpenNonce?: number;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
   onDebuggerOpenChange?: (open: boolean) => void;
@@ -135,6 +140,8 @@ const XyneAISidebar = ({
   channelId,
   threadInfo,
   canvasInfo,
+  initialContextSelections,
+  contextOpenNonce,
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
@@ -264,6 +271,15 @@ const XyneAISidebar = ({
     timestamp: number;
   } | null>(null);
   const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
+
+  // A recording page already knows the exact call and notes canvas that should
+  // scope the conversation. Seed the normal picker state so its visible pills
+  // and the request payload use the same source of truth.
+  useEffect(() => {
+    if (!initialContextSelections) return;
+    setSelectedCanvases(initialContextSelections.canvases);
+    setSelectedRecordings(initialContextSelections.recordings);
+  }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query
   const [conversationChannelId, setConversationChannelId] = useState<string | null>(null);
