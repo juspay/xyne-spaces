@@ -693,6 +693,89 @@ function mergeInvocationsForCitations(...lists: unknown[]): unknown[] {
 }
 
 /**
+ * LEGACY delivery path (pre-XYNE-17815): post the Twin's proposal as an
+ * approve/decline card in a DM with the owner. Kept ONLY as the fallback for
+ * Spaces backends that don't yet serve /api/internal/twin-reply-draft — see
+ * sendTwinReplyDraft. Delete once every environment runs the in-thread draft.
+ * The signature suffix is already applied by the caller, so the original
+ * inline suffix block was removed on restore (it would double-append).
+ */
+async function sendDigitalTwinApprovalDm(
+  ctx: SessionContext,
+  delivery: TwinDelivery,
+  attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+  sessionId: string,
+): Promise<void> {
+  // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
+  // drops it). If it somehow does, never open a DM / post / write a pending row.
+  if (delivery.action === "ignore") {
+    clog.warn(`[webhook/result] sendDigitalTwinApprovalDm called with action=ignore — dropping, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
+  const token = ctx.appToken;
+
+  // workspaceId required by prod openDm schema. Empty fallback only to satisfy
+  // types — the earlier USER_MENTIONED gate already rejected runs where we
+  // couldn't resolve the workspaceId, so this should always have a real value.
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+  }, token)) as { channelId: string };
+
+  const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+    delivery: delivery,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    targetChannelId: ctx.channelId,
+    targetConversationId: ctx.conversationId,
+    mentionedUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+    senderId: ctx.senderId,
+    senderName: ctx.senderName,
+    channelName: ctx.channelName,
+    task: ctx.task,
+    ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+    dmChannelId: dmResult.channelId,
+    spacesBaseUrl: CONFIG.spacesAppUrl,
+  }), ctx.spacesAppId);
+
+  if (attachments?.length) {
+    const form = new FormData();
+    for (const att of attachments) {
+      const buffer = Buffer.from(att.data, "base64");
+      const blob = new Blob([buffer], { type: att.mimeType });
+      form.append("files", blob, att.fileName);
+    }
+    form.append("channelId", dmResult.channelId);
+    form.append("userId", ctx.spacesAppUserId);
+    form.append("flow", JSON.stringify(twinFlow));
+
+    await spacesAppFetchMultipart("/files/filesUpload", form, token);
+  } else {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: dmResult.channelId,
+      flow: twinFlow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+  }
+
+  // Record a PENDING feedback row so the daily learning loop can later reconcile
+  // the user's accept / decline / edit / ignore of this proposal. Fire-and-forget.
+  void recordTwinApprovalPending({
+    userId: ctx.mentionedUserId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    channelName: ctx.channelName,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    incomingTask: ctx.task,
+    delivery: delivery,
+  });
+
+  clog.info(`[webhook/result] Digital Twin: sent approve/decline DM to ${ctx.mentionedUserId} (asked by ${ctx.senderId})`);
+  await deleteSession(sessionId);
+}
+
+/**
  * Deliver the Twin's structured proposal as an OWNER-ONLY in-thread reply draft
  * (replaces the old approval DM card). Bakes citation metadata from the Twin's
  * private `reasoning` (its `[clf-…#n]` tokens reference the Spaces tools it
@@ -705,6 +788,8 @@ async function sendTwinReplyDraft(
   delivery: TwinDelivery,
   toolInvocations: unknown,
   sessionId: string,
+  /** Callback attachments — only used by the legacy approval-DM fallback. */
+  attachments?: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
 ): Promise<void> {
   // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
   // drops it). If it somehow does, never create a draft / write a pending row.
@@ -779,7 +864,14 @@ async function sendTwinReplyDraft(
     sessionId,
   };
 
-  // Create the owner-only in-thread draft in Spaces (Redis). Fail-closed silence.
+  // Create the owner-only in-thread draft in Spaces. When the Spaces backend
+  // doesn't serve /api/internal/twin-reply-draft yet (route added in
+  // XYNE-17815; caller shipped 2026-07-23, route reached main 2026-08-05), the
+  // request falls through to the user-auth middleware and comes back 401/404.
+  // That skew silently killed EVERY twin reply for ~2 weeks because this path
+  // was fail-closed with no alternative. Fall back to the pre-XYNE-17815
+  // approval DM card instead: the twin keeps working on old backends, and the
+  // moment the route deploys we're back on the in-thread draft with no change.
   try {
     const resp = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/twin-reply-draft`, {
       method: "POST",
@@ -789,6 +881,13 @@ async function sendTwinReplyDraft(
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
+      // 401/404 == endpoint not deployed (or not reachable as S2S) → legacy DM.
+      // Any other status is a genuine draft-create failure: stay fail-closed.
+      if (resp.status === 401 || resp.status === 404) {
+        clog.warn(`[webhook/result] Twin reply-draft endpoint unavailable (${resp.status}) — falling back to approval DM, session ${sessionId}`);
+        await sendDigitalTwinApprovalDm(ctx, effectiveDelivery, attachments, sessionId);
+        return;
+      }
       clog.error(`[webhook/result] Twin reply-draft create failed: ${resp.status} ${text.slice(0, 200)} — staying silent, session ${sessionId}`);
       await deleteSession(sessionId);
       return;
@@ -3899,7 +3998,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.info(`[webhook/result] Digital Twin chose to ignore — dropping, no DM/post, session ${sessionId}`);
       await deleteSession(sessionId);
     } else if (isTwinDelivery(payload.twinDelivery)) {
-      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId);
+      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId, payload.attachments);
     } else {
       clog.info(`[webhook/result] Digital Twin stayed silent — no twin_deliver delivery (fail-closed), session ${sessionId}`);
       await deleteSession(sessionId);
