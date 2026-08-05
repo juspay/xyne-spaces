@@ -782,9 +782,12 @@ const SupportScreen = (): ReactElement => {
 
   // deskBoardId (channel preference first) rather than the row-derived
   // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: deskBoardId ?? '' }), {
-    enabled: filterOptionsEnabled && !!deskBoardId,
-  });
+  const [boardStages, boardStagesDetails] = useCachedQuery(
+    queries.stagesByBoard({ boardId: deskBoardId ?? '' }),
+    {
+      enabled: !!deskBoardId,
+    },
+  );
   const availableStages = useMemo(
     () =>
       boardStages?.map(s => ({
@@ -2495,6 +2498,7 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('stages', stages)
                                 }
                                 availableStages={availableStages}
+                                isLoading={!!deskBoardId && boardStagesDetails.type !== 'complete'}
                               />
                             </Popover.Content>
                           </Popover.Root>
@@ -2682,7 +2686,7 @@ const SupportScreen = (): ReactElement => {
                               const Icon =
                                 column.key === 'assignee'
                                   ? User
-                                  : column.key === 'dueDate'
+                                  : column.key === 'dueDate' || column.key === 'createdAt'
                                     ? CalendarDays
                                     : column.key === 'priority'
                                       ? BarChart4Icon
