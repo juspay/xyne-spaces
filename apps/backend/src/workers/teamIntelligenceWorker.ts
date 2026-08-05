@@ -1,8 +1,5 @@
 import Bull from 'bull';
-import {
-  TeamIntelligenceBatchStatus,
-  TeamIntelligenceUserIngestionStatus,
-} from '@prisma/client';
+import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { teamIntelligenceTeamSummaryQueue } from '@/team-intelligence/team-summary.queue';

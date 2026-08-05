@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@prisma/client';
+import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -417,7 +417,7 @@ export async function hydrateTicketBoundPayload<P extends { ticketId: string }>(
     return payload;
   }
 
-  const context = await buildTicketContext(refreshed);
+  const context = await buildTicketContext(refreshed as TicketLike);
   logger.info(
     `[ticket-context] hydrateTicketBoundPayload: resolved ticket ${payload.ticketId} → channelId=${refreshed.channelId ?? '∅'} boardId=${refreshed.boardId ?? '∅'} projectId=${refreshed.projectId ?? '∅'}`,
   );

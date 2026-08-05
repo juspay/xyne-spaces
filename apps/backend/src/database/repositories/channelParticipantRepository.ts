@@ -1,5 +1,6 @@
 import { BaseRepository } from './base';
-import { ChannelParticipant, ChannelRole, UserStatus, UserType } from '@prisma/client';
+import { ChannelParticipant } from '@prisma/client';
+import { ChannelRole, UserStatus, UserType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 
@@ -149,7 +150,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   }
 
   // Channel Participant specific methods
-  async addParticipant(channelId: string, userId: string, role: ChannelRole = 'MEMBER', isClosed: boolean = false): Promise<ChannelParticipant> {
+  async addParticipant(channelId: string, userId: string, role: ChannelRole = ChannelRole.MEMBER, isClosed: boolean = false): Promise<ChannelParticipant> {
     return await this.db.$transaction(async (tx) => {
       const now = new Date();
       const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(tx, channelId, now);
@@ -339,7 +340,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   async addParticipantsBatch(
     channelId: string,
     userIds: string[],
-    role: ChannelRole = 'MEMBER',
+    role: ChannelRole = ChannelRole.MEMBER,
     isClosed: boolean = false,
     overrideCutoffAt?: Date,
   ): Promise<{ addedCount: number; existingCount: number }> {

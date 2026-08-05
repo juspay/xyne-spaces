@@ -1,5 +1,5 @@
-import { ActivityClassification } from '@prisma/client';
 import { db } from '@/database/client';
+import { ActivityClassification } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { repositories } from '@/database/repositories/index';

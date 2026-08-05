@@ -1,10 +1,10 @@
 import { z } from 'zod';
+import { MessageType, ProjectType, UserType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { conversationService } from '@/services/conversationService';
-import { MessageType, ProjectType, UserType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getAutomationsBotUserId } from './automations-bot';
 import { logger } from '@/utils/logger';

@@ -1,10 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import {
-  InvitationResponse,
-  MeetingStatus,
-  type Prisma,
-  type RecurringCallParticipant,
-} from '@prisma/client';
+import { type Prisma, type RecurringCallParticipant } from '@prisma/client';
+import { InvitationResponse, MeetingStatus } from '@xyne/shared';
 import { DatabaseClient } from '../client';
 import { normalizeEmailList } from '@/utils/email';
 

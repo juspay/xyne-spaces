@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import {
   ActivityClassification,
   ActivityType,
@@ -5,9 +6,8 @@ import {
   BoardType,
   FormContextType,
   MessageType,
-  Prisma,
   TicketStageRequestStatus,
-} from '@prisma/client';
+} from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';

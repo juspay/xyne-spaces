@@ -1,5 +1,5 @@
-import { UserResponsibility } from '@prisma/client';
 import { db } from '@/database/client';
+import { UserResponsibility } from '@xyne/shared';
 
 export type KanbanCountsSnapshot = {
   id: string;

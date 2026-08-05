@@ -11,10 +11,11 @@
  */
 
 import { randomUUID } from 'crypto';
-import { PrismaClient,
+import { PrismaClient } from '@prisma/client';
+import {
   AccessType,
   AuthProvider,
-  UserStatus, 
+  UserStatus,
   SessionStatus,
   TicketStatus,
   TicketStatusV2,
@@ -49,8 +50,8 @@ import { PrismaClient,
   FormContextType,
   FormEntityType,
   DocType,
-  ProjectType
-} from '@prisma/client';
+  ProjectType,
+} from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 
 const prisma = new PrismaClient();

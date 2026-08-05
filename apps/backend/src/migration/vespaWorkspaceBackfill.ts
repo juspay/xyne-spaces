@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
+import { AccessType } from '@xyne/shared';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import vespaClient from '@/vespa/client';

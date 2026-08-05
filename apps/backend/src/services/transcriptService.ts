@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';

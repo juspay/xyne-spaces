@@ -12,8 +12,7 @@ import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { ActivityType } from '@prisma/client';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, ActivityType } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
 

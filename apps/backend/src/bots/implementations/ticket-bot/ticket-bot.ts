@@ -18,6 +18,7 @@ import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ConversationSummarizationService } from '@/services/conversationSummarizationService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import type { CreateMessageInput } from '@/database/repositories/messageRepository';
 
 // Define types for the bot
 type TicketBotInput = {
@@ -558,7 +559,7 @@ Provide a concise but informative summary:`;
       };
       logger.info(`[TicketBot] Creating message with data:`, messageData);
 
-      const createdMessage = await repositories.messages.create(messageData);
+      const createdMessage = await repositories.messages.create(messageData as CreateMessageInput);
       logger.info(`[TicketBot] Message created in database:`, createdMessage.messageId);
 
       // Broadcast the message to frontend

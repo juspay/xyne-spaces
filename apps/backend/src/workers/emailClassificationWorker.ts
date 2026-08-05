@@ -1,4 +1,5 @@
 import Bull from 'bull';
+import { ActivityClassification, ActivityType, EmailType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { emailClassificationQueue, type EmailClassificationJobData } from '@/queues/emailClassificationQueue';
 import { EmailClassificationService } from '@/services/emailClassificationService';
@@ -9,11 +10,11 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification, ActivityType, EmailType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { runWithContext } from '@/database/tenant/context';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
@@ -279,7 +280,7 @@ class EmailClassificationWorker {
 
       if (newAssignedTo && assignmentSucceeded) {
         void emitTicketUpdated({
-          ticket: updatedTicket,
+          ticket: updatedTicket as TicketLike,
           changes: { assignedTo: { previousValue: ticket.assignedTo ?? null, newValue: newAssignedTo } },
           performedById: systemActorId,
         });

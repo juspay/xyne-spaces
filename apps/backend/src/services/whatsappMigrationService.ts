@@ -1,4 +1,5 @@
 import { readFile, rm } from 'fs/promises';
+import { MessageDirection, ExternalEntityType, MessageType, ChannelRole } from '@xyne/shared';
 import { basename } from 'path';
 import { fileTypeFromBuffer } from 'file-type';
 import { DatabaseClient } from '@/database/client';
@@ -10,7 +11,6 @@ import { conversationService } from '@/services/conversationService';
 import { ExternalAttachmentService, type ExternalAttachment } from '@/services/externalAttachmentService';
 import type { UploadedFileResult } from '@/services/fileUploadService';
 import { logger } from '@/utils/logger';
-import { MessageDirection, ExternalEntityType } from '@prisma/client';
 import { cleanupWhatsAppExtraction, extractWhatsAppArchive } from '@/services/whatsapp/archive';
 import { parseWhatsAppChat, type ParsedWhatsAppChat } from '@/services/whatsapp/parser';
 import {
@@ -1341,7 +1341,7 @@ export class WhatsAppMigrationService {
           userId: senderUserId,
           content: messageContent,
           uploadedFiles,
-          msgType: 'USER',
+          msgType: MessageType.USER,
           createdAt: message.timestamp,
           isAddingParticipant: false,
           messageMetadata,
@@ -1389,7 +1389,7 @@ export class WhatsAppMigrationService {
         await channelParticipantRepository.addParticipantsBatch(
           input.targetChannelId,
           [...importedUserIds],
-          'MEMBER',
+          ChannelRole.MEMBER,
           false,
           new Date(),
         );

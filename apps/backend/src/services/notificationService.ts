@@ -10,14 +10,18 @@ import {
   createTag,
 } from '@/bots/json-ui';
 import type { FlowJson } from '@/bots/json-ui/types';
-import { ChannelScopeType, NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd, isDeskChannelType, type InitialMessageSummary } from '@xyne/shared';
+import { serializeInitialMessageMd,
+  isDeskChannelType,
+  type InitialMessageSummary,
+  ChannelScopeType,
+  NotificationDeliveryMethod,
+  NotificationType, MessageType } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -553,7 +557,7 @@ class NotificationService {
           conversationId: conversationId,
           senderId: botInfo.id,
           content: flowJsonString,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           hasAttachment: false,
         });
 
@@ -2003,7 +2007,7 @@ class NotificationService {
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',
         message: `You have been assigned to ticket "${ticket.title}"`,
-        type: 'TICKET_ASSIGNMENT',
+        type: NotificationType.TICKET_ASSIGNMENT,
         relatedEntityType: 'ticket',
         relatedEntityId: ticketId,
         actionUrl,

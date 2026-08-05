@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
 import { logger } from '@/utils/logger';
@@ -396,7 +397,7 @@ export class NotificationController {
       await notificationService.createNotification(userId, {
         title: 'Test Notification',
         message: 'This is a test notification from Xyne Spaces',
-        type: 'WORKFLOW_COMPLETION',
+        type: NotificationType.WORKFLOW_COMPLETION,
         relatedEntityType: 'test',
         relatedEntityId: 'test-' + Date.now(),
         actionUrl: `/${req.user!.workspaceId}/notifications`,

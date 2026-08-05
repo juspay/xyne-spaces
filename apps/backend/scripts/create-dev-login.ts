@@ -18,7 +18,8 @@
  * Re-running with the same email resets that account's password rather than failing.
  */
 
-import { PrismaClient, AuthProvider, UserStatus, WorkspaceRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AuthProvider, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();

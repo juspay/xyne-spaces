@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { TicketReferenceRelation } from '@prisma/client';
+import { TicketReferenceRelation } from '@xyne/shared';
 import { ApiResponse } from '@/types/express';
 import { DatabaseClient } from '@/database/client';
 import { logger as baseLogger } from '@/utils/logger';

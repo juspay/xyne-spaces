@@ -10,7 +10,8 @@ import { SubApp } from '@/vespa/src/types';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 import type { VespaFileDocument, VespaChunkMeta } from '@/vespa/src/types';
-import { CollectionRole, CollectionPermission, IngestionStatus, Collection } from '@prisma/client';
+import { CollectionPermission, Collection } from '@prisma/client';
+import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
 import {
@@ -246,7 +247,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
         const { role } = await resolveCollectionAccess(userId, {
             ownerId: collection.ownerId,
             isPrivate: collection.isPrivate,
-            permissions: collection.permissions,
+            permissions: collection.permissions as Parameters<typeof resolveCollectionAccess>[1]['permissions'],
         });
         return { role, collection };
     }

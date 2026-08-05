@@ -1,9 +1,9 @@
 import { UserRepository } from '../../../../database/repositories/users';
+import { AuthProvider } from '@xyne/shared';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
 import { config } from '../../../../config/env';
-import { AuthProvider } from '@prisma/client';
 
 import { logger } from '../../../../utils/logger';
 import { getAllBotTokens } from '../../../../migration/slack/slackMigrationBotConfig';

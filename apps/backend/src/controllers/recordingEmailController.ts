@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { CallType, ChannelType, RecordingType } from '@prisma/client';
+import { CallType, ChannelType, RecordingType } from '@xyne/shared';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';

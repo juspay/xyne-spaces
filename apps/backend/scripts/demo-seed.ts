@@ -26,20 +26,7 @@
  * creating a second copy. Use DEMO_WIPE=1 to start over.
  */
 
-import {
-  PrismaClient,
-  ChannelType,
-  ChannelScopeType,
-  ChannelVisibility,
-  ChannelRole,
-  MessageType,
-  AuthProvider,
-  UserStatus,
-  OrgRole,
-  WorkspaceRole,
-  TicketStatusV2,
-  TicketPriority,
-} from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 import { hashPassword } from '../src/utils/passwordUtils';
 import {
@@ -48,6 +35,14 @@ import {
   MessageType as SharedMessageType,
   TicketStatusV2 as SharedTicketStatusV2,
   TicketPriority as SharedTicketPriority,
+  ChannelType,
+  ChannelScopeType,
+  ChannelVisibility,
+  ChannelRole,
+  AuthProvider,
+  UserStatus,
+  OrgRole,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { CHANNELS, DEMO_USERS, TICKETS, type Line } from './demo-seed-content';
 

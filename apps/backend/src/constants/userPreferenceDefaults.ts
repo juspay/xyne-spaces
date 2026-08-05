@@ -1,4 +1,4 @@
-import { NotificationLevel } from '@prisma/client';
+import { NotificationLevel } from '@xyne/shared';
 
 export const USER_PREFERENCE_NOTIFICATION_DEFAULTS: {
   globalDesktopNotificationLevel: NotificationLevel;

@@ -1,5 +1,5 @@
-import { Prisma, PrismaClient, ProjectType, TicketStatusV2 } from '@prisma/client';
-import { sanitizeProjectCode } from '@xyne/shared';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { sanitizeProjectCode, ProjectType, TicketStatusV2 } from '@xyne/shared';
 import { ensureGeneralChannelForWorkspace } from './workspaceGeneralChannel';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;

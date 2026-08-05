@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
+import { CallType } from '@xyne/shared';
 import { z } from 'zod';
-import { CallType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';

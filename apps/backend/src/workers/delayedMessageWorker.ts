@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification } from '@prisma/client';
+import { ActivityClassification } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';

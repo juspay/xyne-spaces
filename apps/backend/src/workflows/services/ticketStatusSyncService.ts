@@ -2,10 +2,10 @@
 // Implements "any success wins" logic for workflows within a ticket
 
 import { AI_STAGES } from '../types/workflow-enums';
+import { TicketStatusV2 } from '@xyne/shared';
 import { repositories } from '@/database/repositories'
 import { ticketService } from '@/services/ticketService';
 import { logger } from '@/utils/logger'
-import { TicketStatusV2 } from '@prisma/client'
 import { DatabaseClient } from '@/database/client'
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
