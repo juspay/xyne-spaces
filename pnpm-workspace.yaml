@@ -17,6 +17,7 @@ packages:
   - apps/xyne-claw-auth/frontend
 
   - packages/shared
+  - packages/storage
   - packages/icons
   - packages/framework
   - packages/kata-sdk

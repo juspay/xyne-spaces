@@ -20,7 +20,7 @@ import {
 } from '@/services/whatsapp/userResolver';
 import { queueWhatsAppChannelVespaJob } from '@/services/whatsapp/vespa';
 import { whatsAppMigrationProgressService } from '@/services/whatsappMigrationProgressService';
-import { gcsService } from '@/services/gcsService';
+import { storageService } from '@/services/storage';
 import {
   queueJiraPurgeAttachmentVespaDeleteJob,
   queueJiraPurgeMessageVespaDeleteJob,
@@ -1012,10 +1012,10 @@ export class WhatsAppMigrationService {
           queueJiraPurgeAttachmentVespaDeleteJob(attachment.id, params.actorUserId, params.workspaceId);
           try {
             if (attachment.url) {
-              await gcsService.deleteFile(attachment.url);
+              await storageService.deleteFile(attachment.url);
             }
             if (attachment.thumbnailUrl) {
-              await gcsService.deleteFile(attachment.thumbnailUrl);
+              await storageService.deleteFile(attachment.thumbnailUrl);
             }
           } catch (error) {
             logger.warn('[WhatsAppMigration] Failed to cleanup attachment blob during purge', {

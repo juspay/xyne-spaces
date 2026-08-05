@@ -15,31 +15,30 @@ import { createWriteStream } from 'fs';
 import { PassThrough } from 'stream';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
-import { config } from '../../config/env';
-import { logger } from '../../utils/logger';
-import { generateFilePath } from './pathUtils';
-import type { StorageService, UploadOptions, UploadResult, DeleteResult, FileMetadata } from './types';
+
+import { logger } from './logger.js';
+import { generateFilePath } from './pathUtils.js';
+import type { StorageService, S3StorageConfig, UploadOptions, UploadResult, DeleteResult, FileMetadata } from './types.js';
 
 export class S3StorageService implements StorageService {
   private client: S3Client;
   private bucketName: string;
 
-  constructor(bucketName?: string) {
-    this.bucketName = bucketName || config.s3.bucketName;
+  constructor(cfg: S3StorageConfig, bucketName?: string) {
+    this.bucketName = bucketName || cfg.bucketName;
 
-    const clientConfig: S3ClientConfig = { region: config.s3.region };
+    const clientConfig: S3ClientConfig = { region: cfg.region, maxAttempts: 3 };
 
-    if (config.s3.accessKeyId) {
+    if (cfg.accessKeyId && cfg.secretAccessKey) {
       clientConfig.credentials = {
-        accessKeyId: config.s3.accessKeyId,
-        secretAccessKey: config.s3.secretAccessKey,
+        accessKeyId: cfg.accessKeyId,
+        secretAccessKey: cfg.secretAccessKey,
       };
     }
 
-    if (config.s3.endpoint) {
-      clientConfig.endpoint = config.s3.endpoint;
-      clientConfig.forcePathStyle = true; // for MinIO/LocalStack
-      // Disable default request checksums — MinIO doesn't support them
+    if (cfg.endpoint) {
+      clientConfig.endpoint = cfg.endpoint;
+      clientConfig.forcePathStyle = true;
       clientConfig.requestChecksumCalculation = 'WHEN_REQUIRED';
       clientConfig.responseChecksumValidation = 'WHEN_REQUIRED';
     }
@@ -103,7 +102,7 @@ export class S3StorageService implements StorageService {
   }
 
 
-  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<UploadResult> {
+  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult> {
     if (!buffer || buffer.length === 0) throw new Error('File buffer is empty or invalid');
     if (!options.path) throw new Error('Path is required');
     if (!options.contentType) throw new Error('Content type is required');
@@ -118,11 +117,41 @@ export class S3StorageService implements StorageService {
       options.path,
       options.contentType,
       options.metadata,
-      options.cacheControl
+      options.cacheControl,
+      options.ifNotExists
     );
 
     logger.info(`File uploaded to S3: ${options.path}`);
     return { filename: options.path, path: options.path, size: buffer.length };
+  }
+
+  async uploadStreamToPath(
+    stream: NodeJS.ReadableStream,
+    options: { path: string; contentType: string; metadata?: Record<string, string>; ifNotExists?: boolean; resumable?: boolean; timeoutMs?: number }
+  ): Promise<UploadResult> {
+    if (!stream) throw new Error('File stream is empty or invalid');
+    if (!options.path) throw new Error('Path is required');
+    if (!options.contentType) throw new Error('Content type is required');
+
+    let size = 0;
+    const countingStream = new PassThrough();
+    countingStream.on('data', (chunk: Buffer | string) => {
+      size += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+    });
+    stream.on('error', (error) => countingStream.destroy(error));
+    stream.pipe(countingStream);
+
+    await this.uploadBody(
+      countingStream,
+      options.path,
+      options.contentType,
+      options.metadata,
+      undefined,
+      options.ifNotExists
+    );
+
+    logger.info(`Stream uploaded to S3 at exact path: ${options.path}`, { size });
+    return { filename: options.path, path: options.path, size };
   }
 
   async deleteFile(filename: string): Promise<DeleteResult> {
@@ -225,8 +254,8 @@ export class S3StorageService implements StorageService {
     return resp.Body as NodeJS.ReadableStream;
   }
 
-  async listFiles(prefix: string): Promise<Array<{ name: string; contentType?: string }>> {
-    const results: Array<{ name: string; contentType?: string }> = [];
+  async listFiles(prefix: string): Promise<Array<{ name: string; contentType?: string; size?: number; updated?: Date }>> {
+    const results: Array<{ name: string; contentType?: string; size?: number; updated?: Date }> = [];
     let continuationToken: string | undefined;
 
     do {
@@ -238,7 +267,11 @@ export class S3StorageService implements StorageService {
 
       for (const obj of resp.Contents ?? []) {
         if (obj.Key) {
-          results.push({ name: obj.Key });
+          results.push({
+            name: obj.Key,
+            ...(obj.Size !== undefined ? { size: obj.Size } : {}),
+            ...(obj.LastModified ? { updated: obj.LastModified } : {}),
+          });
         }
       }
 
@@ -298,7 +331,6 @@ export class S3StorageService implements StorageService {
   }
 
   private sanitizeMetadata(metadata?: Record<string, string>): Record<string, string> | undefined {
-    // S3 metadata is sent as HTTP headers — only ASCII is allowed.
     return metadata
       ? Object.fromEntries(Object.entries(metadata).map(([k, v]) => [k, v.replace(/[^\x20-\x7E]/g, '_')]))
       : undefined;
@@ -309,7 +341,8 @@ export class S3StorageService implements StorageService {
     filePath: string,
     contentType: string,
     metadata?: Record<string, string>,
-    cacheControl: string = 'public, max-age=31536000'
+    cacheControl: string = 'public, max-age=31536000',
+    ifNotExists?: boolean
   ): Promise<void> {
     const upload = new Upload({
       client: this.client,
@@ -320,9 +353,8 @@ export class S3StorageService implements StorageService {
         ContentType: contentType,
         CacheControl: cacheControl,
         Metadata: this.sanitizeMetadata(metadata),
+        ...(ifNotExists ? { IfNoneMatch: '*' } : {}),
       },
-      // Keep multipart upload memory low for large streaming uploads:
-      // in-flight buffered bytes ~= queueSize * partSize.
       queueSize: 2,
       partSize: 5 * 1024 * 1024,
       leavePartsOnError: false,

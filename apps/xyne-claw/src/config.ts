@@ -67,6 +67,22 @@ export const GCS = {
   fakeHost: normalizeFakeGcsHost(),
 } as const;
 
+/**
+ * Object storage provider selection — 'gcs' (default) or 's3'. Consumed by
+ * storage.ts via the shared @xyne/storage factory. Env names match the Spaces
+ * backend (config/env.ts) and claw-auth so one set of envs configures all
+ * three apps: STORAGE_PROVIDER, AWS_REGION, AWS_ACCESS_KEY_ID,
+ * AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME, S3_ENDPOINT.
+ */
+export const STORAGE = {
+  provider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
+  s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
+  s3BucketName: process.env["S3_BUCKET_NAME"] ?? GCS.bucketName,
+  s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
+  s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
+  s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
+} as const;
+
 function normalizeFakeGcsHost(): string {
   if (process.env["NODE_ENV"] === "production") return "";
   const raw = process.env["FAKE_GCS_HOST"]?.trim() ?? "";
