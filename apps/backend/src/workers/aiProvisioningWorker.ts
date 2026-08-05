@@ -236,12 +236,6 @@ class AIProvisioningWorker {
     // belong to the person within the organization, so all key provisioning
     // uses the stable org-member ID.
     const canonicalProvisioningUserId = userPayload.spacesOrgMemberId;
-    if (!canonicalProvisioningUserId) {
-      throw new ClawSpacesSyncError(
-        `Cannot provision AI credentials without an org member id for Spaces user ${userPayload.spacesUserId}`,
-        { retryable: false },
-      );
-    }
     const { litellmUserId } = await litellmProvisioningClient.createUser({
       orgId: userPayload.spacesOrgId,
       userId: canonicalProvisioningUserId,
@@ -674,6 +668,12 @@ class AIProvisioningWorker {
       throw new ClawSpacesSyncError(`User not found for AI provisioning: ${userId}`, {
         retryable: false,
       });
+    }
+    if (!user.orgMemberId.trim()) {
+      throw new ClawSpacesSyncError(
+        `Cannot provision AI credentials without an org member id for Spaces user ${user.id}`,
+        { retryable: false },
+      );
     }
 
     return {

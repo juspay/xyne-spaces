@@ -336,15 +336,21 @@ async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Pr
 async function resolveHeadlessIdentityContext(
   userId: string,
   workspaceId: string,
-): Promise<{ spacesWorkspaceId: string; spacesOrgId?: string; spacesOrgMemberId?: string }> {
+): Promise<{ spacesWorkspaceId: string; spacesOrgId: string; spacesOrgMemberId: string }> {
   const [workspace, user] = await Promise.all([
     db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
     db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } }),
   ]);
+  if (!workspace?.orgId) {
+    throw new Error(`[RUN_AGENT] workspace ${workspaceId} has no organization`);
+  }
+  if (!user?.orgMemberId) {
+    throw new Error(`[RUN_AGENT] user ${userId} has no orgMemberId`);
+  }
   return {
     spacesWorkspaceId: workspaceId,
-    ...(workspace?.orgId ? { spacesOrgId: workspace.orgId } : {}),
-    ...(user?.orgMemberId ? { spacesOrgMemberId: user.orgMemberId } : {}),
+    spacesOrgId: workspace.orgId,
+    spacesOrgMemberId: user.orgMemberId,
   };
 }
 

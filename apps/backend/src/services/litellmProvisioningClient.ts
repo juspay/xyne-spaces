@@ -83,9 +83,8 @@ export interface StoreUserKeyParams {
   userId: string;
   orgId: string;
   spacesOrgId: string;
-  /** Additive fields: older claw-auth versions safely ignore these. */
-  spacesWorkspaceId?: string;
-  spacesOrgMemberId?: string;
+  spacesWorkspaceId: string;
+  spacesOrgMemberId: string;
   litellmUserId: string;
   teamId: string;
   key: string;
@@ -227,8 +226,8 @@ class LiteLLMProvisioningClient {
       userId: params.userId,
       orgId: params.orgId,
       spacesOrgId: params.spacesOrgId,
-      ...(params.spacesWorkspaceId ? { spacesWorkspaceId: params.spacesWorkspaceId } : {}),
-      ...(params.spacesOrgMemberId ? { spacesOrgMemberId: params.spacesOrgMemberId } : {}),
+      spacesWorkspaceId: params.spacesWorkspaceId,
+      spacesOrgMemberId: params.spacesOrgMemberId,
       litellmUserId: params.litellmUserId,
       teamId: params.teamId,
       key: params.key,

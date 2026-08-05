@@ -229,9 +229,9 @@ export interface S2SRunAgentRequest {
   userId: string;
   userName: string;
   userEmail: string;
-  spacesWorkspaceId?: string;
-  spacesOrgId?: string;
-  spacesOrgMemberId?: string;
+  spacesWorkspaceId: string;
+  spacesOrgId: string;
+  spacesOrgMemberId: string;
   callbackUrl: string;
   conversationId?: string;
   channelId?: string;
@@ -1274,9 +1274,9 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
         agentSlug: req.agentSlug,
         task: req.task,
         userId: req.userId,
-        ...(req.spacesWorkspaceId ? { spacesWorkspaceId: req.spacesWorkspaceId } : {}),
-        ...(req.spacesOrgId ? { spacesOrgId: req.spacesOrgId } : {}),
-        ...(req.spacesOrgMemberId ? { spacesOrgMemberId: req.spacesOrgMemberId } : {}),
+        spacesWorkspaceId: req.spacesWorkspaceId,
+        spacesOrgId: req.spacesOrgId,
+        spacesOrgMemberId: req.spacesOrgMemberId,
         callbackUrl: req.callbackUrl,
         ...(req.conversationId ? { conversationId: req.conversationId } : {}),
         ...(req.channelId ? { channelId: req.channelId } : {}),
@@ -1388,9 +1388,9 @@ export async function runClawAgent(
 }
 
 async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Promise<{
-  workspaceId?: string;
-  orgId?: string;
-  orgMemberId?: string;
+  workspaceId: string;
+  orgId: string;
+  orgMemberId: string;
 }> {
   // A server-initiated event has no browser cookie. Resolve from the channel
   // and actor records rather than trusting caller-supplied identity fields.
@@ -1404,10 +1404,15 @@ async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Pro
     : null;
   const orgId = req.spacesOrgId ?? workspace?.orgId;
   const orgMemberId = req.spacesOrgMemberId ?? actor?.orgMemberId;
+  if (!workspaceId || !orgId || !orgMemberId) {
+    throw new Error(
+      `[ClawAgentService] Cannot dispatch a headless Claw event without workspace, org, and org-member identity for user ${req.userId}`,
+    );
+  }
   return {
-    ...(workspaceId ? { workspaceId } : {}),
-    ...(orgId ? { orgId } : {}),
-    ...(orgMemberId ? { orgMemberId } : {}),
+    workspaceId,
+    orgId,
+    orgMemberId,
   };
 }
 
