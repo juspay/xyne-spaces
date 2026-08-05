@@ -21,6 +21,20 @@ import { logger } from '@/utils/logger';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const activeTicketFilter = (assigneeId?: string | null): Prisma.Sql => {
+  const assigneeCondition = assigneeId
+    ? Prisma.sql`AND t."assignedTo" = ${assigneeId}`
+    : Prisma.sql``;
+
+  return Prisma.sql`AND EXISTS (
+    SELECT 1
+    FROM "public"."tickets" t
+    WHERE t.id = ta."ticketId"
+      AND t."isArchived" = false
+      ${assigneeCondition}
+  )`;
+};
+
 export class DeskMetricsRepository {
   private getDbInstance() {
     const replica = readReplicaDb;
@@ -121,9 +135,7 @@ export class DeskMetricsRepository {
     )`;
 
     // Cohort: tickets created in range. Optionally filtered by assignee and/or custom field.
-    const assigneeJoin = assigneeId
-      ? Prisma.sql`JOIN "public"."tickets" tf ON tf.id = ta."ticketId" AND tf."assignedTo" = ${assigneeId}`
-      : Prisma.sql``;
+    const ticketFilter = activeTicketFilter(assigneeId);
 
     let customFieldExists: Prisma.Sql = Prisma.sql``;
     if (customFieldFilter && customFieldFilter.keys.length > 0) {
@@ -166,10 +178,10 @@ export class DeskMetricsRepository {
       cohort AS (
         SELECT ta."ticketId", ta."timestamp" AS created_at
         FROM "public"."ticket_activities" ta
-        ${assigneeJoin}
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'TICKET_CREATED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+          ${ticketFilter}
           ${customFieldExists}
       )`;
 
@@ -393,6 +405,7 @@ export class DeskMetricsRepository {
     const replyActorFilter = assigneeId
       ? Prisma.sql`AND ta."updatedBy" = ${assigneeId}`
       : Prisma.sql``;
+    const ticketFilter = activeTicketFilter();
 
     const [ownershipRows, replyRows, stageRows] = await Promise.all([
       db.$queryRaw<
@@ -468,6 +481,7 @@ export class DeskMetricsRepository {
           WHERE ta."channelId" = ${channelId}
             AND ta."activityType" = 'EMAIL_SENT'
             AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+            ${ticketFilter}
             ${replyActorFilter}
             ${customFieldExists}
           GROUP BY ta."updatedBy", COALESCE(u."displayName", u.name)
@@ -564,9 +578,7 @@ export class DeskMetricsRepository {
     assigneeId?: string | null,
     customFieldExists: Prisma.Sql = Prisma.sql``,
   ): Promise<number> {
-    const assigneeFilter = assigneeId
-      ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
-      : Prisma.sql``;
+    const ticketFilter = activeTicketFilter(assigneeId);
     const rows = await db.$queryRaw<Array<{ count: number }>>(
       Prisma.sql`
         SELECT COUNT(*)::int AS count
@@ -574,7 +586,7 @@ export class DeskMetricsRepository {
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'EMAIL_SENT'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-          ${assigneeFilter}
+          ${ticketFilter}
           ${customFieldExists}
       `,
     );
@@ -625,9 +637,7 @@ export class DeskMetricsRepository {
     assigneeId?: string | null,
     customFieldExists: Prisma.Sql = Prisma.sql``,
   ): Promise<{ avgScore: number | null; scoredResponses: number; good: number; bad: number }> {
-    const assigneeFilter = assigneeId
-      ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
-      : Prisma.sql``;
+    const ticketFilter = activeTicketFilter(assigneeId);
     const rows = await db.$queryRaw<
       Array<{ avg_score: number | null; scored_responses: number; good: number; bad: number }>
     >(
@@ -641,7 +651,7 @@ export class DeskMetricsRepository {
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'CSAT_RECEIVED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-          ${assigneeFilter}
+          ${ticketFilter}
           ${customFieldExists}
       `,
     );
@@ -671,9 +681,7 @@ export class DeskMetricsRepository {
       ? Prisma.sql`to_char(date_trunc('hour', (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
       : Prisma.sql`to_char(date_trunc('day',  (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
 
-    const assigneeFilter = assigneeId
-      ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
-      : Prisma.sql``;
+    const ticketFilter = activeTicketFilter(assigneeId);
 
     const [openedRows, closedRows] = await Promise.all([
       db.$queryRaw<Array<{ day: string; count: number }>>(
@@ -683,7 +691,7 @@ export class DeskMetricsRepository {
           WHERE ta."channelId" = ${channelId}
             AND ta."activityType" = 'TICKET_CREATED'
             AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-            ${assigneeFilter}
+            ${ticketFilter}
             ${customFieldExists}
           GROUP BY 1
         `,
@@ -695,7 +703,7 @@ export class DeskMetricsRepository {
             SELECT ta."ticketId", MAX(ta."timestamp") AS first_resolved
             FROM "public"."ticket_activities" ta
             WHERE ta."channelId" = ${channelId} AND ${resolvedPredicate}
-              ${assigneeFilter}
+              ${ticketFilter}
               ${customFieldExists}
             GROUP BY ta."ticketId"
           ) r
