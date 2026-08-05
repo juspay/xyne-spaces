@@ -16,6 +16,7 @@ import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
@@ -306,22 +307,28 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     const toRemove = oldTagNames.filter(t => !newTags.includes(t));
 
     toAdd.forEach(tagName => {
-      zero.mutate(
-        mutators.ticketTagV2.create({
-          ticketId: ticket.id,
-          tagId: uuidv4(),
-          projectTagId: uuidv4(),
-          mappingId: uuidv4(),
-          projectId: ticket.projectId,
-          tagName,
-        }),
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticketTagV2.create({
+            ticketId: ticket.id,
+            tagId: uuidv4(),
+            projectTagId: uuidv4(),
+            mappingId: uuidv4(),
+            projectId: ticket.projectId,
+            tagName,
+          }),
+        ),
+        'Failed to add tag',
       );
     });
 
     toRemove.forEach(tagName => {
       const tag = tags?.find(t => t.name === tagName);
       if (tag?.id) {
-        zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id }));
+        void surfaceMutationError(
+          zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id })),
+          'Failed to remove tag',
+        );
       }
     });
   };
@@ -340,23 +347,29 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           : assigneeUserId
             ? { assignedTo: null }
             : { assignedTo: null, userGroupId: '' };
-    zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        ...updates,
-        updatedAt: Date.now(),
-      }),
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          ...updates,
+          updatedAt: Date.now(),
+        }),
+      ),
+      'Failed to update assignee',
     );
     setIsEditingAssignee(false);
   };
 
   const handlePriorityChange = (value: string | null) => {
-    zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        priority: value as typeof ticket.priority,
-        updatedAt: Date.now(),
-      }),
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          priority: value as typeof ticket.priority,
+          updatedAt: Date.now(),
+        }),
+      ),
+      'Failed to update priority',
     );
     setIsEditingPriority(false);
   };

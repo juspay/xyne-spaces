@@ -85,6 +85,7 @@ import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
 import { cn } from '../../../utils/classNames';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
@@ -1555,15 +1556,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     async (
       update: Parameters<typeof mutators.ticket.update>[0],
       errorFallback = 'Failed to update ticket',
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       try {
         const result = await zero.mutate(mutators.ticket.update(update)).server;
         if (result.type === 'error') {
           toast.error(result.error.message || errorFallback);
+          return false;
         }
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         toast.error(message || errorFallback);
+        return false;
       }
     },
     [zero],
@@ -1749,8 +1753,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           void navigate(`${basePath}/${channelId}/${sourceTicketXyneId}`);
         }
       }
-    } catch {
-      toast.error('Failed to unmerge ticket');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to unmerge ticket'));
     }
   };
 
@@ -2225,13 +2229,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
 
     // Default: Direct stage update
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         stageName,
         ...(newStatus && { statusV2: newStatus }),
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to update stage',
     );
   };
 
@@ -2318,7 +2323,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       updateData.eta = newETADate.getTime();
     }
 
-    void zero.mutate(mutators.ticket.update(updateData));
+    void applyTicketUpdate(updateData, 'Failed to update due date');
     setEditingETA(false);
   };
 
@@ -2334,12 +2339,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
     zero.mutate(mutators.ticketStageRequest.deleteByTicketId({ ticketId: ticket.id }));
 
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         boardId: pendingBoardChange,
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to change board',
     );
 
     setShowBoardChangeConfirmDialog(false);
@@ -2406,14 +2412,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
     setShowArchiveConfirmDialog(false);
 
-    void zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        isArchived: true,
-        updatedAt: Date.now(),
-      }),
-    );
-    toast.success('Ticket archived successfully');
+    void applyTicketUpdate(
+      { id: ticket.id, isArchived: true, updatedAt: Date.now() },
+      'Failed to archive ticket',
+    ).then(ok => {
+      if (ok) toast.success('Ticket archived successfully');
+    });
   };
 
   const handleMinimizeExpandedView = (): void => {

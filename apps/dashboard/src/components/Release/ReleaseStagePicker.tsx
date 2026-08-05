@@ -5,6 +5,7 @@ import { Popover } from '../ui/Popover/Popover';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { getStageColor } from '../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { cn } from '../../utils/classNames';
 import { StagePicker } from '../Tickets/TicketListView/StagePicker';
 
@@ -72,13 +73,16 @@ export function ReleaseStagePicker({
         // Caller handles persistence — skip ticket.update entirely.
         onSelect(next);
       } else {
-        void zero.mutate(
-          mutators.ticket.update({
-            id: ticketId,
-            stageName: next.name,
-            ...(next.defaultTicketStatusV2 && { statusV2: next.defaultTicketStatusV2 }),
-            updatedAt: Date.now(),
-          }),
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticket.update({
+              id: ticketId,
+              stageName: next.name,
+              ...(next.defaultTicketStatusV2 && { statusV2: next.defaultTicketStatusV2 }),
+              updatedAt: Date.now(),
+            }),
+          ),
+          'Failed to update stage',
         );
       }
       onAfterChange?.(next.name);
