@@ -330,6 +330,7 @@ async function createGoogleRecordingDocAuthUrl(
   userId: string,
   workspaceId: string,
   returnPath: string,
+  platform: ProviderPlatform,
   req: Request,
 ): Promise<string> {
   const user = await db.user.findFirst({
@@ -345,7 +346,7 @@ async function createGoogleRecordingDocAuthUrl(
     workspaceId,
     expectedEmail: user.email.trim().toLowerCase(),
     returnPath,
-    platform: 'web',
+    platform,
     timestamp: Date.now(),
   });
   return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
@@ -585,6 +586,7 @@ router.post(
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
+    const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
     if (!returnPath) {
       res.status(400).json({ error: 'A valid return path is required' });
       return;
@@ -594,6 +596,7 @@ router.post(
         req.user!.id,
         req.user!.workspaceId,
         returnPath,
+        platform,
         req,
       );
       res.json({ authUrl });

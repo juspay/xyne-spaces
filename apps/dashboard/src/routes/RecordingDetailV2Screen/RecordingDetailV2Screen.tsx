@@ -117,6 +117,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
+  const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [pendingSummaryTemplateId, setPendingSummaryTemplateId] =
@@ -192,6 +193,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     if (connected) {
       toast.success('Google Docs connected');
+      setGoogleDocPreviewNonce(nonce => nonce + 1);
       setShowGoogleDocPreviewModal(true);
     }
     if (connectionError) {
@@ -928,6 +930,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           testId='google-doc-preview-dialog'
         >
           <GoogleDocPreviewModal
+            key={googleDocPreviewNonce}
             recording={recording}
             onClose={() => setShowGoogleDocPreviewModal(false)}
             onExport={exportGoogleDoc}

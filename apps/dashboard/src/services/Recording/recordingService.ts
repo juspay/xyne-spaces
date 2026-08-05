@@ -285,10 +285,13 @@ class RecordingService {
     return response.data;
   }
 
-  async connectGoogleDoc(returnPath: string): Promise<string> {
+  async connectGoogleDoc(
+    returnPath: string,
+    platform: 'electron' | 'web' = 'web',
+  ): Promise<string> {
     const response = await apiInstance.post<GoogleRecordingDocConnectionResponse>(
       '/integrations/google/connect/recording-doc/init',
-      { returnPath },
+      { returnPath, platform },
     );
     return response.data.authUrl;
   }

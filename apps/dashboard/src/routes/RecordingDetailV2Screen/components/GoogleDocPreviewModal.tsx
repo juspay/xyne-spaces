@@ -42,12 +42,22 @@ export function GoogleDocPreviewModal({
     };
   }, [recording.externalId]);
 
-  const connectGoogleCalendar = async (): Promise<void> => {
+  const connectGoogleDoc = async (): Promise<void> => {
     setIsConnecting(true);
     try {
-      const returnPath = `${window.location.pathname}${window.location.search}`;
-      const authUrl = await recordingService.connectGoogleDoc(returnPath);
-      window.location.assign(authUrl);
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      const returnPath =
+        currentPath.startsWith('/') && !currentPath.startsWith('//') ? currentPath : '/recordings';
+      const isElectron = typeof window.electronAPI?.openExternal === 'function';
+      const authUrl = await recordingService.connectGoogleDoc(
+        returnPath,
+        isElectron ? 'electron' : 'web',
+      );
+      if (isElectron) {
+        window.electronAPI?.openExternal(authUrl);
+      } else {
+        window.location.assign(authUrl);
+      }
     } catch (error) {
       toast.error(
         (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
@@ -128,7 +138,7 @@ export function GoogleDocPreviewModal({
               <Button
                 size='sm'
                 variant='outline'
-                onClick={() => void connectGoogleCalendar()}
+                onClick={() => void connectGoogleDoc()}
                 disabled={isConnecting}
                 loading={isConnecting}
                 data-track-category='RecordingDetailV2'
