@@ -1472,6 +1472,12 @@ export class ChannelController {
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
+      let googlePlayApps: Array<{
+        id: string;
+        displayName: string;
+        packageName: string | null;
+        isActive: boolean;
+      }> = [];
       if (source?.sourceType === 'app-desk') {
         const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
         const installedApp = await db.installedApps.findUnique({
@@ -1484,17 +1490,28 @@ export class ChannelController {
         );
       } else if (source?.sourceType === 'slack-desk') {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (source?.sourceType === GOOGLE_PLAY_REVIEWS_SOURCE_TYPE) {
+      } else if (source?.sourceType === 'google-play-reviews') {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, sourceType: GOOGLE_PLAY_REVIEWS_SOURCE_TYPE },
-          select: { displayName: true, isActive: true },
+          where: { channelId, sourceType: 'google-play-reviews' },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
           orderBy: { createdAt: 'asc' },
         });
         isConnected = reviewSources.some(reviewSource => reviewSource.isActive);
-        connectedLabel =
-          reviewSources.length === 1
-            ? reviewSources[0].displayName
-            : `${reviewSources.length} Google Play apps`;
+        googlePlayApps = reviewSources.map(reviewSource => ({
+          id: reviewSource.id,
+          displayName: reviewSource.displayName,
+          packageName: reviewSource.externalIdentifier,
+          isActive: reviewSource.isActive,
+        }));
+        connectedLabel = reviewSources
+          .map(reviewSource => reviewSource.displayName ?? reviewSource.externalIdentifier)
+          .filter(Boolean)
+          .join(', ');
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1502,7 +1519,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
         return;
       }
 
@@ -1519,12 +1536,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });

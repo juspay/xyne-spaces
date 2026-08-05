@@ -167,10 +167,7 @@ const SlackComposer = ({
     setSending(true);
     try {
       const html = editor.getHTML();
-      const replyBase =
-        variant === 'app'
-          ? '/integrations/app-desk'
-          : '/integrations/slack-desk';
+      const replyBase = variant === 'app' ? '/integrations/app-desk' : '/integrations/slack-desk';
       await apiInstance.post(`${replyBase}/${conversationId}/reply`, {
         body: html,
         ...(attachments.length > 0 && { attachmentIds: attachments.map(a => a.id) }),
@@ -402,39 +399,30 @@ const SlackComposer = ({
               data-track-name='attach-file'
               aria-label='Attach files'
             >
-              {uploading ? (
-                <Loader2 size={16} className='animate-spin' />
-              ) : (
-                <Paperclip size={16} />
-              )}
+              {uploading ? <Loader2 size={16} className='animate-spin' /> : <Paperclip size={16} />}
             </button>
             <EmojiPickerButton onEmojiSelect={handleEmojiSelect} disabled={sending} />
           </div>
-          <div className='flex items-center gap-2'>
-            {(() => {
-              const canSend =
-                (!!content || attachments.length > 0) &&
-                !sending &&
-                !uploading;
-              return (
-                <button
-                  type='button'
-                  onClick={() => void handleSend()}
-                  disabled={!canSend}
-                  className={`p-2 rounded-md transition-all ${
-                    canSend
-                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-                  }`}
-                  data-track-category='slack-composer'
-                  data-track-name='send-reply'
-                  aria-label='Send reply'
-                >
-                  {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
-                </button>
-              );
-            })()}
-          </div>
+          {(() => {
+            const canSend = (!!content || attachments.length > 0) && !sending && !uploading;
+            return (
+              <button
+                type='button'
+                onClick={() => void handleSend()}
+                disabled={!canSend}
+                className={`p-2 rounded-md transition-all ${
+                  canSend
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+                }`}
+                data-track-category='slack-composer'
+                data-track-name='send-reply'
+                aria-label='Send reply'
+              >
+                {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
+              </button>
+            );
+          })()}
         </div>
       </div>
     </div>

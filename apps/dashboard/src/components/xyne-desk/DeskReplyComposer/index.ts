@@ -1,1 +1,1 @@
-export { PlainTextDeskReplyComposer } from './PlainTextDeskReplyComposer';
+export { SocialMediaReplyComposer } from './SocialMediaReplyComposer';

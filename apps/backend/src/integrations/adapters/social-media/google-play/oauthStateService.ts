@@ -3,8 +3,10 @@ import { redisService } from '@/services/redisService';
 
 export interface GooglePlayOAuthState {
   purpose: 'google_play_desk_setup';
+  mode?: 'reconnect';
   userId: string;
   workspaceId: string;
+  channelId?: string;
   channelName: string;
   applications: Array<{
     packageName: string;
@@ -32,8 +34,11 @@ function parse(raw: string | null): GooglePlayOAuthState | null {
     const state = JSON.parse(raw) as Partial<GooglePlayOAuthState>;
     if (
       state.purpose !== 'google_play_desk_setup' ||
+      (state.mode !== undefined && state.mode !== 'reconnect') ||
       !state.userId ||
       !state.workspaceId ||
+      (state.channelId !== undefined && typeof state.channelId !== 'string') ||
+      (state.mode === 'reconnect' && !state.channelId) ||
       !state.channelName ||
       !Array.isArray(state.applications) ||
       state.applications.length === 0 ||

@@ -155,7 +155,7 @@ import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailCompo
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
-import { PlainTextDeskReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
+import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
@@ -1842,7 +1842,10 @@ const SupportScreen = (): ReactElement => {
     const connected = searchParams.get('socialMediaOAuth') === 'success';
     const error = searchParams.get('socialMediaError');
     if (!connected && !error) return;
-    if (connected) toast.success('Google Play reviews connected successfully');
+    if (connected) {
+      toast.success('Google Play reviews connected successfully');
+      if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
+    }
     if (error) toast.error(error.replaceAll('_', ' '));
     setSearchParams(
       previous => {
@@ -1853,7 +1856,7 @@ const SupportScreen = (): ReactElement => {
       },
       { replace: true },
     );
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, selectedChannelId, setSearchParams]);
 
   const handleTicketClick = useCallback(
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
@@ -1985,7 +1988,7 @@ const SupportScreen = (): ReactElement => {
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
-                  className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                  className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
                 }
               : {
                   label: 'Mailbox',
@@ -4649,7 +4652,7 @@ export const SupportTicketDetail = ({
             >
               {channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
-                  <PlainTextDeskReplyComposer
+                  <SocialMediaReplyComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     replyBasePath='/integrations/social-media'
@@ -4658,8 +4661,7 @@ export const SupportTicketDetail = ({
                     trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK ||
-                channel?.type === ChannelType.APP ? (
+              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}

@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
 
-interface PlainTextDeskReplyComposerProps {
+interface SocialMediaReplyComposerProps {
   conversationId: string;
   channelId?: string | null;
   replyBasePath: string;
@@ -25,14 +25,14 @@ function toPlainText(value: string): string {
     .trim();
 }
 
-export const PlainTextDeskReplyComposer = ({
+export const SocialMediaReplyComposer = ({
   conversationId,
   channelId,
   replyBasePath,
   placeholder,
   maxLength,
   trackingCategory,
-}: PlainTextDeskReplyComposerProps): ReactElement => {
+}: SocialMediaReplyComposerProps): ReactElement => {
   const [content, setContent] = useState('');
   const [sending, setSending] = useState(false);
   const loadedDraftRef = useRef('');

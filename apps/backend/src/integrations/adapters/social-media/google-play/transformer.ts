@@ -1,14 +1,12 @@
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { BaseTransformer } from '@/integrations/core/baseTransformer';
 import type { NormalizedData, ParseResult } from '@/integrations/core/types';
-import {
-  EmailType,
-  type ExternalSource,
-  TicketPriority,
-} from '@prisma/client';
+import { EmailType, type ExternalSource, TicketPriority } from '@prisma/client';
 import { FormFieldType } from '@xyne/shared';
 import type { NormalizedGooglePlayReview } from './client';
 import {
+  GOOGLE_PLAY_APP_FIELD,
+  GOOGLE_PLAY_PACKAGE_FIELD,
   GOOGLE_PLAY_THUMBS_DOWN_FIELD,
   GOOGLE_PLAY_THUMBS_UP_FIELD,
 } from './constants';
@@ -24,7 +22,7 @@ function priorityForRating(rating?: number): TicketPriority {
 export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, NormalizedData[]> {
   async transform(
     payload: unknown,
-    source?: ExternalSource,
+    source?: ExternalSource
   ): Promise<ParseResult<NormalizedData[]>> {
     const review = payload as Partial<NormalizedGooglePlayReview>;
     if (
@@ -64,6 +62,16 @@ export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, Norma
           source: 'social-media',
         },
         ticketCustomFields: [
+          {
+            fieldName: GOOGLE_PLAY_APP_FIELD,
+            fieldType: FormFieldType.STRING,
+            value: source.displayName,
+          },
+          {
+            fieldName: GOOGLE_PLAY_PACKAGE_FIELD,
+            fieldType: FormFieldType.STRING,
+            value: source.externalIdentifier ?? source.name,
+          },
           {
             fieldName: GOOGLE_PLAY_THUMBS_UP_FIELD,
             fieldType: FormFieldType.NUMBER,
