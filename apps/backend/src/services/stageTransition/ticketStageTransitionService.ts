@@ -1,18 +1,10 @@
-import {
-  Ticket,
-  StageTransition,
-  BoardType,
-  VisitSlaMode,
-  ReenterMode,
-  TicketStageRequestStatus,
-  Prisma,
-} from '@prisma/client';
+import { Ticket, StageTransition, Prisma } from '@prisma/client';
 import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { FormEntityType } from '@xyne/shared';
+import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageRequestStatus } from '@xyne/shared';
 import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
@@ -382,7 +374,7 @@ export class TicketStageTransitionService {
           existingEtaIdAtMaxVersion,
           submittedValues,
           latestValues,
-          reenterMode,
+          reenterMode: reenterMode as ReenterMode,
         });
         newVisitIndex = decision.newVersion;
         rebaseEta = decision.rebaseEta;

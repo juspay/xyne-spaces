@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
+import { AccessType } from '@xyne/shared';
 import { z } from 'zod';
-import { AccessType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { CreateAppInput } from '@/database/repositories/appsRepository';

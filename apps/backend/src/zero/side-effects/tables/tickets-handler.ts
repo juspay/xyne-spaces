@@ -1,5 +1,5 @@
-import { ActivityClassification } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityClassification } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
@@ -17,6 +17,7 @@ import {
   type TicketUpdatedField,
 } from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 const TICKET_UPDATED_FIELDS: ReadonlyArray<TicketUpdatedField> = TicketUpdatedFieldSchema.options;
 
@@ -109,7 +110,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     if (Object.keys(changes).length > 0) {
       const fullTicket = await db.ticket.findUnique({ where: { id: ticketId } });
       if (fullTicket) {
-        void emitTicketUpdated({ ticket: fullTicket, changes, performedById: actorId });
+        void emitTicketUpdated({ ticket: fullTicket as TicketLike, changes, performedById: actorId });
         const snapshot = (await buildKanbanCountsSnapshot(ticketId)) ?? {
           id: fullTicket.id,
           workspaceId: fullTicket.workspaceId,

@@ -1,6 +1,6 @@
 import { conversationService } from '@/services/conversationService';
+import { MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { MessageType } from '@prisma/client';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';

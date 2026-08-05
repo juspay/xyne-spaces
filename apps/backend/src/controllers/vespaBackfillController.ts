@@ -16,7 +16,8 @@ import {
   callSchema,
   SubApp,
 } from '@/vespa/src/types';
-import { AttachmentEntityType, ChannelType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AttachmentEntityType, ChannelType } from '@xyne/shared';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 
 type BackfillFilters = {

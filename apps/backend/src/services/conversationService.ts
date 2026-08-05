@@ -17,14 +17,8 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
-import {
-  Conversation,
-  ConversationParticipation,
-  Message,
-  MessageType,
-  AttachmentEntityType,
-  ChannelScopeType,
-} from '@prisma/client';
+import { Conversation, Message } from '@prisma/client';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -359,7 +353,7 @@ export class ConversationService {
       const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
       if (!isParticipant && !isBot) {
         // Auto-add user as participant when they send first message
-        await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+        await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
         this.pushVespaJobForChannel(channelId, userId, channel?.workspaceId).catch((error) => {
           logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
@@ -546,7 +540,7 @@ export class ConversationService {
       messageId: message.messageId,
       conversationId: conversation.conversationId,
       channelId,
-      msgType: message.msgType,
+      msgType: message.msgType as MessageType,
       userId,
     });
 
@@ -598,7 +592,7 @@ export class ConversationService {
         await this.channelParticipantRepository.addParticipant(
           conversation.channelId,
           userId,
-          'MEMBER'
+          ChannelRole.MEMBER
         );
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
         this.pushVespaJobForChannel(conversation.channelId, userId).catch((error) => {
@@ -813,7 +807,7 @@ export class ConversationService {
       messageId: message.messageId,
       conversationId,
       content: message.content ?? undefined,
-      msgType: message.msgType,
+      msgType: message.msgType as MessageType,
       isBot,
       userId,
       createdAt: message.createdAt,

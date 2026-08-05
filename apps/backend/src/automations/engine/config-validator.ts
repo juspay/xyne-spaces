@@ -154,6 +154,24 @@ function isZodCompatible(upstream: z.ZodTypeAny, consumer: z.ZodTypeAny): boolea
   if (consumer instanceof z.ZodUnknown || consumer instanceof z.ZodAny) return true;
   if (upstream instanceof z.ZodUnknown || upstream instanceof z.ZodAny) return true;
 
+  // Output fields may be nullable/optional even when they are consumed as a
+  // string variable. The runtime resolver safely stringifies nullish values,
+  // so compare the underlying value types for reference validation.
+  while (
+    upstream instanceof z.ZodOptional ||
+    upstream instanceof z.ZodNullable ||
+    upstream instanceof z.ZodDefault
+  ) {
+    upstream = upstream._def.innerType;
+  }
+  while (
+    consumer instanceof z.ZodOptional ||
+    consumer instanceof z.ZodNullable ||
+    consumer instanceof z.ZodDefault
+  ) {
+    consumer = consumer._def.innerType;
+  }
+
   const upType = upstream._def.typeName as string;
   const conType = consumer._def.typeName as string;
 

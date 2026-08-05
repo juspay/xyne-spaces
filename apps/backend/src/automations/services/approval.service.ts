@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
+import { AccessType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import type { Workflow } from '@/types/database';
-import { AccessType } from '@prisma/client';
 import { AutomationStatus, isLiveStatus } from '../types/status';
 import {
   AUTOMATION_WORKFLOW_TYPE,

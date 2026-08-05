@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
-import { Email, EmailType } from '@prisma/client';
+import { Email } from '@prisma/client';
+import { EmailType } from '@xyne/shared';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 

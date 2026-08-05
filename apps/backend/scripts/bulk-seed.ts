@@ -23,9 +23,21 @@
  * deleted explicitly by collected ids.
  */
 
-import { PrismaClient, ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, MessageType, AuthProvider, UserStatus, OrgRole, WorkspaceRole, ActivityClassification } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
-import { serializeInitialMessageMd } from '@xyne/shared';
+import {
+  serializeInitialMessageMd,
+  ChannelType,
+  ChannelScopeType,
+  ChannelVisibility,
+  ChannelRole,
+  MessageType,
+  AuthProvider,
+  UserStatus,
+  OrgRole,
+  WorkspaceRole,
+  ActivityClassification,
+} from '@xyne/shared';
 
 const prisma = new PrismaClient();
 

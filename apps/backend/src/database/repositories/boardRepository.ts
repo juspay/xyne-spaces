@@ -1,6 +1,7 @@
-import {Prisma, PrismaClient, PRStatusEvent, BoardType } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
+import { PRStatusEvent, BoardType } from '@xyne/shared';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 
 
@@ -126,7 +127,7 @@ export class BoardRepository {
           if (!prStatusMap.has(mapping.stageId)) {
             prStatusMap.set(mapping.stageId, []);
           }
-          prStatusMap.get(mapping.stageId)!.push(mapping.prStatus);
+          prStatusMap.get(mapping.stageId)!.push(mapping.prStatus as PRStatusEvent);
         }
 
         stages = rawStages.map(stage => ({

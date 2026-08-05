@@ -1,5 +1,5 @@
-import { CallStatus, MessageType } from '@prisma/client';
 import { db } from '@/database/client';
+import { CallStatus, MessageType, NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { z } from 'zod';
@@ -143,7 +143,7 @@ export const scheduleCallFromThread: NudgeDefinition<
   MessageNudgePayload,
   MessageNudgeEvaluationContext
 > = {
-  kind: 'SCHEDULE_CALL_FROM_THREAD',
+  kind: NudgeKind.SCHEDULE_CALL_FROM_THREAD,
   mode: 'explicit',
   priority: 'low',
   trigger: {
@@ -171,7 +171,7 @@ export const scheduleCallFromThread: NudgeDefinition<
       return threadEvents.length >= 2;
     },
   },
-  direction: { from: 'MESSAGE', to: 'CALL' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.CALL },
 
   async buildContext(payload, activityContext, runtime) {
     return buildMessageNudgeContext(payload, activityContext, runtime);

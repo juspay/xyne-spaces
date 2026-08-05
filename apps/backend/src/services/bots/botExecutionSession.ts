@@ -1,4 +1,5 @@
 import { MessageRepository } from '@/database/repositories/messageRepository';
+import { MessageType } from '@xyne/shared';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { Message } from '@prisma/client';
@@ -51,7 +52,7 @@ export class BotExecutionSession {
         conversationId: this.conversationId,
         senderId: this.botName, // Use bot name as sender ID
         content: jsonContent,
-        msgType: 'BOT',
+        msgType: MessageType.BOT,
         metadata
       });
 

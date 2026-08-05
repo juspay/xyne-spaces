@@ -261,7 +261,7 @@ export const DmListItem = ({
         className={cn(
           'flex w-full items-center gap-[12px] px-4 py-3 cursor-pointer transition-colors',
           'hover:bg-accent active:bg-accent',
-          isSelected && 'bg-accent',
+          isSelected && 'bg-input hover:bg-input active:bg-input',
         )}
         role='button'
         tabIndex={0}

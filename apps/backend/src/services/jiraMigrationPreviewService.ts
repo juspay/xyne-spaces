@@ -1,6 +1,6 @@
 import { DatabaseClient } from '@/database/client';
+import { FormContextType, FormEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
-import { FormContextType, FormEntityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilterOptions, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';

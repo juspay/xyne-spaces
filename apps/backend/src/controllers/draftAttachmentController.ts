@@ -4,7 +4,8 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
-import { AttachmentEntityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
 
 export class DraftAttachmentController {

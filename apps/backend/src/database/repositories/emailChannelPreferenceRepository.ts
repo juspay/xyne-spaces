@@ -4,8 +4,8 @@
  */
 
 import { DatabaseClient } from '../client';
-import { EmailChannelPreference, EmailMergeMode, DeskType } from '@prisma/client';
-import { isDeskChannelType } from '@xyne/shared';
+import { EmailChannelPreference } from '@prisma/client';
+import { isDeskChannelType, EmailMergeMode, DeskType } from '@xyne/shared';
 
 export class EmailChannelPreferenceRepository {
   private db = DatabaseClient.getInstance();

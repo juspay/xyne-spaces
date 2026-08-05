@@ -1,8 +1,8 @@
+import { TicketPriority } from '@xyne/shared';
 /**
  * Types for Email Classification feature
  */
 
-import { TicketPriority } from '@prisma/client';
 
 /** Raw output from AI — shape depends entirely on the channel's prompt */
 export type ClassificationRawOutput = Record<string, unknown>;

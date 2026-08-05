@@ -1,10 +1,10 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { AppController } from '../controllers/appController';
 import { incomingWebhookController } from '../controllers/incomingWebhookController';
 import { ChatController } from '../controllers/chatController';
 import { CommandController } from '../controllers/commandController';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 import chatRoutes from './chat';
 import fileRoutes from './files';
 import ticketRoutes from './ticket';

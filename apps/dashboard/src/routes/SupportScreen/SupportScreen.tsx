@@ -218,7 +218,8 @@ import {
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
-import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
+import { API_BASE_URL } from '../../config';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
@@ -793,9 +794,12 @@ const SupportScreen = (): ReactElement => {
 
   // deskBoardId (channel preference first) rather than the row-derived
   // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: deskBoardId ?? '' }), {
-    enabled: filterOptionsEnabled && !!deskBoardId,
-  });
+  const [boardStages, boardStagesDetails] = useCachedQuery(
+    queries.stagesByBoard({ boardId: deskBoardId ?? '' }),
+    {
+      enabled: !!deskBoardId,
+    },
+  );
   const availableStages = useMemo(
     () =>
       boardStages?.map(s => ({
@@ -2603,6 +2607,7 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('stages', stages)
                                 }
                                 availableStages={availableStages}
+                                isLoading={!!deskBoardId && boardStagesDetails.type !== 'complete'}
                               />
                             </Popover.Content>
                           </Popover.Root>
@@ -2790,7 +2795,7 @@ const SupportScreen = (): ReactElement => {
                               const Icon =
                                 column.key === 'assignee'
                                   ? User
-                                  : column.key === 'dueDate'
+                                  : column.key === 'dueDate' || column.key === 'createdAt'
                                     ? CalendarDays
                                     : column.key === 'priority'
                                       ? BarChart4Icon
@@ -3447,6 +3452,7 @@ export const SupportTicketDetail = ({
     ticketId?: string;
   }>();
   const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
+  const shareableOrigin = useShareableOrigin();
   const { workspaceId, userID } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
@@ -4360,7 +4366,7 @@ export const SupportTicketDetail = ({
                           toast.error('Cannot copy link');
                           return;
                         }
-                        const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
                         void navigator.clipboard
                           .writeText(url)
                           .then(() => toast.success('Link copied'))

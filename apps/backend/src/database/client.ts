@@ -8,6 +8,7 @@ import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
+import { setupEnumTextValidation } from './middleware/enumTextValidation';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -55,6 +56,8 @@ export class DatabaseClient {
       if (config.logging.logUserSessionChanges) {
         setupUserSessionLogging(DatabaseClient.instance, true);
       }
+
+      setupEnumTextValidation(DatabaseClient.instance);
 
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);

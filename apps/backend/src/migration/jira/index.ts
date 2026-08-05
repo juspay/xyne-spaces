@@ -1,8 +1,8 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { JiraMigrationController } from '@/controllers/jiraMigrationController';
-import { AccessType } from '@prisma/client';
 
 const router = Router();
 const controller = new JiraMigrationController();

@@ -1,4 +1,5 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
 import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent } from './redisService';
@@ -10,7 +11,6 @@ import { logger } from '@/utils/logger';
 import { authMiddleware } from '../middleware/auth';
 import { notificationService } from '@/notification-service';
 import { type NotificationData } from './notificationService';
-import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
@@ -295,7 +295,7 @@ class WebSocketService {
         if (!currentStatus || currentStatus.status !== 'AWAY') {
           const onlineUsers = await userStatusService.setUserStatus(
             userId,
-            'ONLINE'
+            UserPresenceStatus.ONLINE
           );
           // Send initial state directly to connecting socket (broadcast may race with socket setup)
           socket.emit('user_status_sync', {
@@ -712,7 +712,7 @@ class WebSocketService {
       logger.info(`[UPDATE-STATUS] User ${userName || userEmail} requested status change to ${status}`);
       
       // Update status in Redis and broadcast to all clients
-      await userStatusService.setUserStatus(userId, status);
+      await userStatusService.setUserStatus(userId, status as UserPresenceStatus);
       
       // Send confirmation directly to the user who changed their status
       socket.emit('user_status_updated', {

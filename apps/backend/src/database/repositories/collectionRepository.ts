@@ -1,4 +1,5 @@
-import { PrismaClient, Collection, CollectionItem, MessageAttachment, IngestionStatus, CollectionRole, AttachmentEntityType } from '@prisma/client';
+import { PrismaClient, Collection, CollectionItem, MessageAttachment } from '@prisma/client';
+import { IngestionStatus, CollectionRole, AttachmentEntityType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { v4 as uuidv4 } from 'uuid';
 

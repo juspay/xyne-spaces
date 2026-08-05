@@ -15,7 +15,14 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { UserRepository } from '@/database/repositories/users';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, ActivityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import {
+  EmailType,
+  MessageDirection,
+  ExternalEntityType,
+  AttachmentEntityType,
+  ActivityType,
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { listS2SClawAgents, getConversationInsight } from '@/services/clawAgentService';
 import { vespaClient } from '@/services/vespaSearch';
@@ -394,7 +401,7 @@ export class EmailController {
 
         const ticketForActivity = await db.ticket.findFirst({
           where: { conversationId },
-          select: { id: true },
+          select: { id: true, workspaceId: true },
         });
 
         await recordTicketTimelineEvent({
@@ -408,6 +415,7 @@ export class EmailController {
                   type: emailType,
                   to: toRecipients,
                 } as Prisma.InputJsonValue,
+                workspaceId: ticketForActivity.workspaceId,
               }
             : undefined,
           message: {

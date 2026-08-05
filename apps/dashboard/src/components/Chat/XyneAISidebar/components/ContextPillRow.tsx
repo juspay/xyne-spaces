@@ -842,7 +842,7 @@ export const ContextPillRow = ({
           getBoundingClientRect reports. */}
       <motion.div
         className={`absolute -bottom-[12px] left-0 right-0 overflow-hidden border border-chat-composer-border ${
-          showContextPicker ? 'bg-background' : 'bg-muted/[2%]'
+          showContextPicker ? 'bg-background' : 'bg-muted/10 backdrop-blur-md'
         } ${isMobile ? 'rounded-t-[26px]' : 'rounded-t-2xl'}`}
         animate={{ height: contentHeight + 14 }}
         initial={false}

@@ -61,6 +61,7 @@ import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
 import publicUserRoutes from '@/routes/publicUserRoutes';
+import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
@@ -94,6 +95,7 @@ import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
+import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
@@ -123,6 +125,7 @@ import workspaceIdBackfillRoutes from '@/routes/workspaceIdBackfill';
 import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
 import appSigningSecretBackfillRoutes from '@/routes/appSigningSecretBackfill';
 import installedAppCommandsBackfillRoutes from '@/routes/installedAppCommandsBackfill';
+import aiProvisioningBackfillRoutes from '@/routes/aiProvisioningBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import aiRoutes from '@/routes/aiRoutes';
@@ -165,7 +168,6 @@ import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
 import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
 import teamIntelligenceRoutes from '@/team-intelligence/routes';
-import telepresenceMonitoringRoutes from '@/telepresence-monitoring/routes';
 import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
 import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
 import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
@@ -367,7 +369,6 @@ export class App {
 
     // Team intelligence sync route (S2S auth - called by Mettle)
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
-    this.app.use('/api/telepresence-monitoring', telepresenceMonitoringRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
     this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
@@ -472,6 +473,8 @@ export class App {
     this.app.use('/migrate/api/admin/workspace-id-backfill', workspaceIdBackfillRoutes);
     this.app.use('/migrate/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
     this.app.use('/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
+    this.app.use('/api/admin/ai-provisioning-backfill', aiProvisioningBackfillRoutes);
+    this.app.use('/migrate/api/admin/ai-provisioning-backfill', aiProvisioningBackfillRoutes);
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
@@ -494,6 +497,7 @@ export class App {
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
     this.app.use('/api/public/users', publicUserRoutes);
+    this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
     // Claw MCP route (user + app auth) — must be before /api/tickets
@@ -641,6 +645,8 @@ export class App {
 
     // Generic CAC config routes
     this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
+
+    this.app.use('/api/lotus-config', authMiddleware.authenticate, lotusCacConfigRoutes);
 
     // Custom instruction routes (auth required)
     this.app.use('/api/custom-instruction', customInstructionRoutes);

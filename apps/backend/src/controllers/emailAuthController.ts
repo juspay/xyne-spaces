@@ -1,7 +1,7 @@
 import crypto from 'crypto';
+import { AuthProvider } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { AuthProvider } from '@prisma/client';
 import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';

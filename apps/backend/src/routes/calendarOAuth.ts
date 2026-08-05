@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from 'express';
-import { AuthProvider, UserStatus } from '@prisma/client';
+import { AuthProvider, UserStatus } from '@xyne/shared';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
 import { AuthorizationCode } from 'simple-oauth2';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
@@ -105,7 +105,9 @@ function redirectWithError(
 }
 
 async function validateBoundUser(state: CalendarOAuthState) {
-  const user = await repositories.users.findById(state.ownerUserId);
+  const user = (await repositories.users.findById(
+    state.ownerUserId,
+  )) as Parameters<typeof isCalendarOAuthStateBoundToUser>[1];
   if (!isCalendarOAuthStateBoundToUser(state, user)) {
     throw new Error('The calendar authorization no longer matches the active workspace user');
   }
@@ -170,7 +172,7 @@ router.post('/init', authMiddleware.authenticate, async (req: Request, res: Resp
       return;
     }
 
-    const provider = providerFromAuthProvider(user.authProvider);
+    const provider = providerFromAuthProvider(user.authProvider as AuthProvider);
     if (!provider) {
       res.status(400).json({ success: false, error: 'unsupported_calendar_provider' });
       return;
