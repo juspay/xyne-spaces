@@ -20,7 +20,7 @@ import { Prisma } from '@prisma/client';
 import { AttachmentEntityType, ChannelType } from '@xyne/shared';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 
-type BackfillFilters = {
+export type BackfillFilters = {
   channelType?: ChannelType;
 };
 
@@ -49,6 +49,37 @@ function parseBackfillFilters(raw: unknown): BackfillFilters | null {
 }
 
 /**
+ * Parses the `fields` query param: a JSON string mapping schema name -> field names,
+ * e.g. {"tickets":["title","priority"],"messages":["threadMentions"]}
+ * Requesting fields for a schema switches its backfill from a full 'feed' to a
+ * partial 'update' restricted to those fields (see AdminBackfillController.backfillX methods).
+ */
+function parseBackfillFields(raw: unknown): Record<string, string[]> | null {
+  if (!raw) return null;
+  if (typeof raw !== 'string') {
+    throw new Error('fields must be a JSON string');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('fields must be valid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('fields must be a JSON object mapping schema name to an array of field names');
+  }
+
+  const result: Record<string, string[]> = {};
+  for (const [schemaName, fieldNames] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!Array.isArray(fieldNames) || fieldNames.some((f) => typeof f !== 'string') || fieldNames.length === 0) {
+      throw new Error(`fields.${schemaName} must be a non-empty array of field name strings`);
+    }
+    result[schemaName] = fieldNames;
+  }
+  return result;
+}
+
+/**
  * Admin controller for Vespa backfill operations
  * Provides endpoints to trigger data ingestion into Vespa
  */
@@ -60,7 +91,7 @@ export class AdminBackfillController {
    * Only backfills messages updated within the specified time range
    * If no timeframe is provided, backfills all messages
    */
-  private static async backfillMessages(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillMessages(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
 
@@ -117,9 +148,10 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
       await vespaBackfillQueue.addJob({
         schema: messageSchema,
-        jobType: 'feed',
+        jobType: fields?.length ? 'update' : 'feed',
         docId: messageRef.messageId,
-        userId: undefined // backfill jobs don't have a specific user
+        userId: undefined, // backfill jobs don't have a specific user
+        fields,
       });
       totalQueued++;
         } catch (error) {
@@ -141,7 +173,7 @@ export class AdminBackfillController {
    * Only backfills channels updated within the specified time range
    * If no timeframe is provided, backfills all channels
    */
-  private static async backfillChannels(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillChannels(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
 
@@ -198,10 +230,11 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
         await vespaBackfillQueue.addJob({
           schema: channelSchema,
-          jobType: 'feed',
+          jobType: fields?.length ? 'update' : 'feed',
           docId: channelRef.id,
           userId: undefined, // backfill jobs don't have a specific user
           workspaceId: channelRef.workspaceId,
+          fields,
         });
         totalQueued++;
         } catch (error) {
@@ -223,7 +256,7 @@ export class AdminBackfillController {
    * Only backfills calls updated within the specified time range.
    * If no timeframe is provided, backfills all calls.
    */
-  private static async backfillCalls(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillCalls(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: Prisma.CallWhereInput = {};
 
@@ -275,9 +308,10 @@ export class AdminBackfillController {
         try {
           await vespaBackfillQueue.addJob({
             schema: callSchema,
-            jobType: 'feed',
+            jobType: fields?.length ? 'update' : 'feed',
             docId: callRef.id,
             userId: undefined,
+            fields,
           });
           totalQueued++;
         } catch (error) {
@@ -298,7 +332,7 @@ export class AdminBackfillController {
    * Only backfills projects updated within the specified time range
    * If no timeframe is provided, backfills all projects
    */
-  private static async backfillProjects(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillProjects(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
 
@@ -355,10 +389,11 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
         await vespaBackfillQueue.addJob({
           schema: projectSchema,
-          jobType: 'feed',
+          jobType: fields?.length ? 'update' : 'feed',
           docId: projectRef.id,
           userId: undefined, // backfill jobs don't have a specific user
           workspaceId: projectRef.workspaceId,
+          fields,
         });
         totalQueued++;
         } catch (error) {
@@ -380,7 +415,7 @@ export class AdminBackfillController {
    * Queues a feed job per app; the worker re-fetches the row and derives
    * workspaceId + creator identity from the creator's user record (mapApp).
    */
-  private static async backfillApps(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillApps(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let whereClause: Prisma.AppsWhereInput = {};
     if (cutoffTime) {
       whereClause = fromTime
@@ -411,7 +446,7 @@ export class AdminBackfillController {
 
       for (const app of apps) {
         try {
-          await vespaBackfillQueue.addJob({ schema: appSchema, jobType: 'feed', docId: app.id });
+          await vespaBackfillQueue.addJob({ schema: appSchema, jobType: fields?.length ? 'update' : 'feed', docId: app.id, fields });
           totalQueued++;
         } catch (error) {
           logger.error(`[Backfill] Failed to queue app ${app.id}:`, error);
@@ -435,6 +470,7 @@ export class AdminBackfillController {
     cutoffTime?: Date,
     fromTime?: Date | null,
     filters?: BackfillFilters | null,
+    fields?: string[],
   ): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
@@ -510,10 +546,11 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
         await vespaBackfillQueue.addJob({
           schema: ticketSchema,
-          jobType: 'feed',
+          jobType: fields?.length ? 'update' : 'feed',
           docId: ticketRef.id,
           userId: undefined, // backfill jobs don't have a specific user
           workspaceId: ticketRef.workspaceId,
+          fields,
         });
         totalQueued++;
         } catch (error) {
@@ -536,7 +573,7 @@ export class AdminBackfillController {
    * Vespa Redis queue; the worker fetches + maps via mapEmail() and feeds Vespa.
    * If no timeframe is provided, backfills all emails.
    */
-  private static async backfillMail(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillMail(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
 
@@ -589,9 +626,10 @@ export class AdminBackfillController {
         try {
           await vespaBackfillQueue.addJob({
             schema: mailSchema,
-            jobType: 'feed',
+            jobType: fields?.length ? 'update' : 'feed',
             docId: emailRef.id,
             userId: undefined,
+            fields,
           });
           totalQueued++;
         } catch (error) {
@@ -612,7 +650,7 @@ export class AdminBackfillController {
    * Only backfills canvases updated within the specified time range
    * If no timeframe is provided, backfills all canvases
    */
-  private static async backfillCanvases(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillCanvases(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
 
@@ -669,10 +707,11 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
           await vespaBackfillQueue.addJob({
             schema: fileSchema,
-            jobType: 'feed',
+            jobType: fields?.length ? 'update' : 'feed',
             docId: canvasRef.id,
             userId: undefined, // backfill jobs don't have a specific user
             app: SubApp.CANVAS,
+            fields,
           });
           totalQueued++;
         } catch (error) {
@@ -694,28 +733,29 @@ export class AdminBackfillController {
    * Only backfills message attachments with entityType=CHAT updated within the specified time range
    * If no timeframe is provided, backfills all chat attachments
    */
-  private static async backfillChatAttachments(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillChatAttachments(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {
       entityType: AttachmentEntityType.CHAT || AttachmentEntityType.IMPACT, // Backfill both chat attachments
     };
 
     // Build where clause based on provided timeframe
+    // Note: MessageAttachment has no updatedAt field, only createdAt.
     if (cutoffTime) {
       if (fromTime) {
-        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        timeRange = `(created between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
         whereClause = {
           ...whereClause,
-          updatedAt: {
+          createdAt: {
             gte: fromTime,
             lte: cutoffTime,
           },
         };
       } else {
-        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        timeRange = `(created before ${cutoffTime.toISOString()})`;
         whereClause = {
           ...whereClause,
-          updatedAt: {
+          createdAt: {
             lte: cutoffTime,
           },
         };
@@ -760,11 +800,12 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
           await vespaBackfillQueue.addJob({
             schema: fileSchema,
-            jobType: 'feed',
+            jobType: fields?.length ? 'update' : 'feed',
             docId: attachmentRef.id,
             userId: attachmentRef.createdBy,
             app: SubApp.CHAT_ATTACHMENT,
             workspaceId: attachmentRef.workspaceId,
+            fields,
           });
           totalQueued++;
         } catch (error) {
@@ -786,28 +827,29 @@ export class AdminBackfillController {
    * Only backfills message attachments with entityType=TICKET updated within the specified time range
    * If no timeframe is provided, backfills all ticket attachments
    */
-  private static async backfillTicketAttachments(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillTicketAttachments(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {
       entityType: AttachmentEntityType.TICKET,
     };
 
     // Build where clause based on provided timeframe
+    // Note: MessageAttachment has no updatedAt field, only createdAt.
     if (cutoffTime) {
       if (fromTime) {
-        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        timeRange = `(created between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
         whereClause = {
           ...whereClause,
-          updatedAt: {
+          createdAt: {
             gte: fromTime,
             lte: cutoffTime,
           },
         };
       } else {
-        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        timeRange = `(created before ${cutoffTime.toISOString()})`;
         whereClause = {
           ...whereClause,
-          updatedAt: {
+          createdAt: {
             lte: cutoffTime,
           },
         };
@@ -852,11 +894,12 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
           await vespaBackfillQueue.addJob({
             schema: fileSchema,
-            jobType: 'feed',
+            jobType: fields?.length ? 'update' : 'feed',
             docId: attachmentRef.id,
             userId: attachmentRef.createdBy,
             app: SubApp.TICKET_ATTACHMENT,
             workspaceId: attachmentRef.workspaceId,
+            fields,
           });
           totalQueued++;
         } catch (error) {
@@ -878,7 +921,7 @@ export class AdminBackfillController {
    * Only backfills calls with transcripts updated within the specified time range
    * If no timeframe is provided, backfills all calls with transcripts
    */
-  private static async backfillTranscripts(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillTranscripts(cutoffTime?: Date, fromTime?: Date | null, fields?: string[]): Promise<number> {
     let timeRange: string;
     let whereClause: any = {
       transcript: {
@@ -940,10 +983,11 @@ export class AdminBackfillController {
           // Queue only the ID - worker will handle the processing
           await vespaBackfillQueue.addJob({
             schema: fileSchema,
-            jobType: 'feed',
+            jobType: fields?.length ? 'update' : 'feed',
             docId: callRef.id,
             userId: undefined, // backfill jobs don't have a specific user
             app: SubApp.TRANSCRIPT,
+            fields,
           });
           totalQueued++;
         } catch (error) {
@@ -1131,6 +1175,7 @@ export class AdminBackfillController {
       const fromTimestampParam = req.query.fromTimestamp as string | undefined;
       const toTimestampParam = req.query.toTimestamp as string | undefined;
       const filtersParam = req.query.filters as string | undefined;
+      const fieldsParam = req.query.fields as string | undefined;
       const queueName = req.query.queueName as string;
 
       // Determine which schemas to backfill
@@ -1229,6 +1274,32 @@ export class AdminBackfillController {
         return;
       }
 
+      let fieldsBySchema: Record<string, string[]> | null = null;
+      if (fieldsParam) {
+        try {
+          fieldsBySchema = parseBackfillFields(fieldsParam);
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid fields parameter',
+            message: error instanceof Error ? error.message : 'Invalid fields parameter',
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+
+        const unknownSchemas = Object.keys(fieldsBySchema ?? {}).filter(s => !schemasToBackfill.includes(s));
+        if (unknownSchemas.length > 0) {
+          res.status(400).json({
+            success: false,
+            error: 'fields references schemas not included in this backfill',
+            message: `Add these to schemas or remove them from fields: ${unknownSchemas.join(', ')}`,
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+      }
+
       logger.info(`📊 Backfilling schemas: ${schemasToBackfill.join(', ')}`);
 
       // Get initial queue stats
@@ -1251,6 +1322,7 @@ export class AdminBackfillController {
         initialQueueStats: initialStats,
         statusEndpoint: '/api/admin/vespa-backfill/stats',
         filters: filters ?? null,
+        fields: fieldsBySchema ?? null,
       };
 
       // Add time info based on whether we have a timeframe
@@ -1280,6 +1352,7 @@ export class AdminBackfillController {
         cutoffTime,
         fromTime,
         filters,
+        fieldsBySchema,
       )
         .catch((error) => {
           logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
@@ -1299,7 +1372,9 @@ export class AdminBackfillController {
 
   /**
    * Execute backfill in the background without blocking the API response
-   * This method is called asynchronously and runs independently
+   * This method is called asynchronously and runs independently.
+   * When `fieldsBySchema` has an entry for a schema, that schema's jobs are field-scoped
+   * partial updates (only those document fields) instead of full feeds.
    */
   private static async executeBackfillInBackground(
     schemasToBackfill: string[],
@@ -1308,6 +1383,7 @@ export class AdminBackfillController {
     cutoffTime?: Date,
     fromTime?: Date | null,
     filters?: BackfillFilters | null,
+    fieldsBySchema?: Record<string, string[]> | null,
   ): Promise<void> {
     try {
       const timeRangeStr = cutoffTime
@@ -1320,47 +1396,47 @@ export class AdminBackfillController {
       const stats: Record<string, number> = {};
 
       if (schemasToBackfill.includes('projects')) {
-        stats.projects = await AdminBackfillController.backfillProjects(cutoffTime, fromTime);
+        stats.projects = await AdminBackfillController.backfillProjects(cutoffTime, fromTime, fieldsBySchema?.['projects']);
       }
 
       if (schemasToBackfill.includes('channels')) {
-        stats.channels = await AdminBackfillController.backfillChannels(cutoffTime, fromTime);
+        stats.channels = await AdminBackfillController.backfillChannels(cutoffTime, fromTime, fieldsBySchema?.['channels']);
       }
 
       if (schemasToBackfill.includes('messages')) {
-        stats.messages = await AdminBackfillController.backfillMessages(cutoffTime, fromTime);
+        stats.messages = await AdminBackfillController.backfillMessages(cutoffTime, fromTime, fieldsBySchema?.['messages']);
       }
 
       if (schemasToBackfill.includes('tickets')) {
-        stats.tickets = await AdminBackfillController.backfillTickets(cutoffTime, fromTime, filters);
+        stats.tickets = await AdminBackfillController.backfillTickets(cutoffTime, fromTime, filters, fieldsBySchema?.['tickets']);
       }
 
       if (schemasToBackfill.includes('canvases')) {
-        stats.canvases = await AdminBackfillController.backfillCanvases(cutoffTime, fromTime);
+        stats.canvases = await AdminBackfillController.backfillCanvases(cutoffTime, fromTime, fieldsBySchema?.['canvases']);
       }
 
       if (schemasToBackfill.includes('transcripts')) {
-        stats.transcripts = await AdminBackfillController.backfillTranscripts(cutoffTime, fromTime);
+        stats.transcripts = await AdminBackfillController.backfillTranscripts(cutoffTime, fromTime, fieldsBySchema?.['transcripts']);
       }
 
       if (schemasToBackfill.includes('chat_attachments')) {
-        stats.chat_attachments = await AdminBackfillController.backfillChatAttachments(cutoffTime, fromTime);
+        stats.chat_attachments = await AdminBackfillController.backfillChatAttachments(cutoffTime, fromTime, fieldsBySchema?.['chat_attachments']);
       }
 
       if (schemasToBackfill.includes('ticket_attachments')) {
-        stats.ticket_attachments = await AdminBackfillController.backfillTicketAttachments(cutoffTime, fromTime);
+        stats.ticket_attachments = await AdminBackfillController.backfillTicketAttachments(cutoffTime, fromTime, fieldsBySchema?.['ticket_attachments']);
       }
 
       if (schemasToBackfill.includes('mail')) {
-        stats.mail = await AdminBackfillController.backfillMail(cutoffTime, fromTime);
+        stats.mail = await AdminBackfillController.backfillMail(cutoffTime, fromTime, fieldsBySchema?.['mail']);
       }
 
       if (schemasToBackfill.includes('app')) {
-        stats.app = await AdminBackfillController.backfillApps(cutoffTime, fromTime);
+        stats.app = await AdminBackfillController.backfillApps(cutoffTime, fromTime, fieldsBySchema?.['app']);
       }
 
       if (schemasToBackfill.includes('calls')) {
-        stats.calls = await AdminBackfillController.backfillCalls(cutoffTime, fromTime);
+        stats.calls = await AdminBackfillController.backfillCalls(cutoffTime, fromTime, fieldsBySchema?.['calls']);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

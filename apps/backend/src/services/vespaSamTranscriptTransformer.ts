@@ -5,6 +5,7 @@ import {
   AIAnalysis,
   VespaDocType,
 } from '@/vespa/src/types';
+import { chunkPlainText } from '@/utils/vespaChunking';
 
 export type { SamTranscriptInput, AIAnalysis };
 
@@ -24,6 +25,10 @@ export function transformSamTranscriptToVespa(
   logger.info(`[VESPA_TRANSFORMER] Transforming SAM transcript: docId=${docId}, meetCode=${data.meetCode}`);
 
   const dateTimeTime = toTimestamp(data.dateTime);
+  const chapters = data.aiAnalysedData.chapters?.length ? JSON.stringify(data.aiAnalysedData.chapters) : undefined;
+  const actionItems = data.aiAnalysedData.action_items?.length ? JSON.stringify(data.aiAnalysedData.action_items) : undefined;
+  const others = data.aiAnalysedData.others?.length ? JSON.stringify(data.aiAnalysedData.others) : undefined;
+  const qna = data.aiAnalysedData.q_n_a?.length ? JSON.stringify(data.aiAnalysedData.q_n_a) : undefined;
 
   const vespaDoc: VespaSamTranscriptDocument = {
     docId: docId,
@@ -34,10 +39,11 @@ export function transformSamTranscriptToVespa(
     type: data.type,
     duration: data.duration,
     meetingSummary: data.aiAnalysedData.summary, // SAM sends 'summary', Vespa expects 'meetingSummary' (reserved word workaround)
-    chapters: data.aiAnalysedData.chapters?.length ? JSON.stringify(data.aiAnalysedData.chapters) : undefined,
-    actionItems: data.aiAnalysedData.action_items?.length ? JSON.stringify(data.aiAnalysedData.action_items) : undefined,
-    others: data.aiAnalysedData.others ? JSON.stringify(data.aiAnalysedData.others) : undefined,
-    qna: data.aiAnalysedData.q_n_a?.length ? JSON.stringify(data.aiAnalysedData.q_n_a) : undefined,
+    chapters,
+    actionItems,
+    others,
+    qna,
+    chunks: chunkPlainText(data.aiAnalysedData.summary),
     dateTime: dateTimeTime,
     merchants: data.merchants || [],
   };

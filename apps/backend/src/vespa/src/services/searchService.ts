@@ -20,7 +20,7 @@ import {
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, resolveEmbeddingVariant, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters } from '../utils/YqlBuilder';
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -201,6 +201,16 @@ export class SearchService {
     }
 
     const useSemantic = query.trim().length > 3;
+    // hf1 dual-embedding migration flag (app catalog re-ranks via closeness, no NN clause).
+    const useV2Embeddings = await superpositionClient.getBooleanValue(
+      'vespa_search_use_v2_embeddings',
+      false,
+      {}
+    );
+    const { tensor: queryTensor, embedder } = resolveEmbeddingVariant(useV2Embeddings);
+    this.logger.info(
+      `[embeddings] app-search using ${useV2Embeddings ? 'V2 (bge-large 1024)' : 'V1 (bge-base 768)'} — embedder=${embedder}, tensor=${queryTensor}`,
+    );
 
     const { yql, params } = this.yqlBuilder.buildAppYql({
       view,
@@ -220,7 +230,9 @@ export class SearchService {
       'input.query(alpha)': 0.35,
       timeout: '15s',
       'presentation.summary': 'lean',
-      ...(useSemantic ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
+      // Embedder must be named: with the hf1 migration two embedders exist, so the
+      // unqualified embed shorthand is ambiguous. Tensor + embedder follow the v2 flag.
+      ...(useSemantic ? { [`input.query(${queryTensor})`]: `embed(${embedder}, @query)` } : {}),
     };
 
     try {
@@ -414,11 +426,13 @@ export class SearchService {
           wsId,
           sort,
           isExactMatch,
+          useV2Embeddings,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
         const queryLength = searchQuery?.trim().length || 0;
         const shouldEmbed = hasQuery && queryLength > 3 && (useSemanticAnyway || useFuzzy);
+        const { tensor: queryTensor, embedder } = resolveEmbeddingVariant(useV2Embeddings);
 
         return {
           yql,
@@ -433,7 +447,9 @@ export class SearchService {
           "input.query(chunk_limit)": chunkLimit,
           "input.query(query_length)": queryWordCount,
           timeout: '30s',
-          ...(shouldEmbed ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
+          // Embedder must be named once hf1 exists (two embedders => ambiguous shorthand).
+          // Tensor + embedder follow the v2 flag (e/hf-embedder vs e_v2/hf1).
+          ...(shouldEmbed ? { [`input.query(${queryTensor})`]: `embed(${embedder}, @query)` } : {}),
           ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
           "input.query(freshness_weight)": freshnessWeight,
           "input.query(filtering_weight)": filteringWeight,
@@ -470,6 +486,19 @@ export class SearchService {
         false,
         {}
       );
+      // hf1 dual-embedding migration: when on, semantic retrieval + query embedding
+      // switch to the bge-large (1024) fields / `e_v2` tensor / `hf1` embedder.
+      const useV2Embeddings = await superpositionClient.getBooleanValue(
+        'vespa_search_use_v2_embeddings',
+        false,
+        {}
+      );
+      {
+        const v = resolveEmbeddingVariant(useV2Embeddings);
+        this.logger.info(
+          `[embeddings] search using ${useV2Embeddings ? 'V2 (bge-large 1024)' : 'V1 (bge-base 768)'} — embedder=${v.embedder}, tensor=${v.tensor}, fieldSuffix='${v.fieldSuffix}'`,
+        );
+      }
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
       this.logger.info(`Payload: ${JSON.stringify(payload)}`);
       if (captureDebug) {

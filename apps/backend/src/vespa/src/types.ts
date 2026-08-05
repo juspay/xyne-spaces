@@ -192,6 +192,7 @@ export interface VespaChatAttachmentDocument extends VespaDocument {
 
 export interface VespaChatContainerDocument extends VespaDocument {
   channelName: string;
+  chunks: string[];
   scopeType: string;
   visibility: string;
   isIm: boolean;
@@ -214,6 +215,7 @@ export interface VespaChatContainerDocument extends VespaDocument {
 
 export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
   text: string;
+  chunks: string[];
   userId: string;
   username: string;
   userEmail: string;
@@ -263,6 +265,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   title: string;
   workflowType: string;
   description: string;
+  chunks: string[];
   description_clean?: string;
   ticketType: string;
   priority: TicketPriority;
@@ -445,6 +448,7 @@ export interface VespaSamTranscriptDocument extends VespaDocument {
   actionItems?: string;   // JSON.stringify'd ActionItem[]
   others?: string;        // JSON.stringify'd OtherItem[] — free-form insights (speaker, content, tags)
   qna?: string;           // JSON.stringify'd QnA[] — questions and answers from the meeting
+  chunks: string[];
   dateTime: number;
   merchants: string[];
 }
@@ -524,6 +528,7 @@ export interface VespaAppDocument {
   version: number;
   name: string;
   description: string;
+  chunks: string[];
   createdBy: string;
   creatorName: string;
   creatorEmail: string;

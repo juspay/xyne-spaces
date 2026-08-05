@@ -17,6 +17,8 @@ import {
 import { User } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import removeMarkdown from 'remove-markdown';
+import { superpositionClient } from '@/services/superpositionClient';
+import { resolveEmbeddingVariant } from '@/vespa/src/utils/YqlBuilder';
 
 const MEMORY_SCHEMA = memorySchema;
 
@@ -73,8 +75,10 @@ async function buildMemoryYql(params: {
   parentRef?: string;
   reviewStatus?: string;
   docId?: string;
+  useV2Embeddings?: boolean;
 }): Promise<string> {
-  const { query, scope, userId, limit, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, docId } = params;
+  const { query, scope, userId, limit, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, docId, useV2Embeddings = false } = params;
+  const { tensor, fieldSuffix } = resolveEmbeddingVariant(useV2Embeddings);
 
   const conditions: string[] = [];
 
@@ -160,7 +164,7 @@ async function buildMemoryYql(params: {
   // Search condition (text + vector)
   if (query && query.trim()) {
     conditions.push(
-      `(userInput(@query) or ({targetHits:${limit}} nearestNeighbor(summary_embeddings, e)))`,
+      `(userInput(@query) or ({targetHits:${limit}} nearestNeighbor(summary_embeddings${fieldSuffix}, ${tensor})))`,
     );
   }
 
@@ -249,6 +253,20 @@ export async function searchMemory(
 ): Promise<MemorySearchResult> {
   const { query, scope, limit = 20, offset = 0, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus , includeQuery = true, includeSummary = true, docId} = request;
 
+  // hf1 dual-embedding migration: switch memory vector retrieval + query embedding
+  // to the bge-large (1024) fields / `e_v2` tensor / `hf1` embedder when enabled.
+  const useV2Embeddings = await superpositionClient.getBooleanValue(
+    'vespa_search_use_v2_embeddings',
+    false,
+    {},
+  );
+  {
+    const v = resolveEmbeddingVariant(useV2Embeddings);
+    logger.info(
+      `[embeddings] memory-search using ${useV2Embeddings ? 'V2 (bge-large 1024)' : 'V1 (bge-base 768)'} — embedder=${v.embedder}, tensor=${v.tensor}, fieldSuffix='${v.fieldSuffix}'`,
+    );
+  }
+
   const yql = await buildMemoryYql({
     query,
     scope,
@@ -265,6 +283,7 @@ export async function searchMemory(
     parentRef,
     reviewStatus,
     docId,
+    useV2Embeddings,
   });
 
 
@@ -279,7 +298,10 @@ export async function searchMemory(
   // Add query and embedding input only when query is present
   if (query && query.trim()) {
     payload.query = query;
-    payload['input.query(e)'] = 'embed(hf-embedder, @query)';
+    // Embedder must be named once hf1 exists (two embedders => ambiguous shorthand).
+    // Tensor + embedder follow the v2 flag (e/hf-embedder vs e_v2/hf1).
+    const { tensor: queryTensor, embedder } = resolveEmbeddingVariant(useV2Embeddings);
+    payload[`input.query(${queryTensor})`] = `embed(${embedder}, @query)`;
     payload['input.query(alpha)'] = 0.5;
     payload['input.query(includeSummary)'] = Number(includeSummary);
     payload['input.query(includeQuery)'] = Number(includeQuery);
