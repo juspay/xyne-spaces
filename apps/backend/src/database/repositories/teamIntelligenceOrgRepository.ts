@@ -1,8 +1,10 @@
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import {
+  TeamIntelligenceOrgLeadershipSummarySchema,
+  type TeamIntelligenceOrgLeadershipSummary,
+} from '@/team-intelligence/org-leadership-summary.schema';
 import { logger } from '@/utils/logger';
-import { RecapEntityType, TicketStatusV2 } from '@xyne/shared';
 
 export interface OrgSummaryDateRangeFilters {
   from: Date;
@@ -57,6 +59,19 @@ export interface OrgTeamsDateRangeResult {
   from: string;
   to: string;
   teams: OrgTeamAggregate[];
+}
+
+export interface OrgLeadershipSnapshotsResult {
+  from: string;
+  to: string;
+  snapshots: Array<{
+    id: string;
+    batchId: string;
+    reportDate: string;
+    source: string;
+    completedAt: string | null;
+    summary: TeamIntelligenceOrgLeadershipSummary;
+  }>;
 }
 
 const ORG_BULLET_CATEGORIES = new Set([
@@ -280,6 +295,77 @@ class TeamIntelligenceOrgRepository {
     aiAgg.total_spend = Math.round(aiAgg.total_spend * 1_000_000) / 1_000_000;
 
     return { orgSummary, prTotal, aiUsages: aiAgg };
+  }
+
+  async getOrgLeadershipSnapshotsByDate(filters: {
+    workspaceId: string;
+    from: Date;
+    to: Date;
+  }): Promise<OrgLeadershipSnapshotsResult> {
+    const { workspaceId, from, to } = filters;
+    const toEndOfDay = new Date(to);
+    toEndOfDay.setUTCHours(23, 59, 59, 999);
+
+    const rows = await db.teamIntelligenceOrgSummaryV2.findMany({
+      where: {
+        workspaceId,
+        reportDate: { gte: from, lte: toEndOfDay },
+        status: 'COMPLETED',
+        contentUrl: { not: null },
+      },
+      orderBy: [{ reportDate: 'desc' }, { completedAt: 'desc' }],
+      select: {
+        id: true,
+        batchId: true,
+        reportDate: true,
+        source: true,
+        completedAt: true,
+        contentUrl: true,
+      },
+    });
+
+    const hydrated = await this.mapWithConcurrency(
+      rows,
+      async (row) => {
+        const content =
+          await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+            orgSummary?: unknown;
+          }>(null, row.contentUrl);
+        const parsed = TeamIntelligenceOrgLeadershipSummarySchema.safeParse(
+          content?.orgSummary
+        );
+        if (!parsed.success) {
+          logger.warn(
+            '[TEAM-INTEL] Ignoring completed org summary with invalid structured content',
+            {
+              orgSummaryId: row.id,
+              error: parsed.error.message,
+            }
+          );
+          return null;
+        }
+        return {
+          id: row.id,
+          batchId: row.batchId,
+          reportDate: row.reportDate.toISOString().slice(0, 10),
+          source: row.source,
+          completedAt: row.completedAt?.toISOString() ?? null,
+          summary: parsed.data,
+        };
+      },
+      DEFAULT_HYDRATION_CONCURRENCY
+    );
+
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: toEndOfDay.toISOString().slice(0, 10),
+      snapshots: hydrated.filter(
+        (
+          snapshot
+        ): snapshot is NonNullable<(typeof hydrated)[number]> =>
+          snapshot !== null
+      ),
+    };
   }
 
   /**
@@ -508,13 +594,13 @@ class TeamIntelligenceOrgRepository {
     const [total, recaps, channels, ticketRecords] = await Promise.all([
       db.recap.count({
         where: {
-          entityType: RecapEntityType.CHANNEL,
+          entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
       }),
       db.recap.findMany({
         where: {
-          entityType: RecapEntityType.CHANNEL,
+          entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
         orderBy: [{ recapDate: 'desc' }, { id: 'desc' }],
@@ -528,10 +614,9 @@ class TeamIntelligenceOrgRepository {
           userId: true,
         },
       }),
-      // Resolves names for ids already in the result set, so it runs above the caller's own scope.
-      withWorkspaceScope(() => db.channel.findMany({
+      db.channel.findMany({
         select: { id: true, name: true },
-      })),
+      }),
       db.ticket.findMany({
         where: {
           createdAt: { gte: rangeStart, lte: rangeEnd },
@@ -544,16 +629,16 @@ class TeamIntelligenceOrgRepository {
 
     const ticketMetrics = {
       totalCount: ticketRecords.length,
-      solvedCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.COMPLETED).length,
-      todoCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.TODO).length,
-      startedCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.STARTED).length,
-      pausedCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.PAUSED).length,
-      cancelledCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.CANCELLED).length,
+      solvedCount: ticketRecords.filter((t) => t.statusV2 === 'COMPLETED').length,
+      todoCount: ticketRecords.filter((t) => t.statusV2 === 'TODO').length,
+      startedCount: ticketRecords.filter((t) => t.statusV2 === 'STARTED').length,
+      pausedCount: ticketRecords.filter((t) => t.statusV2 === 'PAUSED').length,
+      cancelledCount: ticketRecords.filter((t) => t.statusV2 === 'CANCELLED').length,
       overdueCount: ticketRecords.filter(
         (t) =>
           t.eta !== null &&
           t.eta < now &&
-          (t.statusV2 === TicketStatusV2.TODO || t.statusV2 === TicketStatusV2.STARTED || t.statusV2 === TicketStatusV2.PAUSED),
+          (t.statusV2 === 'TODO' || t.statusV2 === 'STARTED' || t.statusV2 === 'PAUSED'),
       ).length,
     };
 

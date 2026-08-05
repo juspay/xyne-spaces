@@ -72,6 +72,46 @@ export class TeamIntelligenceTeamController {
   };
 
   /**
+   * GET /api/team-intelligence-dashboard/team/leadership-snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
+   */
+  getTeamLeadershipSnapshots = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { from, to } = req.query as { from?: string; to?: string };
+      if (!from || !to) {
+        res.status(400).json({ error: '"from" and "to" query parameters are required' });
+        return;
+      }
+
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        res.status(400).json({ error: '"from" and "to" must be valid ISO date strings' });
+        return;
+      }
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      const teamQuery = this.parseTeamId(req);
+      if (!teamQuery.teamId) {
+        res.status(400).json({ error: teamQuery.error ?? '"teamId" query parameter is required' });
+        return;
+      }
+
+      const result = await teamIntelligenceTeamDashboardService.getTeamLeadershipSnapshots({
+        from: fromDate,
+        to: toDate,
+        teamId: teamQuery.teamId,
+      });
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceTeam] getTeamLeadershipSnapshots error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
    * GET /api/team-intelligence-dashboard/team/pr?from=YYYY-MM-DD&to=YYYY-MM-DD&prId=3110
    *
    * Response:

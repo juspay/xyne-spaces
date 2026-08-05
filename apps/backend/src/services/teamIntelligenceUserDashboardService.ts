@@ -53,6 +53,19 @@ class TeamIntelligenceUserDashboardService {
     }
   }
 
+  async getUserLeadershipSnapshots(input: { from: Date; to: Date; userEmail: string }) {
+    try {
+      return await teamIntelligenceUserRepository.getUserLeadershipSnapshotsByDate({
+        from: input.from,
+        to: input.to,
+        userEmail: input.userEmail,
+      });
+    } catch (error) {
+      logger.error('[TeamIntelligenceUser] getUserLeadershipSnapshots failed', { error, input });
+      throw error;
+    }
+  }
+
   async getUserChannelRecaps(input: { from: Date; to: Date; userEmail: string; page: number; limit: number }) {
     try {
       return await teamIntelligenceUserRepository.getUserChannelRecapsByDate({

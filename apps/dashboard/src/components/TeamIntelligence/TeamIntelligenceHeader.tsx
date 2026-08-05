@@ -29,7 +29,7 @@ const TeamIntelligenceHeader = ({
   const { data: memberData } = useMemberDetails(memberEmail!);
 
   const breadcrumbs = useMemo<BreadcrumbSegment[]>(() => {
-    const segs: BreadcrumbSegment[] = [{ label: 'Org Digest', path: '/team-intelligence' }];
+    const segs: BreadcrumbSegment[] = [{ label: 'Founder Brief', path: '/team-intelligence' }];
 
     if (teamId) {
       const team = teams?.data?.find(t => t.id === teamId);
@@ -65,6 +65,7 @@ const TeamIntelligenceHeader = ({
     { value: TimeRange.THIS_WEEK, label: 'This Week' },
     { value: TimeRange.LAST_WEEK, label: 'Last Week' },
     { value: TimeRange.THIS_MONTH, label: 'This Month' },
+    { value: TimeRange.PREVIOUS_MONTH, label: 'Previous Month' },
   ];
 
   return (

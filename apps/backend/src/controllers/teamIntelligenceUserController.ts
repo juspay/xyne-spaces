@@ -243,6 +243,47 @@ export class TeamIntelligenceUserController {
   };
 
   /**
+   * GET /api/team-intelligence-dashboard/user/leadership-snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com
+   */
+  getUserLeadershipSnapshots = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const LeadershipSnapshotSchema = UserDashboardQuerySchema.omit({ page: true, limit: true });
+      const parseResult = LeadershipSnapshotSchema.safeParse(req.query);
+      if (!parseResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
+        });
+        return;
+      }
+
+      const { from, to, userEmail } = parseResult.data;
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+        return;
+      }
+
+      const result = await teamIntelligenceUserDashboardService.getUserLeadershipSnapshots({
+        from: fromDate,
+        to: toDate,
+        userEmail,
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceUser] getUserLeadershipSnapshots error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
    * GET /api/team-intelligence-dashboard/user/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com&page=1&limit=10
    */
   getUserChannelRecaps = async (req: Request, res: Response): Promise<void> => {

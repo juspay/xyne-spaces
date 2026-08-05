@@ -4,6 +4,51 @@ import { logger } from '@/utils/logger';
 
 export class TeamIntelligenceOrgController {
   /**
+   * GET /api/team-intelligence-dashboard/org/leadership-snapshots
+   *
+   * Returns the strict, evidence-backed organization leadership JSON generated
+   * from compact team summaries. Existing summary and bullet endpoints remain
+   * available for legacy clients.
+   */
+  getOrgLeadershipSnapshots = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
+      const { from, to } = req.query as { from?: string; to?: string };
+      if (!from || !to) {
+        res.status(400).json({ error: 'Both "from" and "to" query parameters are required' });
+        return;
+      }
+
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        res.status(400).json({ error: '"from" and "to" must be valid ISO date strings' });
+        return;
+      }
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      const result =
+        await teamIntelligenceOrgRepository.getOrgLeadershipSnapshotsByDate({
+          workspaceId,
+          from: fromDate,
+          to: toDate,
+        });
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceOrg] getOrgLeadershipSnapshots error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
    * GET /api/team-intelligence-dashboard/org/summary
    *
    * Query params:
