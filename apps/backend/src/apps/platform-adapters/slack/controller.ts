@@ -462,8 +462,12 @@ export class SlackController {
 		const channelId = getResolvedChannelId(req);
 		const args = transformDelete({ ...parsed.data, channel: channelId });
 		const existingMessage = await repositories.messages.findById(args.messageId);
-		if (!existingMessage || existingMessage.isDeleted) {
+		if (!existingMessage) {
 			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		if (existingMessage.isDeleted) {
+			res.status(200).json({ ok: true, channel: channelId, ts: args.messageId });
 			return;
 		}
 		if (existingMessage.senderId !== context.userId || existingMessage.msgType !== MessageType.BOT) {

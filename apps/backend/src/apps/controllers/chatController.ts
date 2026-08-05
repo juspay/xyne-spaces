@@ -78,7 +78,10 @@ const DeleteMessageBodySchema = z.object({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
-});
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required', path: ['channelId'] }
+);
 
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
