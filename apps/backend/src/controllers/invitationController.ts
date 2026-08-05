@@ -132,6 +132,7 @@ export class InvitationController {
         await buildInvitationLink({ req, workspaceId, invitationId: invitation.invitationId || invitation.id });
 
       if (config.env === 'development') {
+        console.log("tempPassword: ", tempPassword)
         logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
       } else {
         // Send invitation email

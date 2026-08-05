@@ -616,8 +616,8 @@ export class JiraMigrationPreviewService {
         FROM public.form_fields ff
         INNER JOIN public.forms_context_mapping fcm ON fcm."formId" = ff."formId"
         WHERE fcm."contextId" = ${input.targetBoardId}
-          AND fcm."contextType" = CAST(${FormContextType.BOARD} AS "FormContextType")
-          AND fcm."entityType" = CAST(${FormEntityType.TICKET} AS "FormEntityType")
+          AND fcm."contextType" = CAST(${FormContextType.BOARD} AS text)
+          AND fcm."entityType" = CAST(${FormEntityType.TICKET} AS text)
         ORDER BY ff."createdAt" ASC
       `,
       this.fetchAllProjectStatuses(jiraProjectKey),

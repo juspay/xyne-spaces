@@ -181,33 +181,71 @@ FEATURE_LABELS=(
     "Feature Flags     (superposition)"
 )
 NUM_FEATURES=${#FEATURE_LABELS[@]}
-CURSOR=1                          # start on Xyne-Claw (first toggleable item)
+SELECT_ALL_LABEL="Select all optional features"
+SELECT_ALL_INDEX=1
+NUM_MENU_ITEMS=$((NUM_FEATURES + 1))
+CURSOR=$SELECT_ALL_INDEX          # start on Select all
 declare -a CHECKED=(1 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
 
+all_optional_features_selected() {
+    local i
+    for i in $(seq 1 $((NUM_FEATURES - 1))); do
+        [ "${CHECKED[$i]:-0}" = "1" ] || return 1
+    done
+    return 0
+}
+
 render_menu() {
+    local all_selected=0
+    local any_selected=0
+    local box feature_index i label menu_index
+
+    if all_optional_features_selected; then
+        all_selected=1
+    fi
+    for i in $(seq 1 $((NUM_FEATURES - 1))); do
+        if [ "${CHECKED[$i]:-0}" = "1" ]; then
+            any_selected=1
+            break
+        fi
+    done
+
     echo ""
     echo -e "${BOLD}Which features do you need?${NC} ${YELLOW}(▲/▼ move, space toggle, enter confirm)${NC}"
     echo ""
-    for i in $(seq 0 $((NUM_FEATURES - 1))); do
-        if [ "$i" -eq 0 ]; then
+    for menu_index in $(seq 0 $((NUM_MENU_ITEMS - 1))); do
+        if [ "$menu_index" -eq 0 ]; then
+            label="${FEATURE_LABELS[0]}"
             box="${GREEN}[x]${NC}"
-        elif [ "${CHECKED[$i]}" = "1" ]; then
-            box="${GREEN}[x]${NC}"
+        elif [ "$menu_index" -eq "$SELECT_ALL_INDEX" ]; then
+            label="$SELECT_ALL_LABEL"
+            if [ "$all_selected" = "1" ]; then
+                box="${GREEN}[x]${NC}"
+            elif [ "$any_selected" = "1" ]; then
+                box="${YELLOW}[-]${NC}"
+            else
+                box="[ ]"
+            fi
         else
-            box="[ ]"
+            feature_index=$((menu_index - 1))
+            label="${FEATURE_LABELS[$feature_index]}"
+            if [ "${CHECKED[$feature_index]:-0}" = "1" ]; then
+                box="${GREEN}[x]${NC}"
+            else
+                box="[ ]"
+            fi
         fi
-        if [ "$i" -eq "$CURSOR" ]; then
-            echo -e "  ${CYAN}> ${box} ${FEATURE_LABELS[$i]}${NC}"
-        elif [ "$i" -eq 0 ]; then
-            echo -e "    ${box} ${CYAN}${FEATURE_LABELS[$i]}${NC}"
+
+        if [ "$menu_index" -eq "$CURSOR" ]; then
+            echo -e "  ${CYAN}> ${box} ${label}${NC}"
+        elif [ "$menu_index" -eq 0 ]; then
+            echo -e "    ${box} ${CYAN}${label}${NC}"
         else
-            echo -e "    ${box} ${FEATURE_LABELS[$i]}"
+            echo -e "    ${box} ${label}"
         fi
     done
     echo ""
 }
-
-MOVE_UP=$((NUM_FEATURES + 3))      # lines printed = 1 blank + 1 title + 1 blank + N options + 1 blank
 
 # Restore the cursor no matter how we leave the picker. Without this a Ctrl-C
 # during selection exits with the cursor still hidden, and every later prompt in
@@ -219,7 +257,7 @@ trap restore_cursor EXIT
 tput civis 2>/dev/null || true     # hide cursor
 
 render_menu
-MOVE_LINES=$((NUM_FEATURES + 4))
+MOVE_LINES=$((NUM_MENU_ITEMS + 4))
 while true; do
     IFS= read -rsn1 key
     case "$key" in
@@ -229,12 +267,22 @@ while true; do
                 '[A')               # up
                     [ "$CURSOR" -gt 1 ] && CURSOR=$((CURSOR - 1)) ;;
                 '[B')               # down
-                    [ "$CURSOR" -lt $((NUM_FEATURES - 1)) ] && CURSOR=$((CURSOR + 1)) ;;
+                    [ "$CURSOR" -lt $((NUM_MENU_ITEMS - 1)) ] && CURSOR=$((CURSOR + 1)) ;;
             esac
             ;;
-        ' ')                        # space — toggle (feature 0 is always on)
-            if [ "$CURSOR" -gt 0 ]; then
-                CHECKED[$CURSOR]=$((1 - CHECKED[$CURSOR]))
+        ' ')                        # space — toggle Select all or one optional feature
+            if [ "$CURSOR" -eq "$SELECT_ALL_INDEX" ]; then
+                if all_optional_features_selected; then
+                    new_state=0
+                else
+                    new_state=1
+                fi
+                for i in $(seq 1 $((NUM_FEATURES - 1))); do
+                    CHECKED[$i]=$new_state
+                done
+            elif [ "$CURSOR" -gt "$SELECT_ALL_INDEX" ]; then
+                feature_index=$((CURSOR - 1))
+                CHECKED[$feature_index]=$((1 - CHECKED[$feature_index]))
             fi
             ;;
         '')                         # enter — confirm
@@ -258,7 +306,10 @@ done
 ENABLE_STORAGE=1          # always on (Chat & Tickets needs fake-gcs + minio)
 ENABLE_OBSERVABILITY=0
 ENABLE_CALLS=0
+ENABLE_TRANSCRIPTION=0
+ENABLE_EGRESS=0
 ENABLE_FEATURE_FLAGS=0
+START_VESPA=0
 # Each feature maps to the compose services it needs. Every service is its own
 # container from its own upstream image, so an unselected feature costs nothing
 # and one flaky download cannot take the whole environment with it.
@@ -309,9 +360,11 @@ for f in $(echo "$SELECTED_FEATURES" | tr ',' ' '); do
         2) SELECTED_NAMES="${SELECTED_NAMES}Xyne-Claw " ;;
         3) SELECTED_NAMES="${SELECTED_NAMES}Canvas " ;;
         4) SELECTED_NAMES="${SELECTED_NAMES}Calls " ;;
-        5) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
-        6) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
-        7) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
+        5) SELECTED_NAMES="${SELECTED_NAMES}Transcription " ;;
+        6) SELECTED_NAMES="${SELECTED_NAMES}Call-Recording " ;;
+        7) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
+        8) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
+        9) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
     esac
 done
 echo ""
@@ -794,24 +847,30 @@ fi
 
 if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
     echo -e "${BLUE}  Setting up xyne-claw-auth database schema...${NC}"
-    cd "$REPO_ROOT/apps/xyne-claw-auth/backend"
-    if [ ! -d "node_modules" ]; then
-        echo -e "${YELLOW}  Installing apps/xyne-claw-auth/backend dependencies...${NC}"
-        pnpm install
-    fi
-    set -a && source .env && set +a
-    if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
-      export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
-    fi
-    pnpm exec prisma db push --skip-generate --accept-data-loss
-    pnpm exec prisma generate
-    NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
+    # Keep claw-auth's DATABASE_URL and other exported values inside this
+    # subshell. Sourcing its .env in the parent shell makes later Spaces commands
+    # accidentally connect to claw_auth_db instead of xyne_dev_db.
+    (
+        cd "$REPO_ROOT/apps/xyne-claw-auth/backend"
+        if [ ! -d "node_modules" ]; then
+            echo -e "${YELLOW}  Installing apps/xyne-claw-auth/backend dependencies...${NC}"
+            pnpm install
+        fi
+        set -a && source .env && set +a
+        if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
+            export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
+        fi
+        pnpm exec prisma db push --skip-generate --accept-data-loss
+        pnpm exec prisma generate
+        NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
+    )
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
-    cd "$REPO_ROOT"
 
     echo -e "${BLUE}  Registering Claw agents as Spaces apps...${NC}"
     cd "$REPO_ROOT/apps/backend"
-    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-claw-agent-apps.ts \
+    # --override guarantees the Spaces client uses xyne_dev_db even when the
+    # caller entered this script with a different DATABASE_URL already exported.
+    pnpm exec dotenv --override -e .env.local -- pnpm exec tsx scripts/seed-claw-agent-apps.ts \
         || echo -e "${YELLOW}  Agent registration failed — agents will not be mentionable until it is re-run.${NC}"
     cd "$REPO_ROOT"
 fi

@@ -477,7 +477,7 @@ export class AdminBackfillController {
             SELECT t.id, t."workspaceId"
             FROM "tickets" t
             JOIN "channels" ch ON ch.id = t."channelId"
-            WHERE ch.type = ${ChannelType.EMAIL}::"ChannelType"
+            WHERE ch.type = ${ChannelType.EMAIL}::text
             ${cutoffTime && fromTime
               ? Prisma.sql`AND t."updatedAt" >= ${fromTime} AND t."updatedAt" <= ${cutoffTime}`
               : cutoffTime

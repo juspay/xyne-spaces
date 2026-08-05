@@ -938,6 +938,12 @@ export class App {
     const { botProcessor } = await import('@/services/bots');
     await botProcessor.initialize();
 
+    // Bot synchronization upserts User rows, which triggers userVespaSync.
+    // Initialize the live producer first so those middleware writes can enqueue.
+    logger.info('Initializing Vespa queue...');
+    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
+    await vespaQueue.initialize();
+
     // Initialize unified bot framework
     logger.info('Initializing unified bot framework...');
     initializeBotRegistry(); // Register all bots (internal + external) with unified catalog
@@ -950,9 +956,6 @@ export class App {
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
 
-    logger.info('Initializing Vespa queue...');
-    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
-    await vespaQueue.initialize();
     // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
     await vespaBackfillQueue.initialize();
 
