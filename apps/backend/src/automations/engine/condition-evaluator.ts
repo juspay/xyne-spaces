@@ -46,6 +46,40 @@ function looseEquals(a: unknown, b: unknown): boolean {
   return false;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function applyNumericOperator(
+  operator: ConditionOperator.GT | ConditionOperator.GTE | ConditionOperator.LT | ConditionOperator.LTE,
+  resolved: unknown,
+  refValue: unknown,
+): boolean {
+  const left = toFiniteNumber(resolved);
+  const right = toFiniteNumber(refValue);
+  if (left === null || right === null) return false;
+
+  switch (operator) {
+    case ConditionOperator.GT:
+      return left > right;
+    case ConditionOperator.GTE:
+      return left >= right;
+    case ConditionOperator.LT:
+      return left < right;
+    case ConditionOperator.LTE:
+      return left <= right;
+    default:
+      return assertNever(operator);
+  }
+}
+
 function applyOperator(
   operator: ConditionOperator,
   resolved: unknown,
@@ -68,13 +102,10 @@ function applyOperator(
       return false;
 
     case ConditionOperator.GT:
-      return resolved !== undefined && resolved !== null && (resolved as number) > (refValue as number);
     case ConditionOperator.GTE:
-      return resolved !== undefined && resolved !== null && (resolved as number) >= (refValue as number);
     case ConditionOperator.LT:
-      return resolved !== undefined && resolved !== null && (resolved as number) < (refValue as number);
     case ConditionOperator.LTE:
-      return resolved !== undefined && resolved !== null && (resolved as number) <= (refValue as number);
+      return applyNumericOperator(operator, resolved, refValue);
 
     case ConditionOperator.HAS_TAG: {
       if (!Array.isArray(resolved)) {
