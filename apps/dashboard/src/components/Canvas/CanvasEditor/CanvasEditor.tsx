@@ -32,7 +32,12 @@ import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
 import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
-import { canvasSchema, knownCanvasBlockTypes } from '../canvasSchema';
+import {
+  canvasSchema,
+  canvasTableOptions,
+  canvasTiptapOptions,
+  knownCanvasBlockTypes,
+} from '../canvasSchema';
 import { createElement } from 'react';
 import { MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { RiGroupLine } from 'react-icons/ri';
@@ -162,6 +167,8 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       dictionary: canvasDictionary,
+      tables: canvasTableOptions,
+      _tiptapOptions: canvasTiptapOptions,
     });
 
     // Auto-focus the editor on mount if requested (fire only once, cursor at end)
@@ -588,6 +595,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 onChange={handleChange}
                 theme={theme === 'midnight' ? 'dark' : 'light'}
                 formattingToolbar={false}
+                tableHandles={editable}
                 slashMenu={false}
               >
                 <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
