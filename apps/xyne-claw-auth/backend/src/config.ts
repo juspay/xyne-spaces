@@ -280,7 +280,7 @@ export const CONFIG = {
   /** Global, credentialless Heisenberg pipeline REST API proxied by its MCP server. */
   heisenbergBaseUrl: (
     process.env["HEISENBERG_BASE_URL"] ??
-    "https://heisenberg.internal.staging.mum.juspay.net"
+    "<heisenberg-url>"
   ).replace(/\/+$/, ""),
 } as const;
 

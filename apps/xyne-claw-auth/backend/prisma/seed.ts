@@ -520,7 +520,8 @@ const SERVERS = [
   {
     type: "heisenberg",
     name: "Heisenberg Pipeline",
-    url: "https://heisenberg.internal.staging.mum.juspay.net",
+    // stdio transport — the endpoint comes from HEISENBERG_BASE_URL at runtime.
+    url: "",
     description: "Global MCP proxy for Heisenberg pipeline runs, status, coverage, test failures, and logs.",
     transport: "stdio",
     credentialForm: { fields: [] },

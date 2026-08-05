@@ -1,6 +1,9 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 
-const DEFAULT_BASE_URL = "https://heisenberg.internal.staging.mum.juspay.net";
+// HEISENBERG_BASE_URL is set by adapters/heisenberg.ts from
+// CONFIG.heisenbergBaseUrl when it spawns this server; the placeholder only
+// surfaces when the deployment never configured the endpoint.
+const DEFAULT_BASE_URL = "<heisenberg-url>";
 const JSON_REQUEST_TIMEOUT_MS = 120_000;
 const MAX_SQL_BYTES = 1024 * 1024;
 const MAX_REQUEST_ID_LENGTH = 512;
