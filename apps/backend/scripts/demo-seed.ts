@@ -26,27 +26,23 @@
  * creating a second copy. Use DEMO_WIPE=1 to start over.
  */
 
-import {
-  PrismaClient,
-  ChannelType,
-  ChannelScopeType,
-  ChannelVisibility,
-  ChannelRole,
-  MessageType,
-  AuthProvider,
-  UserStatus,
-  OrgRole,
-  WorkspaceRole,
-  TicketStatusV2,
-  TicketPriority,
-} from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
+import { hashPassword } from '../src/utils/passwordUtils';
 import {
   serializeInitialMessageMd,
   serializeTicketMd,
   MessageType as SharedMessageType,
   TicketStatusV2 as SharedTicketStatusV2,
   TicketPriority as SharedTicketPriority,
+  ChannelType,
+  ChannelScopeType,
+  ChannelVisibility,
+  ChannelRole,
+  AuthProvider,
+  UserStatus,
+  OrgRole,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { CHANNELS, DEMO_USERS, TICKETS, type Line } from './demo-seed-content';
 
@@ -62,6 +58,8 @@ const PROJECT_NAME = 'Platform';
 const BOARD_NAME = 'Delivery';
 /** Distinct domain so the seeded people can be cleaned up without touching real accounts. */
 const DEMO_EMAIL_DOMAIN = '@xyne.team';
+/** Shared password for the seeded teammates — same shape as the dev admin's. */
+const DEMO_USER_PASSWORD = 'xynelocal@123';
 
 const WIPE = process.env.DEMO_WIPE === '1';
 const SKIP_VESPA = process.env.DEMO_SKIP_VESPA === '1';
@@ -210,14 +208,36 @@ async function ensureUsers(workspaceId: string, orgId: string, admin: SeededUser
     }
 
     const memberId = createId();
-    await prisma.orgMember.create({ data: { memberId, orgId, email, role: OrgRole.MEMBER } });
+
+    // These are password accounts, not SSO ones. Three things have to agree or
+    // email+password login rejects them (see emailAuthController):
+    //
+    //   orgMember.passwordHash   — the login path verifies against this, and
+    //                              bails with "no password set" when it is null
+    //   authProvider = EMAIL     — a non-EMAIL provider is refused outright with
+    //                              provider_mismatch; account linking is
+    //                              deliberately unsupported
+    //   providerUserId           — `email-<address>`, the convention
+    //                              migrateLegacyIdentity writes
+    //
+    // Seeding these as GOOGLE produced users who look right in the UI and cannot
+    // sign in at all.
+    await prisma.orgMember.create({
+      data: {
+        memberId,
+        orgId,
+        email,
+        role: OrgRole.MEMBER,
+        passwordHash: await hashPassword(DEMO_USER_PASSWORD),
+      },
+    });
     const user = await prisma.user.create({
       data: {
         name,
         email,
         picture: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff`,
-        authProvider: AuthProvider.GOOGLE,
-        providerUserId: `demo-${memberId}`,
+        authProvider: AuthProvider.EMAIL,
+        providerUserId: `email-${email}`,
         status: UserStatus.ACTIVE,
         workspaceId,
         orgMemberId: memberId,
@@ -506,6 +526,18 @@ const TICKET_CHANNEL: Record<number, string> = {
   9: 'product',
   10: 'design',
   11: 'engineering',
+  12: 'customer-voice',
+  13: 'customer-voice',
+  14: 'incidents',
+  15: 'onboarding',
+  16: 'announcements',
+  17: 'knowledge',
+  18: 'claw-lab',
+  19: 'automations',
+  20: 'automations',
+  21: 'automations',
+  22: 'claw-lab',
+  23: 'claw-lab',
 };
 
 /**
@@ -737,6 +769,7 @@ async function main() {
 
   const messageCount = vespaJobs.filter((j) => j.schema === 'chat_message').length;
   console.log('\n✅ Demo data ready');
+  console.log(`   Seeded teammates sign in with their email and ${DEMO_USER_PASSWORD}`);
   console.log(`   ${users.length} people · ${channels.length} channels · ${messageCount} messages · ${TICKETS.length} tickets\n`);
 }
 

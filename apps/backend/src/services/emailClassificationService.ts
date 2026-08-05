@@ -19,9 +19,8 @@ import type {
   TicketClassificationDataWithPriority,
   PriorityClassificationResult,
 } from '../types/classification.js';
-import { TicketPriority } from '@prisma/client';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, TicketPriority } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
 const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';

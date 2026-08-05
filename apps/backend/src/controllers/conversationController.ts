@@ -15,7 +15,8 @@ import { UserRepository } from '../database/repositories/users';
 import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
-import { Message, MessageType, AttachmentEntityType, ChannelScopeType } from '@prisma/client';
+import { Message } from '@prisma/client';
+import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -52,7 +53,9 @@ import {
 } from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
+import { RecentConversationsRepository } from '../database/repositories/recentConversationsRepository';
 import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
+import { serializeRecentChannelConversations } from '../serializers/recentConversationsSerializer';
 import {
   serializeConversationMessageRow,
   type SerializedConversationMessageRow,
@@ -99,6 +102,7 @@ export class ConversationController {
   private channelUserStatusRespository: ChannelUserStatusRepository;
   private conversationV3Repository: ConversationV3Repository;
   private conversationParticipantRepository: ConversationParticipantRepository;
+  private recentConversationsRepository: RecentConversationsRepository;
 
   constructor() {
     this.conversationRepository = new ConversationRepository();
@@ -111,6 +115,7 @@ export class ConversationController {
     this.channelUserStatusRespository = new ChannelUserStatusRepository();
     this.conversationV3Repository = new ConversationV3Repository();
     this.conversationParticipantRepository = new ConversationParticipantRepository();
+    this.recentConversationsRepository = new RecentConversationsRepository();
   }
 
   /**
@@ -271,6 +276,28 @@ export class ConversationController {
     }
   };
 
+  getRecentVisitedConversations = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const days = config.recentVisitedConversations.lookbackDays;
+      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const channels =
+        await this.recentConversationsRepository.getRecentVisitedChannelConversations(
+          userId,
+          cutoff
+        );
+
+      res.status(200).json({
+        days,
+        channels: serializeRecentChannelConversations(channels),
+      });
+    } catch (error) {
+      logger.error('Error fetching recent visited conversations:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   // Helper method to get user info
   private async getUserInfo(userId: string): Promise<UserInfo> {
     // Check if this is a registered bot
@@ -418,7 +445,7 @@ export class ConversationController {
       if (!isParticipant) {
         // Only auto-add for PUBLIC channels
         if (channel.visibility === 'PUBLIC') {
-          await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+          await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         } else {
           // PRIVATE channels require explicit invitation
           res.status(403).json({
@@ -464,7 +491,7 @@ export class ConversationController {
           channelId,
           conversationId: conversation.conversationId,
           senderId: userId,
-          scopeType: channel.scopeType,
+          scopeType: channel.scopeType as ChannelScopeType,
         });
 
         // Handle bot command with the new conversation ID
@@ -502,7 +529,7 @@ export class ConversationController {
         channelId,
         conversationId: conversation.conversationId,
         senderId: userId,
-        scopeType: channel.scopeType,
+        scopeType: channel.scopeType as ChannelScopeType,
       });
 
       // Create attachment records if files were uploaded
@@ -977,7 +1004,7 @@ export class ConversationController {
           await this.channelParticipantRepository.addParticipant(
             conversation.channelId,
             userId,
-            'MEMBER'
+            ChannelRole.MEMBER
           );
         } else {
           // PRIVATE channels require explicit invitation

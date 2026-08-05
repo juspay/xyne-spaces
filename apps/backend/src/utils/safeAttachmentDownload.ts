@@ -26,9 +26,52 @@ const SAFE_INLINE_MIME_TYPES = new Set<string>([
   'audio/ogg',
 ]);
 
+// Image types allowed to render inline from image-only endpoints (avatars,
+// custom emojis). SVG is included but served with a script-blocking CSP below.
+const INLINE_IMAGE_MIME_TYPES = new Set<string>([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/svg+xml',
+]);
+
 interface SafeDownloadOptions {
   mimetype?: string | null;
   filename?: string | null;
+}
+
+/**
+ * Sets response headers for an image-only streaming endpoint (avatars, custom
+ * emojis) that are rendered via <img>. SVG stays renderable but is served with
+ * a sandbox CSP so it cannot execute scripts on direct navigation. Any type
+ * outside the image allowlist is downgraded to an opaque download. nosniff is
+ * always sent.
+ */
+export function setSafeInlineImageHeaders(
+  res: Response,
+  contentType?: string | null,
+): void {
+  const normalized = (contentType || '').split(';')[0].trim().toLowerCase();
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  if (!INLINE_IMAGE_MIME_TYPES.has(normalized)) {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment');
+    return;
+  }
+
+  if (normalized === 'image/svg+xml') {
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
+  }
+  res.setHeader('Content-Type', normalized);
 }
 
 /**

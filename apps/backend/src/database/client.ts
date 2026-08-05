@@ -1,11 +1,14 @@
 import { PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { retryForever } from '@/utils/retry';
+import { installPrismaRetryMiddleware } from './retryMiddleware';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
+import { setupEnumTextValidation } from './middleware/enumTextValidation';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -26,6 +29,8 @@ export class DatabaseClient {
           },
         },
       });
+
+      installPrismaRetryMiddleware(DatabaseClient.readReplicaInstance, 'prisma.replica');
     }
     return DatabaseClient.readReplicaInstance;
   }
@@ -52,10 +57,15 @@ export class DatabaseClient {
         setupUserSessionLogging(DatabaseClient.instance, true);
       }
 
+      setupEnumTextValidation(DatabaseClient.instance);
+
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);
       setupUserVespaSync(DatabaseClient.instance);
+
+      // Registered last on purpose — see installPrismaRetryMiddleware.
+      installPrismaRetryMiddleware(DatabaseClient.instance);
 
       (DatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Database error:', e);
@@ -79,15 +89,11 @@ export class DatabaseClient {
       return;
     }
 
-    try {
-      const client = DatabaseClient.getInstance();
-      await client.$connect();
-      DatabaseClient.isConnected = true;
-      logger.info('Database connected successfully');
-    } catch (error) {
-      logger.error('Failed to connect to database:', error);
-      throw error;
-    }
+    const client = DatabaseClient.getInstance();
+    await retryForever(() => client.$connect(), 'prisma.connect');
+
+    DatabaseClient.isConnected = true;
+    logger.info('Database connected successfully');
   }
 
   static async disconnect(): Promise<void> {

@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient, Status } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { OrganizationDomainVerificationStatus } from '@xyne/shared';
+import { OrganizationDomainVerificationStatus, Status } from '@xyne/shared';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com',
@@ -125,7 +125,7 @@ export class OrganizationDomainService {
       return null;
     }
 
-    const mapping = await this.prisma.organizationDomain.findFirst({
+    const mappings = await this.prisma.organizationDomain.findMany({
       where: {
         domain,
         verificationStatus: { in: MATCHABLE_DOMAIN_STATUSES },
@@ -133,13 +133,13 @@ export class OrganizationDomainService {
       orderBy: { createdAt: 'asc' },
     });
 
-    if (!mapping) {
+    if (mappings.length === 0) {
       return null;
     }
 
-    const organization = await this.prisma.organization.findFirst({
+    const activeOrgs = await this.prisma.organization.findMany({
       where: {
-        orgId: mapping.orgId,
+        orgId: { in: mappings.map(mapping => mapping.orgId) },
         status: Status.ACTIVE,
       },
       select: {
@@ -149,15 +149,20 @@ export class OrganizationDomainService {
       },
     });
 
-    if (!organization) {
-      return null;
+    const activeOrgById = new Map(activeOrgs.map(org => [org.orgId, org]));
+
+    for (const mapping of mappings) {
+      const organization = activeOrgById.get(mapping.orgId);
+      if (organization) {
+        return {
+          ...organization,
+          domain: mapping.domain,
+          verificationStatus: mapping.verificationStatus,
+        };
+      }
     }
 
-    return {
-      ...organization,
-      domain: mapping.domain,
-      verificationStatus: mapping.verificationStatus,
-    };
+    return null;
   }
 
   async findEnterpriseWorkspaceByEmailDomain(

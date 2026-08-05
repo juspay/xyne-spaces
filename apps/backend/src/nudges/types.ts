@@ -1,5 +1,5 @@
-import type { NudgeKind, SurfaceAreaType } from '@prisma/client';
 import type { ActivityWithRelatedData } from '@/services/userActivityService';
+import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import type { AgentsConfig } from '@/agents/config';
 
 export type NudgeMode = 'explicit' | 'implicit';

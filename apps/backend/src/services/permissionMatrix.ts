@@ -1,4 +1,5 @@
-import { AccessType, WorkspaceRole, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { db } from '../database/client';
@@ -254,8 +255,9 @@ export async function syncResourceAdminAccess(
     );
 
     if (shouldHaveAccess && !hasAdminAccess) {
+      const user = await db.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
       await repositories.resourceAccess.grantAccess(
-        { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+        { userId, resourceId: resource.id, accessType: AccessType.ADMIN, workspaceId: user?.workspaceId },
         actorUserId,
       );
       logger.debug(`${logPrefix} Granted ADMIN access to ${resourceName} for user ${userId}.`);

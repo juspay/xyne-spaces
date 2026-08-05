@@ -10,6 +10,8 @@ router.get('/threads', conversationController.getUserThreads);
 
 router.post('/reply-drafts/:draftId/approve', conversationController.approveReplyDraft);
 router.post('/reply-drafts/:draftId/decline', conversationController.declineReplyDraft);
+// Latest conversations + full threads for every channel the user visited in the last N days.
+router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
 // Keep replyToConversation for file upload handling
 router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);

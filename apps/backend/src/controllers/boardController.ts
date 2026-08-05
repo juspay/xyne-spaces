@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { BoardType } from '@prisma/client';
+import { BoardType } from '@xyne/shared';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { logger } from '@/utils/logger';

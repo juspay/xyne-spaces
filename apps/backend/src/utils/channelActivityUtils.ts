@@ -1,7 +1,7 @@
 import { activityService } from '@/services/activity/activityService';
+import { ActivityClassification } from '@xyne/shared';
 import { db } from '@/database/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification } from '@prisma/client';
 import { logger } from '@/utils/logger';
 
 /**

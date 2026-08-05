@@ -18,12 +18,19 @@
  * Re-running with the same email resets that account's password rather than failing.
  */
 
-import { PrismaClient, AuthProvider, UserStatus, WorkspaceRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AuthProvider, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
 
 const DEFAULT_ORG_ID = 'xyne-default-org';
+
+/** Prisma's unique-constraint failure. Checked structurally so this keeps working
+ *  whether the client throws PrismaClientKnownRequestError or a plain object. */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002';
+}
 const DEFAULT_WORKSPACE_NAME = 'Default Workspace';
 
 async function main() {
@@ -54,10 +61,21 @@ async function main() {
 
   const passwordHash = await hashPassword(password);
 
+  // Use whichever organization this database actually has, rather than assuming
+  // the constant. A database seeded under a different org id would otherwise
+  // send every lookup below to the wrong place.
+  const org = await prisma.orgMember.findFirst({ select: { orgId: true } });
+  const orgId = org?.orgId ?? DEFAULT_ORG_ID;
+
   // OrgMember carries the credential; User is the workspace identity.
+  //
+  // Look up by email ALONE, because that is what the unique index enforces
+  // (org_members_email_key). Scoping the lookup to one org meant an address that
+  // already existed elsewhere slipped past the check and hit the insert, which
+  // surfaced as a raw Prisma P2002 instead of "this account already exists".
   const existingMember = await prisma.orgMember.findFirst({
-    where: { email, orgId: DEFAULT_ORG_ID },
-    select: { memberId: true },
+    where: { email },
+    select: { memberId: true, orgId: true },
   });
 
   let memberId: string;
@@ -67,14 +85,31 @@ async function main() {
       data: { passwordHash },
     });
     memberId = existingMember.memberId;
-    console.log(`  ✅ Reset the password for ${email}`);
+    console.log(`  ℹ️  ${email} already exists — password updated`);
   } else {
-    const member = await prisma.orgMember.create({
-      data: { email, orgId: DEFAULT_ORG_ID, role: 'OWNER', passwordHash },
-      select: { memberId: true },
-    });
-    memberId = member.memberId;
-    console.log(`  ✅ Created org member for ${email}`);
+    try {
+      const member = await prisma.orgMember.create({
+        data: { email, orgId, role: 'OWNER', passwordHash },
+        select: { memberId: true },
+      });
+      memberId = member.memberId;
+      console.log(`  ✅ Created org member for ${email}`);
+    } catch (error) {
+      // Lost a race, or an index we did not anticipate. Recover by adopting the
+      // existing row rather than failing the whole setup run.
+      if (!isUniqueViolation(error)) throw error;
+      const raced = await prisma.orgMember.findFirst({
+        where: { email },
+        select: { memberId: true },
+      });
+      if (!raced) throw error;
+      await prisma.orgMember.update({
+        where: { memberId: raced.memberId },
+        data: { passwordHash },
+      });
+      memberId = raced.memberId;
+      console.log(`  ℹ️  ${email} already exists — password updated`);
+    }
   }
 
   const existingUser = await prisma.user.findFirst({
@@ -89,19 +124,36 @@ async function main() {
     });
     console.log(`  ✅ Updated existing user ${email}`);
   } else {
-    await prisma.user.create({
-      data: {
-        name: email.split('@')[0],
-        email,
-        authProvider: AuthProvider.EMAIL,
-        providerUserId: `email-dev-login-${memberId}`,
-        status: UserStatus.ACTIVE,
-        role: WorkspaceRole.ADMIN,
-        workspaceId: workspace.id,
-        orgMemberId: memberId,
-      },
-    });
-    console.log(`  ✅ Created user ${email}`);
+    try {
+      await prisma.user.create({
+        data: {
+          name: email.split('@')[0],
+          email,
+          // Must be EMAIL: emailAuthController rejects any other provider with
+          // provider_mismatch, so a GOOGLE identity could never use this password.
+          authProvider: AuthProvider.EMAIL,
+          providerUserId: `email-${email}`,
+          status: UserStatus.ACTIVE,
+          role: WorkspaceRole.ADMIN,
+          workspaceId: workspace.id,
+          orgMemberId: memberId,
+        },
+      });
+      console.log(`  ✅ Created user ${email}`);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      // Already present under this workspace — adopt it instead of failing.
+      const raced = await prisma.user.findFirst({
+        where: { email, workspaceId: workspace.id },
+        select: { id: true },
+      });
+      if (!raced) throw error;
+      await prisma.user.update({
+        where: { id: raced.id },
+        data: { orgMemberId: memberId, status: UserStatus.ACTIVE, role: WorkspaceRole.ADMIN },
+      });
+      console.log(`  ℹ️  ${email} already exists — account updated`);
+    }
   }
 
   // Mirror the default admin's group membership so permissions match.

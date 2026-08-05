@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { validateS2SKey } from '@/middleware/validateS2SKey';
+import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
 
 const router = Router();
 
@@ -80,6 +81,9 @@ async function sendVarysWebhook(
   webhookUrl: string,
   payload: PRCheckRequestedPayload
 ): Promise<void> {
+  // Reject webhook URLs whose host resolves to an internal/private address.
+  await assertWebhookUrlSafe(webhookUrl);
+
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: {
@@ -87,6 +91,7 @@ async function sendVarysWebhook(
       'X-Xyne-Event': 'PR_CHECK_REQUESTED',
     },
     body: JSON.stringify(payload),
+    redirect: 'manual',
   });
 
   if (!response.ok) {

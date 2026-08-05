@@ -1,7 +1,7 @@
 import crypto from 'crypto';
+import { AuthProvider } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { AuthProvider } from '@prisma/client';
 import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';
@@ -87,9 +87,10 @@ export class EmailAuthController {
       });
 
       if (!orgMember || orgMember.leftAt) {
+        // Keep this response identical to the wrong-password response below.
         res.status(401).json({
           error: 'Invalid credentials',
-          message: 'User is not a member of org',
+          message: 'Email or password is incorrect',
         });
         return;
       }

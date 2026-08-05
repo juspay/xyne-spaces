@@ -20,401 +20,12 @@ datasource db {
   relationMode = "prisma"
 }
 
-
 // Enums for Workflow model
-enum WorkflowCategory {
-  USER_ONBOARDING
-  BUG_WORKFLOW
-  BUG_WORKFLOW_EVAL
-  BUG_WORKFLOW_EVAL_INNER_STEPS
-  BUG_WORKFLOW_EVAL_INNER_STEPS_EXPERIMENTAL
-  FEATURE_IMPLEMENTATION
-  FEATURE_PLANNING
-  XYNE_SPACES_FEATURE_IMPLEMENTATION
-  FIDO_SERVER_WORKFLOW
-  CONNECTOR_MIGRATION
-  CODER_WORKFLOW
-  QUERY_WORKFLOW
-  QUERY
-  ISSUE
-  REQUIREMENT_NEW
-  REQUIREMENT_ENHANCEMENT
-  FULL_PG_INTEGRATION
-  INVESTIGATION_WORKFLOW
-  GENIUS_INVESTIGATION_WORKFLOW
-  STAGE_APPROVAL_WORKFLOW
-  @@schema("public")
-}
-
-enum WorkflowExecutionMode {
-  AUTOMATIC
-  MANUAL
-  @@schema("public")
-}
-
-enum AutoDraftMode {
-  OFF
-  DRAFT
-  @@schema("public")
-}
-
-enum AutoDraftStatus {
-  GENERATING
-  READY
-  @@schema("public")
-}
-
-enum TicketStatus {      // Deprecated
-  NEW                    // Ticket created, awaiting triage or auto-assignment
-  IN_PROGRESS            // Work actively ongoing
-  WAIT_FOR_APPROVAL      // Awaiting approval from authorized personnel
-  REJECTED               // Ticket invalid or not approved. Cannot be reopened
-  RESOLVED               // Final terminal state
-  @@schema("public")
-}
-
-enum TicketStatusV2 {
-  TODO                   // Ticket created, awaiting triage or auto-assignment
-  STARTED                // Work actively ongoing
-  PAUSED                 // Awaiting approval from authorized personnel
-  CANCELLED              // Ticket invalid or not approved. Cannot be reopened
-  COMPLETED              // Final terminal state
-  @@schema("public")
-}
-
 // Gmail-style mailbox location for a ticket, per-user (see TicketUserMailbox).
 // ARCHIVED = removed from Inbox but still in All Mail. Absence of a row = INBOX.
-enum MailboxState {
-  INBOX
-  ARCHIVED
-  SPAM
-  @@schema("public")
-}
-
-enum TicketPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-  @@schema("public")
-}
-
-enum TicketReferenceRelation {
-  LINKED
-  DUPLICATE_CONFIRMED
-  DUPLICATE_POSSIBLE
-  MERGED_INTO
-  @@schema("public")
-}
-
-enum EmailMergeMode {
-  DISABLED  // Every new email thread creates a separate ticket
-  ENABLED   // Auto-merge cross-thread duplicates and per-email demerge
-  @@schema("public")
-}
-
-enum DeskType {
-  EMAIL
-  DL
-  SLACK
-  APP
-  CALL
-  @@schema("public")
-}
-
-enum UserResponsibility {
-  MANAGER
-  TEAM_LEAD
-  MEMBER
-  PR_REVIEWER
-  QA
-  @@schema("public")
-}
-
-enum RotationInterval {
-  WEEKLY
-  BIWEEKLY
-  MONTHLY
-  @@schema("public")
-}
-
-enum QueryVisualizationType {
-  KPI
-  BAR_CHART
-  PIE_CHART
-  DONUT_CHART
-  LINE_CHART
-  FUNNEL
-  HEATMAP
-  DATA_TABLE
-  AREA_CHART
-  KPI_COMPARE
-  SCATTER_CHART
-  @@schema("public")
-}
-
-enum EntityType {
-  MERCHANT
-  GATEWAY
-  @@schema("public")
-}
-
-enum RecapEntityType {
-  PROJECT
-  CHANNEL
-  @@schema("public")
-}
-
-enum ActivityType {
-  TITLE
-  DESCRIPTION
-  STATUS
-  ASSIGNED_TO
-  TICKET_TYPE
-  PRIORITY
-  ETA
-  STAGE_ETA
-  METADATA
-  CLOSED_AT
-  CLOSED_BY
-  REFERENCE_TICKET
-  STAGE_NAME
-  TAGS
-  ENTITY
-  PR
-  SUBTICKET_CREATED
-  BOARD
-  USER_GROUP_ID
-  PR_REVIEWER
-  QA
-  STAGE_CHANGE_REQUEST
-  STAGE_CHANGE_APPROVED
-  STAGE_CHANGE_REJECTED
-  IS_ARCHIVED
-  MERGED
-  UNMERGED
-  RCA_CREATED
-  RCA_UPDATED
-  EMAIL_SENT
-  TICKET_CREATED
-  CSAT_RECEIVED
-  @@schema("public")
-}
-
-enum AttachmentEntityType {
-  TICKET
-  CHAT
-  CANVAS
-  EMAIL
-  DRAFT
-  DELAYED_MESSAGE
-  WORKFLOW_STEPS
-  IMPACT
-  COLLECTION
-  FORM_ENTITY_VALUE
-  @@schema("public")
-}
-
-enum AttachmentUploadStatus {
-  PENDING
-  STARTED
-  COMPLETED
-  FAILED
-  @@schema("public")
-}
-
-enum TicketEnvironment {
-  DEVELOPMENT
-  STAGING
-  PRODUCTION
-  @@schema("public")
-}
-
-enum ReportedBy {
-  MERCHANT
-  INTERNAL
-  @@schema("public")
-}
-
 // Chat Feature Enums
-enum ChannelScopeType {
-  DEFAULT
-  DM
-  TICKET
-  DOCUMENT
-  GROUP_DM
-  @@schema("public")
-}
-
-enum ChannelType {
-  DEFAULT
-  EMAIL
-  SUPPORT
-  SLACK
-  APP
-  CALL
-  @@schema("public")
-}
-
-enum ChannelRole {
-  ADMIN
-  MEMBER
-  @@schema("public")
-}
-
-enum ChannelVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("public")
-}
-
-enum AppIncomingWebhookType {
-  SLACK
-  SENTINELONE
-  @@schema("workflow")
-}
-
-enum AppIncomingWebhookAction {
-  MESSAGE
-  TICKET
-  @@schema("workflow")
-}
-
-enum CalendarVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("public")
-}
-
-enum ChannelAddUserPolicy {
-  EVERYONE
-  ADMINS_ONLY
-  @@schema("public")
-}
-
-enum ChannelSortOrder {
-  UNREAD
-  RECENCY
-  ALPHABETICAL
-  @@schema("public")
-}
-
-enum MessageType {
-  USER
-  BOT
-  SYSTEM
-  FORWARDED
-  @@schema("public")
-}
-
-enum OrgRole {
-  OWNER
-  ADMIN
-  MEMBER
-  VIEWER
-  COMMUNITY_MEMBER
-  GUEST
-  @@schema("public")
-}
-
 // Call Feature Enums
-enum RecordingType {
-  AUDIO_ONLY
-  AUDIO_SCREEN
-  AUDIO_VIDEO
-  @@schema("public")
-}
-
 // Lifecycle of a single call_recordings row. See docs/call_recording_tech_review.md.
-enum RecordingStatus {
-  RECORDING_ACTIVE         // egress running, writing HLS segments — only status the single-active lock guards
-  RECORDING_STOPPED        // user stopped; egress finalizing last segments (lock freed)
-  PROCESSING_RECORDING     // segments in cloud; stitching HLS → single MP4
-  RECORDING_UPLOADED       // stitched MP4 confirmed in cloud — terminal success
-  RECORDING_FAILED         // startEgress threw / egress failed before any segment
-  RECORDING_UPLOAD_FAILED  // egress reported failure / segments never landed
-  PROCESSING_FAILED        // segments landed but the stitch failed (retryable)
-  RECORDING_EXPIRED        // retention removed the file (+ attachment/message cleaned)
-  RECORDING_DELETED        // user manually deleted (soft delete)
-  @@schema("non_zero")
-}
-
-enum CallType {
-  AUDIO
-  VIDEO
-  HEADLESS
-  @@schema("public")
-}
-
-enum CallOrigin {
-  CHANNEL
-  CONVERSATION
-  GOOGLE_CALENDAR
-  MICROSOFT_CALENDAR
-  @@schema("public")
-}
-
-enum CallStatus {
-  SCHEDULED
-  ACTIVE
-  IN_PROGRESS
-  ENDED
-  CANCELLED
-  @@schema("public")
-}
-
-enum InvitationResponse {
-  INVITED
-  REQUESTED    // External user waiting in lobby
-  ACCEPTED
-  DECLINED
-  MISSED
-  LEFT
-  @@schema("public")
-}
-
-enum MeetingStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-  MAYBE
-  HIDDEN
-  @@schema("public")
-}
-
-enum RecurringCallSeriesStatus {
-  ACTIVE    // Instances are still being generated
-  ENDED     // endsOn has passed
-  CANCELLED // Organizer cancelled the series
-  @@schema("public")
-}
-
-enum ConversationParticipation {
-  AUTHOR      // Sent at least one message in the conversation
-  MENTIONED   // Tagged/mentioned but hasn't replied yet
-  @@schema("public")
-}
-
-enum ProjectType {
-  DEFAULT
-  DM
-  @@schema("public")
-}
-
-enum VCSProviderType {
-  GITHUB
-  BITBUCKET_CLOUD
-  BITBUCKET_SERVER
-  @@schema("public")
-}
-
-enum ReleaseTrackingMode {
-  COMMIT_RANGE
-  VERSION
-
-  @@schema("public")
-}
-
 model Agent {
   id            String   @id @default(cuid())
   userDefinedId String   @unique
@@ -505,8 +116,8 @@ model Ticket {
   id               String            @id @default(cuid())
   title            String
   description      String
-  status           TicketStatus      @default(NEW)  // Deprecated - use statusV2
-  statusV2         TicketStatusV2    @default(TODO)
+  status           String            @default("NEW")  // Deprecated - use statusV2
+  statusV2         String            @default("TODO")
   createdBy        String            // Foreign key to User - Reporter/Owner of the ticket
   updatedBy        String           // Foreign key to User
   assignedTo       String?           // Foreign key to User
@@ -518,7 +129,7 @@ model Ticket {
   channelId        String            // The channel to which the ticket is linked
   eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
-  priority         TicketPriority    @default(LOW)
+  priority         String            @default("LOW")
   metadata         Json?             // Additional metadata - external source tracking, domain-specific context
   closedAt         DateTime?         // When the reporter closed the ticket after verification
   closedBy         String?           // User who closed the ticket
@@ -644,7 +255,7 @@ model TicketAssignment {
   id                 String             @id @default(cuid())
   ticketId           String             // Foreign key to Ticket
   userId             String?             // User ID assigned to this responsibility
-  userResponsibility UserResponsibility? // PR_REVIEWER | QA | etc.
+  userResponsibility String?             // PR_REVIEWER | QA | etc.
   roleId             String?             // nullable for legacy enum rows
   createdAt          DateTime           @default(now())
   createdBy          String             // User who created the assignment
@@ -668,7 +279,7 @@ model TicketActivity {
   ticketId     String       // Ticket reference
   updatedBy    String       // User who made the change
   timestamp    DateTime     @default(now())
-  activityType ActivityType // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
+  activityType String       // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
   value        Json         // The value containing field info, old/new values, etc.
   channelId    String?      // Denormalized from Ticket so desk metrics can query this table alone (no FK constraint)
 
@@ -687,7 +298,7 @@ model TicketEntityMapping {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String     @id @default(cuid())
   ticketId   String     // Ticket reference
-  entityType EntityType // MERCHANT or GATEWAY
+  entityType String     // MERCHANT or GATEWAY
   entityName String     // merchant_id or gateway_name
 
   // Relations
@@ -745,7 +356,7 @@ model TicketReferenceMapping {
   id             String                   @id @default(cuid())
   sourceTicketId String                   // Ticket owning the reference
   targetTicketId String                   // Referenced ticket
-  relationType   TicketReferenceRelation
+  relationType   String
   createdBy      String
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
@@ -787,20 +398,6 @@ model TicketStageEta {
   @@schema("public")
 }
 
-enum WorkflowEventType {
-  NO_OP
-  TICKET_CREATED
-  TICKET_UPDATED
-  TICKET_COMMENTED
-  EMAIL_RECEIVED
-  EMAIL_SENT
-  WEBHOOK
-  MESSAGE_RECEIVED
-  CALL_EVENT
-
-  @@schema("public")
-}
-
 model Workflow {
   id               String    @id @default(cuid())
   ticketId         String?   // Foreign key
@@ -814,7 +411,7 @@ model Workflow {
   /// Trigger discriminator for automations. `NO_OP` for everything else so the
   /// event router skips it. Indexed (eventType, status) for cheap "active
   /// workflows for event X" lookups.
-  eventType        WorkflowEventType @default(NO_OP)
+  eventType        String            @default("NO_OP")
   automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
   createdAt        DateTime  @default(now())
@@ -851,7 +448,7 @@ model WorkflowExecution {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
-  mode                      WorkflowExecutionMode @default(AUTOMATIC) // for agent step continuation control
+  mode                      String                @default("AUTOMATIC") // for agent step continuation control
   createdBy                 String?  // User ID of who created/triggered this execution
 
   // Relations
@@ -886,19 +483,13 @@ model WorkflowExecutionState {
 
 /// Discriminates what an encrypted WorkflowMapping secret belongs to. Add new
 /// values here as more entities need encrypted secrets stored centrally.
-enum WorkflowMappingEntityType {
-  AUTOMATION_WEBHOOK
-
-  @@schema("workflow")
-}
-
 /// Stores encrypted secrets for workflow-adjacent entities (e.g. external-event
 /// webhook triggers). entitySecret is AES-256-CBC encrypted with ENCRYPTION_KEY.
 /// For automation webhook triggers: entityType=AUTOMATION_WEBHOOK,
 /// entityId=automationSeriesId (stable across versions of the same automation).
 model WorkflowMapping {
   id           String                    @id @default(cuid())
-  entityType   WorkflowMappingEntityType
+  entityType   String
   entityId     String
   entitySecret String
 
@@ -1038,9 +629,6 @@ model AgentStep {
   @@schema("workflow")
 }
 
-
-
-
 model ExternalStepResponse {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
@@ -1060,41 +648,6 @@ model ExternalStepResponse {
 }
 
 // Enums for User Management
-enum AuthProvider {
-  GOOGLE
-  MICROSOFT
-  API_KEY
-  EMAIL
-  @@schema("public")
-}
-
-enum UserStatus {
-  ACTIVE
-  INACTIVE
-  @@schema("public")
-}
-
-enum UserType {
-  USER
-  BOT
-  APP
-  @@schema("public")
-}
-
-enum UserPresenceStatus {
-  ONLINE
-  AWAY
-  OFFLINE
-  @@schema("public")
-}
-
-enum AccessType {
-  ADMIN
-  READ
-  WRITE
-  @@schema("public")
-}
-
 // API Key Management
 model ApiKey {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -1127,7 +680,7 @@ model UserGroup {
   description String?
   metadata    Json? // Team-specific config: statuses, skills, etc.
   autoRotationEnabled  Boolean           @default(false)
-  rotationInterval     RotationInterval? // Only set when autoRotationEnabled is true
+  rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1193,28 +746,7 @@ model UserRoleMapping {
   @@schema("public")
 }
 
-enum SessionStatus {
-  ACTIVE
-  EXPIRED
-  REVOKED
-  @@schema("public")
-}
-
-enum Status {
-  ACTIVE
-  ARCHIVED
-  DELETED
-  @@schema("public")
-}
-
-enum WorkspaceRole {
-  OWNER
-  ADMIN
-  MEMBER
-  GUEST
-  COMMUNITY_MEMBER
-  @@schema("public")
-} 
+ 
 
 model UserSession {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -1224,7 +756,7 @@ model UserSession {
   refreshTokenExpiry  DateTime
   accessToken         String?       // Store the current access token
   accessTokenExpiry   DateTime?
-  status              SessionStatus @default(ACTIVE)
+  status              String        @default("ACTIVE")
   deviceInfo          String?       // JSON string containing device/browser info
   deviceId            String?       // Native mobile device identifier
   fcmToken            String?       // Stored as <platform>:<raw token>
@@ -1250,14 +782,14 @@ model User {
   name           String
   email          String
   picture        String?      // Google profile picture URL
-  authProvider   AuthProvider @default(GOOGLE)
+  authProvider   String       @default("GOOGLE")
   providerUserId String
-  status         UserStatus   @default(ACTIVE)
-  userType       UserType     @default(USER) // USER or BOT
+  status         String       @default("ACTIVE")
+  userType       String       @default("USER") // USER or BOT
   metadata       Json? // Flexible user metadata
   displayName    String?
   workspaceId    String
-  role           WorkspaceRole   @default(MEMBER)
+  role           String          @default("MEMBER")
   orgMemberId    String       // Links to org_members.memberId for organization membership
   leftAt         DateTime?
   createdAt      DateTime     @default(now())
@@ -1269,7 +801,7 @@ model User {
   lastActiveAt   DateTime?    // @see user_presence.lastActiveAt
   notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
-  calendarVisibility CalendarVisibility @default(PUBLIC)
+  calendarVisibility String             @default("PUBLIC")
 
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
@@ -1291,6 +823,9 @@ model User {
   channelParticipations     ChannelParticipant[]   @relation("ChannelParticipantUser")
   channelUserStatuses       ChannelUserStatus[]    @relation("ChannelUserStatusUser")
   canvasUserStatuses        CanvasUserStatus[]     @relation("CanvasUserStatusUser")
+  createdCanvasCommentThreads CanvasCommentThread[] @relation("CanvasCommentThreadCreatedBy")
+  statusUpdatedCanvasCommentThreads CanvasCommentThread[] @relation("CanvasCommentThreadStatusUpdatedBy")
+  createdCanvasComments     CanvasComment[]        @relation("CanvasCommentCreatedBy")
   sentMessages              Message[]              @relation("MessageSender")
   createdConversations      Conversation[]         @relation("ConversationCreatedBy")
   createdChannels           Channel[]              @relation("ChannelCreatedBy")
@@ -1324,13 +859,13 @@ model UserPreference {
   id                      String   @id @default(cuid())
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
-  channelSortOrder         ChannelSortOrder @default(RECENCY) // Sidebar channel sort
+  channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
 
   // Global notification settings
-  globalDesktopNotificationLevel  NotificationLevel? // Default level for all channels (desktop)
-  globalMobileNotificationLevel   NotificationLevel? // Default level for all channels (mobile)
+  globalDesktopNotificationLevel  String?            // Default level for all channels (desktop)
+  globalMobileNotificationLevel   String?            // Default level for all channels (mobile)
   threadReplyNotificationsEnabled Boolean           @default(true) // Receive thread reply notifications globally
   channelWideMentionsEnabled      Boolean           @default(true) // Receive @channel and @here mention notifications
   notificationKeywords            String?             // Global keyword-notification list (max 50, each <= 80 chars)
@@ -1396,7 +931,7 @@ model UserGroupMapping {
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
   roleId         String?             // References Role.id; null = legacy rows using responsibility column
-  responsibility UserResponsibility? // Legacy column; new writes set roleId instead
+  responsibility String?             // Legacy column; new writes set roleId instead
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
   createdAt      DateTime            @default(now())
@@ -1522,7 +1057,7 @@ model UserPresence {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String            @id @default(cuid())
   userId        String            @unique // One-to-one with User
-  status        UserPresenceStatus @default(OFFLINE)
+  status        String             @default("OFFLINE")
   lastActiveAt  DateTime          @default(now()) // @deprecated — use User.lastActiveAt
   lastSeenAt    DateTime          @default(now())
   isManual      Boolean           @default(false) // If user manually set status
@@ -1577,7 +1112,6 @@ model Resource {
   // Relations
   resourceAccess ResourceAccess[]
 
-
   @@index([name, id])
   @@map("resources")
   @@schema("public")
@@ -1589,7 +1123,7 @@ model ResourceAccess {
   groupId    String?
   userId     String?
   resourceId String
-  accessType AccessType
+  accessType String
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
@@ -1611,35 +1145,13 @@ model ResourceAccess {
 }
 
 // ACL Audit Trail
-enum ACLAuditEventType {
-  RESOURCE_CREATED
-  RESOURCE_UPDATED
-  RESOURCE_DELETED
-  PERMISSION_GRANTED
-  PERMISSION_REVOKED
-  PERMISSION_UPDATED
-  USER_GROUP_CREATED
-  USER_GROUP_UPDATED
-  USER_GROUP_DELETED
-  USER_GROUP_REACTIVATED
-  USER_GROUP_DEACTIVATED
-  @@schema("public")
-}
-
-enum ACLAuditTargetType {
-  RESOURCE
-  RESOURCE_ACCESS
-  USER_GROUP
-  @@schema("public")
-}
-
 model ACLAuditLog {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String               @id @default(cuid())
   timestamp   DateTime             @default(now())
   actorUserId String?
-  eventType   ACLAuditEventType
-  targetType  ACLAuditTargetType
+  eventType   String
+  targetType  String
   targetId    String
   description String
   createdAt   DateTime             @default(now())
@@ -1653,24 +1165,6 @@ model ACLAuditLog {
   @@index([actorUserId])
   @@map("acl_audit_logs")
   @@schema("workflow")
-}
-
-enum PRStatus {
-  OPEN
-  UPDATED
-  DECLINED
-  MERGED
-  DELETED
-  @@schema("public")
-}
-
-enum PRStatusEvent {
-  CREATED
-  UPDATED
-  MERGED
-  DECLINED
-  DELETED
-  @@schema("public")
 }
 
 // PR Analytics models
@@ -1687,7 +1181,7 @@ model PullRequests {
   repositoryUrl           String
   prUrl                   String
   updatedAt               DateTime  @updatedAt
-  status                  PRStatus
+  status                  String
   ticketId                String?   // Ticket reference for prs raised by devs
 
   // Relations
@@ -1697,40 +1191,6 @@ model PullRequests {
   @@index([date])
   @@map("pull_requests")
   @@schema("public")
-}
-
-enum TeamIntelligenceBatchStatus {
-  RECEIVED
-  QUEUED
-  PARTIALLY_QUEUED
-  PROCESSING
-  COMPLETED
-  FAILED
-
-  @@schema("non_zero")
-}
-
-enum TeamIntelligenceUserIngestionStatus {
-  RECEIVED
-  QUEUED
-  PROCESSING
-  COMPLETED
-  FAILED
-
-  @@schema("non_zero")
-}
-
-enum TeamIntelligenceBulletCategory {
-  SHIPPED
-  ACHIEVEMENT
-  COLLABORATION
-  LEARNING
-  RECOGNITION
-  LEARNED
-  HELPED
-  MILESTONE
-
-  @@schema("non_zero")
 }
 
 model TeamIntelligenceIngestionBatchV2 {
@@ -1746,7 +1206,7 @@ model TeamIntelligenceIngestionBatchV2 {
   totalUsers      Int
   queuedUsers     Int                              @default(0)
   failedUsers     Int                              @default(0)
-  status          TeamIntelligenceBatchStatus      @default(RECEIVED)
+  status          String                           @default("RECEIVED")
   receivedAt      DateTime                         @default(now())
   queuedAt        DateTime?
   completedAt     DateTime?
@@ -1779,7 +1239,7 @@ model TeamIntelligenceUserIngestionV2 {
   contentUrl       String?
   contentSize      Int?
   contentChecksum  String?
-  processingStatus TeamIntelligenceUserIngestionStatus   @default(RECEIVED)
+  processingStatus String                                @default("RECEIVED")
   queueJobId       String?
   queuedAt         DateTime?
   startedAt        DateTime?
@@ -1814,7 +1274,7 @@ model TeamIntelligenceTeamSummaryV2 {
   contentUrl      String?
   contentSize     Int?
   contentChecksum String?
-  status          TeamIntelligenceBatchStatus   @default(RECEIVED)
+  status          String                        @default("RECEIVED")
   queueJobId      String?
   queuedAt        DateTime?
   startedAt       DateTime?
@@ -1847,7 +1307,7 @@ model TeamIntelligenceOrgSummaryV2 {
   contentUrl      String?
   contentSize     Int?
   contentChecksum String?
-  status          TeamIntelligenceBatchStatus   @default(RECEIVED)
+  status          String                        @default("RECEIVED")
   queueJobId      String?
   queuedAt        DateTime?
   startedAt       DateTime?
@@ -1876,7 +1336,7 @@ model Organization {
   createdBy   String   // User ID (no FK constraint)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  status      Status   @default(ACTIVE)
+  status      String   @default("ACTIVE")
   metadata    Json?
 
   // Relations
@@ -1912,7 +1372,7 @@ model OrgMember {
   orgId       String   // Organization ID (no FK constraint)
   userId      String   @default("deprecated")   // Deprecated not using, only here for backward compatibility
   email       String   @unique // Email address — globally unique, one org per email
-  role        OrgRole  // OWNER | ADMIN | MEMBER | VIEWER
+  role        String   // OWNER | ADMIN | MEMBER | VIEWER
   passwordHash String?  // For email-password based login; null for existing Google/Microsoft SSO users unless explicitly set by forgot password
   joinedAt    DateTime @default(now())
   invitedBy   String?  // Who invited this user (no FK constraint)
@@ -1932,7 +1392,7 @@ model WorkspaceOrganization {
   id           String      @id @default(cuid())
   orgId        String
   workspaceId  String
-  role         WorkspaceRole
+  role         String
   leftAt       DateTime?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -1955,7 +1415,7 @@ model Workspace {
   name        String
   description String?
   createdBy   String
-  status      Status   @default(ACTIVE)
+  status      String   @default("ACTIVE")
   metadata    Json?
   workspaceType String?
   joinPolicy    String?
@@ -2034,13 +1494,12 @@ model OrgLLMServiceAccountCredential {
   @@schema("non_zero")
 }
 
-
 model Invitation {
   id           String        @id @default(cuid())
   orgId        String?
   workspaceId  String?
   email        String
-  role         WorkspaceRole @default(MEMBER)
+  role         String        @default("MEMBER")
   invitedBy    String
   invitedAt    DateTime      @default(now())
   expiredAt    DateTime?     // Expiration date - 15 days from creation by default, or updated on revoke
@@ -2089,7 +1548,7 @@ model Project {
   ticketSequence Int              @default(0) // Used when ENABLE_COMMON_DB_TICKET_SEQUENCE is disabled
   description    String?
   workspaceId    String // Workspace this project belongs to
-  type           ProjectType      @default(DEFAULT)
+  type           String           @default("DEFAULT")
   createdBy      String // User ID (no FK constraint)
   updatedBy      String? // User ID (no FK constraint)
   createdAt      DateTime         @default(now())
@@ -2116,15 +1575,15 @@ model Project {
 model Board {
   id                  String               @id @default(cuid())
   name                String
-  boardType           BoardType            @default(DEFAULT)
+  boardType           String               @default("DEFAULT")
   projectId           String               // Project ID (no FK constraint)
   workspaceId         String               // Workspace for ACL optimization (denormalized from project)
   createdBy           String               // User ID (no FK constraint)
   updatedBy           String?              // User ID (no FK constraint)
   description         String?              // Board description
   metadata            Json?                // Board configuration including ticketFormConfig
-  vcsProvider         VCSProviderType?      // Main release board VCS provider
-  releaseTrackingMode ReleaseTrackingMode? // Main release board tracking mode
+  vcsProvider         String?               // Main release board VCS provider
+  releaseTrackingMode String?              // Main release board tracking mode
   createdAt           DateTime             @default(now())
   updatedAt           DateTime?            @updatedAt
 
@@ -2159,8 +1618,8 @@ model Stage {
   updatedBy            String?      // User ID (no FK constraint)
   createdAt            DateTime     @default(now())
   updatedAt            DateTime?    @updatedAt
-  defaultTicketStatus     TicketStatus    @default(IN_PROGRESS)  // Deprecated - use defaultTicketStatusV2
-  defaultTicketStatusV2   TicketStatusV2 @default(STARTED)
+  defaultTicketStatus     String          @default("IN_PROGRESS")  // Deprecated - use defaultTicketStatusV2
+  defaultTicketStatusV2   String         @default("STARTED")
   requestApprovalOnEntry  Boolean?       // NULL treated as false in code; auto-create approval request when a ticket enters the PREVIOUS stage (linear/DEFAULT boards only)
 
   // Relations
@@ -2178,7 +1637,7 @@ model StagePRStatusMapping {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String        @id @default(cuid())
   stageId   String        // Stage ID (no FK constraint)
-  prStatus  PRStatusEvent
+  prStatus  String
   createdAt DateTime      @default(now())
 
   @@unique([stageId, prStatus])
@@ -2197,9 +1656,9 @@ model StageTransition {
   requiresApproval            Boolean?      // NULL treated as false in code
   bypassApprovalForAutomation Boolean?      // NULL treated as false in code
   requestApprovalOnEntry      Boolean?      // NULL treated as false in code; auto-create approval request when ticket enters the fromStage (single-outgoing edges only)
-  visitSlaMode                VisitSlaMode? // NULL treated as STAGE_DEFAULT in code
+  visitSlaMode                String?       // NULL treated as STAGE_DEFAULT in code
   fixedEtaHours               Int?
-  onReenter                   ReenterMode?  // NULL treated as RESET in code
+  onReenter                   String?       // NULL treated as RESET in code
   createdAt                   DateTime?     // set by app on insert; NULL treated as creation time in code
   updatedAt                   DateTime      @updatedAt
 
@@ -2214,20 +1673,14 @@ model StageTransition {
   @@schema("public")
 }
 
-enum ApproverType {
-  USER
-  ROLE
-  @@schema("public")
-}
-
 // Channel Models
 model Channel {
   id              String            @id @default(cuid())
   name            String
   description     String?
-  type            ChannelType       @default(DEFAULT)
-  scopeType       ChannelScopeType  // DEFAULT | DM | TICKET | DOCUMENT | GROUP_DM
-  visibility      ChannelVisibility @default(PUBLIC) // PUBLIC | PRIVATE
+  type            String            @default("DEFAULT")
+  scopeType       String            // DEFAULT | DM | TICKET | DOCUMENT | GROUP_DM
+  visibility      String            @default("PUBLIC") // PUBLIC | PRIVATE
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   lastActivityAt  DateTime          @default(now())
@@ -2237,7 +1690,7 @@ model Channel {
   workspaceId     String            // Workspace for ACL optimization (denormalized from project)
   participantCount Int                    @default(0)
   isMigrated      Boolean?                @default(false)
-  addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
+  addUserPolicy   String?                @default("EVERYONE")
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
@@ -2272,7 +1725,7 @@ model ChannelStats {
   channelId        String                @id
   lastActivityAt   DateTime              
   participantCount Int                   @default(0)
-  addUserPolicy    ChannelAddUserPolicy? @default(EVERYONE)
+  addUserPolicy    String?               @default("EVERYONE")
   lastRecapHadMessages   Boolean?             // null = not processed, true = recap with messages, false = recap with 0 messages
 
   // Relations
@@ -2289,7 +1742,7 @@ model ChannelParticipant {
   channelId                 String      // Channel ID (no FK constraint)
   userId                    String      // User ID (no FK constraint)
   joinedAt                  DateTime    @default(now())
-  role                      ChannelRole @default(MEMBER) // ADMIN | MEMBER
+  role                      String      @default("MEMBER") // ADMIN | MEMBER
 
   // deprecated columns will be removed in future
   lastViewedAt              DateTime    @default(now()) // Track when user last viewed channel
@@ -2333,8 +1786,8 @@ model ChannelUserStatus {
   lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
   customRecapPrompt         String?     // Optional custom prompt for personalized recaps
 
-  desktopNotificationLevel  NotificationLevel?    // Channel notification preference (desktop); null = inherit UserPreference.globalDesktopNotificationLevel
-  mobileNotificationLevel   NotificationLevel?   // Channel notification preference (mobile); null = inherit UserPreference.globalMobileNotificationLevel
+  desktopNotificationLevel  String?               // Channel notification preference (desktop); null = inherit UserPreference.globalDesktopNotificationLevel
+  mobileNotificationLevel   String?              // Channel notification preference (mobile); null = inherit UserPreference.globalMobileNotificationLevel
   threadReplyNotificationsEnabled Boolean?       // Per-channel override: null = inherit UserPreference.threadReplyNotificationsEnabled
   channelWideMentionsEnabled      Boolean?       // Per-channel override: null = inherit UserPreference.channelWideMentionsEnabled
 
@@ -2368,7 +1821,7 @@ model ChannelSection {
   position    String    // Fractional index (generateKeyBetween) among the user's sections
   isCollapsed Boolean           @default(false) // Per-user collapse state, synced across devices
   isDeleted   Boolean           @default(false) // Soft delete flag
-  sortOrder   ChannelSortOrder? // Optional per-section channel sort order
+  sortOrder   String?           // Optional per-section channel sort order
   createdAt   DateTime          @default(now())
   updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
 
@@ -2425,7 +1878,7 @@ model ConversationParticipant {
   id                String                        @id @default(cuid())
   conversationId    String                        // Conversation ID (no FK constraint)
   userId            String                        // User ID (no FK constraint)
-  participationType ConversationParticipation?    // AUTHOR, MENTIONED, or NULL (manual subscription)
+  participationType String?                       // AUTHOR, MENTIONED, or NULL (manual subscription)
   isSubscribed      Boolean                       @default(true) // Notification subscription status
   joinedAt          DateTime                      @default(now())
   lastReadAt        DateTime?                     // Track when user last read this thread conversation
@@ -2449,18 +1902,10 @@ model ConversationParticipant {
   @@schema("public")
 }
 
-enum EmailType {
-  DEFAULT
-  REPLY
-  REPLY_ALL
-  COMPOSE
-  @@schema("public")
-}
-
 model Email {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id String @id @default(cuid())
-  type EmailType
+  type String
   subject String
   body String
   to String[]
@@ -2502,7 +1947,7 @@ model EmailDraft {
   toRecipients String? // draft "To" recipients — JSON-stringified string[], parsed app-side
   ccRecipients String? // draft "Cc" recipients — JSON-stringified string[]
   bccRecipients String? // draft "Bcc" recipients — JSON-stringified string[]
-  autoDraftStatus AutoDraftStatus?
+  autoDraftStatus String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2580,7 +2025,7 @@ model TicketUserMailbox {
   userId      String       // Owner — the overlay is private to this agent (no FK constraint)
   channelId   String       // Denormalized for ACL + per-user view filtering
   workspaceId String       // Denormalized
-  state       MailboxState? // No DDL default on the custom enum type — mutators always write it; readers treat null/absent as INBOX
+  state       String?       // No DDL default on the custom enum type — mutators always write it; readers treat null/absent as INBOX
   starred     Boolean      @default(false)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     // Set manually in code — written only by Zero mutators, never Prisma Client
@@ -2618,14 +2063,14 @@ model EmailChannelPreference {
   classificationPrompt         String?  // Custom system prompt for the classification LLM
   categoryField                String?  // Label for the top-level category
   subCategoryField             String?  // Label for the sub-category
-  emailMergeMode               EmailMergeMode @default(ENABLED) // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants can be added
+  emailMergeMode               String         @default("ENABLED") // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants can be added
   twoStepSendEnabled           Boolean  @default(false) // When on, sending shows a review/confirm step before the email actually goes out
   priorityClassificationEnabled Boolean @default(false)
   priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
   priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
-  autoDraftMode          AutoDraftMode @default(OFF)
+  autoDraftMode          String        @default("OFF")
   autoDraftAgentSlug     String?
-  deskType               DeskType @default(EMAIL)
+  deskType               String   @default("EMAIL")
   dlEmail                String?
   workspaceId            String?
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
@@ -2662,7 +2107,7 @@ model BoardSlaPolicy {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String         @id @default(cuid())
   boardId         String
-  priority        TicketPriority
+  priority        String
   responseHours   Float          // SLA first-response window in hours
   resolutionHours Float          // SLA resolution window in hours
   businessHoursOnly Boolean      @default(true)
@@ -2688,7 +2133,7 @@ model Message {
   senderId            String      // User who sent the message (no FK constraint)
   workspaceId         String?     // Workspace for ACL optimization (denormalized from conversation)
   content             String      // Text content
-  msgType             MessageType @default(USER) // USER | BOT | SYSTEM
+  msgType             String      @default("USER") // USER | BOT | SYSTEM
   hasAttachment       Boolean     @default(false) // Quick check for attachments
   edited              Boolean     @default(false) // Whether the message has been edited
   isDeleted           Boolean     @default(false)
@@ -2736,11 +2181,10 @@ model MessageSearch {
   @@schema("workflow")
 }
 
-
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
-  entityType         AttachmentEntityType  // TICKET, CHAT, DRAFT, DELAYED_MESSAGE, etc.
+  entityType         String                // TICKET, CHAT, DRAFT, DELAYED_MESSAGE, etc.
   entityId           String                // Ticket id or message id (mandatory)
   workspaceId        String                // Workspace for ACL optimization
   storageProvider    String                // Storage provider where file is stored
@@ -2757,7 +2201,7 @@ model MessageAttachment {
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
-  uploadStatus       AttachmentUploadStatus? // Tracks upload state
+  uploadStatus       String?                 // Tracks upload state
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
@@ -2844,15 +2288,14 @@ model Activity {
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
-  classification  ActivityClassification @default(PENDING)
+  classification  String                 @default("PENDING")
   classificationConfidence Float?
-  classificationJobType ActivityClassificationJobType?
+  classificationJobType String?
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
-
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
   @@index([workspaceId]) // ACL workspace filtering
@@ -2933,25 +2376,16 @@ model ExternalSource {
   @@schema("workflow")
 }
 
-enum ExternalEntityType {
-  MESSAGE
-  EMAIL
-  TICKET
-  ATTACHMENT
-  CANVAS
-  @@schema("public")
-}
-
 model ExternalMessage {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                 String   @id @default(cuid())
   externalSourceId   String                // External source ID (no FK constraint)
   externalId         String                // Message ID in external system (for deduplication)
   externalThreadId   String                // Thread/ticket ID in external system (to find conversation)
-  entityType         ExternalEntityType    @default(MESSAGE)            
+  entityType         String                @default("MESSAGE")
   entityId           String?               // Entity ID for MESSAGE, Email ID
   messageId          String                // Link to our Message (no FK constraint)
-  direction          MessageDirection      // INCOMING | OUTGOING
+  direction          String                // INCOMING | OUTGOING
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -2965,64 +2399,12 @@ model ExternalMessage {
   @@schema("workflow")
 }
 
-enum MessageDirection {
-  INCOMING   // From external source → Xyne
-  OUTGOING   // From Xyne → external source (Phase 2)
-  @@schema("public")
-}
-
-enum ActivityClassification {
-  ACTIONABLE
-  FYI
-  SKIP
-  PENDING
-  PROCESSING
-  ERROR
-  @@schema("public")
-}
-
-enum ActivityClassificationJobType {
-  SINGLE
-  SPECIAL_MENTION_AUDIENCE
-  @@schema("public")
-}
-
-enum NudgeType {
-  EXISTING_TICKET
-  CREATE_TICKET
-  SET_REMINDER
-  ADD_TO_KB
-  REVERSE_KB_LOOKUP
-  THREAD_FOLLOW_UP
-  DECISION_PENDING
-  WAITING_ON_BLOCKED_BY
-  @@schema("public")
-}
-
-enum NudgeKind {
-  CREATE_TICKET_FROM_MESSAGE
-  FIND_RELATED_TICKET_FROM_MESSAGE
-  FIND_RELATED_MESSAGE_FROM_MESSAGE
-  LINK_PASTE_TO_SURFACE
-  FORWARD_MESSAGE_LINK
-  DELETE_MESSAGE_CLEANUP
-  SCHEDULE_CALL_FROM_THREAD
-  @@schema("public")
-}
-
-enum NudgeState {
-  ACTIVE
-  DISMISSED
-  ACTED_ON
-  @@schema("public")
-}
-
 model ProactiveNudge {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                      String             @id @default(cuid())
   messageId               String
 
-  type                    NudgeType
+  type                    String
   priority                String             // HIGH, MEDIUM, LOW
 
   title                   String
@@ -3045,13 +2427,13 @@ model ProactiveNudge {
 model SurfaceNudge {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String            @id @default(cuid())
-  nudgeKind   NudgeKind
+  nudgeKind   String
   sourceId    String
   title       String
   description String            @db.Text
   priority    String?           @default("medium")
   actions     Json?
-  state       NudgeState        @default(ACTIVE)
+  state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
   projectId   String
@@ -3102,83 +2484,16 @@ model SurfaceNudgeCount {
 }
 
 // Notification System Enums
-enum NotificationType {
-  TICKET_STATUS_CHANGE
-  TICKET_ASSIGNMENT
-  TICKET_REASSIGNMENT
-  TICKET_DUE_DATE_CHANGED
-  TICKET_PRIORITY_CHANGED
-  TICKET_USER_GROUP_CHANGED
-  TICKET_TITLE_CHANGED
-  TICKET_DESCRIPTION_CHANGED
-  TICKET_RCA_CREATED
-  TICKET_RCA_UPDATED
-  TICKET_SUBTICKET_ADDED
-  TICKET_RELATED_TICKET_ADDED
-  TICKET_RELATED_TICKET_REMOVED
-  CHANNEL_READ
-  THREAD_READ
-  CHANNEL_MESSAGE
-  MENTION
-  DIRECT_MESSAGE
-  WORKFLOW_COMPLETION
-  WORKFLOW_FAILURE
-  THREAD_REPLY
-  INCOMING_CALL
-  MISSED_CALL
-  CALL_DISMISS
-  CALL_REMINDER
-  CALL_SCHEDULED
-  CALL_UPDATED
-  EMAIL_FETCH_COMPLETED
-  EMAIL_FETCH_FAILED
-  CANVAS_SHARED
-  EMAIL_REPLY_RECEIVED
-  MESSAGE_DELETED
-  MESSAGE_EDITED
-  STAGE_APPROVAL_REQUESTED
-  STAGE_APPROVAL_APPROVED
-  STAGE_APPROVAL_REJECTED
-  @@schema("public")
-}
-
-enum NotificationStatus {
-  UNREAD
-  READ
-  DISMISSED
-  DELIVERED
-  FAILED
-  @@schema("public")
-}
-
-enum NotificationDeliveryMethod {
-  BROWSER
-  EMAIL
-  SLACK
-  MOBILE
-  IOS
-  ANDROID
-  @@schema("public")
-}
-
-enum NotificationLevel {
-  ALL                    // All new posts - Messages and threads you follow
-  MENTIONS_ONLY          // Just mentions - @you, @channel, @here
-  THREADS_ONLY           // Only thread replies - For threads a user is subscribed to
-  NONE
-  @@schema("public")
-}
-
 // Notification System Models
 model Notification {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
-  type              NotificationType
+  type              String
   title             String
   message           String
-  status            NotificationStatus          @default(UNREAD)
-  deliveryMethods   NotificationDeliveryMethod[]
+  status            String                      @default("UNREAD")
+  deliveryMethods   String[]
   metadata          Json?                       // Additional context data
   relatedEntityType String?                     // "ticket", "workflow", "message", etc.
   relatedEntityId   String?                     // ID of the related entity
@@ -3201,7 +2516,7 @@ model NotificationPreference {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id               String           @id @default(cuid())
   userId           String           // User ID (no FK constraint)
-  notificationType NotificationType
+  notificationType String
   browserEnabled   Boolean          @default(true)
   emailEnabled     Boolean          @default(false)
   slackEnabled     Boolean          @default(false)
@@ -3242,9 +2557,9 @@ model Call {
   channelId        String?     // Channel where call is happening (null for GOOGLE_CALENDAR origin)
   orgName          String?     // Organization name (no FK constraint)
   description      String?     // Meeting description/agenda
-  callType         CallType    @default(VIDEO)
-  callOrigin       CallOrigin  @default(CHANNEL)
-  status           CallStatus  @default(ACTIVE)
+  callType         String      @default("VIDEO")
+  callOrigin       String      @default("CHANNEL")
+  status           String      @default("ACTIVE")
   roomLink         String?     // LiveKit room URL/token
   startsAt         DateTime?   // Scheduled start time
   endsAt           DateTime?   // Scheduled end time
@@ -3266,6 +2581,9 @@ model Call {
   callUpdatesChannel String?   // Non-null = post call updates to this channel (Case 3); null = no broadcast
   participantCount Int?        // Denormalized total CallParticipant rows; nullable until backfilled
   participantPreviewUserIds String? // Stringified JSON: list of { userId: string , hasJoined: boolean }
+  summaryTemplateId String?
+  labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
+  markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
@@ -3283,10 +2601,59 @@ model Call {
   @@index([isRecurring]) // Fast lookup of recurring calls
   @@index([instanceDate]) // Fast lookup by instance date
   @@index([orgName]) // Fast org call lookup
+  @@index([summaryTemplateId])
 
   @@index([status, startedAt(sort: Desc), externalId])
   @@index([status, startsAt, externalId])
   @@map("calls")
+  @@schema("public")
+}
+
+/// Polymorphic sharing record. `entityId` is resolved according to
+/// `shareableEntityType`; application services enforce target existence and access.
+/// Sharing target is exactly one of userId, userGroupId, or channelId.
+/// `shareableEntityType` and `entityUserAccess` are plain Strings (DB enums are
+/// frozen — see scripts/validate-no-new-enums.sh). Allowed values are enforced
+/// app-side via the ShareableEntityType / EntityUserAccess consts exported from
+/// packages/shared/src/zero/schema.ts (import from '@xyne/shared').
+model EntityAccess {
+  id                  String   @id @default(cuid())
+  workspaceId         String
+  shareableEntityType String   // NOTE_TAKER (see ShareableEntityType in @xyne/shared; app-validated, no DB enum)
+  entityId            String   // Polymorphic id, resolved by shareableEntityType (no FK constraint)
+
+  userId              String?  // Shared with a specific user (no FK constraint)
+  userGroupId         String?  // Shared with a user group (no FK constraint)
+  channelId           String?  // Shared with a channel (no FK constraint)
+
+  entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime
+
+  @@unique([workspaceId, shareableEntityType, entityId, userId])
+  @@index([workspaceId, shareableEntityType, entityId])
+  @@index([workspaceId, userId])
+  @@index([workspaceId, userGroupId])
+  @@index([workspaceId, channelId])
+  @@map("entity_access")
+  @@schema("public")
+}
+
+model SummaryTemplate {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  name              String
+  autoTriggerPrompt String?
+  sections          Json
+  version           Int      @default(1)
+  systemPrompt      String
+  defaultOutlet     String   @default("EMAIL") // EMAIL/MESSAGE (see DefaultOutlet in @xyne/shared; app-validated, no DB enum)
+  createdBy         String
+  createdAt         DateTime @default(now())
+
+  @@index([workspaceId, name])
+  @@unique([workspaceId, name, version])
+  @@map("summary_templates")
   @@schema("public")
 }
 
@@ -3297,8 +2664,8 @@ model CallParticipant {
   userId       String              // User ID (no FK constraint)
   invitedBy    String              // User who sent invitation (no FK constraint)
   invitedAt    DateTime            @default(now())
-  response     InvitationResponse? // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
-  meetingStatus MeetingStatus      @default(PENDING)
+  response     String?             // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
+  meetingStatus String             @default("PENDING")
   respondedAt  DateTime?           // When they accepted/rejected
   joinedAt     DateTime?           // NULL = not joined yet
   leftAt       DateTime?           // NULL = still in call
@@ -3333,8 +2700,8 @@ model CallRecording {
   egressId      String?         @unique          // webhook correlation key
   startedBy     String                           // user id; always set at creation. Cascade on user hard-delete
   name          String?                          // prefilled "Recording 1", renamable on stop
-  recordingType RecordingType                    // explicit at start (no default)
-  status        RecordingStatus                  // explicit at insert (born RECORDING_ACTIVE, no default)
+  recordingType String                           // explicit at start (no default)
+  status        String                           // explicit at insert (born RECORDING_ACTIVE, no default)
   storagePath   String?                          // final MP4 object key, set only on UPLOADED (read by all consumers)
   segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
   messageId     String?                          // thread message this recording is posted under
@@ -3362,7 +2729,7 @@ model RecurringCallSeries {
   timezone       String                    // IANA timezone e.g. "America/New_York"
   startTime      String                    // Time of day, 24h format e.g. "10:00"
   endTime        String                    // Time of day, 24h format e.g. "11:00"
-  status         RecurringCallSeriesStatus @default(ACTIVE)
+  status         String                    @default("ACTIVE")
   startsOn       DateTime                  // Series start date (first possible occurrence)
   endsOn         DateTime?                 // Series end date (null = indefinite)
   metadata           Json?                     // Extra config e.g. { "reminderMinutes": 10 }
@@ -3388,8 +2755,8 @@ model RecurringCallParticipant {
   userId            String              // User ID for internal participants; synthetic ID for external invitees
   invitedBy         String              // User who sent invitation (no FK constraint)
   invitedAt         DateTime
-  response          InvitationResponse? // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
-  meetingStatus     MeetingStatus       @default(PENDING)
+  response          String?             // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
+  meetingStatus     String              @default("PENDING")
   respondedAt       DateTime?           // When they accepted/rejected
   metadata          Json?               // Future participant-level metadata
   displayName       String?             // Name for external users
@@ -3410,25 +2777,6 @@ model RecurringCallParticipant {
 }
 
 // Canvas Feature Models (Notion/Slack Canvas-like documents)
-
-enum CanvasVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("public")
-}
-
-enum CanvasRole {
-  OWNER
-  EDITOR
-  VIEWER
-  @@schema("public")
-}
-
-enum DocType {
-  Canvas
-  Quarto
-  @@schema("public")
-}
 
 // Canvas folders for manual canvas organization within a project, a specific
 // channel, or a user's personal "My Canvases" scope.
@@ -3468,7 +2816,7 @@ model Canvas {
   createdBy    String // User ID (no FK constraint)
   viewAccessId String? @unique // Random ID for view-only access
   editAccessId String? @unique // Random ID for edit access
-  visibility   CanvasVisibility @default(PRIVATE)
+  visibility   String           @default("PRIVATE")
   isTemplate   Boolean          @default(false)
   lastEditedBy String? // Last user who edited (no FK constraint)
   lastEditedAt DateTime?
@@ -3478,12 +2826,13 @@ model Canvas {
   isCollaborative   Boolean   @default(false)
 
   // Doc type - Canvas or Quarto
-  docType      DocType          @default(Canvas)
+  docType      String           @default("Canvas")
 
   // Relations
   participants CanvasParticipant[]
   userStatuses CanvasUserStatus[]
   versions     CanvasVersion[]
+  commentThreads CanvasCommentThread[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // Quarto Doc fields - when docType is Quarto
@@ -3533,6 +2882,50 @@ model CanvasVersion {
   @@schema("public")
 }
 
+model CanvasCommentThread {
+  id              String                    @id @default(cuid())
+  canvasId        String
+  blockId         String
+  anchorText      String?
+  initialCommentId String?
+  status          String                    @default("OPEN")
+  statusUpdatedBy String?
+  statusUpdatedAt DateTime?
+  createdBy       String
+  createdAt       DateTime                  @default(now())
+
+  canvas              Canvas          @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  comments            CanvasComment[] @relation("CanvasCommentThreadComments")
+  initialComment      CanvasComment?  @relation("CanvasCommentThreadInitialComment", fields: [initialCommentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
+  statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
+
+  @@index([canvasId, createdAt])
+  @@map("canvas_comment_threads")
+  @@schema("public")
+}
+
+model CanvasComment {
+  id               String   @id @default(cuid())
+  threadId         String
+  canvasId         String
+  body             String
+  mentionedUserIds String   @default("[]")
+  isInitial        Boolean  @default(false)
+  createdBy        String
+  editedAt         DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+
+  thread       CanvasCommentThread  @relation("CanvasCommentThreadComments", fields: [threadId], references: [id], onDelete: Cascade)
+  initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
+  createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([threadId, isInitial, createdAt])
+  @@map("canvas_comments")
+  @@schema("public")
+}
+
 model CanvasParticipant {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String     @id @default(cuid())
@@ -3540,7 +2933,7 @@ model CanvasParticipant {
   userId      String? // User ID (no FK constraint)
   userGroupId String? // User group share target (no FK constraint)
   channelId   String? // Channel/DM share target (not canvas home channel, no FK constraint)
-  role        CanvasRole @default(VIEWER) // OWNER | EDITOR | VIEWER
+  role        String     @default("VIEWER") // OWNER | EDITOR | VIEWER
   joinedAt    DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -3579,20 +2972,12 @@ model CanvasUserStatus {
 }
 
 // Bookmark Feature Models
-enum BookmarkEntityType {
-  MESSAGE
-  CONVERSATION
-  TICKET
-  CANVAS
-  @@schema("public")
-}
-
 model Bookmark {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String             @id @default(cuid())
   userId     String             // User who bookmarked (no FK constraint)
   entityId   String             // ID of the bookmarked entity
-  entityType BookmarkEntityType // Type of entity bookmarked
+  entityType String             // Type of entity bookmarked
   createdAt  DateTime           @default(now())
   updatedAt  DateTime?
   isDeleted  Boolean            @default(false)
@@ -3610,12 +2995,6 @@ model Bookmark {
 }
 
 // Link Sharing Feature Models
-enum LinkVisibility {
-  DEFAULT  // Visible to all channel members
-  PERSONAL // Only visible to creator + explicitly shared participants
-  @@schema("public")
-}
-
 model Link {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
@@ -3625,7 +3004,7 @@ model Link {
   favicon     String?
   channelId   String
   createdBy   String         // User ID (no FK constraint)
-  visibility  LinkVisibility @default(DEFAULT)
+  visibility  String         @default("DEFAULT")
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -3651,28 +3030,13 @@ model LinkAccess {
 }
 
 // Vespa Insertion Logs
-enum VespaInsertionStatus {
-  PENDING
-  FAILED
-  FAILED_MAX_RETRIES
-  @@schema("public")
-}
-
-enum VespaOperationType {
-  INSERT
-  UPDATE
-  DELETE
-  POST_INGEST_CLEAN
-  @@schema("public")
-}
-
 model VespaInsertionLogs {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String                @id @default(cuid())
   entityId     String
   entityType   String
-  type         VespaOperationType    // INSERT | UPDATE | DELETE | POST_INGEST_CLEAN
-  status       VespaInsertionStatus  @default(PENDING)
+  type         String                // INSERT | UPDATE | DELETE | POST_INGEST_CLEAN
+  status       String                @default("PENDING")
   namespace    String?
   cluster      String?
   errorMessage String?
@@ -3709,80 +3073,11 @@ model Repo {
 }
 
 // Form Models
-enum FormFieldType {
-  STRING
-  NUMBER
-  BOOLEAN
-  DATE
-  SINGLE_SELECT
-  MULTI_SELECT
-  USER
-  DOC
-  @@schema("public")
-}
-
-enum FormContextType {
-  BOARD
-  RELEASE_CHANGE
-  STAGE
-  @@schema("public")
-}
-
-enum BoardType {
-  DEFAULT
-  RELEASE
-  NON_LINEAR
-  @@schema("public")
-}
-
-enum VisitSlaMode {
-  STAGE_DEFAULT
-  NONE
-  FIXED_HOURS
-  @@schema("public")
-}
-
-enum ReenterMode {
-  RESET
-  CONTINUE
-  @@schema("public")
-}
-
-enum FormEntityType {
-  TICKET
-  SUB_TICKET
-  RELEASE_MIGRATION_FORM
-  RELEASE_ENV_FORM
-  @@schema("public")
-}
-
 // Lookup value types for dynamic enumeration values
-enum LookupType {
-  TICKET_TYPE
-  COE_ACTION_TYPE
-  COE_ACTION_TYPE_RELIABILITY_CHANGE
-  COE_ACTION_TYPE_RELIABILITY_CAPACITY
-  COE_ACTION_TYPE_RELIABILITY_FAULT
-  COE_ACTION_TYPE_PERF
-  COE_ACTION_TYPE_UIUX
-  IMPACT_TYPE
-  BUG_TYPE
-  BUG_CATEGORY_TYPE
-  BUG_ISSUE_TYPE
-  BUG_ISSUE_CATEGORY_CAPACITY
-  BUG_ISSUE_CATEGORY_CHANGE
-  BUG_ISSUE_CATEGORY_FAULT
-  BUG_RESOLUTION_CAPACITY
-  BUG_RESOLUTION_CHANGE
-  BUG_RESOLUTION_FAULT
-  QUICK_FIX_OPTION
-  @@schema("public")
-}
-
 // Lookup values table - stores dynamic enumeration values for various entities
 model LookupValue {
   id        String          @id @default(cuid())
-  type      LookupType // Category/type of lookup value
+  type      String     // Category/type of lookup value
   value     String          // The actual value
   createdAt DateTime        @default(now())
 
@@ -3796,8 +3091,8 @@ model Form {
   id              String         @id @default(cuid())
   formName        String
   formDescription String?
-  entityType      FormEntityType
-  contextType     FormContextType
+  entityType      String
+  contextType     String
   workspaceId     String         // Workspace for ACL optimization
   createdBy       String
   createdAt       DateTime       @default(now())
@@ -3819,8 +3114,8 @@ model FormContextMapping {
   id          String         @id @default(cuid())
   formId      String
   contextId   String
-  contextType FormContextType
-  entityType  FormEntityType
+  contextType String
+  entityType  String
 
   @@unique([contextId, contextType, formId])
   @@unique([contextId, entityType])
@@ -3836,7 +3131,7 @@ model GlobalField {
   id          String        @id @default(cuid())
   projectId   String        // Project scope for reuse + ACL
   fieldName   String        // Name of the field
-  fieldType   FormFieldType
+  fieldType   String
   fieldEnum   String?         // Legacy string[]
   fieldOptions String?      // Canonical {id,value}[] options, JSON-stringified
   createdAt   DateTime      @default(now())
@@ -3861,7 +3156,7 @@ model FormFields {
   formId         String         // Form this membership row belongs to
   globalFieldId  String?        // Definition in global_fields (null for legacy rows)
   fieldName      String?        // DEPRECATED: legacy definition only; new definitions live in global_fields
-  fieldType      FormFieldType? // DEPRECATED: legacy definition only
+  fieldType      String?        // DEPRECATED: legacy definition only
   fieldEnum      Json?          // DEPRECATED: legacy definition only; string[] projection kept for backward compat
   fieldOptions   String?        // Canonical {id,value}[] options, JSON-stringified; new clients read this, old clients never receive it
   isOptional     Boolean        @default(false) // Per-form optional
@@ -3925,9 +3220,9 @@ model Query {
   id             String          @id @default(cuid())
   title          String
   queryJson      Json
-  entityType     FormEntityType? // Deprecated: use targetEntity instead
+  entityType     String?         // Deprecated: use targetEntity instead
   targetEntity   String?         // Entity/table being queried (e.g., TICKET, USER_WORKLOAD_MAPPING)
-  visualType     QueryVisualizationType?
+  visualType     String?
   position       String?
   createdBy      String
   createdAt      DateTime        @default(now())
@@ -3956,7 +3251,6 @@ model Merchant {
   id        String   @id @default(cuid())
   mid       String   @unique // Merchant identifier (matches TicketEntityMapping.entityName)
 
-
   @@index([mid, id])
   @@map("merchants")
   @@schema("public")
@@ -3983,13 +3277,6 @@ model DraftMessage {
   @@schema("public")
 }
 
-enum Platform {
-  WEB
-  ELECTRON
-  MOBILE
-  @@schema("workflow")
-}
-
 model UserActivityEvent {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String    @id @default(cuid())
@@ -4001,7 +3288,7 @@ model UserActivityEvent {
   url             String
   triggerType     String    @default("CLICK")
   contextMetadata Json?   
-  platform        Platform    
+  platform        String
   timestamp       DateTime
 
   @@index([userId])
@@ -4030,22 +3317,6 @@ model ActivityAlias {
 }
 
 // Collection-related Enums
-enum IngestionStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  NONE
-  @@schema("public")
-}
-
-enum CollectionRole {
-  OWNER
-  EDITOR
-  VIEWER
-  @@schema("public")
-}
-
 // Collection serves as BOTH the root collection AND any sub-folder.
 // parentId = null  →  root collection (has its own permissions)
 // parentId = <id>  →  sub-folder whose parent is that Collection row
@@ -4101,7 +3372,7 @@ model CollectionItem {
   name             String
   uploadedById     String?
 
-  ingestionStatus  IngestionStatus @default(NONE)
+  ingestionStatus  String          @default("NONE")
   versionNumber    Int          @default(1)
   isLatest         Boolean      @default(true)
   createdAt        DateTime
@@ -4123,7 +3394,7 @@ model CollectionPermission {
   collectionId String
   userId       String?
   userGroupId  String?
-  role         CollectionRole
+  role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
   createdAt    DateTime
@@ -4146,7 +3417,7 @@ model StageApprovers {
   id                   String       @id @default(cuid())
   userId               String?      // set when approverType = USER
   roleId               String?      // set when approverType = ROLE
-  approverType         ApproverType? // NULL treated as ApproverType.USER in code
+  approverType         String?       // NULL treated as ApproverType.USER in code
   stageId              String?      // Stage ID for linear boards (no FK constraint)
   transitionId         String?      // Transition ID for NON_LINEAR boards
   createdAt            DateTime     @default(now())
@@ -4169,24 +3440,6 @@ model StageApprovers {
 // ============================================================================
 
 // Release Management Enums
-
-enum ReleaseEventType {
-  RELEASE
-  TICKET
-  SUBTICKET
-  TESTING
-  SYSTEM
-  CANVAS
-  @@schema("public")
-}
-
-enum RCAStatus {
-  DRAFT
-  IN_REVIEW
-  APPROVED
-  CLOSED
-  @@schema("public")
-}
 
 // Services that can be released
 model Application {
@@ -4243,14 +3496,13 @@ model ApplicationReleaseTicket {
   @@schema("public")
 }
 
-
 // Captures all events tied to the release for audit trail
 model ReleaseEvent {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String            @id @default(cuid())
   releaseId             String            // Always present - Release ticket ID
   applicationReleaseId  String?           // App-specific events (SubTicket ID)
-  eventType             ReleaseEventType
+  eventType             String
   eventName             String            // Specific action
   message               String            // Human-readable message
   userId                String?           // NULL = system event
@@ -4318,22 +3570,13 @@ model ReleaseChangeType {
   @@schema("public")
 }
 
-enum TicketStageRequestStatus {
-  DRAFT
-  SUBMITTED
-  APPROVED
-  REJECTED
-
-  @@schema("public")
-}
-
 model TicketStageRequest {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                        String                    @id @default(cuid())
   ticketId                  String
   stageId                   String
   formId                    String?
-  status                    TicketStageRequestStatus @default(DRAFT)
+  status                    String                   @default("DRAFT")
   submittedBy               String
   reviewedBy                String?
   reviewerCommentMessageId  String?                   // messages.messageId of the reviewer's comment (required on REJECTED, optional on APPROVED). Bare-string FK to match this model's existing convention.
@@ -4348,21 +3591,6 @@ model TicketStageRequest {
   @@map("ticket_stage_requests")
   @@schema("public")
 }
-enum COEStatus {
-  OPEN
-  IN_PROGRESS
-  COMPLETED
-  @@schema("public")
-}
-
-enum SEVERITY {
-  SEV_1
-  SEV_2
-  SEV_3
-  @@schema("public")
-}
-
-
 // Root cause analysis for issues
 model RCA {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4372,8 +3600,8 @@ model RCA {
   ownerId               String     // User ID (no FK constraint)
   summary               String?
   rootCause             String?
-  severity              SEVERITY
-  status                RCAStatus  @default(DRAFT)
+  severity              String
+  status                String     @default("DRAFT")
   bugTypeId             String     // bug type
   categoryTypeId        String     // category type
   issueCategoryId       String?
@@ -4413,7 +3641,7 @@ model COE {
   ownerId         String        // User ID (no FK constraint)
   actionTypeId    String        // COEActionType ID
   action          String        // Description of the action
-  status          COEStatus     @default(OPEN)
+  status          String        @default("OPEN")
   dueDate         DateTime?
   createdAt       DateTime      @default(now())
   completedAt     DateTime?
@@ -4426,13 +3654,6 @@ model COE {
   @@schema("public")
 }
 
-enum AttributionConfidence {
-  LOW
-  MEDIUM
-  HIGH
-  @@schema("public")
-}
-
 model ReleaseAttribution {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                      String                 @id @default(cuid())
@@ -4440,7 +3661,7 @@ model ReleaseAttribution {
   releaseId               String                 // Release ticket ID
   releaseApplicationId    String?                // Application release ID (SubTicket ID)
   rootCauseTicketId       String?                // Root cause ticket
-  confidence              AttributionConfidence  @default(LOW)
+  confidence              String                 @default("LOW")
   createdAt               DateTime               @default(now())
 
   @@index([ticketId])
@@ -4458,7 +3679,7 @@ model ReleaseAttribution {
 model Recap {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
-  entityType  RecapEntityType
+  entityType  String
   entityId    String
   recapDate   DateTime
   summary     String
@@ -4505,32 +3726,9 @@ model ChannelRecap {
   @@schema("public")
 }
 
-
 // ============================================================================
 // SURFACE NUDGE FRAMEWORK
 // ============================================================================
-
-enum SurfaceAreaType {
-  MESSAGE
-  TICKET
-  CANVAS
-  CALL
-  CONVERSATION
-  @@schema("public")
-}
-
-enum SurfaceLinkKind {
-  RELATES_TO
-  @@schema("public")
-}
-
-enum SessionRecordingProcessStatus {
-  PENDING      // File synced to GCS, needs SOP/fact extraction
-  PROCESSING   // Extraction job running
-  COMPLETED    // Extraction done
-  FAILED       // Extraction failed
-  @@schema("workflow")
-}
 
 // GCS Path format: sessions/${userId}/${sessionId}/recording.json
 model SessionRecordingFile {
@@ -4539,7 +3737,7 @@ model SessionRecordingFile {
   sessionId         String   @unique
   userId            String
   url               String?  // Full GCS URI: gs://bucket/path/to/file.json
-  status            SessionRecordingProcessStatus @default(PENDING)
+  status            String                        @default("PENDING")
   lastProcessedTurn Int?     // Last turn ID that was processed for SOP/fact extraction
 
   @@index([status])
@@ -4552,13 +3750,13 @@ model SurfaceLink {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String          @id @default(cuid())
 
-  sourceType  SurfaceAreaType
+  sourceType  String
   sourceId    String
 
-  targetType  SurfaceAreaType
+  targetType  String
   targetId    String
 
-  linkKind    SurfaceLinkKind
+  linkKind    String
   createdBy   String
   projectId   String
   createdAt   DateTime        @default(now())
@@ -4570,7 +3768,6 @@ model SurfaceLink {
   @@map("surface_links")
   @@schema("public")
 }
-
 
 model Apps {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4632,8 +3829,8 @@ model InstalledAppCommand {
   sourceCommandId String
   commandName          String
   description          String
-  commandType          CommandType
-  commandAccessibility CommandAccessibility
+  commandType          String
+  commandAccessibility String
   createdAt       DateTime
   updatedAt       DateTime
 
@@ -4651,8 +3848,8 @@ model AppIncomingWebhook {
   channelId      String
   boardId        String?
   name           String
-  type           AppIncomingWebhookType @default(SLACK)
-  action         AppIncomingWebhookAction @default(MESSAGE)
+  type           String                 @default("SLACK")
+  action         String                   @default("MESSAGE")
   secret         String
   isActive       Boolean   @default(true)
   createdBy      String
@@ -4674,31 +3871,14 @@ model AppIncomingWebhook {
   @@schema("workflow")
 }
 
-enum CommandType {
-  COMMAND
-  SHORTCUT
-
-  @@schema("public")
-}
-
-enum CommandAccessibility {
-  CHAT
-  THREAD
-  BOTH
-  MESSAGE
-  GLOBAL
-
-  @@schema("public")
-}
-
 model AppCommand {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String               @id @default(cuid())
   appId                 String
   commandName           String               // e.g. "sell" for commands, "create_task" (callbackId) for shortcuts
   description           String               // shown in the / dropdown or shortcut picker
-  commandType           CommandType
-  commandAccessibility  CommandAccessibility
+  commandType           String
+  commandAccessibility  String
   // @deprecated — use commandAccessibility instead
   isForThread           Boolean?
   // @deprecated — use commandAccessibility instead
@@ -4715,35 +3895,15 @@ model AppCommand {
 }
 
 // Saved Views Enums
-enum SavedConfigContextType {
-  BOARD
-
-  @@schema("public")
-}
-
-enum SavedConfigVisibility {
-  PRIVATE
-  PUBLIC
-
-  @@schema("public")
-}
-
-enum SavedConfigEntityName {
-  TICKET
-  FORM_ENTITY_VALUE
-
-  @@schema("public")
-}
-
 // Saved Views Models
 model SavedUserConfiguration {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String                  @id @default(cuid())
   userId      String
   name        String
-  contextType SavedConfigContextType
+  contextType String
   contextId   String
-  visibility  SavedConfigVisibility
+  visibility  String
   isStarred   Boolean                 @default(false)
   createdAt   DateTime
   updatedAt   DateTime
@@ -4761,7 +3921,7 @@ model SavedUserConfigurationValue {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String                  @id @default(cuid())
   configId   String
-  entityName SavedConfigEntityName
+  entityName String
   fieldName  String
   fieldValue String
   createdAt  DateTime
@@ -4775,16 +3935,6 @@ model SavedUserConfigurationValue {
 }
 
 // Scheduled Message Models
-enum DelayedMessageStatus {
-  PENDING    // Waiting to be sent
-  SENDING    // Currently being processed
-  SENT       // Successfully delivered
-  FAILED     // Delivery failed (retries exhausted)
-  CANCELLED  // Cancelled by user before send time
-
-  @@schema("public")
-}
-
 model DelayedMessage {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String                 @id @default(cuid())
@@ -4794,7 +3944,7 @@ model DelayedMessage {
   content         String                 // Message content (HTML)
   hasAttachment   Boolean                @default(false)
   scheduledFor    Float                  // Unix ms timestamp when the message should be sent
-  status          DelayedMessageStatus @default(PENDING)
+  status          String               @default("PENDING")
   failureReason   String?                // Error details if status=FAILED
   sentAt          DateTime?              // Actual send time (set when status=SENT)
   createdAt       DateTime
@@ -4903,27 +4053,13 @@ model DataSourceRelationship {
   @@schema("non_zero")
 }
 
-
-enum DashboardVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("non_zero")
-}
-
-enum DashboardRole {
-  OWNER
-  EDITOR
-  VIEWER
-  @@schema("non_zero")
-}
-
 model DynamicDashboard {
   id           String              @id @default(cuid())
   workspaceId  String
   name         String
   description  String?
   createdBy    String
-  visibility   DashboardVisibility @default(PRIVATE)
+  visibility   String              @default("PRIVATE")
   config       String              @default("{}")              // JSON: { timeRange?, autoRefresh?, variables? } — DashboardConfigSchema on parse
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -4944,7 +4080,7 @@ model DashboardParticipant {
   id          String        @id @default(cuid())
   dashboardId String
   userId      String
-  role        DashboardRole @default(VIEWER)
+  role        String        @default("VIEWER")
   joinedAt    DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -4956,7 +4092,6 @@ model DashboardParticipant {
   @@map("dashboard_participants")
   @@schema("non_zero")
 }
-
 
 model DashboardActivity {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4975,23 +4110,15 @@ model DashboardActivity {
   @@schema("non_zero")
 }
 
-
-enum QueryType {
-  internal
-  external
-
-  @@schema("non_zero")
-}
-
 model DynamicDashboardQuery {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String                  @id @default(cuid())
   title        String?
-  queryType    QueryType               @default(internal)
+  queryType    String                  @default("internal")
   queryJson    Json
-  entityType   FormEntityType?
+  entityType   String?
   targetEntity String?
-  visualType   QueryVisualizationType?
+  visualType   String?
   position     String                  @default("{}")
   config       String                  @default("{}")
   createdBy    String
@@ -5025,29 +4152,14 @@ model DynamicDashboardQueryMapping {
 }
 
 // Action/access type for a permission scope (the part after the colon, e.g. chat:WRITE)
-enum AppPermissionType {
-  READ    // read-only access
-  WRITE   // create / update access
-
-  @@schema("public")
-}
-
 // Status of a permission on an installed app
-enum AppPermissionStatus {
-  UNAPPROVED    // Added after install, pending activation via reinstall
-  APPROVED      // Active — confirmed during install or reinstall
-  PENDINGDELETE // Marked for removal, still active until next reinstall
-
-  @@schema("public")
-}
-
 // App Permission System
 /// Registry of all available permissions.
 /// The full scope string used in requirePermission() is composed as "name:type" (e.g. "chat:WRITE").
 model AvailableAppPermission {
   id          String            @id @default(cuid())
   name        String            // resource prefix — e.g. "chat", "channels", "tickets"
-  type        AppPermissionType // action — READ, WRITE, HISTORY, DELETE, MANAGE
+  type        String            // action — READ, WRITE, HISTORY, DELETE, MANAGE
   description String?
   createdAt   DateTime          @default(now())
 
@@ -5086,7 +4198,7 @@ model InstalledAppPermission {
   id             String                @id @default(cuid())
   installedAppId String
   permissionId   String
-  status         AppPermissionStatus   @default(UNAPPROVED)
+  status         String                @default("UNAPPROVED")
   createdAt      DateTime              @default(now())
 
   installedApp InstalledApps         @relation(fields: [installedAppId], references: [id])
@@ -5103,13 +4215,6 @@ model InstalledAppPermission {
 // Generic Tag Framework (V1)
 // ─────────────────────────────────────────────────────────────────────────
 
-enum TagMethod {
-  MANUAL
-  LLM
-  AUTOMATED
-  @@schema("non_zero")
-}
-
 model Tag {
   id          String    @id @default(cuid())
   sourceId    String
@@ -5118,7 +4223,7 @@ model Tag {
   configKey   String?
   tagCategory String
   tag         String
-  method      TagMethod
+  method      String
   reason      String?
   createdBy   String?
   updatedBy   String?
@@ -5234,7 +4339,6 @@ model DoclingAsyncPart {
   @@schema("non_zero")
 }
 
-
 model Entity {
   workspaceId String?
   id          String  @id @default(cuid())
@@ -5274,63 +4378,5 @@ model EntityAlias {
   @@unique([workspaceId, type, normalizedForm])
   @@index([entityId])
   @@map("entity_aliases")
-  @@schema("non_zero")
-}
-
-// Telepresence Health Monitoring Models
-enum TelepresenceDeviceType {
-  TV
-  CAMERA
-  MICROPHONE
-  SPEAKER
-
-  @@schema("non_zero")
-}
-
-enum TelepresenceHealthStatus {
-  HEALTHY
-  DEGRADED
-  UNAVAILABLE
-  UNKNOWN
-
-  @@schema("non_zero")
-}
-
-// Current health snapshot per device (upserted on every report)
-model TelepresenceHealthView {
-  id             String                   @id @default(cuid())
-  userId         String
-  deviceType     TelepresenceDeviceType
-  name           String
-  status         TelepresenceHealthStatus @default(UNKNOWN)
-  connected      Int
-  detected       Int
-  cpuTemperature Float
-  lastReportedAt DateTime
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
-
-  @@unique([userId, deviceType, name])
-  @@map("telepresence_health_view")
-  @@schema("non_zero")
-}
-
-// Append-only history of every health report received
-model TelepresenceHealthLog {
-  id             String                   @id @default(cuid())
-  userId         String
-  deviceType     TelepresenceDeviceType
-  name           String?
-  status         TelepresenceHealthStatus @default(UNKNOWN)
-  connected      Int
-  detected       Int
-  cpuTemperature Float
-  description    String?
-  reportedAt     DateTime
-  createdAt      DateTime                 @default(now())
-
-  @@index([userId, reportedAt])
-  @@index([userId, deviceType, reportedAt])
-  @@map("telepresence_health_log")
   @@schema("non_zero")
 }

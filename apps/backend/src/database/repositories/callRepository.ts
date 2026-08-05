@@ -1,16 +1,8 @@
 import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  InvitationResponse,
-  MeetingStatus,
-  Prisma,
-  type Call,
-  type CallParticipant,
-} from '@prisma/client';
+import { Prisma, type Call, type CallParticipant } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -47,6 +39,9 @@ export interface UpdateCallInput {
   transcript?: string;
   startedAt?: Date;
   recordingUrl?: string | null;
+  labels?: string[];
+  markedItems?: Prisma.InputJsonValue[];
+  summaryTemplateId?: string | null;
 }
 
 export interface CreateCallWithParticipantsInput {
@@ -217,6 +212,15 @@ export class CallRepository {
     });
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
+  }
+
+  async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
+      WHERE "externalId" = ${externalId}
+    `;
+    return rowsUpdated > 0;
   }
 
   async findById(id: string): Promise<Call | null> {
@@ -541,7 +545,7 @@ export class CallRepository {
    * - INVITED: participant has not yet joined
    */
   async findParticipantsWithStatus(callId: string): Promise<Array<{ userId: string; response: InvitationResponse | null }>> {
-    return await DatabaseClient.getInstance().callParticipant.findMany({
+    return (await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
       },
@@ -549,7 +553,7 @@ export class CallRepository {
         userId: true,
         response: true,
       },
-    });
+    })) as Array<{ userId: string; response: InvitationResponse | null }>;
   }
 
   /**
@@ -1418,8 +1422,8 @@ export class CallRepository {
           userName: externalName,
           userEmail: p.email ?? '',
           userPicture: null,
-          response: p.response,
-          meetingStatus: p.meetingStatus,
+          response: p.response as InvitationResponse | null,
+          meetingStatus: p.meetingStatus as MeetingStatus,
           joinedAt: p.joinedAt,
           leftAt: p.leftAt,
         };
@@ -1430,8 +1434,8 @@ export class CallRepository {
         userName: (user?.displayName || user?.name) ?? 'Unknown',
         userEmail: user?.email ?? '',
         userPicture: user?.picture ?? null,
-        response: p.response,
-        meetingStatus: p.meetingStatus,
+        response: p.response as InvitationResponse | null,
+        meetingStatus: p.meetingStatus as MeetingStatus,
         joinedAt: p.joinedAt,
         leftAt: p.leftAt,
       };
@@ -1577,8 +1581,8 @@ export class CallRepository {
     if (!call) return null;
     return {
       title: call.title,
-      callType: call.callType,
-      status: call.status,
+      callType: call.callType as CallType,
+      status: call.status as CallStatus,
       callId: call.id,
       createdByUserId: call.createdByUserId,
       roomName: call.externalId, // LiveKit room name == externalId
@@ -1632,7 +1636,7 @@ export class CallRepository {
       },
       select: { response: true },
     });
-    return row;
+    return row as { response: InvitationResponse | null } | null;
   }
 
   async findExternalParticipantById(params: {
@@ -1848,7 +1852,7 @@ export class CallRepository {
         ? (p.displayName || 'Guest')
         : (userNameMap.get(p.userId) || 'Unknown'),
       isExternal: p.isExternal,
-      response: p.response,
+      response: p.response as InvitationResponse | null,
     }));
   }
 

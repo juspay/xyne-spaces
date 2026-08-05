@@ -1,12 +1,12 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -25,7 +25,7 @@ import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
-interface TranscriptEntry {
+export interface TranscriptEntry {
   user: string;
   text: string;
   timestamp: number;
@@ -34,7 +34,7 @@ interface TranscriptEntry {
 
 // Shape of the metadata stored on a transcript message attachment. Written in
 // postCallTranscript/processCallWithSummary and read back by the reconcile dedup guard.
-interface TranscriptAttachmentMetadata {
+export interface TranscriptAttachmentMetadata {
   callId: string;
   type: 'transcript' | 'identified_transcript';
   duration: number;
@@ -65,19 +65,29 @@ BRAND NAME CORRECTION:
 - When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
 - Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
+CITATION RULES:
+- The transcript is numbered: each line starts with [N] (e.g. "[1] [03:24] Alice: ...")
+- After any claim, fact, or outcome derived from the transcript, append a citation token [clf-N]
+  where N is the segment number from the transcript line that supports the claim
+- Place the token AFTER the word and BEFORE any trailing punctuation: "Revenue grew 12%[clf-3]."
+- Multiple consecutive tokens are allowed for multi-segment support: "discussed the roadmap[clf-5][clf-8]"
+- Cite at least one segment per key outcome and per action item when possible
+- Do NOT cite the Summary overview section — it is too high-level for precise citations
+- Do NOT invent segment numbers — only use numbers that appear in the transcript
+
 MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 
 ## Summary:
 [2-3 sentence overview of the call]
 
 ## Key outcomes:
-1. [First key outcome or decision]
-2. [Second key outcome or decision]
-3. [Third key outcome or decision if applicable]
+1. [First key outcome or decision][clf-N]
+2. [Second key outcome or decision][clf-N]
+3. [Third key outcome or decision if applicable][clf-N]
 
 ## Action Items:
-- [Action item 1] or "None"
-- [Action item 2 if applicable]
+- [Action item 1][clf-N] or "None"
+- [Action item 2 if applicable][clf-N]
 
 ## Participants:
 - [Participant 1 name]
@@ -204,6 +214,65 @@ TRANSCRIPT:
 {transcript}
 `
 
+// Short topical labels for browsing/search. Kept intentionally simple (no
+// categories/config) — persisted as generic Tag rows by noteTakerTranscriptService.
+const CALL_LABELS_PROMPT = `
+You are analyzing a call transcript to generate a small set of short topical labels/tags for browsing and search.
+
+CRITICAL RULES:
+- Output ONLY valid JSON
+- Generate 1-4 short labels that best describe the topics/themes discussed
+- Each label must be 1-3 words, lowercase, describing a topic (e.g. "pricing", "bug report", "onboarding")
+- Do NOT include people's names, company names, or dates as labels
+- Do NOT duplicate labels
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+
+JSON STRUCTURE (FOLLOW EXACTLY):
+{
+  "labels": ["[short topic label]", "[short topic label]"]
+}
+
+Only output valid JSON.
+No explanations.
+
+TRANSCRIPT:
+{transcript}
+`;
+
+// Decisions/actions extraction. Transcript lines are prefixed with a "[MM:SS]"
+// (or "[HH:MM:SS]") timestamp relative to call start — the LLM is asked to
+// report that same timestamp back per item so it can be stored alongside the
+// text, instead of us trying to re-locate the sentence in the transcript.
+const MARKED_ITEMS_PROMPT = `
+You are analyzing a call transcript (each line is prefixed with a "[MM:SS]" or "[HH:MM:SS]" timestamp relative to the start of the call) to extract key decisions made and action items assigned.
+
+CRITICAL RULES:
+- Output ONLY valid JSON
+- Extract 0-15 items total across decisions and actions \u2014 only clear, concrete ones
+- For each item, use the exact "[MM:SS]" (or "[HH:MM:SS]") timestamp of the transcript line it is most closely associated with
+- "type" must be exactly "decision" or "action"
+- Keep "text" concise (one sentence)
+- If nothing clear qualifies, return an empty array for "items"
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+
+JSON STRUCTURE (FOLLOW EXACTLY):
+{
+  "items": [
+    { "type": "decision" | "action", "text": "[concise description]", "timestamp": "MM:SS" }
+  ]
+}
+
+Only output valid JSON.
+No explanations.
+
+TRANSCRIPT:
+{transcript}
+`;
 
 export interface TicketSuggestion {
   id: string;
@@ -213,6 +282,12 @@ export interface TicketSuggestion {
   suggestedAssignee: string;
   status: 'pending' | 'created' | 'dismissed';
   createdTicketId?: string;
+}
+
+export interface MarkedItem {
+  type: 'decision' | 'action' | 'moment';
+  text: string;
+  timestampSeconds: number;
 }
 
 export class TranscriptService {
@@ -237,11 +312,24 @@ export class TranscriptService {
         OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
       );
 
-      if (!credential) {
-        logger.warn('Org LiteLLM credentials not configured. AI features will be disabled.', {
+      // Prefer the org-provisioned credential; fall back to the env-configured
+      // CALL_LITELLM_API_KEY/LITELLM_BASE_URL (config.llm) when no org credential
+      // exists yet (e.g. local/dev where AI provisioning never ran).
+      const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
+      const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
+      const defaultModel = credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
+
+      if (!apiKey || !baseUrl) {
+        logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
           userId,
         });
         return null;
+      }
+
+      if (!credential) {
+        logger.info('Using env-configured LiteLLM credentials (CALL_LITELLM_API_KEY/LITELLM_BASE_URL) — no org-provisioned credential found.', {
+          userId,
+        });
       }
 
       const agentConfig = {
@@ -249,12 +337,12 @@ export class TranscriptService {
           provider: {
             type: 'litellm' as const,
             config: {
-              apiKey: credential.apiKey,
-              baseUrl: credential.baseUrl,
+              apiKey,
+              baseUrl,
               timeout: 300000,
             },
           },
-          defaultModel: credential.defaultModel || config.llm.callLitellmModel || 'glm-latest',
+          defaultModel,
         },
         tools: {
           enabled: [],
@@ -469,7 +557,7 @@ export class TranscriptService {
    *
    * TEST MODE: Set USE_TEST_TRANSCRIPT=true to use local transcript.json file
    */
-  private async retrieveTranscript(callId: string): Promise<string | null> {
+  async retrieveTranscript(callId: string): Promise<string | null> {
     const storagePath = `transcriptions/${callId}.jsonl`;
     try {
       logger.info(`[${callId}] transcript_fetch_started`, { path: storagePath });
@@ -495,7 +583,7 @@ export class TranscriptService {
   /**
    * Parse JSONL content into transcript entries
    */
-  private parseTranscriptEntries(jsonlContent: string): TranscriptEntry[] {
+  parseTranscriptEntries(jsonlContent: string): TranscriptEntry[] {
     const lines = jsonlContent
       .trim()
       .split('\n')
@@ -554,7 +642,7 @@ export class TranscriptService {
   /**
    * Format transcript entries into plain text
    */
-  private formatTranscript(entries: TranscriptEntry[], callId?: string): string {
+  formatTranscript(entries: TranscriptEntry[], callId?: string): string {
     if (entries.length === 0) {
       return 'No transcript available.';
     }
@@ -579,7 +667,7 @@ export class TranscriptService {
    * Upload formatted transcript to transcript GCS bucket as .txt file
    * Returns GCS path
    */
-  private async uploadFormattedTranscript(callId: string, content: string): Promise<string> {
+  async uploadFormattedTranscript(callId: string, content: string): Promise<string> {
     const filepath = `attachments/${callId}_formatted.txt`;
     const buffer = Buffer.from(content, 'utf-8');
 
@@ -595,7 +683,7 @@ export class TranscriptService {
     return filepath;
   }
 
-  private async isSpeakerIdentificationEnabled(): Promise<boolean> {
+  async isSpeakerIdentificationEnabled(): Promise<boolean> {
     const cfg = await CacConfigService.fetch(SPEAKER_IDENTIFICATION_CAC_KEY) as { enabled?: boolean } | null;
     return cfg?.enabled === true;
   }
@@ -809,7 +897,7 @@ export class TranscriptService {
    * @param callId - The external call ID
    * @param gcsPath - The GCS path to the transcript file
    */
-  private async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
+  async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
     try {
       logger.info(`Starting background translation for call: ${callId}`);
 
@@ -1159,6 +1247,126 @@ Output ONLY the processed transcript, nothing else.`;
       return suggestions;
     } catch (error) {
       logger.error(`ticket_suggestions_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Generate a small set of short topical labels from the transcript (for
+   * browsing/search). Returns [] on any failure or when nothing qualifies —
+   * callers should treat an empty array as "nothing to add", not an error.
+   */
+  async generateCallLabels(transcript: string, callId?: string): Promise<string[]> {
+    const logCallId = callId || 'unknown';
+    const agent = await this.createAgent(logCallId);
+    if (!agent) {
+      logger.warn('Agent creation failed. Skipping call labels generation.');
+      return [];
+    }
+
+    const prompt = CALL_LABELS_PROMPT.replace('{transcript}', transcript);
+
+    try {
+      const result = await agent.execute({
+        messages: [createUserMessage(prompt)],
+      });
+
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error(`call_labels_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
+        return [];
+      }
+
+      let jsonContent = extracted.content;
+      const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
+      if (codeBlockMatch) {
+        jsonContent = codeBlockMatch[1].trim();
+      }
+
+      const parsed = JSON.parse(jsonContent);
+      if (!Array.isArray(parsed.labels)) {
+        logger.error(`call_labels_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
+        return [];
+      }
+
+      const labels = parsed.labels
+        .filter((l: unknown): l is string => typeof l === 'string' && l.trim().length > 0)
+        .slice(0, 4);
+
+      logger.info(`Generated ${labels.length} call labels`);
+      return labels;
+    } catch (error) {
+      logger.error(`call_labels_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
+      return [];
+    }
+  }
+
+  /** Parse a "MM:SS" or "HH:MM:SS" string (as emitted by formatTimestamp) back to seconds. */
+  private parseTimestampToSeconds(value: unknown): number {
+    if (typeof value !== 'string') return 0;
+    const match = value.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+    if (!match) return 0;
+    const hours = match[1] ? parseInt(match[1], 10) : 0;
+    const minutes = parseInt(match[2], 10);
+    const seconds = parseInt(match[3], 10);
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+
+  /**
+   * Generate key decisions/action items from the transcript, each anchored to
+   * the timestamp (in seconds from call start) of the transcript line it came
+   * from. Returns [] on any failure or when nothing qualifies.
+   */
+  async generateMarkedItems(transcript: string, callId?: string): Promise<MarkedItem[]> {
+    const logCallId = callId || 'unknown';
+    const agent = await this.createAgent(logCallId);
+    if (!agent) {
+      logger.warn('Agent creation failed. Skipping marked items generation.');
+      return [];
+    }
+
+    const prompt = MARKED_ITEMS_PROMPT.replace('{transcript}', transcript);
+
+    try {
+      const result = await agent.execute({
+        messages: [createUserMessage(prompt)],
+      });
+
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error(`marked_items_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
+        return [];
+      }
+
+      let jsonContent = extracted.content;
+      const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
+      if (codeBlockMatch) {
+        jsonContent = codeBlockMatch[1].trim();
+      }
+
+      const parsed = JSON.parse(jsonContent);
+      if (!Array.isArray(parsed.items)) {
+        logger.error(`marked_items_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
+        return [];
+      }
+
+      const items: MarkedItem[] = parsed.items
+        .slice(0, 15)
+        .map((item: any) => {
+          const text = typeof item?.text === 'string' ? item.text.trim() : '';
+          if (!text) return null;
+          return {
+            type: item?.type === 'action' ? 'action' : 'decision',
+            text,
+            timestampSeconds: this.parseTimestampToSeconds(item?.timestamp),
+          } satisfies MarkedItem;
+        })
+        .filter((item: MarkedItem | null): item is MarkedItem => item !== null);
+
+      logger.info(`Generated ${items.length} marked items`);
+      return items;
+    } catch (error) {
+      logger.error(`marked_items_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
       return [];
     }
   }
@@ -1545,6 +1753,13 @@ Output ONLY the processed transcript, nothing else.`;
     }
   }
 
+  /**
+   * NOTE_TAKER (HEADLESS / "Xyne Oats") calls never reach this method — their
+   * entire pipeline (transcriptReady webhook, reconcile) is routed straight to
+   * noteTakerTranscriptService, which never creates or posts a message. This
+   * method is for the channel/conversation-based flow only.
+   */
+
   async processCallWithSummary(
     callId: string,
     messageId: string,
@@ -1569,6 +1784,10 @@ Output ONLY the processed transcript, nothing else.`;
       });
       return;
     }
+
+    let pendingDetailedSummary:
+      | ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>
+      | null = null;
 
     try {
       // Get call details for summary generation and notes posting.
@@ -1604,42 +1823,18 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       // Retrieve and format transcript for AI.
-      // For HEADLESS recordings, prefer the identified transcript (real speaker names)
-      // so that summaries, titles, and ticket suggestions reflect who said what.
-      // Fall back to plain transcript if identified is not yet available.
-      const speakerIdentificationEnabled = await this.isSpeakerIdentificationEnabled();
-      const isHeadless = call.callType === CallType.HEADLESS;
-      let transcriptContent: string | null = null;
-      if (speakerIdentificationEnabled && isHeadless) {
-        transcriptContent = await this.getIdentifiedTranscriptContent(callId);
-        if (transcriptContent) {
-          logger.info(`[${callId}] using_identified_transcript_for_summary`, { reason: 'headless_call' });
-        } else {
-          logger.warn(`[${callId}] identified_transcript_unavailable`, { action: 'fallback_to_plain' });
-        }
-      }
-      if (!transcriptContent) {
-        transcriptContent = await this.retrieveTranscript(callId);
-      }
+      const transcriptContent = await this.retrieveTranscript(callId);
       if (!transcriptContent) {
         logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
         return;
       }
 
-      // getIdentifiedTranscriptContent returns already-formatted text; retrieveTranscript
-      // returns raw JSONL that still needs parsing and formatting.
-      let formattedTranscript: string;
-      if (speakerIdentificationEnabled && isHeadless && transcriptContent.startsWith('[')) {
-        // Already formatted ("[MM:SS] Speaker: text" lines) — use directly
-        formattedTranscript = transcriptContent;
-      } else {
-        const entries = this.parseTranscriptEntries(transcriptContent);
-        if (entries.length === 0) {
-          logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
-          return;
-        }
-        formattedTranscript = this.formatTranscript(entries, callId);
+      const entries = this.parseTranscriptEntries(transcriptContent);
+      if (entries.length === 0) {
+        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
+        return;
       }
+      const formattedTranscript = this.formatTranscript(entries, callId);
 
       // For CONVERSATION origin calls, combine conversation messages with transcript for title
       let titleInput = formattedTranscript;
@@ -1657,19 +1852,38 @@ Output ONLY the processed transcript, nothing else.`;
       if (skipTitleGeneration) {
         logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
       }
-      const [summary, title, ticketSuggestions] = await Promise.all([
-        this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-          logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-          return null;
-        }),
-        skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput, callId).catch((err) => {
+      const summaryPromise = this.generateCallSummary(formattedTranscript, callId).catch((err) => {
+        logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        return null;
+      });
+      const callTitlePromise = skipTitleGeneration
+        ? Promise.resolve(null)
+        : this.generateCallTitle(titleInput, callId).catch((err) => {
           logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
-        }),
-        this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-          logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-          return [];
-        }),
+        });
+      const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript).catch((err) => {
+        logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        return [];
+      });
+
+      // Preserve the existing requirement that the short summary succeeds, but
+      // do not wait for title/ticket generation before starting the detailed
+      // summary stream. This keeps peak LLM concurrency at three: the detailed
+      // request takes the short-summary slot as soon as that request finishes.
+      const summary = await summaryPromise;
+      pendingDetailedSummary = summary
+        ? callDocumentService.generateAndPostDetailedSummary(
+            callId,
+            formattedTranscript,
+            callMessage.conversationId,
+            undefined,
+            { callTitlePromise },
+          )
+        : null;
+      const [title, ticketSuggestions] = await Promise.all([
+        callTitlePromise,
+        ticketSuggestionsPromise,
       ]);
 
       const duration = Date.now() - startTime;
@@ -1712,14 +1926,18 @@ Output ONLY the processed transcript, nothing else.`;
         }
 
         // Update the call system message with the title (if generated)
-        if (title && !skipTitleGeneration) {
+        if (title) {
           try {
-            // Use Prisma transaction for atomic message update
+            // Serialize with first-chunk Canvas URL attachment. Both operations
+            // merge message metadata, so the row lock prevents either concurrent
+            // writer from replacing the other's newly-added keys.
             await db.$transaction(async (tx) => {
-              // Fetch the message within the transaction
-              const message = await tx.message.findUnique({
-                where: { messageId },
-              });
+              const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
+                SELECT "content", "metadata"
+                FROM "messages"
+                WHERE "messageId" = ${messageId}
+                FOR UPDATE
+              `;
 
               if (message) {
                 // Swap storage: message.content = AI description, metadata.callEndedText = original call text
@@ -1813,16 +2031,25 @@ Output ONLY the processed transcript, nothing else.`;
           }
         }
 
-        try {
-          await callDocumentService.generateAndPostDetailedSummary(
-            callId,
-            formattedTranscript,
-            callMessage.conversationId
-          );
-          logger.info(`Auto-generated detailed summary for call: ${callId}`);
-        } catch (error) {
-          // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-          logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+        if (pendingDetailedSummary) {
+          // Clear the fallback reference before awaiting normally. The finally
+          // block only drains a task when an earlier return/error bypasses here.
+          const detailedSummaryPromise = pendingDetailedSummary;
+          pendingDetailedSummary = null;
+          try {
+            const detailedSummaryResult = await detailedSummaryPromise;
+            if (detailedSummaryResult.success) {
+              logger.info(`Auto-generated detailed summary for call: ${callId}`);
+            } else {
+              logger.error(`[${callId}] detailed_summary_failed`, {
+                stage: 'detailed_summary_generation',
+                error: detailedSummaryResult.error || 'Unknown detailed summary failure',
+              });
+            }
+          } catch (error) {
+            // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
+            logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+          }
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
@@ -1850,6 +2077,19 @@ Output ONLY the processed transcript, nothing else.`;
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     } finally {
+      // Once started, keep the per-call lock until detailed generation settles.
+      // This covers early returns (for example, a concurrently deleted call)
+      // without leaving an unobserved stream racing the next reconciliation.
+      if (pendingDetailedSummary) {
+        try {
+          await pendingDetailedSummary;
+        } catch (error) {
+          logger.error(`[${callId}] detailed_summary_background_drain_failed`, {
+            error,
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+        }
+      }
       await releaseLock(lockHandle);
     }
   }

@@ -316,16 +316,18 @@ type LooseBlock = {
   children?: LooseBlock[];
 };
 
-// Inline content types the frontend canvas schema adds on top of the BlockNote
-// defaults. ServerBlockNoteEditor.create() only knows the default schema, so any
-// of these custom inline nodes make blocksToMarkdownLossy throw
-// "node type <x> not found in schema". We rewrite them to plain text first.
-const CUSTOM_INLINE_TYPES = new Set(['mention']);
+// ServerBlockNoteEditor.create() only knows the default schema, so custom inline
+// nodes must be rewritten before Markdown export.
+const CUSTOM_INLINE_TYPES = new Set(['mention', 'citation']);
 
 // Render a custom inline node as plain text, mirroring the frontend display
 // logic (CanvasMentionSpec: prefer the group name for group mentions, otherwise
 // the username).
 function customInlineToText(inline: LooseInline): string {
+  // Citation chips are annotations that point at a transcript segment; in a
+  // plain-text/markdown export (or Vespa index text) they carry no useful prose
+  // — the cited words already live in the transcript — so drop them to empty.
+  if (inline.type === 'citation') return '';
   const props = inline.props || {};
   const groupId = props['groupId'] as string | undefined;
   const groupName = props['groupName'] as string | undefined;
@@ -334,26 +336,41 @@ function customInlineToText(inline: LooseInline): string {
   return `@${name}`;
 }
 
-// Recursively replace custom inline nodes with plain-text runs so the default
-// server schema can serialize the document. Returns a new tree; the input is not
-// mutated.
+function normalizeInlineContent(content: unknown): unknown {
+  if (Array.isArray(content)) {
+    return content.map(normalizeInlineContent);
+  }
+
+  if (!content || typeof content !== 'object') {
+    return content;
+  }
+
+  const inline = content as LooseInline;
+  if (inline.type && CUSTOM_INLINE_TYPES.has(inline.type)) {
+    return { type: 'text', text: customInlineToText(inline), styles: {} };
+  }
+
+  return Object.fromEntries(
+    Object.entries(content).map(([key, value]) => [key, normalizeInlineContent(value)]),
+  );
+}
+
+// Remove citation blocks and replace custom inline nodes before serialization.
 function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
-  return blocks.map(block => {
+  return blocks.flatMap(block => {
+    if (block.type === 'citation') return [];
+
     const next: LooseBlock = { ...block };
 
-    if (Array.isArray(block.content)) {
-      next.content = (block.content as LooseInline[]).map(inline =>
-        inline?.type && CUSTOM_INLINE_TYPES.has(inline.type)
-          ? { type: 'text', text: customInlineToText(inline), styles: {} }
-          : inline,
-      );
+    if (block.content !== undefined) {
+      next.content = normalizeInlineContent(block.content);
     }
 
     if (Array.isArray(block.children) && block.children.length > 0) {
       next.children = normalizeBlocksForMarkdown(block.children);
     }
 
-    return next;
+    return [next];
   });
 }
 

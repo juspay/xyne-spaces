@@ -17,7 +17,8 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "clean": "rm -rf dist build coverage",
-    "validate": "pnpm run typecheck && (pnpm run format:check || (pnpm run format && exit 1)) && pnpm run lint",
+    "validate": "node ../../scripts/xyne-doctor.mjs dashboard-validate",
+    "validate:raw": "pnpm run typecheck && (pnpm run format:check || (pnpm run format && exit 1)) && pnpm run lint",
     "prepare": "husky"
   },
   "keywords": [

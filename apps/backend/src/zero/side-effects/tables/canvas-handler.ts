@@ -1,5 +1,5 @@
-import { ActivityClassification } from '@prisma/client';
 import { db } from '@/database/client';
+import { ActivityClassification } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { repositories } from '@/database/repositories/index';
@@ -19,6 +19,18 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
    * Handle canvas insert events to create activities and notifications for mentions
    */
   async onInsert(job: SideEffectJobConfig): Promise<void> {
+    await this.handleInsert(job, true);
+  }
+
+  /**
+   * Run insert activities and mention notifications when indexing is handled by
+   * the caller. Used when an initially-empty canvas is finalized later.
+   */
+  async onDeferredInsert(job: SideEffectJobConfig): Promise<void> {
+    await this.handleInsert(job, false);
+  }
+
+  private async handleInsert(job: SideEffectJobConfig, shouldQueueVespa: boolean): Promise<void> {
     const canvasId = job.entityId;
 
     try {
@@ -111,6 +123,7 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
           this.ctx.workspaceId,
           channelName,
           undefined, // no specific blockId for AI-generated content
+          undefined, // no comment thread for AI-generated content
           canvas.channelId ?? undefined,
         ),
       ]).then(() => {
@@ -118,6 +131,10 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
       }).catch(error => {
         logger.error('[CanvasSideEffectHandler] Failed to create activities or send mention notifications:', error);
       });
+
+      if (!shouldQueueVespa) {
+        return;
+      }
 
       // Queue Vespa indexing job for the canvas
       try {
@@ -139,7 +156,8 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
       // Don't throw - we don't want to fail the main canvas creation
     }
   }
-    /**
+
+  /**
    * Handle canvas update events to queue Vespa indexing
    */
   async onUpdate(job: SideEffectJobConfig): Promise<void> {

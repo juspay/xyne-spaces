@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
-import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
+import { MessageAttachment } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 
 export interface CreateMessageAttachmentInput {
   entityId: string; // Message ID or Ticket ID

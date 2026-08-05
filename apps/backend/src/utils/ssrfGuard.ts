@@ -79,8 +79,11 @@ function isBlockedHostname(host: string): boolean {
   return false;
 }
 
-export async function assertHostIsExternal(host: string): Promise<void> {
-  if (isAllowPrivate()) {
+export async function assertHostIsExternal(
+  host: string,
+  allowPrivate: boolean = isAllowPrivate(),
+): Promise<void> {
+  if (allowPrivate) {
     logger.debug(
       '[SsrfGuard] private hosts allowed (DATA_SOURCE_ALLOW_PRIVATE_HOSTS); skipping check',
       { host },
@@ -138,4 +141,27 @@ export async function assertHostIsExternal(host: string): Promise<void> {
       throw new SsrfBlockedError(trimmed, addr, 'resolves to private / loopback / link-local IPv6');
     }
   }
+}
+
+/**
+ * SSRF guard for outbound webhook URLs (app webhooks, automation
+ * trigger_webhook). Ensures the host does not resolve to an internal / private /
+ * loopback / link-local address. Throws SsrfBlockedError on any violation.
+ * Scheme is intentionally not restricted to https.
+ *
+ * Callers MUST also disable redirect-following (`redirect: 'manual'`) on the
+ * subsequent fetch.
+ */
+export async function assertWebhookUrlSafe(rawUrl: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
+  }
+  // Webhooks honor the private-host bypass only in local development, not in
+  // shared non-prod where DATA_SOURCE_ALLOW_PRIVATE_HOSTS may be set for
+  // data-source connectors.
+  const allowPrivate = isAllowPrivate() && config.env === 'development';
+  await assertHostIsExternal(parsed.hostname, allowPrivate);
 }

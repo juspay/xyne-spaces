@@ -58,6 +58,7 @@ interface NotificationData {
       messageType?: string;
       canvasId?: string;
       blockId?: string;
+      commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
     };
@@ -179,9 +180,19 @@ export const NotificationHandler: React.FC = () => {
         // For canvas notifications, construct actionUrl from data if not provided
         const canvasRedirectUrl =
           !data.notification.actionUrl && data.notification.data?.canvasId
-            ? data.notification.data.blockId
-              ? `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}&blockId=${encodeURIComponent(data.notification.data.blockId)}`
-              : `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
+            ? (() => {
+                const canvasParams = new URLSearchParams({
+                  type: 'canvas',
+                  canvasId: data.notification.data.canvasId,
+                });
+                if (data.notification.data.blockId) {
+                  canvasParams.set('blockId', data.notification.data.blockId);
+                }
+                if (data.notification.data.commentThreadId) {
+                  canvasParams.set('commentThreadId', data.notification.data.commentThreadId);
+                }
+                return `/redirected?${canvasParams.toString()}`;
+              })()
             : undefined;
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
         const notificationWorkspaceId = data.notification.workspaceId;
@@ -495,9 +506,11 @@ export const NotificationHandler: React.FC = () => {
     if (!isElectron || !meetingDetector) return;
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
-    return meetingDetector.onStartRecordingFromMeeting(() => {
+    const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
       sendRecordingEvent({ type: 'requestAutoStart' });
     });
+    window.electronAPI?.ipcSend?.('recording:renderer-ready');
+    return cleanup;
   }, [isElectron]);
 
   // Handle stop signal from the floating recording pill's Stop button
@@ -509,18 +522,23 @@ export const NotificationHandler: React.FC = () => {
     });
   }, [isElectron]);
 
-  // Hide the floating pill when recording transitions from active to inactive
-  // (user stopped it manually in the recordings UI, not just via the pill Stop button)
   const recordingStatus = useRecordingStore(ctx => ctx.status);
-  const wasRecordingActiveRef = useRef(false);
+  const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
+  const wasRecordingActiveRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (!isElectron) return;
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
-    if (wasRecordingActiveRef.current && !isActive) {
-      window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
+    if (isActive !== wasRecordingActiveRef.current) {
+      window.electronAPI?.ipcSend?.('recording:state-changed', {
+        active: isActive,
+        startTime: recordingStartTime ?? undefined,
+      });
+      if (!isActive) {
+        window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
+      }
     }
     wasRecordingActiveRef.current = isActive;
-  }, [isElectron, recordingStatus]);
+  }, [isElectron, recordingStatus, recordingStartTime]);
 
   const handleNotificationRef = useRef(handleNotification);
   const notificationReceivedListenerRef = useRef((n: NotificationData): void =>

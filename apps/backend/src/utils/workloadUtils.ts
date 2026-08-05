@@ -1,6 +1,6 @@
 import { DatabaseClient } from '@/database/client';
+import { TicketStatusV2 } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { TicketStatusV2 } from '@prisma/client';
 import { logger } from './logger';
 
 const db = DatabaseClient.getInstance();

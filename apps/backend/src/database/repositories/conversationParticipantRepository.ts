@@ -1,5 +1,6 @@
 import { BaseRepository } from './base';
-import { ConversationParticipant, ConversationParticipation, Prisma } from '@prisma/client';
+import { ConversationParticipant, Prisma } from '@prisma/client';
+import { ConversationParticipation } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { ThreadListCursor, ThreadListSection } from '@/utils/threadListCursor';
 import { ACLFactory } from '@/services/pythonQuery/acl';
@@ -204,7 +205,7 @@ export class ConversationParticipantRepository extends BaseRepository<
       },
     });
 
-    return participant?.participationType ?? null;
+    return (participant?.participationType ?? null) as ConversationParticipation;
   }
 
   /**

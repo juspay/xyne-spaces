@@ -1,6 +1,5 @@
-import { AuthProvider, Status, User, UserStatus, WorkspaceRole } from '@prisma/client';
-import {
-  CommunityJoinResultStatus,
+import { User } from '@prisma/client';
+import { CommunityJoinResultStatus,
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
   OrgRole,
   WorkspaceJoinPolicy,
@@ -9,7 +8,10 @@ import {
   WorkspaceJoinRequestStatus,
   type WorkspaceJoinRequestStatus as WorkspaceJoinRequestStatusType,
   WorkspaceType,
-} from '@xyne/shared';
+  AuthProvider,
+  Status,
+  UserStatus,
+  WorkspaceRole, ChannelRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -19,6 +21,7 @@ import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 import { repositories } from '@/database/repositories';
+import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -370,7 +373,7 @@ export class CommunityWorkspaceService {
         await repositories.channelParticipants.addParticipant(
           landingChannelId,
           result.workspaceUser.id,
-          'MEMBER',
+          ChannelRole.MEMBER,
         );
       } catch (error) {
         logger.error('[CommunityWorkspaceService] Failed to add user to landing channel', {
@@ -388,6 +391,22 @@ export class CommunityWorkspaceService {
       COMMUNITY_MEMBER_WORKSPACE_ROLE,
       params.workspace.id
     );
+
+    // Join the community workspace's general channel (idempotent)
+    try {
+      await joinUserToGeneralChannel(
+        this.prisma,
+        params.workspace.id,
+        result.workspaceUser.id,
+        ChannelRole.MEMBER
+      );
+    } catch (error) {
+      logger.error('[CommunityWorkspaceService] Failed to join user to general channel', {
+        workspaceId: params.workspace.id,
+        userId: result.workspaceUser.id,
+        error,
+      });
+    }
 
     try {
       await aiProvisioningService.enqueueUserSync(result.workspaceUser.id);

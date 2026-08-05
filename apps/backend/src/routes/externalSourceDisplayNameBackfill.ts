@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { ExternalSourceDisplayNameBackfillController } from '@/controllers/externalSourceDisplayNameBackfillController';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';

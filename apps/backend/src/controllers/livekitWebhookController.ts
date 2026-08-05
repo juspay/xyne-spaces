@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { WebhookReceiver, WebhookEvent } from 'livekit-server-sdk';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { CallOrigin, CallStatus, InvitationResponse, type Call } from '@prisma/client';
+import { type Call } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,6 +21,7 @@ import { callRecordingService } from '@/services/callRecordingService';
 import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
+import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -40,7 +42,7 @@ class LiveKitWebhookController {
         externalId: call.externalId,
         channelId: call.channelId,
         title: call.title,
-        callType: call.callType,
+        callType: call.callType as CallType,
         startedAt: call.startedAt,
         endedAt,
         aiSummary: call.aiSummary,
@@ -109,6 +111,18 @@ class LiveKitWebhookController {
     logger.info('[LiveKit Webhook] webhook_parsed', { event: event.event, room: event.room?.name ?? 'none' });
 
     try {
+      // Global routing: NOTE_TAKER (HEADLESS / "Xyne Oats") rooms never have a
+      // channel/message/conversation, so every event type for them is handled
+      // entirely by noteTakerWebhookController instead of the channel-based
+      // handlers below. This check must run before the switch so no event type
+      // (room_finished, participant_left, track_published, egress_*, etc.) ever
+      // falls through to the channel-based DB operations, which don't apply.
+      if (await this.isNoteTakerRoom(event)) {
+        await noteTakerWebhookController.handleEvent(event);
+        res.status(200).json({ success: true });
+        return;
+      }
+
       // Handle different event types
       switch (event.event) {
         case 'room_started':
@@ -149,6 +163,28 @@ class LiveKitWebhookController {
       res.status(500).json({ error: 'Failed to process webhook' });
     }
   };
+
+  /**
+   * Determine whether a webhook event belongs to a NOTE_TAKER (HEADLESS) room.
+   * Prefers the DB row (authoritative once the call exists); falls back to the
+   * room metadata for events that arrive before the Call row is created
+   * (room_started, and the very first participant_joined).
+   */
+  private async isNoteTakerRoom(event: WebhookEvent): Promise<boolean> {
+    const roomName = event.room?.name;
+    if (!roomName) return false;
+
+    const call = await repositories.calls.findByExternalId(roomName);
+    if (call) return call.callType === CallType.HEADLESS;
+
+    if (!event.room?.metadata) return false;
+    try {
+      const metadata = JSON.parse(event.room.metadata) as Record<string, unknown>;
+      return metadata.callType === CallType.HEADLESS;
+    } catch {
+      return false;
+    }
+  }
 
   /**
    * Handle room_started event
@@ -242,7 +278,10 @@ class LiveKitWebhookController {
 
         // Track call metrics (count + duration) as a side effect
         try {
-          await callSideEffectService.logCallAnalytics(result.call, now);
+          await callSideEffectService.logCallAnalytics(
+            { ...result.call, callOrigin: result.call.callOrigin as CallOrigin },
+            now,
+          );
         } catch (analyticsError) {
           logger.error(`[LiveKit Webhook] Failed to log call analytics for ${callId}:`, analyticsError);
         }
@@ -464,7 +503,7 @@ class LiveKitWebhookController {
             externalId: call.externalId,
             channelId: call.channelId,
             title: call.title,
-            callType: call.callType,
+            callType: call.callType as CallType,
             startedAt: call.startedAt,
           }).catch(autoError => {
             logger.error(`[LiveKit Webhook] Failed to emit call-started automation event:`, autoError);
@@ -694,7 +733,10 @@ class LiveKitWebhookController {
 
         // Emit analytics events (call_ended + per-participant) for the Calls dashboards
         try {
-          await callSideEffectService.logCallAnalytics(result.call, now);
+          await callSideEffectService.logCallAnalytics(
+            { ...result.call, callOrigin: result.call.callOrigin as CallOrigin },
+            now,
+          );
         } catch (analyticsError) {
           logger.error(`[LiveKit Webhook] Failed to log call analytics for ${callId}:`, analyticsError);
         }

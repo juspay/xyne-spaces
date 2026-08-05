@@ -10,14 +10,18 @@ import {
   createTag,
 } from '@/bots/json-ui';
 import type { FlowJson } from '@/bots/json-ui/types';
-import { ChannelScopeType, NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd, isDeskChannelType, type InitialMessageSummary } from '@xyne/shared';
+import { serializeInitialMessageMd,
+  isDeskChannelType,
+  type InitialMessageSummary,
+  ChannelScopeType,
+  NotificationDeliveryMethod,
+  NotificationType, MessageType } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -553,7 +557,7 @@ class NotificationService {
           conversationId: conversationId,
           senderId: botInfo.id,
           content: flowJsonString,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           hasAttachment: false,
         });
 
@@ -1279,7 +1283,9 @@ class NotificationService {
     workspaceId: string,
     channelName?: string,
     blockId?: string,
+    commentThreadId?: string,
     channelId?: string | null,
+    mentionContext: 'canvas' | 'comment' = 'canvas',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
     if (recipientIds.length === 0) {
@@ -1302,13 +1308,18 @@ class NotificationService {
 
     getNotificationJobsExpected().add(desktopUsers.length + mobileUsers.length, { platform: 'desktop', message_type: 'channel' });
 
-    // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
-    const title = channelName
-      ? `You were mentioned in #${channelName}`
-      : `You were mentioned in ${canvasTitle}`;
-    const message = channelName
-      ? `${senderName} mentioned you in #${channelName}`
-      : `${senderName} mentioned you in a canvas`;
+    // Mirror message mentions for canvas body; make comment mentions explicit.
+    const isCommentMention = mentionContext === 'comment';
+    const title = isCommentMention
+      ? `You were mentioned in a comment on ${canvasTitle}`
+      : channelName
+        ? `You were mentioned in #${channelName}`
+        : `You were mentioned in ${canvasTitle}`;
+    const message = isCommentMention
+      ? ''
+      : channelName
+        ? `${senderName} mentioned you in #${channelName}`
+        : `${senderName} mentioned you in a canvas`;
 
     const notificationData = {
       title,
@@ -1320,14 +1331,20 @@ class NotificationService {
         canvasId,
         canvasTitle,
         senderId,
-        senderName,
+        ...(!isCommentMention ? { senderName } : {}),
         workspaceId,
+        mentionContext,
         ...(blockId ? { blockId } : {}),
+        ...(commentThreadId ? { commentThreadId } : {}),
       },
     };
 
-    const actionUrl = blockId
-      ? `/${workspaceId}/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}`
+    const canvasQueryParams = new URLSearchParams();
+    if (blockId) canvasQueryParams.set('blockId', blockId);
+    if (commentThreadId) canvasQueryParams.set('commentThreadId', commentThreadId);
+    const queryString = canvasQueryParams.toString();
+    const actionUrl = queryString
+      ? `/${workspaceId}/chat/canvas/${canvasId}?${queryString}`
       : `/${workspaceId}/chat/canvas/${canvasId}`;
 
     // Send desktop-only notifications
@@ -1421,6 +1438,59 @@ class NotificationService {
     const deliveredUserIds = results
       .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
       .map(r => r.value);
+
+    return { deliveredUserIds };
+  }
+
+  async createRecordingSharedNotifications(
+    recipientUserIds: string[],
+    callId: string,
+    recordingTitle: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'recording_shared' | 'recording_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'recording',
+    });
+
+    const isRevoked = actorAction === 'recording_access_revoked';
+    const title = isRevoked
+      ? `${actorName} removed your access to a recording`
+      : `${actorName} shared a recording with you`;
+    const message = isRevoked
+      ? `${actorName} removed your access to "${recordingTitle}"`
+      : `${actorName} shared "${recordingTitle}" with you`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'RECORDING_SHARED' as NotificationType,
+          relatedEntityType: 'call',
+          relatedEntityId: callId,
+          metadata: {
+            callId,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      }),
+    );
+
+    const deliveredUserIds = results
+      .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+      .map(result => result.value);
 
     return { deliveredUserIds };
   }
@@ -1937,7 +2007,7 @@ class NotificationService {
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',
         message: `You have been assigned to ticket "${ticket.title}"`,
-        type: 'TICKET_ASSIGNMENT',
+        type: NotificationType.TICKET_ASSIGNMENT,
         relatedEntityType: 'ticket',
         relatedEntityId: ticketId,
         actionUrl,

@@ -4,6 +4,7 @@
  */
 
 import express, { Router, Request, Response } from 'express';
+import { DeskType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
@@ -17,7 +18,6 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
-import { DeskType } from '@prisma/client';
 import { runWithContext } from '@/database/tenant/context';
 
 const router = Router();

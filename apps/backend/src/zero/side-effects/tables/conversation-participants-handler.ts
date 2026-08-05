@@ -1,10 +1,10 @@
 import { notificationService } from '@/services/notificationService';
 import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, flagThreadRecommendation } from '@/services/threadSummaryService';
 import { db } from '@/database/client';
+import { NotificationType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { ConversationParticipantPreviousValue, SideEffectJobConfig } from '../types';
 import { logger } from '@/utils/logger';
-import { NotificationType } from '@prisma/client';
 
 const ON_INSERT_TIMEOUT_MS = 45_000;
 

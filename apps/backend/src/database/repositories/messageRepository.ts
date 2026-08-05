@@ -1,8 +1,8 @@
 import { BaseRepository } from './base';
-import { Message, MessageType } from '@prisma/client';
+import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH } from '@xyne/shared';
+import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';

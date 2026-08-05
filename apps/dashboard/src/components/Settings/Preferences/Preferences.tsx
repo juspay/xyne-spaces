@@ -602,6 +602,24 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       />
     </div>
 
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          {state.canSwitchRecordingVersion
+            ? 'Switch between the classic and redesigned recording interface on this device.'
+            : 'Stop the active recording before switching experiences.'}
+        </p>
+      </div>
+      <Switch
+        id='recording-version-v2'
+        aria-label='Use new recording experience'
+        checked={state.recordingVersion === 'v2'}
+        disabled={!state.canSwitchRecordingVersion}
+        onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+      />
+    </div>
+
     {/* Recording section divider */}
     <div className='pt-2'>
       <p id='recording-tab-view-label' className='text-sm font-semibold text-foreground'>
