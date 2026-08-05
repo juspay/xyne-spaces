@@ -23,6 +23,8 @@ export interface ClawSyncUserPayload {
   spacesUserId: string;
   spacesWorkspaceId: string;
   spacesOrgId: string;
+  /** Stable identity for one person within a Spaces organization. */
+  spacesOrgMemberId?: string;
   email: string;
   name: string;
   role?: string | null;

@@ -207,8 +207,20 @@ class AIProvisioningWorker {
     await this.ensureOrgLiteLLMServiceAccountCredentials(orgPayload, teamId);
   }
 
-  private async provisionUser(userId: string): Promise<void> {
-    const userPayload = await this.buildUserPayload(userId);
+  private async provisionUser(orgMemberId: string): Promise<void> {
+    const sourceUser = await this.prisma.user.findFirst({
+      where: { orgMemberId, leftAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!sourceUser) {
+      throw new ClawSpacesSyncError(
+        `No active workspace user found for AI provisioning org member: ${orgMemberId}`,
+        { retryable: false },
+      );
+    }
+
+    const userPayload = await this.buildUserPayload(sourceUser.id);
     const { workspaceType, ...clawUserPayload } = userPayload;
     const orgPayload = await this.buildOrgPayload(userPayload.spacesOrgId);
     const workspacePayload = await this.buildWorkspacePayload(userPayload.spacesWorkspaceId);
@@ -220,27 +232,49 @@ class AIProvisioningWorker {
 
     const teamId = await this.ensureLiteLLMTeamForOrg(orgPayload);
     await this.ensureOrgLiteLLMServiceAccountCredentials(orgPayload, teamId);
+    // A Spaces user row is a workspace membership. LiteLLM keys must instead
+    // belong to the person within the organization, so all key provisioning
+    // uses the stable org-member ID.
+    const canonicalProvisioningUserId = userPayload.spacesOrgMemberId;
+    if (!canonicalProvisioningUserId) {
+      throw new ClawSpacesSyncError(
+        `Cannot provision AI credentials without an org member id for Spaces user ${userPayload.spacesUserId}`,
+        { retryable: false },
+      );
+    }
     const { litellmUserId } = await litellmProvisioningClient.createUser({
       orgId: userPayload.spacesOrgId,
-      userId: userPayload.spacesUserId,
+      userId: canonicalProvisioningUserId,
       email: userPayload.email,
       name: userPayload.name,
       teamId,
       budget: userBudget,
+      metadata: {
+        spaces_org_member_id: userPayload.spacesOrgMemberId,
+        spaces_workspace_id: userPayload.spacesWorkspaceId,
+        spaces_user_id: userPayload.spacesUserId,
+      },
     });
     const key = await litellmProvisioningClient.generateKey({
       orgId: userPayload.spacesOrgId,
-      userId: userPayload.spacesUserId,
+      userId: canonicalProvisioningUserId,
       email: userPayload.email,
       litellmUserId,
       teamId,
       budget: userBudget,
+      metadata: {
+        spaces_org_member_id: userPayload.spacesOrgMemberId,
+        spaces_workspace_id: userPayload.spacesWorkspaceId,
+        spaces_user_id: userPayload.spacesUserId,
+      },
     });
 
     await litellmProvisioningClient.storeUserKey({
-      userId: userPayload.spacesUserId,
+      userId: canonicalProvisioningUserId,
       orgId: userPayload.spacesOrgId,
       spacesOrgId: userPayload.spacesOrgId,
+      spacesWorkspaceId: userPayload.spacesWorkspaceId,
+      spacesOrgMemberId: userPayload.spacesOrgMemberId,
       litellmUserId,
       teamId,
       key: key.key,
@@ -617,6 +651,7 @@ class AIProvisioningWorker {
         email: true,
         name: true,
         role: true,
+        orgMemberId: true,
         status: true,
         workspace: {
           select: {
@@ -645,6 +680,7 @@ class AIProvisioningWorker {
       spacesUserId: user.id,
       spacesWorkspaceId: user.workspace.id,
       spacesOrgId: user.workspace.orgId,
+      spacesOrgMemberId: user.orgMemberId,
       email: user.email,
       name: user.name,
       role: user.role,

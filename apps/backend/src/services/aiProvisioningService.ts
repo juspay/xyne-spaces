@@ -22,8 +22,8 @@ class AIProvisioningService {
     );
   }
 
-  async enqueueUserSync(spacesUserId: string) {
-    return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.USER, spacesUserId);
+  async enqueueUserSync(spacesOrgMemberId: string) {
+    return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.USER, spacesOrgMemberId);
   }
 
   async upgradeCommunityToEnterpriseBudget(orgMemberId: string): Promise<void> {

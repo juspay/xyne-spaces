@@ -229,6 +229,9 @@ export interface S2SRunAgentRequest {
   userId: string;
   userName: string;
   userEmail: string;
+  spacesWorkspaceId?: string;
+  spacesOrgId?: string;
+  spacesOrgMemberId?: string;
   callbackUrl: string;
   conversationId?: string;
   channelId?: string;
@@ -295,7 +298,10 @@ function extractCookieHeader(req: { headers?: { cookie?: string } }): Record<str
 }
 
 function extractUserIdHeader(userId: string): Record<string, string> {
-  return { 'x-user-id': userId };
+  // `userId` is the raw, workspace-scoped Spaces user id. Keep the legacy
+  // x-user-id header for older Claw deployments, and send the explicit source
+  // identity for Claw versions that canonicalize it at the auth boundary.
+  return { 'x-user-id': userId, 'x-spaces-user-id': userId };
 }
 
 // ============================================================================
@@ -1268,6 +1274,9 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
         agentSlug: req.agentSlug,
         task: req.task,
         userId: req.userId,
+        ...(req.spacesWorkspaceId ? { spacesWorkspaceId: req.spacesWorkspaceId } : {}),
+        ...(req.spacesOrgId ? { spacesOrgId: req.spacesOrgId } : {}),
+        ...(req.spacesOrgMemberId ? { spacesOrgMemberId: req.spacesOrgMemberId } : {}),
         callbackUrl: req.callbackUrl,
         ...(req.conversationId ? { conversationId: req.conversationId } : {}),
         ...(req.channelId ? { channelId: req.channelId } : {}),
@@ -1298,6 +1307,10 @@ export interface AppMentionAgentRequest {
   channelId: string;
   workspaceId: string;
   resultForwardUrl: string;
+  /** Optional when the caller already resolved the Spaces identity. */
+  spacesWorkspaceId?: string;
+  spacesOrgId?: string;
+  spacesOrgMemberId?: string;
 }
 
 export async function runClawAgent(
@@ -1352,6 +1365,8 @@ export async function runClawAgent(
     return { dispatched: false };
   }
 
+  const identityContext = await resolveHeadlessAppEventIdentity(req);
+
   const event: BaseAppEvent = {
     eventType: AppEventType.APP_MENTION,
     payload: {
@@ -1363,12 +1378,37 @@ export async function runClawAgent(
       userId: req.userId,
       senderName: req.userName,
       channelId: req.channelId,
+      ...identityContext,
       metadata: { resultForwardUrl: req.resultForwardUrl },
     },
     timestamp: new Date().toISOString(),
   };
   await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc));
   return { dispatched: true };
+}
+
+async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Promise<{
+  workspaceId?: string;
+  orgId?: string;
+  orgMemberId?: string;
+}> {
+  // A server-initiated event has no browser cookie. Resolve from the channel
+  // and actor records rather than trusting caller-supplied identity fields.
+  const [actor, channel] = await Promise.all([
+    db.user.findUnique({ where: { id: req.userId }, select: { orgMemberId: true } }),
+    db.channel.findUnique({ where: { id: req.channelId }, select: { workspaceId: true } }),
+  ]);
+  const workspaceId = req.spacesWorkspaceId ?? channel?.workspaceId;
+  const workspace = workspaceId
+    ? await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } })
+    : null;
+  const orgId = req.spacesOrgId ?? workspace?.orgId;
+  const orgMemberId = req.spacesOrgMemberId ?? actor?.orgMemberId;
+  return {
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(orgId ? { orgId } : {}),
+    ...(orgMemberId ? { orgMemberId } : {}),
+  };
 }
 
 /** Fetch the latest assistant reasoning and tool invocations from a claw conversation. Used by email auto-draft. */
@@ -1383,7 +1423,7 @@ export async function getConversationInsight(params: {
   try {
     res = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': userId, ...getS2SHeaders() },
+      headers: { 'Content-Type': 'application/json', ...extractUserIdHeader(userId), ...getS2SHeaders() },
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {

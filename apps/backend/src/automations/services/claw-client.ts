@@ -26,6 +26,10 @@ export interface RunAgentRequest {
   agentSlug: string;
   task: string;
   userId: string;
+  /** Additive context for headless calls. Existing Claw callbacks ignore it. */
+  spacesWorkspaceId?: string;
+  spacesOrgId?: string;
+  spacesOrgMemberId?: string;
   callbackUrl: string;
   context?: string;
   conversationId?: string;
@@ -86,6 +90,9 @@ class ClawClient {
       sessionId: req.sessionId,
       task: req.task,
       userId: req.userId,
+      ...(req.spacesWorkspaceId ? { spacesWorkspaceId: req.spacesWorkspaceId } : {}),
+      ...(req.spacesOrgId ? { spacesOrgId: req.spacesOrgId } : {}),
+      ...(req.spacesOrgMemberId ? { spacesOrgMemberId: req.spacesOrgMemberId } : {}),
       callbackUrl: req.callbackUrl,
       ...(req.context ? { context: req.context } : {}),
       ...(req.conversationId ? { conversationId: req.conversationId } : {}),
