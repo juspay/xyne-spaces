@@ -1298,7 +1298,9 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
  * `?dryRun=true` previews. `?overwrite=true` replaces existing cursors — safe only
  * while nothing reads the column.
  */
-router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, authMiddleware.requireAdmin, async (req: Request, res: Response): Promise<void> => {
+// requireAdminOrOwner, not requireAdmin: the latter compares users.role against
+// lowercase 'admin' while the column stores 'ADMIN'/'MEMBER', so it never matches.
+router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, authMiddleware.requireAdminOrOwner, async (req: Request, res: Response): Promise<void> => {
   try {
     const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
     const overwrite = req.query.overwrite === 'true' || req.body?.overwrite === true;
