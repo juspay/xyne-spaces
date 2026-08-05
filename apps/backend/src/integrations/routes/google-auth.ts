@@ -1292,19 +1292,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
 /**
  * POST /api/integrations/google/admin/seed-sync-cursors
- * One-shot: give every active Gmail source a starting `lastSyncCursor`, read from
- * `users.getProfile`. Run this before the cursor-resuming ingestion path ships —
- * without a cursor, a source's first push resolves to nothing and skips the mail
- * that triggered it.
+ * Give every active Gmail source a starting `lastSyncCursor` from `users.getProfile`.
+ * Run before the cursor-resuming ingestion path ships.
  *
- * `?dryRun=true` previews. `?overwrite=true` replaces existing cursors, which is
- * only safe while nothing reads the column; once ingestion resumes from it,
- * overwriting moves a desk past mail that was never ingested.
- *
- * Auth: requires a logged-in user. Wrap with an admin role check if the platform
- * has one.
+ * `?dryRun=true` previews. `?overwrite=true` replaces existing cursors — safe only
+ * while nothing reads the column.
  */
-router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, authMiddleware.requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
     const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
     const overwrite = req.query.overwrite === 'true' || req.body?.overwrite === true;
