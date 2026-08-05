@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { chunkPlainText } from '@/utils/vespaTextValidation';
 import {
   VespaSamTranscriptDocument,
   SamTranscriptInput,
@@ -34,6 +35,7 @@ export function transformSamTranscriptToVespa(
     type: data.type,
     duration: data.duration,
     meetingSummary: data.aiAnalysedData.summary, // SAM sends 'summary', Vespa expects 'meetingSummary' (reserved word workaround)
+    chunks: chunkPlainText(data.aiAnalysedData.summary || ''), // Pre-chunked meetingSummary for chunk-level embeddings
     chapters: data.aiAnalysedData.chapters?.length ? JSON.stringify(data.aiAnalysedData.chapters) : undefined,
     actionItems: data.aiAnalysedData.action_items?.length ? JSON.stringify(data.aiAnalysedData.action_items) : undefined,
     others: data.aiAnalysedData.others ? JSON.stringify(data.aiAnalysedData.others) : undefined,
