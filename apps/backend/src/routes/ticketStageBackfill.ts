@@ -20,6 +20,7 @@ const adminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
  *         boardId?: string,
  *         externalSourceType?: string,
  *         createdAfter?: string,
+ *         createdBefore?: string,
  *         dryRun?: boolean
  *       }
  *       Exactly one of destinationStage or status is required.
