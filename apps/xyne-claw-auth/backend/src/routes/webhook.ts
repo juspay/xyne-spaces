@@ -486,6 +486,11 @@ async function postGeneratedMarkdownFile(args: {
   /** Text body, or raw bytes when `mimeType` says the payload is binary. */
   markdown: string | Uint8Array;
   mimeType?: string;
+  /** Additional files to attach to the SAME message (Spaces' filesUpload takes
+   *  repeated `files` parts). Used by /experiment findings, which ships the
+   *  proof zip AND the readable .md side by side — the zip is the archive, the
+   *  markdown is what people actually open in the thread. */
+  extraFiles?: Array<{ filename: string; content: string | Uint8Array; mimeType?: string }>;
   summary: string;
 }): Promise<void> {
   const form = new FormData();
@@ -494,6 +499,12 @@ async function postGeneratedMarkdownFile(args: {
     ? [args.markdown]
     : [new Uint8Array(args.markdown)];
   form.append("files", new Blob(body, { type: mimeType }), args.filename);
+  for (const extra of args.extraFiles ?? []) {
+    const extraBody = typeof extra.content === "string"
+      ? [extra.content]
+      : [new Uint8Array(extra.content)];
+    form.append("files", new Blob(extraBody, { type: extra.mimeType ?? "text/markdown" }), extra.filename);
+  }
   form.append("channelId", args.channelId);
   form.append("conversationId", args.conversationId);
   form.append("userId", args.userId);
@@ -1619,7 +1630,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         summaryLines.push(
           `Proof bundle: ${bundle.includedCount} of ${bundle.entries.length} findings have their artifact attached` +
           (bundle.missingCount > 0 ? ` · ${bundle.missingCount} missing (see MANIFEST.md)` : "") +
-          ` — organised by epoch inside the zip.`,
+          ` — organised by epoch inside the zip. The findings write-up is also attached as ${filename}.`,
         );
       }
       const summary = summaryLines.join("\n");
@@ -1632,6 +1643,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           filename: bundle ? bundle.filename : filename,
           markdown: bundle ? bundle.buffer : markdown,
           ...(bundle ? { mimeType: "application/zip" } : {}),
+          // Ship the readable findings .md alongside the zip. The zip is the
+          // complete archive (proof artifacts organised by epoch), but nobody
+          // wants to download-and-unzip just to read the write-up — so the
+          // markdown rides the same message, exactly as it did before bundling.
+          ...(bundle ? { extraFiles: [{ filename, content: markdown, mimeType: "text/markdown" }] } : {}),
           summary,
         });
       } catch (err) {
