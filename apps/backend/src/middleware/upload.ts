@@ -7,14 +7,18 @@ const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
 
 /**
- * Content types refused at upload. A blocklist rather than an allowlist on purpose: this
+ * Content types refused at upload.
+ *
+ * SVG is deliberately not listed: it is a first-class image format here — custom emojis are
+ * SVG — and the serving path renders it under a Content-Security-Policy of
+ * `default-src 'none'; style-src 'unsafe-inline'; sandbox`, which permits neither script
+ * execution nor resource loading. See setSafeInlineImageHeaders. A blocklist rather than an allowlist on purpose: this
  * surface accepts arbitrary business files, and an allowlist breaks the moment someone
  * uploads a type nobody enumerated.
  */
 const BLOCKED_UPLOAD_MIME_TYPES = new Set([
   'text/html',
   'application/xhtml+xml',
-  'image/svg+xml',
   'application/xml',
   'text/xml',
   'application/x-msdownload',
@@ -26,7 +30,7 @@ const BLOCKED_UPLOAD_MIME_TYPES = new Set([
 ]);
 
 const BLOCKED_UPLOAD_EXTENSIONS = new Set([
-  '.html', '.htm', '.xhtml', '.svg', '.xml',
+  '.html', '.htm', '.xhtml', '.xml',
   '.exe', '.dll', '.bat', '.cmd', '.com', '.msi', '.scr',
   '.sh', '.bash', '.ps1', '.jar', '.php',
 ]);
