@@ -717,9 +717,11 @@ async function queueForVespa(workspaceId: string, orgId: string, userId: string)
   let queued = 0;
   for (const job of vespaJobs) {
     try {
+      const isUser = job.schema === 'user';
       await vespaQueue.addJob({
         schema: job.schema as never,
-        jobType: 'feed' as never,
+        jobType: (isUser ? 'update' : 'feed') as never,
+        ...(isUser ? { create: true } : {}),
         docId: job.docId,
         workspaceId,
         orgId,

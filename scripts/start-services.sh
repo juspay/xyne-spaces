@@ -569,6 +569,9 @@ else
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db OWNER xyne;" 2>/dev/null
 
+        echo -e "${BLUE}  Flushing Redis (stale queue jobs reference the dropped database)...${NC}"
+        $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+
         # Push schema with force-reset (first time setup - ensures tables are created)
         echo -e "${BLUE}  Creating database schema...${NC}"
         pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
@@ -815,13 +818,15 @@ if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
         echo -e "${YELLOW}  Installing apps/xyne-claw-auth/backend dependencies...${NC}"
         pnpm install
     fi
-    set -a && source .env && set +a
-    if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
-      export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
-    fi
-    pnpm exec prisma db push --skip-generate --accept-data-loss
-    pnpm exec prisma generate
-    NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
+    (
+        set -a && source .env && set +a
+        if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
+          export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
+        fi
+        pnpm exec prisma db push --skip-generate --accept-data-loss
+        pnpm exec prisma generate
+        NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
+    )
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
     cd "$REPO_ROOT"
 
