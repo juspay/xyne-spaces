@@ -24,7 +24,7 @@ class BrowserSettingsService {
 
   setSettings(settings: Partial<BrowserSettings>): BrowserSettings {
     const currentSettings = this.getSettings();
-    // XYNE Issue 396 (CWE-20): strictly allowlist known keys and validate value
+    // Strictly allowlist known keys and validate value
     // types before persisting. Unknown keys and wrong-typed values are dropped so
     // a compromised renderer cannot pollute the persisted store or alter policy
     // via unexpected fields.
