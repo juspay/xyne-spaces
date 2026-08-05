@@ -125,8 +125,6 @@ import {
   TicketStageRequestsACL,
   TicketTagMappingsACL,
   TicketUserMailboxACL,
-  TelepresenceHealthLogACL,
-  TelepresenceHealthViewACL,
   UnscopedACL,
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
@@ -491,10 +489,6 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
-    case 'telepresenceHealthLog':
-      return new TelepresenceHealthLogACL(ctx, prisma)
-    case 'telepresenceHealthView':
-      return new TelepresenceHealthViewACL(ctx, prisma)
     }
   }
 }

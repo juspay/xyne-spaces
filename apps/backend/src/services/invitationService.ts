@@ -361,7 +361,6 @@ export class InvitationService {
         userId,
         workspaceId,
         role: ChannelRole.MEMBER,
-        workspaceId,
       },
     });
 
@@ -569,7 +568,6 @@ export class InvitationService {
           userId,
           workspaceId,
           role: CanvasRole.VIEWER,
-          workspaceId,
         },
       });
       return `/${workspaceId}/chat/canvas/${entityId}`;

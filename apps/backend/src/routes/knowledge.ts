@@ -1,5 +1,5 @@
+import { AccessType } from '@xyne/shared';
 import { Router, Request, Response } from 'express';
-import { AccessType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import {

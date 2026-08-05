@@ -1,7 +1,6 @@
 import { BaseRepository } from './base';
-import { getContextOrNull, currentWorkspaceId } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { type Prisma, type AvailableAppPermission } from '@prisma/client';
-import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
 
 // ─── Prisma transaction client type ──────────────────────────────────────────
 import { PrismaClient } from '@prisma/client';

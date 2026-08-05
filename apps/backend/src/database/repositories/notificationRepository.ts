@@ -1,5 +1,4 @@
 import { BaseRepository } from './base';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { Notification, NotificationPreference, BrowserNotificationSubscription } from '@prisma/client';
 import { NotificationType, NotificationStatus, NotificationDeliveryMethod } from '@xyne/shared';
 import { currentWorkspaceId } from '@/database/tenant/context';

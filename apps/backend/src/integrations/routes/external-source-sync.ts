@@ -18,8 +18,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
-import { runWithContext, runAsServiceActor } from '@/database/tenant/context';
-import { DeskType } from '@xyne/shared';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const router = Router();
 

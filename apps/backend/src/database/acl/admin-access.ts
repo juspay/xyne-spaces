@@ -1,4 +1,5 @@
-import { PrismaClient, AccessType } from '@prisma/client'
+import { AccessType } from '@xyne/shared';
+import { PrismaClient, } from '@prisma/client'
 
 /**
  * True when `userId` has ADMIN access to the named resource — granted directly, or via one of the

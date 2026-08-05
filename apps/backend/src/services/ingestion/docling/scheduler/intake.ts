@@ -10,7 +10,7 @@
  */
 import { db } from '@/database/client';
 import { IngestionStatus } from '@xyne/shared';
-import { runWithContext, runAsServiceActor } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';

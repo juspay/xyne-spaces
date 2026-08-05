@@ -22,7 +22,7 @@ import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 import { repositories } from '@/database/repositories';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
-import { elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;

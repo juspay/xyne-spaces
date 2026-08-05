@@ -196,58 +196,17 @@ export class CallParticipantCountBackfillController {
           continue;
         }
 
-<<<<<<< HEAD
-        for (const call of calls) {
-          summary.processed += 1;
-          const nextCount = countByCallId.get(call.id) ?? 0;
-          const nextPreviewUserIds = buildCallParticipantPreviewUserIdsFromRows(
-            participantsByCallId.get(call.id) ?? [],
-          );
-          const currentPreviewUserIds = normalizeParticipantPreview(call.participantPreviewUserIds);
-          const nextPreviewPayload = normalizeParticipantPreview(nextPreviewUserIds);
-          const previewUnchanged =
-            currentPreviewUserIds.length === nextPreviewPayload.length &&
-            currentPreviewUserIds.every(
-              (entry, index) =>
-                entry.userId === nextPreviewPayload[index]?.userId &&
-                entry.hasJoined === nextPreviewPayload[index]?.hasJoined,
-            );
-          const previewStorageUnchanged = call.participantPreviewUserIds === nextPreviewUserIds;
-
-          if (call.participantCount === nextCount && previewUnchanged && previewStorageUnchanged) {
-            summary.skipped += 1;
-            continue;
-          }
-
-          try {
-            if (!options.dryRun) {
-              await db.$executeRaw(
-                Prisma.sql`
-                  UPDATE "public"."calls"
-                  SET
-                    "participantCount" = ${nextCount},
-                    "participantPreviewUserIds" = ${nextPreviewUserIds}
-                  WHERE "id" = ${call.id}
-                `,
-              );
-            }
-            summary.updated += 1;
-          } catch (error) {
-            summary.errors += 1;
-            logger.warn(`${TAG} Failed to update call`, {
-              callId: call.id,
-              error: error instanceof Error ? error.message : String(error),
-=======
         try {
           if (!options.dryRun) {
-            await db.call.update({
-              where: { id: call.id },
-              data: {
-                participantCount: nextCount,
-                participantPreviewUserIds: nextPreviewUserIds,
-              },
->>>>>>> cc0393b78 (refactor: XYNE-54301 declare workspace scope at the route, not the query)
-            });
+            await db.$executeRaw(
+              Prisma.sql`
+                UPDATE "public"."calls"
+                SET
+                  "participantCount" = ${nextCount},
+                  "participantPreviewUserIds" = ${nextPreviewUserIds}
+                WHERE "id" = ${call.id}
+              `,
+            );
           }
           summary.updated += 1;
         } catch (error) {

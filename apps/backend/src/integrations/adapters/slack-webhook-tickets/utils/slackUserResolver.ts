@@ -418,7 +418,7 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
       });
       if (!workspace) {
         logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
-        continue;
+        return undefined;
       }
       // Never pull a Slack member who already belongs to a DIFFERENT org into this
       // workspace: buildTokenFallbackList tries every configured bot token, so a fallback
@@ -426,7 +426,7 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
       // still auto-created; existing members of THIS org are still linked by email.
       if (orgMember && orgMember.orgId !== workspace.orgId) {
         logger.warn('[resolveApiGroup] Skipping cross-org Slack member (email belongs to another org)', { email });
-        continue;
+        return undefined;
       }
       if (!orgMember) {
         orgMember = await dbClient.orgMember.create({

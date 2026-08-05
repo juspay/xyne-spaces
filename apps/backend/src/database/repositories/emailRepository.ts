@@ -1,7 +1,7 @@
 import { DatabaseClient } from '../client';
 import { Email } from '@prisma/client';
 import { EmailType } from '@xyne/shared';
-import { elevateToServiceActor, withWorkspaceScope } from '../tenant/context';
+import { withWorkspaceScope } from '../tenant/context';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 

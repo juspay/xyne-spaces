@@ -416,7 +416,6 @@ export class EmailController {
                   type: emailType,
                   to: toRecipients,
                 } as Prisma.InputJsonValue,
-                workspaceId: ticketForActivity.workspaceId,
               }
             : undefined,
           message: {
