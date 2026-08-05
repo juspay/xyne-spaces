@@ -1,6 +1,7 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
+import { config } from '@/config/env';
 import { classifyAndTagThread } from '@/services/messageClassification';
 
 /**
@@ -30,7 +31,7 @@ class MessageClassificationQueue {
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
-    if (process.env['ENABLE_MESSAGE_CLASSIFICATION'] !== 'true') {
+    if (!config.messageClassificationEnabled) {
       logger.info('[MessageClassificationQueue] Disabled; not initializing');
       return;
     }

@@ -78,7 +78,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const messageClassificationEnabled = process.env.ENABLE_MESSAGE_CLASSIFICATION === 'true'
+      const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
     const workflowType = process.env.WORKFLOW_TYPE
@@ -351,7 +351,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const messageClassificationEnabled = process.env.ENABLE_MESSAGE_CLASSIFICATION === 'true'
+      const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
       if (enableRecovery) {

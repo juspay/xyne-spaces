@@ -11493,18 +11493,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Backend copy only. Zero collects no side-effect job for conversation updates
           // (SIDE_EFFECT_OPERATION_CONFIG lists insert/delete), and a thread's tags live on
           // the ROOT MESSAGE's Vespa doc — so without this a hand-applied tag never reaches
-          // search. The job carries no payload, so the worker reads current state.
-          try {
-            await vespaQueue.addJob({
-              schema: 'chat_message',
-              jobType: 'feed',
-              docId: conversation.initialMessageId,
-              userId: ctx.userID,
-              ...(conversation.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
-            });
-          } catch (error) {
-            logger.error('[threadTag] Failed to queue Vespa refeed', { conversationId, error });
-          }
+          // search. Deferred rather than awaited: a Redis round-trip inside the mutation
+          // would hold the transaction open, and an unindexed tag must never fail the write.
+          const { initialMessageId, workspaceId } = conversation;
+          asyncTasks.push(async () => {
+            try {
+              await vespaQueue.addJob({
+                schema: 'chat_message',
+                jobType: 'feed',
+                docId: initialMessageId,
+                userId: ctx.userID,
+                ...(workspaceId ? { workspaceId } : {}),
+              });
+            } catch (error) {
+              logger.error('[threadTag] Failed to queue Vespa refeed', { conversationId, error });
+            }
+          });
         },
       ),
     },
