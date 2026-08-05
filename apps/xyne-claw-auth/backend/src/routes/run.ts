@@ -249,29 +249,7 @@ async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: s
 
   // Gateway call — resolve externalUserId → Xyne Spaces userId
   if (gatewayType && externalUserId) {
-    const gateway = await prisma.gateway.findUnique({ where: { type: gatewayType } });
-    if (!gateway) {
-      return { error: `Unknown gateway type: ${gatewayType}` };
-    }
-    if (!gateway.enabled) {
-      return { error: `Gateway '${gatewayType}' is disabled` };
-    }
-
-    const identity = await prisma.gatewayIdentity.findFirst({
-      where: { gatewayId: gateway.id, externalUserId: externalUserId.trim() },
-      include: { user: true },
-    });
-
-    if (!identity) {
-      return { error: `No linked Xyne Spaces account for ${gatewayType} user '${externalUserId}'` };
-    }
-
-    return {
-      userId: identity.userId,
-      userName: identity.user.name,
-      userEmail: identity.user.email,
-      ...(identity.user.orgId ? { orgId: identity.user.orgId } : {}),
-    };
+    return { error: "Gateway identity resolution is not available" };
   }
 
   return { error: "Either userId or (gatewayType + externalUserId) is required" };
@@ -876,7 +854,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const requestedCalleeSlugs = Array.isArray(toolsCfg?.callableAgents)
       ? (toolsCfg!.callableAgents as unknown[]).filter((x): x is string => typeof x === "string")
       : [];
-    const runningUserIsAdmin = await isClawAdmin(resolved.userId);
+    const runningUserIsAdmin = await isClawAdmin(resolved.userId, agent.orgId ?? undefined);
     const callableAgents = agent.delegationTier === "orchestrator"
       ? await resolveOrchestratorCallableAgentsForRun(prisma, agent.id, agent.orgId, {
           runningUserId: resolved.userId,
@@ -1192,7 +1170,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           fastMode: effectiveFastMode,
         }).catch((e) => log.warn("[run] AgentRun.start failed (detached):", e instanceof Error ? e.message : e));
         redisService.getConnection()
-          .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant" }))
+          .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant", orgId: agent.orgId }))
           .catch(() => {});
       }
 
@@ -1269,7 +1247,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           fastMode: effectiveFastMode,
         }).catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
         redisService.getConnection()
-          .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant" }))
+          .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant", orgId: agent.orgId }))
           .catch(() => {});
       }
 
@@ -1433,7 +1411,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           fastMode: effectiveFastMode,
         }).catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
         redisService.getConnection()
-          .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant" }))
+          .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant", orgId: agent.orgId }))
           .catch(() => {});
       }
 
@@ -1527,7 +1505,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         fastMode: effectiveFastMode,
       }).catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
       redisService.getConnection()
-        .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId: body.sessionId, agentSlug: agentSlug || "assistant" }))
+        .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId: body.sessionId, agentSlug: agentSlug || "assistant", orgId: agent.orgId }))
         .catch(() => {});
     }
 

@@ -119,10 +119,21 @@ async function resolveScopedUserId(
   const requesterId = getRequesterId(req);
   if (!requesterId) return explicitUserId; // S2S — trust caller
   if (explicitUserId && explicitUserId !== requesterId) {
-    if (await isClawAdmin(requesterId)) return explicitUserId;
+    if (await isClawAdmin(requesterId, getOrgId(req))) return explicitUserId;
     return requesterId; // non-admin attempting cross-user read — clamp to self
   }
   return requesterId;
+}
+
+/** Browser/S2S requests authenticated as a user may only touch jobs in that
+ * user's single current organization. This check is intentionally separate
+ * from the owner/admin check: an admin must not turn a cross-org job ID into
+ * an authorization bypass. */
+function jobBelongsToRequestOrg(req: Request, row: { orgId: string }): boolean {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) return true; // trusted S2S paths have their own clamps
+  const orgId = getOrgId(req);
+  return Boolean(orgId && row.orgId === orgId);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -265,7 +276,7 @@ router.post("/", async (req: Request, res: Response) => {
     // can create jobs owned by someone else.
     const requesterId = getRequesterId(req);
     const userId = requesterId
-      ? (bodyUserId && bodyUserId !== requesterId && (await isClawAdmin(requesterId))
+      ? (bodyUserId && bodyUserId !== requesterId && (await isClawAdmin(requesterId, getOrgId(req)))
           ? bodyUserId
           : requesterId)
       : bodyUserId;
@@ -288,6 +299,15 @@ router.post("/", async (req: Request, res: Response) => {
       log.error(`[scheduled-jobs/create] orgId is required userId=${userId} requesterId=${requesterId ?? "none"} bodyUserId=${bodyUserId ?? "none"} agentSlug=${agentSlug} channelId=${channelId ?? "none"} conversationId=${conversationId ?? "none"} workspaceId=${workspaceId ?? "none"} type=${type}`);
       res.status(400).json({ success: false, error: "orgId is required" });
       return;
+    }
+    // An org admin may create a job for another member, but never turn a
+    // cross-org user id into a job owned by their current organization.
+    if (requesterId) {
+      const owner = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+      if (!owner || owner.orgId !== requestOrgId) {
+        res.status(403).json({ success: false, error: "Job owner must belong to your organization" });
+        return;
+      }
     }
     const agent = await prisma.agent.findFirst({
       where: { slug: agentSlug, orgId: requestOrgId },
@@ -429,6 +449,9 @@ router.get("/", async (req: Request, res: Response) => {
     const { userId: qUserId, status, agentSlug } = req.query as { userId?: string; status?: string; agentSlug?: string };
     const userId = await resolveScopedUserId(req, qUserId);
     const where: Record<string, unknown> = {};
+    const requesterId = getRequesterId(req);
+    const requesterOrgId = getOrgId(req);
+    if (requesterId && requesterOrgId) where["orgId"] = requesterOrgId;
     if (userId) where["userId"] = userId;
     if (status) where["status"] = status;
     if (agentSlug) where["agentSlug"] = agentSlug;
@@ -464,6 +487,9 @@ router.get("/runs", async (req: Request, res: Response) => {
 
     const userId = await resolveScopedUserId(req, qUserId);
     const jobWhere: Record<string, unknown> = { agentSlug };
+    const requesterId = getRequesterId(req);
+    const requesterOrgId = getOrgId(req);
+    if (requesterId && requesterOrgId) jobWhere["orgId"] = requesterOrgId;
     if (userId) jobWhere["userId"] = userId;
 
     const jobIds = await prisma.scheduledJob.findMany({
@@ -498,6 +524,10 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
+    if (!jobBelongsToRequestOrg(req, row)) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
     // Require a resolved requester identity. On the browser path requireAuth
     // overwrites x-user-id with the verified Spaces session id, so this is the
     // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
@@ -509,7 +539,7 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(401).json({ success: false, error: "Authentication required" });
       return;
     }
-    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    if (row.userId !== requesterId && !(await isClawAdmin(requesterId, getOrgId(req)))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
@@ -538,6 +568,10 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
+    if (!jobBelongsToRequestOrg(req, row)) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
     // Require a resolved requester identity. On the browser path requireAuth
     // overwrites x-user-id with the verified Spaces session id, so this is the
     // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
@@ -549,7 +583,7 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(401).json({ success: false, error: "Authentication required" });
       return;
     }
-    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    if (row.userId !== requesterId && !(await isClawAdmin(requesterId, getOrgId(req)))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
@@ -1069,6 +1103,10 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
+    if (!jobBelongsToRequestOrg(req, row)) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
     // Delete is restricted to the job owner or a CLAW_ADMIN — S2S callers
     // can't delete jobs on behalf of users.
     const requesterId = getRequesterId(req);
@@ -1076,7 +1114,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(401).json({ success: false, error: "Authentication required" });
       return;
     }
-    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    if (row.userId !== requesterId && !(await isClawAdmin(requesterId, getOrgId(req)))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
@@ -1126,6 +1164,25 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   };
 
   log.info(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
+  // Bind the callback's session to the persisted job before acknowledging it.
+  // A trusted worker may report only for the job owner/org that created the
+  // run; callback body identity is never used to cross that boundary.
+  const job = await prisma.scheduledJob.findUnique({
+    where: { id },
+    select: { userId: true, orgId: true },
+  }).catch(() => null);
+  if (!job) {
+    res.status(404).json({ success: false, error: "Scheduled job not found" });
+    return;
+  }
+  if (payload.sessionId) {
+    const run = await agentRunRepository.findBySessionId(payload.sessionId).catch(() => null);
+    if (run && (run.userId !== job.userId || run.orgId !== job.orgId)) {
+      log.warn(`[scheduled-jobs/result] rejected cross-org/session callback job=${id} session=${payload.sessionId}`);
+      res.status(403).json({ success: false, error: "Run does not belong to scheduled job organization" });
+      return;
+    }
+  }
   res.json({ success: true });
 
   if (payload.status === "handoff") {

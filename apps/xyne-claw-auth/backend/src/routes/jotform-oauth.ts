@@ -113,7 +113,7 @@ async function registerJotFormClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "jotform" McpServer row exists, creating it if necessary. */
 async function ensureJotFormServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "jotform" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "jotform", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

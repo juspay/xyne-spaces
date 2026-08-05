@@ -18,7 +18,7 @@
  */
 
 import type { Request } from "express";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, isClawAdmin, getOrgId } from "../middleware/agent-acl.js";
 
 export type ScheduledJobControlAuthResult =
   | { ok: true; actorUserId: string }
@@ -26,11 +26,19 @@ export type ScheduledJobControlAuthResult =
 
 export async function assertCanControlScheduledJob(
   req: Request,
-  row: { id: string; userId: string; agentSlug: string },
+  row: { id: string; userId: string; agentSlug: string; orgId?: string },
 ): Promise<ScheduledJobControlAuthResult> {
   const requesterId = getRequesterId(req);
   if (requesterId) {
-    if (row.userId === requesterId || (await isClawAdmin(requesterId))) {
+    if (row.userId === requesterId || (await isClawAdmin(requesterId, row.orgId))) {
+      // Org boundary: an admin may control another user's scheduled job,
+      // but only within their own org.
+      if (row.userId !== requesterId && row.orgId) {
+        const requesterOrgId = getOrgId(req);
+        if (!requesterOrgId || row.orgId !== requesterOrgId) {
+          return { ok: false, status: 403, error: "Scheduled job belongs to a different organization" };
+        }
+      }
       return { ok: true, actorUserId: requesterId };
     }
     return { ok: false, status: 404, error: "Not found" };

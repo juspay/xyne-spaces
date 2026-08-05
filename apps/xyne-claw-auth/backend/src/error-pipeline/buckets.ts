@@ -20,17 +20,18 @@ export type EnqueueOutcome = "queued" | "deduped";
 export async function routeError(
   error: IncomingError,
   classification: ClassifyResult,
+  orgId: string,
 ): Promise<{ errorKey: string; outcome: EnqueueOutcome; bucket: string }> {
   const errorKey = errorKeyFor(error);
 
-  const rules = await getRules();
+  const rules = await getRules(orgId);
   const cfg = rules?.find((b) => b.name === classification.bucket);
 
   // Known bucket → itself; unknown name → default; DB unavailable → trust the
   // classifier (its names come from the same table anyway).
   const bucket = rules ? (cfg ? classification.bucket : "default") : classification.bucket || "default";
 
-  const item: WorkItem = { errorKey, error, classification, enqueuedAt: Date.now() };
+  const item: WorkItem = { orgId, errorKey, error, classification, enqueuedAt: Date.now() };
   const queued = await getQueue().enqueue(bucket, item);
   if (!queued) {
     return { errorKey, outcome: "deduped", bucket };
@@ -40,6 +41,6 @@ export async function routeError(
   return { errorKey, outcome: "queued", bucket };
 }
 
-export async function bucketStats(): Promise<Record<string, QueueStats>> {
-  return getQueue().stats(await laneNames());
+export async function bucketStats(orgId: string): Promise<Record<string, QueueStats>> {
+  return getQueue().stats(orgId, await laneNames(orgId));
 }

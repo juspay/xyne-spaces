@@ -19,7 +19,6 @@ import { routeError } from "../error-pipeline/buckets.js";
 import { agentRunRepository } from "../repositories/agentRunRepository.js";
 import type { IncomingError } from "../error-pipeline/types.js";
 import { createLogger } from "../logger.js";
-import { prisma } from "../db.js";
 import { persistRunStreamResult } from "./run-stream.js";
 
 const log = createLogger("error-pipeline");
@@ -44,9 +43,6 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
     status?: string;
     result?: string;
     error?: string;
-    userId?: string;
-    agentSlug?: string;
-    conversationId?: string | null;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
   };
   if (!p.sessionId) {
@@ -54,6 +50,14 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
     return;
   }
   const status = p.status === "completed" ? "completed" : "failed";
+  // The callback payload is untrusted beyond its S2S transport. Bind all
+  // user, conversation, agent, and org data to the persisted run instead of
+  // accepting those fields from the callback body.
+  const run = await agentRunRepository.findBySessionId(p.sessionId).catch(() => null);
+  if (!run) {
+    res.status(404).json({ success: false, error: "Run not found" });
+    return;
+  }
   try {
     await agentRunRepository.finalize(p.sessionId, {
       status,
@@ -69,30 +73,22 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
   res.json({ success: true });
   log.info(`[run-result] finalized ${p.sessionId} → ${status} (attachments=${p.attachments?.length ?? 0})`);
 
-  // Persist the assistant turn into the run's conversation AFTER acking (claw
-  // only needs the AgentRun finalized). Without this, the report files the
-  // agent attaches exist only in this callback payload and vanish — the
-  // pipeline UI's Attachments section and "Open chat" had nothing to show.
-  // Best-effort: a persistence failure must never make claw retry the ack.
-  // persistRunStreamResult dedupes on sessionId across claw's retries.
-  if (p.conversationId && p.userId && (p.result || p.attachments?.length)) {
+  // Persist the assistant turn into the run's conversation AFTER acking
+  // (claw only needs the AgentRun finalized). Best-effort: a persistence
+  // failure must never make claw retry the ack.
+  if (run.conversationId && run.userId && run.orgId && (p.result || p.attachments?.length)) {
     try {
-      const user = await prisma.user.findUnique({ where: { id: p.userId }, select: { orgId: true } });
-      if (user?.orgId) {
-        await persistRunStreamResult({
-          conversationId: p.conversationId,
-          agentSlug: p.agentSlug ?? ERROR_PIPELINE.agentSlug,
-          userId: p.userId,
-          content: p.result ?? "",
-          status: status === "completed" ? "completed" : "failed",
-          orgId: user.orgId,
-          sessionId: p.sessionId,
-          ...(p.attachments?.length ? { attachments: p.attachments } : {}),
-        });
-        log.info(`[run-result] persisted assistant turn for ${p.sessionId} (conv ${p.conversationId}, ${p.attachments?.length ?? 0} attachments)`);
-      } else {
-        log.warn(`[run-result] no orgId for user ${p.userId} — skipping conversation persistence`);
-      }
+      await persistRunStreamResult({
+        conversationId: run.conversationId,
+        agentSlug: run.agentSlug ?? ERROR_PIPELINE.agentSlug,
+        userId: run.userId,
+        content: p.result ?? "",
+        status: status === "completed" ? "completed" : "failed",
+        orgId: run.orgId,
+        sessionId: p.sessionId,
+        ...(p.attachments?.length ? { attachments: p.attachments } : {}),
+      });
+      log.info(`[run-result] persisted assistant turn for ${p.sessionId} (conv ${run.conversationId}, ${p.attachments?.length ?? 0} attachments)`);
     } catch (err) {
       log.warn(`[run-result] conversation persistence failed for ${p.sessionId}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -110,10 +106,13 @@ function validateIngestAuth(req: Request, res: Response, next: NextFunction): vo
       return;
     }
     try {
-      jwt.verify(authHeader.slice("Bearer ".length), ERROR_PIPELINE.jwtSecret, {
+      const payload = jwt.verify(authHeader.slice("Bearer ".length), ERROR_PIPELINE.jwtSecret, {
         algorithms: ["HS256"],
         audience: INGEST_JWT_AUDIENCE,
       });
+      const orgId = typeof payload === "object" && payload && typeof payload.orgId === "string" ? payload.orgId : "";
+      if (!orgId) { res.status(401).json({ success: false, error: "Ingest token has no organization scope" }); return; }
+      (req as Request & { errorPipelineOrgId?: string }).errorPipelineOrgId = orgId;
       next();
       return;
     } catch (err) {
@@ -125,6 +124,9 @@ function validateIngestAuth(req: Request, res: Response, next: NextFunction): vo
   // No Bearer header: allow internal S2S callers, otherwise say what this
   // route accepts.
   if (s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)) {
+    const orgId = typeof req.headers["x-org-id"] === "string" ? req.headers["x-org-id"].trim() : "";
+    if (!orgId) { res.status(400).json({ success: false, error: "x-org-id is required" }); return; }
+    (req as Request & { errorPipelineOrgId?: string }).errorPipelineOrgId = orgId;
     next();
     return;
   }
@@ -199,6 +201,8 @@ function fromGrafanaPayload(body: unknown): IncomingError[] | null {
  * the per-stream doctor-agents work the queues asynchronously.
  */
 errorPipelineIngestRouter.post("/ingest", validateIngestAuth, async (req: Request, res: Response) => {
+  const orgId = (req as Request & { errorPipelineOrgId?: string }).errorPipelineOrgId;
+  if (!orgId) return res.status(400).json({ success: false, error: "Organization scope is required" });
   const body = req.body as unknown;
   const grafanaItems = fromGrafanaPayload(body);
   const rawItems: unknown[] = grafanaItems ?? (Array.isArray((body as { items?: unknown[] })?.items)
@@ -220,8 +224,8 @@ errorPipelineIngestRouter.post("/ingest", validateIngestAuth, async (req: Reques
       continue;
     }
     try {
-      const classification = await classify(raw);
-      const { outcome, bucket } = await routeError(raw, classification);
+      const classification = await classify(raw, orgId);
+      const { outcome, bucket } = await routeError(raw, classification, orgId);
       if (outcome === "queued") {
         summary.queued++;
         summary.byBucket[bucket] = (summary.byBucket[bucket] ?? 0) + 1;

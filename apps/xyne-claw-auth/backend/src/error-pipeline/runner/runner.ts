@@ -28,7 +28,8 @@ const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const RUN_POLL_MS = 5_000;
 
 /**
- * The runner: ONE worker per stream. Each worker owns its bucket, pulls items
+ * The runner: ONE worker per organization stream. Each worker owns its bucket,
+ * pulls items
  * one at a time, and spawns the agent (doctor-agent by default) to debug the
  * error and produce a detailed RCA (no PR/COE for now). Sequential
  * within a stream ("one completes, then the next"); streams run in parallel
@@ -75,8 +76,9 @@ class Runner {
     }
   }
 
-  /** Resolved service-user id; ERROR_PIPELINE_AGENT_USER_ID short-circuits the lookup. */
-  private agentUserId = ERROR_PIPELINE.agentUserId;
+  /** Per-org service user cache; an identity may never dispatch work for another org. */
+  private readonly agentUsers = new Map<string, string>();
+  private readonly agentLookupAfter = new Map<string, number>();
 
   start(): void {
     // Only ever called on the dedicated runner pod (main.ts gates the import
@@ -84,21 +86,8 @@ class Runner {
     void this.init();
   }
 
-  // Idle rather than drain: until the service user resolves we can't run the
-  // agent, and we don't want workers consuming the streams.
   private async init(): Promise<void> {
-    while (!this.stopped && !this.agentUserId) {
-      try {
-        await this.resolveAgentUser();
-        if (this.agentUserId) break;
-        log.warn(`[runner] idle — agent "${ERROR_PIPELINE.agentSlug}" has no spacesAppUserId/ownerUserId; set ERROR_PIPELINE_AGENT_USER_ID to a Bitbucket-connected user`);
-      } catch (err) {
-        log.warn(`[runner] idle — agent lookup failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      await sleep(60_000);
-    }
-    if (this.stopped) return;
-    log.info(`[runner] starting — one worker per stream, agent=${ERROR_PIPELINE.agentSlug}, user=${this.agentUserId}`);
+    log.info(`[runner] starting — one worker per org stream, agent=${ERROR_PIPELINE.agentSlug}`);
     await this.leaderTick();
     this.leaderTimer = setInterval(() => void this.leaderTick(), LEADER_TTL_MS / 3);
     void this.supervise();
@@ -107,29 +96,43 @@ class Runner {
   }
 
   /**
-   * Resolve the identity the agent runs as — the same way the Spaces automation
-   * engine does: the agent's own bot user `spacesAppUserId`, falling back to
-   * its `ownerUserId`. Direct DB read (we own the agents table now).
+   * Resolve a service identity for exactly one org. The configured override is
+   * usable only in the org that owns it; other orgs use their own error agent.
    */
-  private async resolveAgentUser(): Promise<void> {
-    // Agents are org-scoped now (@@unique([orgId, slug])); the runner has no
-    // org context, so mirror agentRepository.findBySlugSingleMatch: accept the
-    // slug only when it's unambiguous across orgs.
-    const matches = await prisma.agent.findMany({
-      where: { slug: ERROR_PIPELINE.agentSlug },
+  private async agentUserForOrg(orgId: string): Promise<string | null> {
+    const cached = this.agentUsers.get(orgId);
+    if (cached) return cached;
+    if ((this.agentLookupAfter.get(orgId) ?? 0) > Date.now()) return null;
+    this.agentLookupAfter.set(orgId, Date.now() + 30_000);
+
+    const agent = await prisma.agent.findFirst({
+      where: { orgId, slug: ERROR_PIPELINE.agentSlug },
       select: { spacesAppUserId: true, ownerUserId: true },
-      take: 2,
     });
-    if (matches.length > 1) {
-      log.error(`[runner] agent slug "${ERROR_PIPELINE.agentSlug}" is ambiguous across orgs — set ERROR_PIPELINE_AGENT_USER_ID`);
-      return;
+    if (!agent) {
+      log.warn(`[runner] org ${orgId} idle — agent "${ERROR_PIPELINE.agentSlug}" does not exist`);
+      return null;
     }
-    const agent = matches[0];
-    const resolved = agent?.spacesAppUserId || agent?.ownerUserId || "";
-    if (resolved) {
-      this.agentUserId = resolved;
-      log.info(`[runner] agent user resolved from "${ERROR_PIPELINE.agentSlug}": ${resolved}`);
+
+    let candidate = agent.spacesAppUserId || agent.ownerUserId || "";
+    const configuredUserId = ERROR_PIPELINE.agentUserId;
+    if (configuredUserId) {
+      const configuredUser = await prisma.user.findUnique({ where: { id: configuredUserId }, select: { orgId: true } });
+      if (configuredUser?.orgId === orgId) candidate = configuredUserId;
     }
+    if (!candidate) {
+      log.warn(`[runner] org ${orgId} idle — agent "${ERROR_PIPELINE.agentSlug}" has no service user`);
+      return null;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: candidate }, select: { orgId: true } });
+    if (user?.orgId !== orgId) {
+      log.error(`[runner] org ${orgId} idle — error agent user ${candidate} belongs to another org or is unknown`);
+      return null;
+    }
+    this.agentUsers.set(orgId, candidate);
+    log.info(`[runner] org ${orgId} error agent user resolved: ${candidate}`);
+    return candidate;
   }
 
   stop(): void {
@@ -142,20 +145,25 @@ class Runner {
     }
   }
 
-  /** Ensure exactly one worker per current live lane (incl. default). */
+  /** Ensure exactly one worker per organization and current live lane (incl. default). */
   private async supervise(): Promise<void> {
     if (this.stopped) return;
-    for (const bucket of (await laneNames()).filter((n) => !EXCLUDE.has(n))) {
-      if (!this.workers.has(bucket)) {
-        this.workers.add(bucket);
-        void this.streamWorker(bucket);
+    const orgs = await prisma.organization.findMany({ select: { id: true } });
+    for (const org of orgs) {
+      for (const bucket of await laneNames(org.id)) {
+        if (EXCLUDE.has(bucket)) continue;
+        const workerKey = `${org.id}:${bucket}`;
+        if (!this.workers.has(workerKey)) {
+          this.workers.add(workerKey);
+          void this.streamWorker(org.id, bucket, workerKey);
+        }
       }
     }
   }
 
-  private async streamWorker(bucket: string): Promise<void> {
-    const consumer = `runner-${process.pid}-${bucket}`;
-    log.info(`[runner] worker up for stream "${bucket}"`);
+  private async streamWorker(orgId: string, bucket: string, workerKey: string): Promise<void> {
+    const consumer = `runner-${process.pid}-${orgId}-${bucket}`;
+    log.info(`[runner] worker up for org ${orgId}, stream "${bucket}"`);
     while (!this.stopped) {
       let worked = false;
       try {
@@ -163,26 +171,31 @@ class Runner {
           await sleep(ERROR_PIPELINE.runnerPollMs);
           continue;
         }
-        const claimed = await getQueue().claimNext(bucket, consumer);
+        const agentUserId = await this.agentUserForOrg(orgId);
+        if (!agentUserId) {
+          await sleep(30_000);
+          continue;
+        }
+        const claimed = await getQueue().claimNext(orgId, bucket, consumer);
         if (claimed) {
           worked = true;
-          await this.process(claimed);
+          await this.process(claimed, agentUserId);
         }
       } catch (err) {
         log.error(`[runner] ${bucket}: ${err instanceof Error ? err.message : String(err)}`);
       }
       if (!worked && !this.stopped) await sleep(ERROR_PIPELINE.runnerPollMs);
     }
-    this.workers.delete(bucket);
+    this.workers.delete(workerKey);
   }
 
-  private async process(claimed: ClaimedItem): Promise<void> {
+  private async process(claimed: ClaimedItem, agentUserId: string): Promise<void> {
     const q = getQueue();
     const { item, bucket } = claimed;
 
     // Dedup: this shape was already worked recently — skip. The prior RCA is
     // findable by the [errpipe:<key>] marker embedded in its report.
-    const prior = await getFixRecord(item.errorKey);
+    const prior = await getFixRecord(item.orgId, item.errorKey);
     if (prior && prior.status === "completed" && Date.now() - prior.updatedAt < COOLDOWN_MS) {
       const remainingSeconds = Math.max(1, Math.ceil((COOLDOWN_MS - (Date.now() - prior.updatedAt)) / 1000));
       log.info(`[runner] ${item.errorKey} completed recently — ack, skip (hold dedup ${remainingSeconds}s)`);
@@ -196,7 +209,7 @@ class Runner {
     // show two agents running in one lane.
     try {
       const { listFixRecords, saveFixRecord } = await import("./store.js");
-      for (const rec of await listFixRecords(300)) {
+      for (const rec of await listFixRecords(300, item.orgId)) {
         if (rec.status === "running" && rec.bucket === bucket && rec.errorKey !== item.errorKey) {
           await saveFixRecord({ ...rec, status: "failed", summary: "interrupted (service restarted mid-run) — the queue will retry" });
         }
@@ -206,7 +219,7 @@ class Runner {
     // Dispatch the agent via the automation path; poll the run row to completion.
     await this.record(item, bucket, { status: "running", attempts: claimed.deliveries });
     const task = this.buildTask(item);
-    const outcome = await this.runAgent(item, bucket, task, claimed.deliveries);
+    const outcome = await this.runAgent(item, bucket, task, claimed.deliveries, agentUserId);
     if (!outcome) {
       // Couldn't even start — leave unacked so it retries (queue reclaim), then
       // dead-letters past maxAttempts. Correct the record so the UI doesn't
@@ -290,6 +303,7 @@ class Runner {
     bucket: string,
     task: string,
     attempts: number,
+    agentUserId: string,
   ): Promise<{ sessionId?: string; conversationId?: string; status: string; result: string } | null> {
     const conversationId = randomUUID();
     const callbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/error-pipeline/run-result`;
@@ -304,9 +318,9 @@ class Runner {
         send(t: unknown) { capBody = t; return this; },
       } as unknown as Response;
       const mockReq = {
-        body: { sessionId: randomUUID(), userId: this.agentUserId, agentSlug: ERROR_PIPELINE.agentSlug, task, callbackUrl, conversationId, allowWriteInReadOnlyJob: true },
+        body: { sessionId: randomUUID(), userId: agentUserId, agentSlug: ERROR_PIPELINE.agentSlug, task, callbackUrl, conversationId, allowWriteInReadOnlyJob: true },
       } as unknown as Request;
-      await handleAutomationWebhook(mockReq, mockRes, ERROR_PIPELINE.agentSlug);
+      await handleAutomationWebhook(mockReq, mockRes, ERROR_PIPELINE.agentSlug, item.orgId);
       if (capStatus < 200 || capStatus >= 300) {
         log.error(`[runner] automation dispatch HTTP ${capStatus}: ${JSON.stringify(capBody).slice(0, 200)}`);
         return null;
@@ -370,6 +384,7 @@ class Runner {
   private async record(item: WorkItem, bucket: string, patch: Partial<import("./store.js").FixRecord> & { status: import("./store.js").FixStatus; attempts: number }): Promise<void> {
     await saveFixRecord({
       errorKey: item.errorKey,
+      orgId: item.orgId,
       bucket,
       message: item.error.message.slice(0, 20_000),
       updatedAt: 0, // stamped in saveFixRecord

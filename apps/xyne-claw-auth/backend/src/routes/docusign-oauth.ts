@@ -73,10 +73,9 @@ export async function ensureDocuSignServer() {
     ],
   };
   const healthcheckSpec = { name: "getUserInfo", params: {} };
-  return prisma.mcpServer.upsert({
-    where: { type: "docusign" },
-    update: { writeToolPolicy, healthcheckSpec, transport: "http" },
-    create: {
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "docusign", orgId: null } });
+  if (existing) return prisma.mcpServer.update({ where: { id: existing.id }, data: { writeToolPolicy, healthcheckSpec, transport: "http" } });
+  return prisma.mcpServer.create({ data: {
       type: "docusign",
       name: "DocuSign",
       url: "",
@@ -85,8 +84,7 @@ export async function ensureDocuSignServer() {
       writeToolPolicy,
       healthcheckSpec,
       connectorMeta: { scope: "global", mode: "self-serve" },
-    },
-  });
+    }, });
 }
 
 const router = Router();

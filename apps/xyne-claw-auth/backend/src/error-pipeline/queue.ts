@@ -9,7 +9,8 @@ const log = createLogger("error-pipeline");
 /**
  * Durable bucket queues for the error pipeline — Redis Streams on claw-auth's
  * EXISTING redis (redisService, the same instance behind BullMQ/pubsub; keys
- * namespaced errpipe:*). One stream per domain bucket + consumer group
+ * namespaced errpipe:*). One stream per organization and domain bucket +
+ * consumer group
  * `workers`. This buys, natively:
  *   - durability across deploys/restarts (stream entries persist)
  *   - crash-safe in-flight tracking (the group's pending-entries list)
@@ -19,6 +20,7 @@ const log = createLogger("error-pipeline");
  */
 
 export interface ClaimedItem {
+  orgId: string;
   bucket: string;
   id: string;
   item: WorkItem;
@@ -31,9 +33,9 @@ export interface QueueStats {
 }
 
 const GROUP = "workers";
-const STREAM = (bucket: string) => `errpipe:${bucket}`;
-const SEEN = (errorKey: string) => `errpipe:seen:${errorKey}`;
-const DEAD_STREAM = "errpipe:needs-human";
+const STREAM = (orgId: string, bucket: string) => `errpipe:org:${orgId}:${bucket}`;
+const SEEN = (orgId: string, errorKey: string) => `errpipe:seen:${orgId}:${errorKey}`;
+const DEAD_STREAM = (orgId: string) => STREAM(orgId, "needs-human");
 
 class ErrorQueue {
   private groupsEnsured = new Set<string>();
@@ -53,38 +55,38 @@ class ErrorQueue {
   }
 
   async enqueue(bucket: string, item: WorkItem): Promise<boolean> {
-    const fresh = await this.redis.set(SEEN(item.errorKey), bucket, "EX", ERROR_PIPELINE.dedupTtlSeconds, "NX");
+    const fresh = await this.redis.set(SEEN(item.orgId, item.errorKey), bucket, "EX", ERROR_PIPELINE.dedupTtlSeconds, "NX");
     if (fresh === null) return false;
 
     try {
-      const stream = STREAM(bucket);
+      const stream = STREAM(item.orgId, bucket);
       await this.ensureGroup(stream);
       await this.redis.xadd(stream, "MAXLEN", "~", ERROR_PIPELINE.maxStreamLen, "*", "errorKey", item.errorKey, "item", JSON.stringify(item));
       return true;
     } catch (err) {
-      await this.redis.del(SEEN(item.errorKey)).catch(() => {});
+      await this.redis.del(SEEN(item.orgId, item.errorKey)).catch(() => {});
       throw err;
     }
   }
 
-  async claimNext(bucket: string, consumer: string): Promise<ClaimedItem | null> {
-    const stream = STREAM(bucket);
+  async claimNext(orgId: string, bucket: string, consumer: string): Promise<ClaimedItem | null> {
+    const stream = STREAM(orgId, bucket);
     await this.ensureGroup(stream);
     try {
-      return await this.claimNextInner(bucket, stream, consumer);
+      return await this.claimNextInner(orgId, bucket, stream, consumer);
     } catch (err) {
       // Self-heal: if the stream/group was deleted externally (manual redis
       // flush), our in-memory groupsEnsured cache lies — recreate and retry.
       if (err instanceof Error && err.message.includes("NOGROUP")) {
         this.groupsEnsured.delete(stream);
         await this.ensureGroup(stream);
-        return this.claimNextInner(bucket, stream, consumer);
+        return this.claimNextInner(orgId, bucket, stream, consumer);
       }
       throw err;
     }
   }
 
-  private async claimNextInner(bucket: string, stream: string, consumer: string): Promise<ClaimedItem | null> {
+  private async claimNextInner(orgId: string, bucket: string, stream: string, consumer: string): Promise<ClaimedItem | null> {
 
     // 1. Stuck items first: idle past the timeout → retry (or dead-letter).
     for (;;) {
@@ -95,7 +97,7 @@ class ErrorQueue {
       if (entries.length === 0) break;
 
       const [id, fields] = entries[0]!;
-      const claimed = await this.toClaimed(bucket, id, fields);
+      const claimed = await this.toClaimed(orgId, bucket, stream, id, fields);
       if (!claimed) continue; // tombstone/corrupt — ack'd inside toClaimed
 
       if (claimed.deliveries > ERROR_PIPELINE.maxAttempts) {
@@ -112,16 +114,16 @@ class ErrorQueue {
     )) as Array<[string, Array<[string, string[]]>]> | null;
     const entry = read?.[0]?.[1]?.[0];
     if (!entry) return null;
-    return this.toClaimed(bucket, entry[0], entry[1]);
+    return this.toClaimed(orgId, bucket, stream, entry[0], entry[1]);
   }
 
-  private async toClaimed(bucket: string, id: string, fields: string[]): Promise<ClaimedItem | null> {
+  private async toClaimed(orgId: string, bucket: string, stream: string, id: string, fields: string[]): Promise<ClaimedItem | null> {
     const map = new Map<string, string>();
     for (let i = 0; i + 1 < fields.length; i += 2) map.set(fields[i]!, fields[i + 1]!);
     const raw = map.get("item");
     if (!raw) {
-      await this.redis.xack(STREAM(bucket), GROUP, id);
-      await this.redis.xdel(STREAM(bucket), id);
+      await this.redis.xack(stream, GROUP, id);
+      await this.redis.xdel(stream, id);
       return null;
     }
     let item: WorkItem;
@@ -129,14 +131,20 @@ class ErrorQueue {
       item = JSON.parse(raw) as WorkItem;
     } catch {
       log.error(`[queue] dropping corrupt entry ${id} in ${bucket}`);
-      await this.redis.xack(STREAM(bucket), GROUP, id);
-      await this.redis.xdel(STREAM(bucket), id);
+      await this.redis.xack(stream, GROUP, id);
+      await this.redis.xdel(stream, id);
+      return null;
+    }
+    if (item.orgId !== orgId) {
+      log.error(`[queue] dropping cross-org entry ${id} in ${bucket}`);
+      await this.redis.xack(stream, GROUP, id);
+      await this.redis.xdel(stream, id);
       return null;
     }
     // Delivery count lives in the group's pending-entries list.
-    const pending = (await this.redis.xpending(STREAM(bucket), GROUP, id, id, 1)) as Array<[string, string, number, number]>;
+    const pending = (await this.redis.xpending(stream, GROUP, id, id, 1)) as Array<[string, string, number, number]>;
     const deliveries = pending?.[0]?.[3] ?? 1;
-    return { bucket, id, item, deliveries };
+    return { orgId, bucket, id, item, deliveries };
   }
 
   /**
@@ -149,14 +157,14 @@ class ErrorQueue {
    * "completed recently — ack, skip").
    */
   async ack(claimed: ClaimedItem, opts?: { keepDedupForSeconds?: number }): Promise<void> {
-    const stream = STREAM(claimed.bucket);
+    const stream = STREAM(claimed.orgId, claimed.bucket);
     await this.redis.xack(stream, GROUP, claimed.id);
     await this.redis.xdel(stream, claimed.id);
     const keep = opts?.keepDedupForSeconds;
     if (keep && keep > 0) {
-      await this.redis.set(SEEN(claimed.item.errorKey), claimed.bucket, "EX", Math.ceil(keep));
+      await this.redis.set(SEEN(claimed.item.orgId, claimed.item.errorKey), claimed.bucket, "EX", Math.ceil(keep));
     } else {
-      await this.redis.del(SEEN(claimed.item.errorKey));
+      await this.redis.del(SEEN(claimed.item.orgId, claimed.item.errorKey));
     }
   }
 
@@ -164,6 +172,7 @@ class ErrorQueue {
     try {
       const { saveFixRecord } = await import("./runner/store.js");
       await saveFixRecord({
+        orgId: claimed.item.orgId,
         errorKey: claimed.item.errorKey,
         bucket: claimed.bucket,
         status: "failed",
@@ -174,14 +183,14 @@ class ErrorQueue {
       });
     } catch { /* record best-effort — parking the item matters more */ }
     await this.redis.xadd(
-      DEAD_STREAM, "MAXLEN", "~", ERROR_PIPELINE.maxStreamLen, "*",
+      DEAD_STREAM(claimed.orgId), "MAXLEN", "~", ERROR_PIPELINE.maxStreamLen, "*",
       "bucket", claimed.bucket,
       "errorKey", claimed.item.errorKey,
       "reason", reason,
       "deliveries", String(claimed.deliveries),
       "item", JSON.stringify(claimed.item),
     );
-    const stream = STREAM(claimed.bucket);
+    const stream = STREAM(claimed.orgId, claimed.bucket);
     await this.redis.xack(stream, GROUP, claimed.id);
     await this.redis.xdel(stream, claimed.id);
     // Dedup marker intentionally NOT deleted: while it lives, re-fires of this
@@ -189,10 +198,10 @@ class ErrorQueue {
     log.warn(`[queue] dead-lettered ${claimed.item.errorKey} from ${claimed.bucket}: ${reason}`);
   }
 
-  async stats(buckets: string[]): Promise<Record<string, QueueStats>> {
+  async stats(orgId: string, buckets: string[]): Promise<Record<string, QueueStats>> {
     const out: Record<string, QueueStats> = {};
     for (const bucket of buckets) {
-      const stream = STREAM(bucket);
+      const stream = STREAM(orgId, bucket);
       const queued = await this.redis.xlen(stream);
       let pending = 0;
       try {
@@ -203,7 +212,7 @@ class ErrorQueue {
       }
       out[bucket] = { queued, pending };
     }
-    out["needs-human"] = { queued: await this.redis.xlen(DEAD_STREAM), pending: 0 };
+    out["needs-human"] = { queued: await this.redis.xlen(DEAD_STREAM(orgId)), pending: 0 };
     return out;
   }
 
@@ -214,14 +223,19 @@ class ErrorQueue {
    * scanner noise) without needing redis-cli. Returns how many entries were
    * dropped. The consumer group is recreated lazily on the next claim.
    */
-  async flushBucket(bucket: string): Promise<number> {
-    const stream = bucket === "needs-human" ? DEAD_STREAM : STREAM(bucket);
+  async flushBucket(orgId: string, bucket: string): Promise<number> {
+    const stream = bucket === "needs-human" ? DEAD_STREAM(orgId) : STREAM(orgId, bucket);
     const entries = (await this.redis.xrange(stream, "-", "+")) as Array<[string, string[]]>;
     // Release each entry's dedup marker so re-fires aren't suppressed.
     const seenKeys: string[] = [];
     for (const [, fields] of entries) {
       for (let i = 0; i + 1 < fields.length; i += 2) {
-        if (fields[i] === "errorKey" && fields[i + 1]) seenKeys.push(SEEN(fields[i + 1]!));
+        if (fields[i] === "item" && fields[i + 1]) {
+          try {
+            const item = JSON.parse(fields[i + 1]!) as WorkItem;
+            if (item.orgId === orgId) seenKeys.push(SEEN(orgId, item.errorKey));
+          } catch { /* skip corrupt */ }
+        }
       }
     }
     if (seenKeys.length) await this.redis.del(...seenKeys);
@@ -231,15 +245,16 @@ class ErrorQueue {
     return entries.length;
   }
 
-  async peekItems(bucket: string, limit: number): Promise<WorkItem[]> {
-    const stream = bucket === "needs-human" ? DEAD_STREAM : STREAM(bucket);
+  async peekItems(orgId: string, bucket: string, limit: number): Promise<WorkItem[]> {
+    const stream = bucket === "needs-human" ? DEAD_STREAM(orgId) : STREAM(orgId, bucket);
     const entries = (await this.redis.xrange(stream, "-", "+", "COUNT", limit)) as Array<[string, string[]]>;
     const items: WorkItem[] = [];
     for (const [, fields] of entries) {
       for (let i = 0; i + 1 < fields.length; i += 2) {
         if (fields[i] === "item") {
           try {
-            items.push(JSON.parse(fields[i + 1]!) as WorkItem);
+            const item = JSON.parse(fields[i + 1]!) as WorkItem;
+            if (item.orgId === orgId) items.push(item);
           } catch {
             /* skip corrupt */
           }

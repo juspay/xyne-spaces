@@ -20,10 +20,8 @@ const accessTokenRegistry = new WeakMap<Response, VerifiedCliToken>();
  * is set. Read-only: looks up the user's `orgId` and their `OrgMember.role` and
  * stamps `x-org-id` / `x-user-role` for downstream handlers (getTenantContext).
  *
- * Non-breaking and best-effort: if the user has no org yet (should not happen
- * post-backfill — JIT attaches new users to the default org, see users-jit.ts)
- * or the lookup fails, we simply leave the headers unset. Nothing downstream
- * requires them this phase.
+ * If the user has no org yet, the authenticated request is rejected by
+ * `requireOrgContext` before it reaches a tenant-owned route.
  *
  * Called only after the caller's identity is authenticated: browser-cookie auth
  * derives `userId` from Spaces, and S2S callers may pin `x-user-id` after the
@@ -37,13 +35,14 @@ async function attachOrgContext(req: Request, userId: string): Promise<void> {
     });
     if (!user?.orgId) return;
 
-    req.headers["x-org-id"] = user.orgId;
-
     const member = await prisma.orgMember.findUnique({
       where: { userId_orgId: { userId, orgId: user.orgId } },
-      select: { role: true },
+      select: { role: true, leftAt: true },
     });
-    if (member?.role) req.headers["x-user-role"] = member.role;
+    if (!member || member.leftAt) return;
+
+    req.headers["x-org-id"] = user.orgId;
+    if (member.role) req.headers["x-user-role"] = member.role;
   } catch (err) {
     log.warn(`[require-auth] attachOrgContext(${userId}) failed:`, err instanceof Error ? err.message : err);
   }
@@ -72,6 +71,19 @@ interface SpacesMeResponse {
 function stripClientOrgHeaders(req: Request): void {
   delete req.headers["x-org-id"];
   delete req.headers["x-user-role"];
+}
+
+/**
+ * Require organization context derived by verified authentication. This never
+ * reads client-supplied body, query, or org headers.
+ */
+export function requireOrgContext(req: Request, res: Response, next: NextFunction): void {
+  const orgId = req.headers["x-org-id"];
+  if (typeof orgId !== "string" || !orgId.trim()) {
+    res.status(403).json({ success: false, error: "Organization context required" });
+    return;
+  }
+  next();
 }
 
 export function s2sKeyMatches(provided: string | string[] | undefined): boolean {
@@ -159,9 +171,9 @@ export async function requireAuth(
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
     req.headers["x-user-id"] = userId;
-    // Phase-1 org context (additive; requireAuth only).
+    // Derived tenant context for every authenticated user request.
     await attachOrgContext(req, userId);
-    next();
+    requireOrgContext(req, res, next);
     return;
   }
 
@@ -181,7 +193,7 @@ export async function requireAuth(
       res.locals = res.locals ?? {};
       res.locals["accessToken"] = token;
       accessTokenRegistry.set(res, token);
-      next();
+      requireOrgContext(req, res, next);
       return;
     }
   }
@@ -192,7 +204,11 @@ export async function requireAuth(
     const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
     if (pinnedUserId) {
       await attachOrgContext(req, pinnedUserId);
+      requireOrgContext(req, res, next);
+      return;
     }
+    // Unbound internal callbacks have no caller org. They must authorize from
+    // the persisted resource they reference, not from request context.
     next();
     return;
   }
@@ -339,6 +355,37 @@ export async function requireUserAuth(
   });
   req.headers["x-user-id"] = userId;
   await attachOrgContext(req, userId);
+  requireOrgContext(req, res, next);
+}
+
+/**
+ * Barrier middleware: reject requests whose identity came from a CLI/service
+ * access token. Mount this AFTER requireAuth on routes that should only be
+ * reachable by a browser session or a validated S2S key.
+ *
+ * This closes the bearer-token scope-enforcement gap: requireAuth accepts
+ * xyne_cli_* / xyne_svc_* tokens, but most routes do not enforce scopes.
+ * Only endpoints that explicitly understand scopes (currently /run) should
+ * omit this barrier.
+ */
+export function requireNoAccessToken(_req: Request, res: Response, next: NextFunction): void {
+  const token = accessTokenRegistry.get(res);
+  if (token) {
+    // Actionable on purpose: this endpoint worked for token callers before the
+    // scope gap was closed, so a bare "not authorized" reads as a regression.
+    // Name the token, the reason, and the two supported paths forward.
+    log.warn(
+      `[require-auth] access-token (${token.client ?? "unknown"}) rejected on non-/run route userId=${token.userId}`,
+    );
+    res.status(403).json({
+      success: false,
+      error:
+        "This endpoint does not accept CLI/service access tokens (they carry no scopes here). " +
+        "Use the /run API with a service token, or call this endpoint with a signed-in browser session.",
+      code: "ACCESS_TOKEN_NOT_ALLOWED",
+    });
+    return;
+  }
   next();
 }
 

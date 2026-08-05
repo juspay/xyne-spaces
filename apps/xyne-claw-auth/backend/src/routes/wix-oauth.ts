@@ -115,7 +115,7 @@ async function registerWixClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "wix" McpServer row exists, creating it if necessary. */
 async function ensureWixServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "wix" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "wix", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

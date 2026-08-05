@@ -393,6 +393,15 @@ router.post("/:id/members", async (req: Request, res: Response) => {
       return;
     }
 
+    const activeMembership = await prisma.orgMember.findFirst({
+      where: { userId: targetUser.id, leftAt: null },
+      select: { orgId: true },
+    });
+    if (activeMembership && activeMembership.orgId !== orgId) {
+      res.status(409).json({ success: false, error: "User already belongs to another organization" });
+      return;
+    }
+
     const member = await prisma.orgMember.upsert({
       where: { userId_orgId: { userId: targetUser.id, orgId } },
       create: { orgId, userId: targetUser.id, role: requestedRole, invitedBy: requesterId },

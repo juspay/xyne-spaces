@@ -63,7 +63,7 @@ router.get("/", async (req: Request, res: Response) => {
         res.status(404).json({ success: false, error: "Agent not found" });
         return;
       }
-      const admin = await isClawAdmin(userId);
+      const admin = await isClawAdmin(userId, orgId);
       if (!admin && !access.canEdit) {
         log.warn(`[runs/all] denied userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
         res.status(403).json({ success: false, error: "Only admins, the owner, or contributors can view all runs for this agent" });

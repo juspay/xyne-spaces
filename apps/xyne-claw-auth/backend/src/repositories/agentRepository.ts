@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { randomBytes } from "node:crypto";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
@@ -385,19 +385,20 @@ export const agentRepository = {
     prisma.tool.findUnique({ where: { id } }),
 
   /** Aggregate counts for the admin dashboard overview. */
-  dashboardStats: async () => {
+  dashboardStats: async (orgId?: string) => {
+    const orgWhere = orgId ? { orgId } : {};
     const [total, globalEnabled, globalDisabled, personalEnabled, personalDisabled, pendingRequests,
       registeredTotal, registeredGlobal, registeredPersonal] = await Promise.all([
-      prisma.agent.count(),
-      prisma.agent.count({ where: { scope: "global", enabled: true } }),
-      prisma.agent.count({ where: { scope: "global", enabled: false } }),
-      prisma.agent.count({ where: { scope: "personal", enabled: true } }),
-      prisma.agent.count({ where: { scope: "personal", enabled: false } }),
-      prisma.agentRequest.count({ where: { status: "pending", targetType: "agent" } }),
+      prisma.agent.count({ where: orgWhere }),
+      prisma.agent.count({ where: { ...orgWhere, scope: "global", enabled: true } }),
+      prisma.agent.count({ where: { ...orgWhere, scope: "global", enabled: false } }),
+      prisma.agent.count({ where: { ...orgWhere, scope: "personal", enabled: true } }),
+      prisma.agent.count({ where: { ...orgWhere, scope: "personal", enabled: false } }),
+      prisma.agentRequest.count({ where: { ...orgWhere, status: "pending", targetType: "agent" } }),
       // Spaces registration: spacesAppId is set = registered
-      prisma.agent.count({ where: { spacesAppId: { not: null } } }),
-      prisma.agent.count({ where: { scope: "global", spacesAppId: { not: null } } }),
-      prisma.agent.count({ where: { scope: "personal", spacesAppId: { not: null } } }),
+      prisma.agent.count({ where: { ...orgWhere, spacesAppId: { not: null } } }),
+      prisma.agent.count({ where: { ...orgWhere, scope: "global", spacesAppId: { not: null } } }),
+      prisma.agent.count({ where: { ...orgWhere, scope: "personal", spacesAppId: { not: null } } }),
     ]);
     const globalTotal = globalEnabled + globalDisabled;
     return {
@@ -415,8 +416,9 @@ export const agentRepository = {
   },
 
   /** Per-agent metadata for dashboard table (no heavy joins). */
-  listForDashboard: () =>
+  listForDashboard: (orgId?: string) =>
     prisma.agent.findMany({
+      where: orgId ? { orgId } : {},
       select: {
         id: true, slug: true, name: true, description: true,
         scope: true, enabled: true, ownerUserId: true,
@@ -500,7 +502,7 @@ export const agentRepository = {
    * SQL is the correct trade-off here. Read-only, parameter-free, no
    * injection surface.
    */
-  skillUsageByGlobalAgents: async () => {
+  skillUsageByGlobalAgents: async (orgId?: string) => {
     type Row = {
       skill_id: string;
       skill_slug: string;
@@ -521,6 +523,7 @@ export const agentRepository = {
       JOIN skills s ON s.id = aks."skillId"
       JOIN agents a ON a.id = aks."agentId"
       WHERE a.scope = 'global'
+      ${orgId ? Prisma.sql`AND a."orgId" = ${orgId}` : Prisma.empty}
       GROUP BY s.id, s.slug, s.name, s.source
       ORDER BY agent_count DESC, s.name ASC
     `;
@@ -534,7 +537,7 @@ export const agentRepository = {
     }));
   },
 
-  subagentUsageByGlobalAgents: async () => {
+  subagentUsageByGlobalAgents: async (orgId?: string) => {
     type Row = {
       subagent_name: string;
       agent_count: bigint;
@@ -550,6 +553,7 @@ export const agentRepository = {
           COALESCE(a.config->'tools'->'subagents', '[]'::jsonb)
         ) AS subagent_name
       WHERE a.scope = 'global'
+        ${orgId ? Prisma.sql`AND a."orgId" = ${orgId}` : Prisma.empty}
         AND a.config->'tools'->'subagents' IS NOT NULL
         AND jsonb_array_length(a.config->'tools'->'subagents') > 0
       GROUP BY subagent_name

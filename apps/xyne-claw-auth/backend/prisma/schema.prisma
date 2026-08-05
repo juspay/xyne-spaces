@@ -257,6 +257,9 @@ model Organization {
   skills              Skill[]
   subagentDefinitions SubagentDefinition[]
   surfaceTenantLinks  SurfaceTenantLink[]
+  mcpConnectorEditRequests McpConnectorEditRequest[]
+  mcpServers         McpServer[]
+  errorBuckets       ErrorBucket[]
 
   @@map("organizations")
 }
@@ -441,6 +444,8 @@ model OrgMember {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, orgId])
+  // PostgreSQL migration adds a partial unique index on userId WHERE leftAt IS NULL.
+  // Historical memberships remain allowed, but a user can have only one active org.
   @@index([orgId])
   @@map("org_members")
 }
@@ -1334,6 +1339,7 @@ model GatewayIdentity {
 
 model McpServer {
   id                   String                    @id @default(cuid())
+  orgId                String?
   name                 String
   type                 String
   url                  String
@@ -1362,12 +1368,14 @@ model McpServer {
   forwardFiles         Boolean                   @default(false)
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
+  org                  Organization?             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   connections          UserMcpConnection[]
   agentConnections     AgentMcpConnection[]
   globalCredentials    GlobalMcpCredentials[]
   editRequests         McpConnectorEditRequest[]
 
-  @@unique([type])
+  @@index([orgId, type])
+  @@unique([type, orgId])
   @@index([enabled])
   @@index([transport])
   @@map("mcp_servers")
@@ -1396,6 +1404,8 @@ model McpConnectorEditRequest {
 
   /// User who proposed the change. Captured via x-user-id at submission time.
   proposedByUserId String
+  orgId           String
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
   proposedAt       DateTime @default(now())
 
   /// Full proposed snapshot of the editable McpServer fields. Stored as a
@@ -1420,6 +1430,7 @@ model McpConnectorEditRequest {
 
   @@index([mcpServerId, status])
   @@index([status, createdAt])
+  @@index([orgId, status, createdAt])
   @@map("mcp_connector_edit_requests")
 }
 
@@ -2202,7 +2213,9 @@ model ServiceRegistry {
 // enum→text convention.
 model ErrorBucket {
   id          String   @id @default(cuid())
-  name        String   @unique
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name        String
   description String   @default("") // one-liner for the LLM prompt
   keywords    String[] @default([]) // literal phrases (auto-escaped, case-insensitive) — the friendly editor
   markers     String   @default("") // advanced: raw regex, unioned with keywords. Escape hatch for power patterns.
@@ -2211,7 +2224,8 @@ model ErrorBucket {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([enabled, matchOrder])
+  @@unique([orgId, name])
+  @@index([orgId, enabled, matchOrder])
   @@map("error_buckets")
 }
 

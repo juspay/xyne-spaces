@@ -117,7 +117,7 @@ async function registerMiroClient(redirectUri: string): Promise<{ clientId: stri
 
 /** Ensures a "miro" McpServer row exists, creating it if necessary. */
 async function ensureMiroServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "miro" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "miro", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

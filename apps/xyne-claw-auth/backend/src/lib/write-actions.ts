@@ -19,12 +19,6 @@
 import { prisma } from "../db.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
-
-const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
-  ?.split(",")
-  .map((tenant) => tenant.trim())
-  .find((tenant) => tenant.length > 0);
 
 export interface SignedWriteAction {
   serverType: string;
@@ -38,20 +32,6 @@ export interface WriteActionResult {
   ok: boolean;
   content: string;
   error?: string;
-}
-
-function parseGatewayActionTarget(serverType: string): { serviceName: string; backendId?: string } | null {
-  const parsed = parseGatewayCatalogSource(serverType);
-  if (parsed) return { serviceName: parsed.serviceName, backendId: parsed.backendId };
-
-  if (!serverType.startsWith(GATEWAY_KEY_PREFIX)) return null;
-  const raw = serverType.slice(GATEWAY_KEY_PREFIX.length).trim();
-  if (!raw) return null;
-  const parts = raw.split(":");
-  if (parts.length !== 1) return null;
-  const [serviceName] = parts;
-  if (!serviceName) return null;
-  return { serviceName };
 }
 
 /**
@@ -73,38 +53,7 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
   try {
     // 2a. MCP gateway tools: serverType is encoded as gateway:<service>[:<backendId>]
     if (serverType.startsWith("gateway:")) {
-      const gatewayTarget = parseGatewayActionTarget(serverType);
-      if (!gatewayTarget) {
-        return { ok: false, content: "", error: "Invalid gateway action: missing service name." };
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { email: true },
-      });
-      if (!user) {
-        return { ok: false, content: "", error: "User not found for gateway execution." };
-      }
-      if (!DEFAULT_GATEWAY_TENANT) {
-        return { ok: false, content: "", error: "Gateway tenant is not configured." };
-      }
-
-      const { executeTool: executeGatewayTool } = await import("../mcpgateway/services/execution.js");
-      const result = await executeGatewayTool(DEFAULT_GATEWAY_TENANT, user.email, {
-        serviceName: gatewayTarget.serviceName,
-        toolName: tool,
-        arguments: params,
-        ...(gatewayTarget.backendId ? { backendId: gatewayTarget.backendId } : {}),
-      });
-
-      if (!result.success) {
-        return { ok: false, content: "", error: result.error ?? "Gateway execution failed." };
-      }
-
-      return {
-        ok: true,
-        content: typeof result.result === "string" ? result.result : JSON.stringify(result.result ?? {}),
-      };
+      return { ok: false, content: "", error: "Gateway actions are not available." };
     }
 
     // 2a. Google custom tools (gmail, calendar, drive, tasks, contacts)

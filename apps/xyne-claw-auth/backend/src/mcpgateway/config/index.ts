@@ -83,7 +83,13 @@ const hasEncryptionKey = Boolean(
   process.env.BACKEND_CLIENT_SECRET_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY
 );
 
+// The gateway implementation is retained for future use, but the product has
+// no active gateway integration. Keep it hard-disabled even if deployment
+// secrets are present so no internal caller can reach a backend service.
+const gatewayFeatureEnabled = false;
+
 export const isGatewayEnabled =
+  gatewayFeatureEnabled &&
   hasEncryptionKey &&
   SECURITY.ALLOWED_TENANTS.length > 0 &&
   SECURITY.REGISTRATION_API_KEY.length > 0 &&

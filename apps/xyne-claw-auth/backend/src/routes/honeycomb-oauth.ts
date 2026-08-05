@@ -127,7 +127,7 @@ async function registerHoneycombClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "honeycomb" McpServer row exists, creating it if necessary. */
 async function ensureHoneycombServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "honeycomb" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "honeycomb", orgId: null } });
   if (existing) return existing;
 
   return prisma.mcpServer.create({
