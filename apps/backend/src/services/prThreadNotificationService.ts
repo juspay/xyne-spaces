@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { MessageType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { parseBitbucketPrUrl } from '@/utils/repoUrlParser';

@@ -174,9 +174,9 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
     //   - PUBLIC channel  → open to members of the channel's workspace (the "Run PR Check"
     //     button renders to every viewer via showToAll, so ordinary viewers legitimately
     //     have no participant row here) — but the caller must still belong to that workspace.
-    if (typeof callerUserId === 'string' && callerUserId.trim() && ticket.channelId) {
+    if (typeof callerUserId === 'string' && callerUserId.trim() && channelId) {
       const chan = await db.channel.findUnique({
-        where: { id: ticket.channelId },
+        where: { id: channelId },
         select: { visibility: true, workspaceId: true },
       });
 
@@ -191,7 +191,7 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
         // PRIVATE, or a channel with no resolvable workspace → require the specific
         // participant row (fail closed).
         const participant = await db.channelParticipant.findUnique({
-          where: { channelId_userId: { channelId: ticket.channelId, userId: callerUserId } },
+          where: { channelId_userId: { channelId, userId: callerUserId } },
           select: { id: true },
         });
         authorized = !!participant;
