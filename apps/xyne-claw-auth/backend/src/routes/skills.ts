@@ -18,6 +18,8 @@ import {
 } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
+import { skillVersionRepository } from "../repositories/skillVersionRepository.js";
+import { recordAndPropagateSkillVersion } from "../services/skillVersioning.js";
 const log = createLogger("skills");
 
 const router = Router();
@@ -141,6 +143,14 @@ router.post("/", async (req: Request, res: Response) => {
       org: { connect: { id: orgId } },
     });
 
+    // Cut the initial immutable version (v1). Best-effort — never blocks create.
+    await recordAndPropagateSkillVersion({
+      skill: { id: skill.id, slug: skill.slug, name: skill.name, orgId: skill.orgId },
+      content: skill.content,
+      editorUserId: requesterId ?? null,
+      source: "initial",
+    });
+
     res.status(201).json({ success: true, data: skill });
   } catch (err) {
     log.error("[skills] create error:", err);
@@ -182,6 +192,14 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     if (enabled !== undefined) data.enabled = enabled;
 
     const skill = await skillRepository.update(req.params.slug, existing.orgId, data);
+    if (content !== undefined) {
+      await recordAndPropagateSkillVersion({
+        skill: { id: skill.id, slug: skill.slug, name: skill.name, orgId: skill.orgId },
+        content: skill.content,
+        editorUserId: requesterId ?? null,
+        source: "direct_edit",
+      });
+    }
     res.json({ success: true, data: skill });
   } catch (err) {
     log.error("[skills] update error:", err);
@@ -440,6 +458,15 @@ router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
       res.status(400).json({ success: false, error: err instanceof Error ? err.message : String(err) });
       return;
     }
+
+    // Files changed → snapshot the new bundle into a version (SKILL.md content
+    // unchanged). Propagates to pinned agents like any other edit.
+    await recordAndPropagateSkillVersion({
+      skill: { id: skill.id, slug: skill.slug, name: skill.name, orgId: skill.orgId },
+      content: skill.content,
+      editorUserId: requesterId,
+      source: "files_edit",
+    });
 
     const files = await skillRepository.listFiles(skill.id);
     res.json({
@@ -788,12 +815,77 @@ export async function resolveSkillUpdateRequest(
       return { ok: false, code: 409, error: "Proposed content failed integrity check" };
     }
     await skillRepository.update(skill.slug, skill.orgId, { content: normalizeSkillContent(proposed) });
+    await recordAndPropagateSkillVersion({
+      skill: { id: skill.id, slug: skill.slug, name: skill.name, orgId: skill.orgId },
+      content: normalizeSkillContent(proposed),
+      editorUserId: callerUserId,
+      source: "proposal_approved",
+    });
   } catch (err) {
     await agentRequestRepository.revertSkillUpdateToPending(request.id).catch(() => {});
     throw err;
   }
 
   await writeAuditLog({ actorUserId: callerUserId, eventType: "REQUEST_APPROVED", targetId: skill.id, description: `Approved skill update of "${skill.name}" proposed by ${request.requesterId}` });
+  return { ok: true, status: "approved" };
+}
+
+/**
+ * Resolve a per-agent skill-version ADOPTION request (Point 4). Unlike
+ * resolveSkillUpdateRequest, accepting NEVER mutates the skill — it only
+ * re-pins the ONE target agent to the requested version. The approver is the
+ * TARGET agent's owner (re-derived from the live agent row — never trust the
+ * card), or any admin. Idempotent + concurrency-safe via an atomic claim.
+ */
+export async function resolveSkillAdoptRequest(
+  requestId: string,
+  callerUserId: string,
+  decision: "approve" | "reject",
+): Promise<
+  | { ok: true; status: "approved" | "rejected"; alreadyResolved?: boolean }
+  | { ok: false; code: 400 | 403 | 404 | 409; error: string }
+> {
+  const request = await agentRequestRepository.findById(requestId);
+  if (!request || request.requestType !== "skill_version_adopt" || !request.agentId || !request.toVersionId) {
+    return { ok: false, code: 404, error: "Skill adoption request not found" };
+  }
+
+  const agent = await skillVersionRepository.agentAdoptContext(request.agentId);
+  if (!agent) return { ok: false, code: 404, error: "Agent not found" };
+
+  const isOwner = !!agent.ownerUserId && agent.ownerUserId === callerUserId;
+  const callerIsAdmin = await isClawAdmin(callerUserId);
+  if (!isOwner && !callerIsAdmin) {
+    return { ok: false, code: 403, error: "Only the agent owner or an admin can decide this adoption" };
+  }
+
+  if (request.status !== "pending") {
+    return { ok: true, status: request.status === "approved" ? "approved" : "rejected", alreadyResolved: true };
+  }
+  const alreadyResolved = async () => {
+    const fresh = await agentRequestRepository.findById(request.id);
+    return { ok: true as const, status: (fresh?.status === "approved" ? "approved" : "rejected") as "approved" | "rejected", alreadyResolved: true };
+  };
+
+  if (decision === "reject") {
+    const claim = await agentRequestRepository.claimPendingSkillAdopt(request.id, "rejected", callerUserId);
+    if (claim.count === 0) return alreadyResolved();
+    await writeAuditLog({ actorUserId: callerUserId, eventType: "SKILL_VERSION_ADOPT_DECLINED", targetId: request.skillId ?? agent.id, description: `Declined skill-version adoption for agent "${agent.slug}"` });
+    return { ok: true, status: "rejected" };
+  }
+
+  // approve → validate the target version still exists, then claim + re-pin.
+  const version = await skillVersionRepository.findById(request.toVersionId);
+  if (!version) return { ok: false, code: 409, error: "Target skill version no longer exists" };
+  if (request.skillId && version.skillId !== request.skillId) {
+    return { ok: false, code: 409, error: "Target version does not belong to this skill" };
+  }
+
+  const claim = await agentRequestRepository.claimPendingSkillAdopt(request.id, "approved", callerUserId);
+  if (claim.count === 0) return alreadyResolved();
+
+  await skillVersionRepository.pinAgentSkill(agent.id, version.skillId, version.id);
+  await writeAuditLog({ actorUserId: callerUserId, eventType: "SKILL_VERSION_ADOPTED", targetId: version.skillId, description: `Agent "${agent.slug}" adopted v${version.version} of skill ${request.skillSlug ?? version.skillId}` });
   return { ok: true, status: "approved" };
 }
 
@@ -821,6 +913,90 @@ router.post("/skill-update-requests/:requestId/reject", async (req: Request<{ re
     res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
   } catch (err) {
     log.error("[skills] reject skill-update error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ── Skill-version adoption REST parity (card path uses resolveSkillAdoptRequest). ──
+router.post("/skill-adopt-requests/:requestId/approve", async (req: Request<{ requestId: string }>, res: Response) => {
+  try {
+    const callerUserId = getRequesterId(req);
+    if (!callerUserId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+    const result = await resolveSkillAdoptRequest(req.params.requestId, callerUserId, "approve");
+    if (!result.ok) { res.status(result.code).json({ success: false, error: result.error }); return; }
+    res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
+  } catch (err) {
+    log.error("[skills] approve skill-adopt error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/skill-adopt-requests/:requestId/reject", async (req: Request<{ requestId: string }>, res: Response) => {
+  try {
+    const callerUserId = getRequesterId(req);
+    if (!callerUserId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+    const result = await resolveSkillAdoptRequest(req.params.requestId, callerUserId, "reject");
+    if (!result.ok) { res.status(result.code).json({ success: false, error: result.error }); return; }
+    res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
+  } catch (err) {
+    log.error("[skills] reject skill-adopt error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ── Version history (Point 3) ────────────────────────────────────────────────
+// List a skill's immutable version rows (newest first). Org-scoped like every
+// other skill read. Content is omitted from the list to keep it light.
+router.get("/:slug/versions", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!skill) { res.status(404).json({ success: false, error: "Skill not found" }); return; }
+    const versions = await skillVersionRepository.findBySkill(skill.id);
+    res.json({
+      success: true,
+      data: versions.map((v) => ({
+        id: v.id,
+        version: v.version,
+        source: v.source,
+        contentHash: v.contentHash,
+        authorUserId: v.authorUserId,
+        changelog: v.changelog,
+        isCurrent: v.id === skill.currentVersionId,
+        createdAt: v.createdAt,
+      })),
+    });
+  } catch (err) {
+    log.error("[skills] list versions error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// Fetch one version's full content + files snapshot (rollback / diff view).
+router.get("/:slug/versions/:version", async (req: Request<{ slug: string; version: string }>, res: Response) => {
+  try {
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!skill) { res.status(404).json({ success: false, error: "Skill not found" }); return; }
+    const n = Number.parseInt(req.params.version, 10);
+    if (!Number.isFinite(n)) { res.status(400).json({ success: false, error: "version must be an integer" }); return; }
+    const v = await skillVersionRepository.findByVersion(skill.id, n);
+    if (!v) { res.status(404).json({ success: false, error: "Version not found" }); return; }
+    res.json({
+      success: true,
+      data: {
+        id: v.id,
+        version: v.version,
+        source: v.source,
+        content: v.content,
+        contentHash: v.contentHash,
+        filesSnapshot: v.filesSnapshot,
+        authorUserId: v.authorUserId,
+        changelog: v.changelog,
+        isCurrent: v.id === skill.currentVersionId,
+        createdAt: v.createdAt,
+      },
+    });
+  } catch (err) {
+    log.error("[skills] get version error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

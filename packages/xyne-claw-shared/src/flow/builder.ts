@@ -912,3 +912,95 @@ export function buildSkillUpdateApprovalFlow(
     });
   return b.build();
 }
+
+/**
+ * Approval card for a per-agent skill-version ADOPTION request
+ * (requestType="skill_version_adopt"). Raised when an admin edits a skill that
+ * ANOTHER admin's agent uses: that agent's owner is asked whether their agent
+ * should move from its currently-pinned version to the new one. Mirrors
+ * buildSkillUpdateApprovalFlow, but the actor is the AGENT OWNER (not the skill
+ * owner) and accepting only re-pins THAT agent — it never mutates the skill.
+ */
+export function buildSkillAdoptApprovalFlow(
+  context: {
+    requestId: string;
+    /** The agent owner being asked (fail-closed match in the /action handler). */
+    approverUserId: string;
+    skillSlug: string;
+    skillName: string;
+    /** The agent that would adopt the new version. */
+    targetAgentName: string;
+    /** Who edited the skill (informational). */
+    editorName: string;
+    fromVersion?: number | null;
+    toVersion?: number | null;
+    diff?: { hunks: Array<{ header: string; lines: Array<{ kind: 'ctx' | 'add' | 'del'; text: string }> }>; added: number; removed: number };
+    diffText?: string;
+    summary?: string;
+    /** The TARGET agent's slug — used to collapse the card + resolve its token. */
+    agentSlug?: string;
+    spacesAppId?: string;
+    spacesBaseUrl?: string;
+  },
+): FlowDefinition {
+  const b = new FlowBuilder(`skill-adopt-${crypto.randomUUID()}`)
+    .setTitle('Skill Update Available')
+    .addHeading('title', `Adopt update to \`${context.skillName}\`?`, 3);
+
+  const verFrom = context.fromVersion != null ? `v${context.fromVersion}` : 'its current version';
+  const verTo = context.toVersion != null ? `v${context.toVersion}` : 'the latest version';
+  const stats = context.diff ? `  ·  *+${context.diff.added}* / *−${context.diff.removed}*  ·  ${context.diff.hunks.length} hunk${context.diff.hunks.length === 1 ? '' : 's'}` : '';
+  b.addText('meta', `*${context.editorName}* updated \`${context.skillSlug}\`. Your agent *${context.targetAgentName}* is pinned to ${verFrom} — adopt ${verTo}?${stats}`, { variant: 'muted', size: 'sm' });
+
+  if (context.summary) {
+    b.addText('summary', `*What changed:* ${context.summary.length > 300 ? `${context.summary.slice(0, 300)}…` : context.summary}`);
+  }
+
+  b.addDivider('d1');
+
+  if (context.diff && context.diff.hunks.length > 0) {
+    let linesUsed = 0;
+    let hunksRendered = 0;
+    let truncated = false;
+    for (const [hi, hunk] of context.diff.hunks.entries()) {
+      if (hunksRendered >= DIFF_CARD_MAX_HUNKS || linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
+      const children: FlowComponent[] = [
+        { id: `h${hi}-header`, type: 'text', props: { content: hunk.header, variant: 'muted', size: 'xs' }, style: { padding: '2px 8px' } },
+      ];
+      for (const [li, line] of hunk.lines.entries()) {
+        if (linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
+        children.push(diffLineComponent(`h${hi}-l${li}`, line.kind, line.text));
+        linesUsed++;
+      }
+      b.addCard(`hunk-${hi}`, children, {
+        border: '1px solid rgba(128,128,128,0.25)',
+        borderRadius: '6px',
+        padding: '4px 0',
+        margin: '4px 0',
+        maxHeight: '320px',
+        overflowY: 'auto',
+      });
+      hunksRendered++;
+    }
+    if (truncated) {
+      b.addText('diff-truncated', `_… diff truncated for display (showing ${linesUsed} lines across ${hunksRendered} hunks). The full version content is stored on the request and pinned exactly as reviewed._`, { variant: 'muted', size: 'sm' });
+    }
+  } else if (context.diffText) {
+    b.addText('diff', context.diffText);
+  }
+
+  b.addDivider('d2')
+    .addRow('actions', [
+      FlowBuilder.button('approve', '✓  Adopt update', { type: 'submit', actionId: 'skill-adopt-approve', successMessage: 'Adopted' }, { variant: 'primary' }),
+      FlowBuilder.button('decline', '✕  Keep current', { type: 'submit', actionId: 'skill-adopt-decline' }, { variant: 'destructive' }),
+    ])
+    .setData({
+      actionType: 'skill-adopt',
+      requestId: context.requestId,
+      approverUserId: context.approverUserId,
+      skillSlug: context.skillSlug,
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
+    });
+  return b.build();
+}

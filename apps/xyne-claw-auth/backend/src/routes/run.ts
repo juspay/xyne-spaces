@@ -1,4 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
+import { resolveAgentSkillArtifact } from "../lib/skillArtifact.js";
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
@@ -372,7 +373,7 @@ async function resolveAgent(agentSlug: string | undefined, orgId: string | undef
   // Find by slug, or fall back to default agent. Include the skill's
   // sibling files (SkillFile rows) so directory-style skills get
   // materialized in the child workspace alongside SKILL.md.
-  const includeSkills = { skills: { include: { skill: { include: { files: true } } } } };
+  const includeSkills = { skills: { include: { skill: { include: { files: true } }, pinnedVersion: true } } };
   if (agentSlug && !orgId) {
     log.error(`[run] orgId is required for agentSlug lookup agentSlug=${agentSlug}`);
     return { error: `Agent '${agentSlug}' not found` };
@@ -400,21 +401,24 @@ async function resolveAgent(agentSlug: string | undefined, orgId: string | undef
   // (UI-created skills are plain text; seeded skills have inline frontmatter).
   // Also forward `files[]` (relativePath/content) — extra files in the skill
   // directory beyond SKILL.md.
-  const skills = agent.skills.map((as) => ({
-    slug: as.skill.slug,
-    name: as.skill.name,
-    description: as.skill.description ?? "",
-    content: as.skill.content,
-    ...(as.skill.files.length > 0
-      ? {
-          files: as.skill.files.map((f) => ({
-            relativePath: f.relativePath,
-            content: f.content,
-            contentType: f.contentType,
-          })),
-        }
-      : {}),
-  }));
+  const skills = agent.skills.map((as) => {
+    const art = resolveAgentSkillArtifact(as);
+    return {
+      slug: as.skill.slug,
+      name: as.skill.name,
+      description: as.skill.description ?? "",
+      content: art.content,
+      ...(art.files.length > 0
+        ? {
+            files: art.files.map((f) => ({
+              relativePath: f.relativePath,
+              content: f.content,
+              contentType: f.contentType ?? null,
+            })),
+          }
+        : {}),
+    };
+  });
 
   return {
     id: agent.id,

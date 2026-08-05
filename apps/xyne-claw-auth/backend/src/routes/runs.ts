@@ -3,6 +3,7 @@ import { agentRunRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
+import { resolveAgentSkillArtifact } from "../lib/skillArtifact.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
@@ -332,27 +333,28 @@ router.get("/session/export", async (req: Request, res: Response) => {
         res.status(404).json({ success: false, error: "Agent not found" });
         return;
       }
-      const skills = (agentRow.skills ?? []).map((as) => ({
-        slug: as.skill.slug,
-        name: as.skill.name,
-        description: as.skill.description ?? "",
-        content: as.skill.content ?? "",
-        // Ship the skill's bundled files (scripts/, assets, …) too. Without
-        // this the SKILL.md loaded but its `scripts/` folder was silently
-        // dropped on the top-level /run path — only the subagent/callable
-        // resolvers included files — so a skill that shells out to its own
-        // scripts appeared "loaded" but its scripts never materialized in the
-        // session. Mirrors subagent-resolver.ts.
-        ...((as.skill.files?.length ?? 0) > 0
-          ? {
-              files: as.skill.files.map((f) => ({
-                relativePath: f.relativePath,
-                content: f.content,
-                contentType: f.contentType ?? undefined,
-              })),
-            }
-          : {}),
-      }));
+      const skills = (agentRow.skills ?? []).map((as) => {
+        const art = resolveAgentSkillArtifact(as);
+        return {
+          slug: as.skill.slug,
+          name: as.skill.name,
+          description: as.skill.description ?? "",
+          content: art.content ?? "",
+          // Ship the skill's bundled files (scripts/, assets, …) too — pinned
+          // version snapshot when the agent is pinned, else live files. Without
+          // this a skill that shells out to its own scripts appears "loaded"
+          // but its scripts never materialize. Mirrors subagent-resolver.ts.
+          ...(art.files.length > 0
+            ? {
+                files: art.files.map((f) => ({
+                  relativePath: f.relativePath,
+                  content: f.content,
+                  contentType: f.contentType ?? undefined,
+                })),
+              }
+            : {}),
+        };
+      });
       const zipBuffer = await renderClaudeProjectZip({
         agent: {
           slug: agentRow.slug,
