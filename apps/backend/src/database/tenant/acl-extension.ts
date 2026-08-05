@@ -249,6 +249,12 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
                 notePattern('[acl] table opted out of scoping', model, operation, { side: 'read' });
               }
               return query(args);
+            } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(aclWhere, ws)) {
+              // A model carrying workspaceId should resolve within the caller's workspace whatever
+              // its own clause returned. Reported here rather than applied: a table that
+              // legitimately spans workspaces would return nothing instead of erroring, and the
+              // only environment that can say which tables those are is one carrying real traffic.
+              notePattern('[acl] clause wider than the workspace', model, operation, { side: 'read' });
             }
             const scalarDefault = isWorkspaceOnly(aclWhere, ws);
 
@@ -338,6 +344,9 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               notePattern('[acl] table opted out of scoping', model, operation, { side: 'write' });
             }
             return query(args);
+          } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(mutateWhere, ws)) {
+            // Same reporting rule as reads.
+            notePattern('[acl] clause wider than the workspace', model, operation, { side: 'write' });
           }
 
           // Bulk ops accept a non-unique/relational where — AND the mutate filter directly.
