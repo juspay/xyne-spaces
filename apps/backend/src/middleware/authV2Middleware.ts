@@ -45,13 +45,12 @@ class AuthV2Middleware {
    * Helper to get global session ID (not workspace-scoped)
    */
   private getSessionId(req: Request): string | undefined {
-    // Header-based session ID (API clients / old dashboards that can't set cookies)
-    const headerSessionId = req.headers['x-session-id'] as string | undefined;
-    if (headerSessionId) {
-      return headerSessionId;
+    // The session reference is read from the httpOnly cookie only. A request header is not
+    // accepted here: headers are copied into access logs, proxies and crash reports far more
+    // readily than a cookie the browser will not hand to script.
+    if (req.headers['x-session-id']) {
+      logger.warn('[AuthV2] Ignoring x-session-id header; session is read from the cookie');
     }
-
-    // Backward compat: user_session_id cookie (for old dashboard versions)
     return req.cookies?.user_session_id;
   }
 
