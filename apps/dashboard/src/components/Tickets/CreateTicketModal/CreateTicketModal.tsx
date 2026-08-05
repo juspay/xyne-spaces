@@ -59,6 +59,7 @@ import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { queries } from '../../../zero/queries';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -1296,16 +1297,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         const masterTicketId = createdTicketResponse.id;
         const masterConversationId = createdTicketResponse.conversationId;
         subticketsToCreate.forEach((subTicket, index) => {
-          void zero.mutate(
-            mutators.subTicket.create({
-              subTicketId: uuidv4(),
-              mappingId: uuidv4(),
-              timestamp: baseTimestamp + index,
-              title: subTicket.title,
-              ...(subTicket.description ? { description: subTicket.description } : {}),
-              ticketId: masterTicketId,
-              ...(masterConversationId ? { conversationId: masterConversationId } : {}),
-            }),
+          void surfaceMutationError(
+            zero.mutate(
+              mutators.subTicket.create({
+                subTicketId: uuidv4(),
+                mappingId: uuidv4(),
+                timestamp: baseTimestamp + index,
+                title: subTicket.title,
+                ...(subTicket.description ? { description: subTicket.description } : {}),
+                ticketId: masterTicketId,
+                ...(masterConversationId ? { conversationId: masterConversationId } : {}),
+              }),
+            ),
+            `Failed to create sub-ticket "${subTicket.title}"`,
           );
         });
       }

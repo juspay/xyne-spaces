@@ -28,6 +28,7 @@ import {
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
@@ -503,12 +504,15 @@ export const SupportKanbanBoard = ({
                         fromSequenceNumber: backwardStageChange.fromSequenceNumber,
                       }),
                     );
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: backwardStageChange.ticketId,
-                        stageName: backwardStageChange.stageName,
-                        updatedAt: Date.now(),
-                      }),
+                    void surfaceMutationError(
+                      zero.mutate(
+                        mutators.ticket.update({
+                          id: backwardStageChange.ticketId,
+                          stageName: backwardStageChange.stageName,
+                          updatedAt: Date.now(),
+                        }),
+                      ),
+                      'Failed to move ticket',
                     );
                   }
                   setShowBackwardConfirmDialog(false);

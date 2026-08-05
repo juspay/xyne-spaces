@@ -9,6 +9,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { getStageColor } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { cn } from '../../../utils/classNames';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { TicketStageRequestStatus, BoardType, ApproverType, FormContextType } from '@xyne/shared';
@@ -606,15 +607,18 @@ export function StagePicker({
         }
       });
     } else {
-      void zero.mutate(
-        mutators.ticket.update({
-          id: ticketId,
-          stageName: next,
-          ...(targetStageObj?.defaultTicketStatusV2 && {
-            statusV2: targetStageObj.defaultTicketStatusV2,
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.update({
+            id: ticketId,
+            stageName: next,
+            ...(targetStageObj?.defaultTicketStatusV2 && {
+              statusV2: targetStageObj.defaultTicketStatusV2,
+            }),
+            updatedAt: Date.now(),
           }),
-          updatedAt: Date.now(),
-        }),
+        ),
+        'Failed to update stage',
       );
       onAfterStageChange?.(next);
     }
