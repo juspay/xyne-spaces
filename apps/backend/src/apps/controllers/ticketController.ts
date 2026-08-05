@@ -2520,7 +2520,7 @@ export class TicketController {
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
           receivedAt: new Date(),
         });
-        await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, email.id);
+        await this.recordIncomingAppMessage(externalSource.id, channelId, externalMessageId, externalThreadId, email.id);
         const existingTicket = await prismaClient.ticket.findFirst({
           where: { conversationId: threadEmail.conversationId },
           select: { id: true, xyneId: true, boardId: true },
@@ -2620,7 +2620,7 @@ export class TicketController {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
       }
 
-      await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);
+      await this.recordIncomingAppMessage(externalSource.id, channelId, externalMessageId, externalThreadId, initialEmail.id);
 
       logger.info('[AppDeskInbound] created new ticket', {
         threadId: externalThreadId,
@@ -2650,12 +2650,13 @@ export class TicketController {
 
   private async recordIncomingAppMessage(
     externalSourceId: string,
+    channelId: string,
     externalMessageId: string,
     externalThreadId: string,
     emailId: string,
   ): Promise<void> {
     try {
-      const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'externalSource', { id: externalSourceId });
+      const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'channel', { id: channelId });
       await prismaClient.externalMessage.create({
         data: {
           externalSourceId,
