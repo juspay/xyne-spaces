@@ -93,6 +93,24 @@ export type OAuthStateValue = {
 const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
 const OAUTH_STATE_TTL_SECONDS = 60 * 60;
 
+const RECORDING_OAUTH_QUERY_PARAMS = {
+  'recording-email': {
+    connected: 'recordingEmailConnected',
+    error: 'recordingEmailError',
+  },
+  'recording-doc': {
+    connected: 'recordingGoogleDocConnected',
+    error: 'recordingGoogleDocError',
+  },
+} as const;
+
+type RecordingOAuthMode = keyof typeof RECORDING_OAUTH_QUERY_PARAMS;
+type RecordingOAuthResult = keyof (typeof RECORDING_OAUTH_QUERY_PARAMS)[RecordingOAuthMode];
+
+function recordingOAuthQueryParam(mode: RecordingOAuthMode, result: RecordingOAuthResult): string {
+  return RECORDING_OAUTH_QUERY_PARAMS[mode][result];
+}
+
 export async function setOAuthState(state: string, value: OAuthStateValue): Promise<void> {
   await redisService.set(
     `${OAUTH_STATE_KEY_PREFIX}${state}`,
@@ -629,8 +647,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         frontendUrl,
         stateData,
         new URLSearchParams({
-          [stateData.mode === 'recording-doc' ? 'recordingGoogleDocError' : 'recordingEmailError']:
-            message,
+          [recordingOAuthQueryParam(stateData.mode, 'error')]: message,
         }),
       );
       return;
@@ -687,8 +704,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           frontendUrl,
           stateData,
           new URLSearchParams({
-            [isRecordingDoc ? 'recordingGoogleDocError' : 'recordingEmailError']:
-              'Google did not verify this email address',
+            [recordingOAuthQueryParam(stateData.mode, 'error')]: 'Google did not verify this email address',
           }),
         );
         return;
@@ -699,7 +715,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           frontendUrl,
           stateData,
           new URLSearchParams({
-            [isRecordingDoc ? 'recordingGoogleDocError' : 'recordingEmailError']:
+            [recordingOAuthQueryParam(stateData.mode, 'error')]:
               `Connect ${stateData.expectedEmail} to ${isRecordingDoc ? 'export recordings' : 'send recording recaps'}`,
           }),
         );
@@ -767,7 +783,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         frontendUrl,
         stateData,
         new URLSearchParams({
-          [isRecordingDoc ? 'recordingGoogleDocConnected' : 'recordingEmailConnected']: 'true',
+          [recordingOAuthQueryParam(stateData.mode, 'connected')]: 'true',
         }),
       );
       return;
