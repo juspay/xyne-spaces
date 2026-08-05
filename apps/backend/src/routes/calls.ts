@@ -7,6 +7,7 @@ import { callChatController, requireInternalCallParticipant } from '@/controller
 import { uploadSingle } from '@/middleware/upload';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
+import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
 
 const router = Router();
 
@@ -27,6 +28,8 @@ router.get(
   recordingEmailController.getComposeContext,
 );
 router.post('/recordings/:callId/send-email', recordingEmailController.sendRecordingEmail);
+router.post('/recordings/:callId/export-google-doc', recordingGoogleDocController.export);
+router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
