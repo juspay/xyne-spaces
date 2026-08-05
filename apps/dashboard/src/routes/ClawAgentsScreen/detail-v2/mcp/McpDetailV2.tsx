@@ -129,7 +129,9 @@ const McpDetailBody = ({ server }: { server: McpServer }): ReactElement => {
 
       {config && (
         <div className='flex min-w-0 flex-col gap-1.5'>
-          <span className='text-[15px] font-medium leading-tight text-foreground'>End Point</span>
+          <span className='text-[15px] font-medium leading-tight text-foreground'>
+            Advanced Configuration
+          </span>
           <div className='flex items-start gap-2 rounded-xl border border-border px-3 py-2.5'>
             <pre className='min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all font-sans text-[15px] leading-normal text-foreground/80'>
               {config}
