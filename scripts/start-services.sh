@@ -181,6 +181,12 @@ FEATURE_LABELS=(
     "Feature Flags     (superposition)"
 )
 NUM_FEATURES=${#FEATURE_LABELS[@]}
+
+if [ -n "${XYNE_FEATURES:-}" ]; then
+    SELECTED_FEATURES="$XYNE_FEATURES"
+    echo "$SELECTED_FEATURES" | grep -qw 1 || SELECTED_FEATURES="1,${SELECTED_FEATURES}"
+else
+
 CURSOR=1                          # start on Xyne-Claw (first toggleable item)
 declare -a CHECKED=(1 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
 
@@ -254,6 +260,8 @@ for i in $(seq 1 $((NUM_FEATURES - 1))); do
     fi
 done
 
+fi
+
 # Determine env vars and compose profiles
 ENABLE_STORAGE=1          # always on (Chat & Tickets needs fake-gcs + minio)
 ENABLE_OBSERVABILITY=0
@@ -309,9 +317,11 @@ for f in $(echo "$SELECTED_FEATURES" | tr ',' ' '); do
         2) SELECTED_NAMES="${SELECTED_NAMES}Xyne-Claw " ;;
         3) SELECTED_NAMES="${SELECTED_NAMES}Canvas " ;;
         4) SELECTED_NAMES="${SELECTED_NAMES}Calls " ;;
-        5) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
-        6) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
-        7) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
+        5) SELECTED_NAMES="${SELECTED_NAMES}Transcription " ;;
+        6) SELECTED_NAMES="${SELECTED_NAMES}Call-Recording " ;;
+        7) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
+        8) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
+        9) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
     esac
 done
 echo ""

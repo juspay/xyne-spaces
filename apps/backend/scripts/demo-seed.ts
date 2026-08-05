@@ -378,10 +378,10 @@ async function createConversation(
     if (line.react) {
       const reactor = members[(line.from + 1) % members.length];
       await prisma.reaction.create({
-        data: { messageId, userId: reactor.id, emojiName: line.react },
+        data: { messageId, userId: reactor.id, emojiName: line.react, workspaceId },
       });
       await prisma.reactionCount.create({
-        data: { messageId, emojiName: line.react, count: 1 },
+        data: { messageId, emojiName: line.react, count: 1, workspaceId },
       });
     }
   }
@@ -437,7 +437,7 @@ async function createChannels(
     // The DM/channel lists read channel_stats, not channels — without a row the
     // channel does not appear in the sidebar.
     await prisma.channelStats.create({
-      data: { channelId, lastActivityAt: minsAgo(i), participantCount: members.length },
+      data: { channelId, lastActivityAt: minsAgo(i), participantCount: members.length, workspaceId },
     });
 
     for (let m = 0; m < members.length; m++) {
@@ -446,10 +446,11 @@ async function createChannels(
           channelId,
           userId: members[m].id,
           role: m === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER,
+          workspaceId,
         },
       });
       await prisma.channelUserStatus.create({
-        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general' },
+        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general', workspaceId },
       });
     }
 
