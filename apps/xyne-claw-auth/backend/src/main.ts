@@ -167,9 +167,18 @@ const BASE = "/claw/api/v1";
 app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
 app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
 app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
+// NOT behind requireAuth (so requireNoAccessToken never runs here): every
+// sub-path self-authenticates inside the router with requireStrictS2S +
+// requireSessionToken (routes/mcp.ts) — the run's HMAC session token is the
+// credential, not a user identity. Do NOT add requireAuth here expecting the
+// access-token barrier to apply; add the guard inside the router instead.
 app.use(`${BASE}/sessions`, mcpRouter);
 app.use(`${BASE}/gateways`, requireAuth, requireNoAccessToken, requireClawAdmin, gatewaysRouter);
 app.use(`${BASE}/agents`, requireAuth, requireNoAccessToken, agentsRouter);
+// NOT behind requireAuth (so requireNoAccessToken never runs here): the device
+// -flow endpoints must be reachable pre-authentication, and each route carries
+// its own guard (requireCliTokensEnabled / requireApproveAuth — routes/cli-auth.ts).
+// This is also where CLI tokens are MINTED, so it must never require one.
 app.use(`${BASE}/cli`, cliAuthRouter);
 // Public Slack ingress; authenticates itself with the per-install HMAC secret.
 app.use(`${BASE}/surfaces/slack`, slackRouter);
@@ -235,6 +244,11 @@ app.use(BASE, honeycombCallbackRouter);
 app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, customerioOAuthRouter);
 app.use(BASE, customerioCallbackRouter);
 app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
+// DELIBERATE requireNoAccessToken exception: /run is the ONE route that
+// understands CLI/service-token scopes and enforces them itself (agent
+// allowlist + elevated-delivery scope — see routes/run.ts, `accessToken` in
+// res.locals). Every other requireAuth mount carries the barrier. Do not "fix"
+// this asymmetry by adding the barrier — it would break every service token.
 app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
 // IMPORTANT: more-specific runStreamRouter MUST be mounted BEFORE the broader
 // runRouter at BASE. runRouter has `POST /run/:sessionId/cancel`, which would
@@ -285,6 +299,9 @@ app.use(`${BASE}/search-evals`, requireAuth, requireNoAccessToken, requireSearch
 app.use(`${BASE}/entity-extraction`, requireAuth, requireNoAccessToken, requireClawAdmin, entityExtractionRouter);
 
 // MCP Gateway routes (for backend service registration)
+// NOT behind requireAuth (so requireNoAccessToken never runs here): gateway
+// routes authenticate per-route with gatewayTenantAuth + gatewayRegistrationAuth
+// (mcpgateway/middleware/gateway-auth.ts) against the registration API key.
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
 
 const server = app.

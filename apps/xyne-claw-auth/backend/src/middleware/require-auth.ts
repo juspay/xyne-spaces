@@ -353,8 +353,21 @@ export async function requireUserAuth(
  * omit this barrier.
  */
 export function requireNoAccessToken(_req: Request, res: Response, next: NextFunction): void {
-  if (accessTokenRegistry.has(res)) {
-    res.status(403).json({ success: false, error: "Access tokens are not authorized for this endpoint" });
+  const token = accessTokenRegistry.get(res);
+  if (token) {
+    // Actionable on purpose: this endpoint worked for token callers before the
+    // scope gap was closed, so a bare "not authorized" reads as a regression.
+    // Name the token, the reason, and the two supported paths forward.
+    log.warn(
+      `[require-auth] access-token (${token.client ?? "unknown"}) rejected on non-/run route userId=${token.userId}`,
+    );
+    res.status(403).json({
+      success: false,
+      error:
+        "This endpoint does not accept CLI/service access tokens (they carry no scopes here). " +
+        "Use the /run API with a service token, or call this endpoint with a signed-in browser session.",
+      code: "ACCESS_TOKEN_NOT_ALLOWED",
+    });
     return;
   }
   next();

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextFunction, Request, Response } from "express";
 
@@ -40,6 +43,139 @@ vi.mock("../db.js", () => ({
     orgMember: { findUnique: vi.fn() },
   },
 }));
+
+vi.mock("../logger.js", () => ({
+  createLogger: () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  }),
+}));
+
+function extractAppUseMounts(source: string): string[] {
+  const mounts: string[] = [];
+  let searchFrom = 0;
+
+  while (true) {
+    const appUseIndex = source.indexOf("app.use", searchFrom);
+    if (appUseIndex === -1) {
+      break;
+    }
+
+    const openParenIndex = source.indexOf("(", appUseIndex);
+    if (openParenIndex === -1) {
+      break;
+    }
+
+    let depth = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let inTemplate = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    let foundCloseParen = false;
+
+    for (let index = openParenIndex; index < source.length; index += 1) {
+      const char = source[index];
+      const nextChar = source[index + 1];
+      const previousChar = source[index - 1];
+
+      if (inLineComment) {
+        if (char === "\n") {
+          inLineComment = false;
+        }
+        continue;
+      }
+
+      if (inBlockComment) {
+        if (char === "*" && nextChar === "/") {
+          inBlockComment = false;
+          index += 1;
+        }
+        continue;
+      }
+
+      if (inSingleQuote) {
+        if (char === "'" && previousChar !== "\\") {
+          inSingleQuote = false;
+        }
+        continue;
+      }
+
+      if (inDoubleQuote) {
+        if (char === "\"" && previousChar !== "\\") {
+          inDoubleQuote = false;
+        }
+        continue;
+      }
+
+      if (inTemplate) {
+        if (char === "`" && previousChar !== "\\") {
+          inTemplate = false;
+        }
+        continue;
+      }
+
+      if (char === "/" && nextChar === "/") {
+        inLineComment = true;
+        index += 1;
+        continue;
+      }
+
+      if (char === "/" && nextChar === "*") {
+        inBlockComment = true;
+        index += 1;
+        continue;
+      }
+
+      if (char === "'") {
+        inSingleQuote = true;
+        continue;
+      }
+
+      if (char === "\"") {
+        inDoubleQuote = true;
+        continue;
+      }
+
+      if (char === "`") {
+        inTemplate = true;
+        continue;
+      }
+
+      if (char === "(") {
+        depth += 1;
+        continue;
+      }
+
+      if (char === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          mounts.push(source.slice(appUseIndex, index + 1));
+          searchFrom = index + 1;
+          foundCloseParen = true;
+          break;
+        }
+      }
+    }
+
+    if (!foundCloseParen) {
+      searchFrom = openParenIndex + 1;
+    }
+  }
+
+  return mounts;
+}
+
+function findRequireAuthMountsMissingBarrier(mounts: string[]): string[] {
+  return mounts.filter((mount) =>
+    mount.includes("requireAuth")
+    && !mount.includes("requireNoAccessToken")
+    && !mount.includes("runRouter")
+  );
+}
 
 describe("requireAuth CLI bearer branch", () => {
   beforeEach(() => {
@@ -142,10 +278,15 @@ describe("requireNoAccessToken barrier", () => {
 
     expect(barrierNext).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      error: "Access tokens are not authorized for this endpoint",
-    });
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        code: "ACCESS_TOKEN_NOT_ALLOWED",
+        // Actionable: names both supported paths so an integrator whose token
+        // stopped working knows what to do instead of guessing.
+        error: expect.stringContaining("/run"),
+      }),
+    );
   });
 
   it("allows requests that are not access-token authenticated", async () => {
@@ -166,5 +307,38 @@ describe("requireNoAccessToken barrier", () => {
 
     expect(next).toHaveBeenCalledOnce();
     expect(res.status).not.toHaveBeenCalled();
+  });
+});
+
+describe("main.ts requireAuth mount policy", () => {
+  it("keeps requireNoAccessToken on every requireAuth mount except runRouter", () => {
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const mainSource = readFileSync(resolve(testDir, "../main.ts"), "utf8");
+    const mounts = extractAppUseMounts(mainSource);
+
+    expect(mounts.length).toBeGreaterThan(0);
+
+    const guardedMount = mounts.find((mount) =>
+      mount.includes("requireAuth")
+      && mount.includes("requireNoAccessToken")
+      && !mount.includes("runRouter")
+    );
+    expect(guardedMount).toBeDefined();
+
+    if (guardedMount === undefined) {
+      throw new Error("Expected at least one non-runRouter requireAuth mount with requireNoAccessToken");
+    }
+
+    const mutatedMount = guardedMount.replace("requireNoAccessToken, ", "");
+    const mutatedMounts = mounts.map((mount) =>
+      mount === guardedMount ? mutatedMount : mount
+    );
+    expect(findRequireAuthMountsMissingBarrier(mutatedMounts)).toEqual([mutatedMount]);
+
+    const violations = findRequireAuthMountsMissingBarrier(mounts);
+    expect(
+      violations,
+      `Every app.use(...) mount with requireAuth must also include requireNoAccessToken, except runRouter.\n\nOffending mounts:\n${violations.join("\n")}`,
+    ).toEqual([]);
   });
 });
