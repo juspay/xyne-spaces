@@ -1,4 +1,5 @@
-import { PrismaClient, FormFieldType } from '@prisma/client';
+import { FormFieldType } from '@xyne/shared';
+import { PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { config } from '@/config/env';
