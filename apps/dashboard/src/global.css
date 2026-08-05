@@ -1733,7 +1733,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* `border`/`border-radius` are reset so composer classes baked into already-sent
    messages don't draw a second border inside the code block wrapper's. */
 .jp-message-html pre {
-  @apply bg-muted m-0 p-2 whitespace-pre-wrap relative;
+  @apply bg-muted m-0 px-4 py-3 whitespace-pre-wrap relative;
   overflow-x: auto;
   overflow-wrap: break-word;
   word-break: normal;
@@ -1742,7 +1742,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 .jp-message-html div.slack_code {
-  @apply bg-muted border border-border rounded p-2 whitespace-pre-wrap relative mt-3 mb-3;
+  @apply bg-muted border border-border rounded px-4 py-3 whitespace-pre-wrap relative mt-3 mb-3;
   overflow-wrap: break-word;
   word-break: normal;
 }
@@ -1815,7 +1815,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   border-spacing: 0;
   margin: 8px 0;
   font-size: 13px;
-  border: 1px solid hsl(var(--foreground) / 0.06);
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   overflow: hidden;
   min-width: 100%;
@@ -1827,14 +1827,14 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   letter-spacing: 0.2px;
   color: hsl(var(--foreground) / 0.6);
   padding: 10px 16px;
-  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
-  background: hsl(var(--foreground) / 0.02);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
   white-space: nowrap;
 }
 
 .jp-message-html td {
   padding: 10px 16px;
-  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
+  border-bottom: 1px solid hsl(var(--border));
   color: hsl(var(--foreground) / 0.8);
 }
 
@@ -1864,7 +1864,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 .jp-message-html blockquote {
-  @apply border-l-2 pl-2 m-0 sm:border-l-4 sm:pl-4;
+  @apply border-l-2 pl-2 my-2 sm:border-l-4 sm:pl-4;
   border-left-color: var(--border-color, hsl(var(--border)));
   max-width: 100%;
   overflow-wrap: break-word;
@@ -1946,6 +1946,10 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .jp-message-html a {
   color: var(--link-color);
   text-decoration: underline;
+}
+
+.jp-message-html a:hover {
+  color: var(--link-hover-color);
 }
 
 /* ----------------------------
@@ -2943,7 +2947,7 @@ img.inline-emoji,
   border-spacing: 0;
   margin: 8px 0;
   font-size: 13px;
-  border: 1px solid hsl(var(--foreground) / 0.06);
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   overflow: hidden;
   min-width: 100%;
@@ -2956,15 +2960,15 @@ img.inline-emoji,
   letter-spacing: 0.2px;
   color: hsl(var(--foreground) / 0.6);
   padding: 10px 16px;
-  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
-  background: hsl(var(--foreground) / 0.02);
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
   white-space: nowrap;
 }
 
 .bot-markdown-content td,
 .bot-markdown-content-call-summary td {
   padding: 10px 16px;
-  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
+  border-bottom: 1px solid hsl(var(--border));
   color: hsl(var(--foreground) / 0.8);
 }
 
