@@ -18,6 +18,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { logger } from '@/utils/logger';
+import { isPermanentAuthError } from '@/integrations/core/authErrors';
 
 const TAG = '[GmailWatchRenewal]';
 const GMAIL_WATCH_RENEWAL_CRON =
@@ -26,12 +27,6 @@ const GMAIL_WATCH_RENEWAL_CRON =
 // Process N sources concurrently per batch. Gmail's per-user quota is
 // generous; keep this modest so one slow source doesn't stall the cycle.
 const BATCH_SIZE = 10;
-
-// Same "permanent auth failure" detection used by the manual refetch flow
-// (external-source-sync.ts:174). Seeing one of these means the refresh token
-// has been revoked and there's no way to recover from a background job —
-// deactivate so we stop pounding a dead credential.
-const PERMANENT_AUTH_ERROR = /invalid_grant|unauthorized_client|invalid_token/i;
 
 const externalSourceRepo = new ExternalSourceRepository();
 
@@ -56,7 +51,7 @@ async function renewSource(source: {
     return { status: 'renewed', expiration: result.expiration, historyId: result.historyId };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (PERMANENT_AUTH_ERROR.test(message)) {
+    if (isPermanentAuthError(message)) {
       try {
         await externalSourceRepo.update(source.id, { isActive: false });
         logger.error(`${TAG} deactivated source due to bad credentials`, {

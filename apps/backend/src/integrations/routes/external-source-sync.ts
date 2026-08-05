@@ -13,6 +13,7 @@ import { adapterRegistry } from '../core/adapterRegistry';
 import { logger } from '../../utils/logger';
 import { RawBodyRequest } from '@/types/express';
 import { webhookLimiter } from '@/middleware/rateLimiters';
+import { isPermanentAuthError } from '@/integrations/core/authErrors';
 import { authMiddleware } from '@/middleware/auth';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
@@ -226,7 +227,7 @@ router.post(
       return res.json({ success: true, ...result });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
-      const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
+      const needsReauth = isPermanentAuthError(raw);
       const status = needsReauth ? 403 : 500;
       logger.error('Fetch failed', { error: raw });
       return res.status(status).json({
