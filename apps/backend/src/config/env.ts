@@ -306,11 +306,9 @@ const envSchema = Joi.object({
   GITHUB_APP_PRIVATE_KEY: Joi.string().allow('').default(''),
   GITHUB_APP_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   // Community intake
-  XYNE_COMMUNITY_URL: Joi.string().allow('').default(''),
   COMMUNITY_WORKSPACE_ID: Joi.string().allow('').default(''),
   COMMUNITY_INTAKE_BOARD_ID: Joi.string().allow('').default(''),
   COMMUNITY_INTAKE_CHANNEL_ID: Joi.string().allow('').default(''),
-  COMMUNITY_INTAKE_SYSTEM_USER_ID: Joi.string().allow('').default(''),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -743,11 +741,9 @@ export const config = {
     appWebhookSecret: envVars.GITHUB_APP_WEBHOOK_SECRET,
   },
   community: {
-    url: envVars.XYNE_COMMUNITY_URL,
     workspaceId: envVars.COMMUNITY_WORKSPACE_ID,
     intakeBoardId: envVars.COMMUNITY_INTAKE_BOARD_ID,
     intakeChannelId: envVars.COMMUNITY_INTAKE_CHANNEL_ID,
-    systemUserId: envVars.COMMUNITY_INTAKE_SYSTEM_USER_ID,
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,

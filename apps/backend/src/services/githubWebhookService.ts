@@ -7,6 +7,11 @@ import { createTicketWithConversation } from '@/apps/core/ticketutils';
 import { DatabaseClient } from '@/database/client';
 import { githubAppClient } from '@/services/githubAppClient';
 import { ticketService } from '@/services/ticketService';
+import { unifiedBotUserService } from '@/bots/unified/index.js';
+
+// Community-intake tickets are authored by the Ticket Bot, auto-registered as a
+// workspace user at startup. Resolved by email per intake workspace at runtime.
+const TICKET_BOT_EMAIL = 'ticket-bot@bot.xyne.ai';
 
 // Board custom fields that store the GitHub issue metadata. Resolved (and
 // auto-created if missing) by name at runtime — ids differ per environment.
@@ -159,10 +164,10 @@ export class GitHubWebhookService {
     }
 
     const c = config.community;
-    if (!c?.intakeBoardId || !c?.intakeChannelId || !c?.systemUserId) {
+    if (!c?.intakeBoardId || !c?.intakeChannelId) {
       logger.warn(
         '[GitHub-Webhook] Community intake is not fully configured ' +
-          '(COMMUNITY_INTAKE_BOARD_ID / _CHANNEL_ID / _SYSTEM_USER_ID); skipping ticket creation'
+          '(COMMUNITY_INTAKE_BOARD_ID / _CHANNEL_ID); skipping ticket creation'
       );
       return { success: true, message: 'Community intake not configured' };
     }
@@ -192,6 +197,18 @@ export class GitHubWebhookService {
 
     const { projectId, workspaceId } = intakeBoard;
 
+    // Community-intake tickets are authored by the Ticket Bot user (auto-registered
+    // at startup). Resolve it by email within the intake workspace.
+    const ticketBot = await unifiedBotUserService.getBotByEmail(TICKET_BOT_EMAIL, workspaceId);
+    if (!ticketBot) {
+      logger.warn(
+        `[GitHub-Webhook] Ticket Bot user (${TICKET_BOT_EMAIL}) not found in workspace ` +
+          `${workspaceId}; skipping ticket creation`
+      );
+      return { success: true, message: 'Community intake bot not found' };
+    }
+    const systemUserId = ticketBot.id;
+
     // Ensure the board's GitHub custom fields exist (auto-create if missing).
     const fields = await this.ensureIssueCustomFields(c.intakeBoardId, projectId, workspaceId);
 
@@ -213,7 +230,7 @@ export class GitHubWebhookService {
             action,
             issue,
             repoFullName,
-            c.systemUserId
+            systemUserId
           );
         }
         logger.info(
@@ -232,9 +249,9 @@ export class GitHubWebhookService {
       return { success: true, message: `Issue #${issue.number} closed; not tracked` };
     }
 
-    // Community-intake tickets are always authored by the community system bot;
-    // the reporter's GitHub identity is captured in the custom fields below.
-    const createdByUserId = c.systemUserId;
+    // Community-intake tickets are always authored by the Ticket Bot; the
+    // reporter's GitHub identity is captured in the custom fields below.
+    const createdByUserId = systemUserId;
 
     const description =
       (issue?.body?.trim() || '_No description provided._') +
@@ -304,8 +321,8 @@ export class GitHubWebhookService {
     );
 
     // Acknowledge the reporter on the GitHub issue and point them to the community.
-    const communityUrl = config.community?.url || '';
-    const followLine = communityUrl ? ` Follow along here: ${communityUrl}` : '';
+    const communityUrl = `${config.frontendUrl}/community`;
+    const followLine = ` Follow along here: ${communityUrl}`;
     const posted = await githubAppClient.postIssueComment(
       repository.owner.login,
       repository.name,
