@@ -2,7 +2,7 @@
 // Handles mapping PR status changes to ticket stage updates based on configurable PR status mappings
 
 import { DatabaseClient } from '@/database/client';
-import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType } from '@xyne/shared';
+import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType, UserResponsibility } from '@xyne/shared';
 import { ticketService } from '@/services/ticketService';
 import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
@@ -536,7 +536,7 @@ export class PRTicketStatusSyncService {
           conversationId: ticket.conversationId,
           senderId,
           content: message,
-          activityType: 'PR',
+          activityType: ActivityType.PR,
           workspaceId: ticket.workspaceId,
           extraMetadata: {
             prWebhook: true,
@@ -622,7 +622,7 @@ export class PRTicketStatusSyncService {
   private async assignUserToTicket(
     ticket: TicketInfo,
     assignedUserId: string,
-    assignmentKey: { roleId: string } | { responsibility: 'PR_REVIEWER' | 'QA' },
+    assignmentKey: { roleId: string } | { responsibility: UserResponsibility.PR_REVIEWER | UserResponsibility.QA },
     eventKey: 'prOpenedRoleId' | 'prMergedRoleId',
     fieldName: 'prReviewerId' | 'qaId',
     roleName: string,
@@ -944,7 +944,7 @@ export class PRTicketStatusSyncService {
     }
 
     const assignedUserId = assignmentResult.assignedUserId;
-    const responsibility = fieldToUpdate === 'prReviewerId' ? 'PR_REVIEWER' : 'QA';
+    const responsibility = fieldToUpdate === 'prReviewerId' ? UserResponsibility.PR_REVIEWER : UserResponsibility.QA;
 
     await this.assignUserToTicket(
       ticket,

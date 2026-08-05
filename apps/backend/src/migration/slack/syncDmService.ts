@@ -17,7 +17,7 @@
  */
 
 import { WebClient } from '@slack/web-api';
-import { AuthProvider } from '@xyne/shared';
+import { AuthProvider, OrgRole } from '@xyne/shared';
 import { Request, Response } from 'express';
 import { logger } from '../../utils/logger';
 import { checkUserAuthorization } from './command';
@@ -464,7 +464,7 @@ async function resolveSlackToXyneUser(
         create: {
           orgId: wsOrg.orgId,
           email: email.toLowerCase(),
-          role: 'MEMBER',
+          role: OrgRole.MEMBER,
         },
       });
 

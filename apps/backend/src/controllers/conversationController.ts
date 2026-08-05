@@ -1983,7 +1983,7 @@ export class ConversationController {
           senderId: agentUserId,
           senderName: String(stored.agentSlug ?? ''),
           content: JSON.stringify({ type: 'agent_progress', data: payload }),
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           createdAt: new Date(),
         });
       }

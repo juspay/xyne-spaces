@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { ChannelScopeType, ChannelRole, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelRole, ChannelVisibility, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { getMigrationMessageBlocks, getMigrationMessageFallbackText } from './utils/blockKit';
 import { postMessage } from './utils/postMessage';
 import { extractChannelHistory, extractLegacyThreadReplies, UserInfoCache, getUserInfo } from './utils/extractConversation';
@@ -40,8 +40,8 @@ async function pushVespaJobForChannel(channelId: string, userId: string, workspa
       if (db.vespaInsertionLogs) {
         await db.vespaInsertionLogs.create({
           data: {
-            status: 'FAILED',
-            type: 'INSERT',
+            status: VespaInsertionStatus.FAILED,
+            type: VespaOperationType.INSERT,
             entityId: channelId,
             entityType: channelSchema,
             namespace: NAMESPACE,

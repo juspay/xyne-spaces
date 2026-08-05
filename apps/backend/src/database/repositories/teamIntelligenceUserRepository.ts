@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import { RecapEntityType } from '@xyne/shared';
 
 export interface UserDetailsDateRangeFilters {
   from: Date;
@@ -496,7 +497,7 @@ class TeamIntelligenceUserRepository {
     // Get total count for pagination
     const total = await db.recap.count({
       where: {
-        entityType: 'CHANNEL',
+        entityType: RecapEntityType.CHANNEL,
         userId: user.id,
         recapDate: {
           gte: from,
@@ -511,7 +512,7 @@ class TeamIntelligenceUserRepository {
     // Get paginated recaps
     const recaps = await db.recap.findMany({
       where: {
-        entityType: 'CHANNEL',
+        entityType: RecapEntityType.CHANNEL,
         userId: user.id,
         recapDate: {
           gte: from,

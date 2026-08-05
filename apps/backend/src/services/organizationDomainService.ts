@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
-import { OrganizationDomainVerificationStatus, Status } from '@xyne/shared';
+import { OrganizationDomainVerificationStatus, Status, WorkspaceType } from '@xyne/shared';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com',
@@ -178,7 +178,7 @@ export class OrganizationDomainService {
       where: {
         orgId: existingOrg.orgId,
         status: Status.ACTIVE,
-        OR: [{ workspaceType: 'ENTERPRISE' }, { workspaceType: null }],
+        OR: [{ workspaceType: WorkspaceType.ENTERPRISE }, { workspaceType: null }],
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {

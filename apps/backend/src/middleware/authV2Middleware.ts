@@ -7,6 +7,7 @@ import '../types/express';
 import { UserSessionService } from '../services/userSessionService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
+import { AuthProvider } from '@xyne/shared';
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
 class AuthV2Middleware {
@@ -124,7 +125,7 @@ class AuthV2Middleware {
 
       // --- Provider Verification Step ---
       // Only verify with Google if the user authenticated via Google
-      if (session.user.authProvider === 'GOOGLE' && session.refreshToken) {
+      if (session.user.authProvider === AuthProvider.GOOGLE && session.refreshToken) {
         try {
           // Verify if the user is still valid in Google by checking their refresh token
           this.googleClient.setCredentials({ refresh_token: session.refreshToken });
@@ -158,7 +159,7 @@ class AuthV2Middleware {
           }
           // Proceed with local session if it's just a network/transient error
         }
-      } else if (session.user.authProvider === 'MICROSOFT') {
+      } else if (session.user.authProvider === AuthProvider.MICROSOFT) {
         // Verify if the user is still valid in Azure AD via Microsoft Graph API
         if (session.accessToken) {
           try {
@@ -209,7 +210,7 @@ class AuthV2Middleware {
         } else {
           logger.info(`[Auto-Refresh] No access token for Microsoft user ${session.user.email}. Skipping Graph check.`);
         }
-      } else if (session.user.authProvider === 'EMAIL') {
+      } else if (session.user.authProvider === AuthProvider.EMAIL) {
         // Email auth: we issued the refresh token ourselves
         // No external provider to verify against
         logger.info(`[Auto-Refresh] Email auth session for ${session.user.email} — skipping provider check`);

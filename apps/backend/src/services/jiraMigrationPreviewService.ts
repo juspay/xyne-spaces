@@ -617,8 +617,8 @@ export class JiraMigrationPreviewService {
         FROM public.form_fields ff
         INNER JOIN public.forms_context_mapping fcm ON fcm."formId" = ff."formId"
         WHERE fcm."contextId" = ${input.targetBoardId}
-          AND fcm."contextType" = CAST(${FormContextType.BOARD} AS "FormContextType")
-          AND fcm."entityType" = CAST(${FormEntityType.TICKET} AS "FormEntityType")
+          AND fcm."contextType" = ${FormContextType.BOARD}
+          AND fcm."entityType" = ${FormEntityType.TICKET}
           AND EXISTS (
             SELECT 1 FROM public.boards b
             WHERE b.id = fcm."contextId" AND b."workspaceId" = ${currentWorkspaceId()}

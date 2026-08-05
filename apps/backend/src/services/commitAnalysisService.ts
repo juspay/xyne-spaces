@@ -4,7 +4,7 @@ import { DatabaseClient } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { logger } from '@/utils/logger';
 import { PullRequestInfo, DiffstatSummary, ChangeEntry } from '@/types/bitbucket';
-import { FormContextType, FormEntityType, BaseTicketType } from '@xyne/shared';
+import { FormContextType, FormEntityType, BaseTicketType, BoardType, ChannelVisibility, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { Application, } from '@prisma/client';
 import { XyneRelease } from './release/xyne/xyneRelease';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
@@ -213,7 +213,7 @@ export class CommitAnalysisService {
         return null;
       }
       const board = await db.board.findFirst({
-        where: { projectId: project.id, boardType: { not: 'RELEASE' } },
+        where: { projectId: project.id, boardType: { not: BoardType.RELEASE } },
         select: { id: true },
       });
       if (!board) {
@@ -246,7 +246,7 @@ export class CommitAnalysisService {
       // Prefer a PUBLIC channel on the project; fall back to any project channel.
       const channel =
         (await db.channel.findFirst({
-          where: { projectId: project.id, visibility: 'PUBLIC' },
+          where: { projectId: project.id, visibility: ChannelVisibility.PUBLIC },
           select: { id: true },
         })) ??
         (await db.channel.findFirst({
@@ -282,8 +282,8 @@ export class CommitAnalysisService {
           // so the TicketActivitiesACL's ticket→conversation→channel traversal resolves.
           // Re-use an existing conversation in the project channel if available.
           conversationId: conversation?.conversationId ?? channel.id,
-          statusV2: 'TODO',
-          priority: 'LOW',
+          statusV2: TicketStatusV2.TODO,
+          priority: TicketPriority.LOW,
           stageName: 'BACKLOG',
           ticketType: BaseTicketType.Fix,
           lastEmailAt: new Date(),

@@ -12,7 +12,18 @@
 
 import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  ProjectType,
+  OrgRole,
+  UserType,
+} from '@xyne/shared';
 import { runAsSystem } from '../src/database/tenant/context';
 import { hashPassword } from '../src/utils/passwordUtils';
 
@@ -234,7 +245,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');
@@ -366,7 +377,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');
@@ -397,7 +408,7 @@ async function main() {
           data: {
             email: DEFAULT_ADMIN_USER.email,
             orgId: DEFAULT_ORG.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
             passwordHash,
           }
         });
@@ -481,7 +492,7 @@ async function main() {
           data: {
             email: adminUser.email,
             orgId: DEFAULT_ORG.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
           }
         });
         console.log('  ✅ Linked admin user to organization as OWNER');
@@ -509,7 +520,7 @@ async function main() {
             data: {
               email: defaultAdminEmail,
               orgId: DEFAULT_ORG.orgId,
-              role: 'OWNER',
+              role: OrgRole.OWNER,
             }
           });
           console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
@@ -594,7 +605,7 @@ async function main() {
             data: {
               email: defaultAdminUser.email,
               orgId: DEFAULT_ORG.orgId,
-              role: 'OWNER',
+              role: OrgRole.OWNER,
             }
           });
           console.log('  ✅ Linked default admin email user to organization as OWNER');
@@ -653,7 +664,7 @@ async function main() {
 
       // Find all bots (using string literal since UserType enum may not be generated yet)
       const botUsers = await prisma.user.findMany({
-        where: { userType: 'BOT' }
+        where: { userType: UserType.BOT }
       });
 
       let addedCount = 0;
@@ -672,7 +683,7 @@ async function main() {
             data: {
               email: botUser.email,
               orgId: DEFAULT_ORG.orgId,
-              role: 'MEMBER', // Bots are regular members, not owners
+              role: OrgRole.MEMBER, // Bots are regular members, not owners
             }
           });
           addedCount++;

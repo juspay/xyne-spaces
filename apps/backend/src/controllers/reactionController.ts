@@ -4,6 +4,7 @@ import { MessageRepository } from '../database/repositories/messageRepository';
 
 import { logger } from '../utils/logger';
 import { redisService } from '../services/redisService';
+import { MessageType } from '@xyne/shared';
 import { messageMetadataService } from '../services/messageMetadataService';
 import {
   ReactionResponse,
@@ -174,7 +175,7 @@ export class ReactionController {
             data: reactions,
             messageId: messageId,
           }),
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           createdAt: new Date(),
         });
 

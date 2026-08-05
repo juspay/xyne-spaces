@@ -257,7 +257,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
-    if (message.content && message.msgType === 'USER') {
+    if (message.content && message.msgType === MessageType.USER) {
       this.resolveLinkPreview(message.messageId, message.conversationId, message.content).catch(error => {
         logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
           messageId,
@@ -385,7 +385,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
 
       // Emit MESSAGE.FORWARDED for forwarded messages
-      if (message.msgType === 'FORWARDED') {
+      if (message.msgType === MessageType.FORWARDED) {
         let originalMessageId: string | undefined;
         try {
           const { parseForwardedMessageXml } = await import('@xyne/shared');
@@ -444,7 +444,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     if (isDMChannel && channel) {
       const memberNames = channelParticipants
-        .filter(p => channel.scopeType === 'DM' ? p.userId !== senderId : true)
+        .filter(p => channel.scopeType === ChannelScopeType.DM ? p.userId !== senderId : true)
         .map(p => p.user.name || 'Unknown');
       const dmChannelName = formatDmChannelName(memberNames);
 
@@ -1931,7 +1931,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
     }
 
-    if (previousValue?.channelId && previousValue.conversationId && previousValue.msgType !== 'SYSTEM') {
+    if (previousValue?.channelId && previousValue.conversationId && previousValue.msgType !== MessageType.SYSTEM) {
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_DELETED,
         messageId,
@@ -1953,7 +1953,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       activityService.deleteActivitiesBySource('message', messageId),
     ]);
 
-    if (!previousValue?.conversationId || previousValue.msgType === 'SYSTEM') {
+    if (!previousValue?.conversationId || previousValue.msgType === MessageType.SYSTEM) {
       return;
     }
 
@@ -2056,7 +2056,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
     const previousValue = job.previousValue as MessagePreviousValue | undefined;
-    if (!previousValue || previousValue.msgType === 'SYSTEM' || !previousValue.channelId) {
+    if (!previousValue || previousValue.msgType === MessageType.SYSTEM || !previousValue.channelId) {
       return;
     }
     const currentMessage = await db.message.findUnique({
@@ -2229,13 +2229,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
 
       // Skip if DM channel (already handled by mutator auto-response)
-      if (channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM') {
+      if (channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM) {
         return;
       }
 
       // CRITICAL FIX: Skip bot messages to prevent infinite loops
       // When a bot responds, its response message would trigger this again
-      if (sender?.userType === 'BOT') {
+      if (sender?.userType === UserType.BOT) {
         logger.debug('[BOT-MENTION] Skipping bot message to prevent infinite loop', {
           messageId: message.messageId,
           senderId: message.senderId,
@@ -2268,7 +2268,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           },
         });
 
-        if (initialMessage?.sender && initialMessage.sender.userType === 'BOT') {
+        if (initialMessage?.sender && initialMessage.sender.userType === UserType.BOT) {
           // Look up the bot catalog entry by DB user id instead of parsing the email
           const dbUserId = initialMessage.sender.id;
           const botEntry = botCatalog.getAll().find(

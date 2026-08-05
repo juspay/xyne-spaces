@@ -22,6 +22,7 @@ import {
   queueJiraPurgeTicketVespaDeleteJob,
 } from '@/services/jira/vespa';
 import { runWithContext } from '@/database/tenant/context';
+import { CanvasRole, CanvasVisibility, ConversationParticipation, ExternalEntityType, MessageType } from '@xyne/shared';
 
 const db = DatabaseClient.getInstance();
 
@@ -132,7 +133,7 @@ export class JiraMigrationController {
       const ticketMappings = await db.externalMessage.findMany({
         where: {
           externalSourceId: externalSource.id,
-          entityType: 'TICKET',
+          entityType: ExternalEntityType.TICKET,
           entityId: { not: null },
         },
         select: { entityId: true },
@@ -499,7 +500,7 @@ export class JiraMigrationController {
       const ticketMappings = await db.externalMessage.findMany({
         where: {
           externalSourceId: sourceExternalSource.id,
-          entityType: 'TICKET',
+          entityType: ExternalEntityType.TICKET,
           entityId: { not: null },
         },
         select: { entityId: true },
@@ -1669,7 +1670,7 @@ export class JiraMigrationController {
       // Find ticket IDs imported from Jira via external_messages
       const jiraTicketMappings = await db.externalMessage.findMany({
         where: {
-          entityType: 'TICKET',
+          entityType: ExternalEntityType.TICKET,
           entityId: { not: null },
           ...(externalSourceId ? { externalSourceId } : {}),
         },
@@ -2004,7 +2005,7 @@ export class JiraMigrationController {
             content: this.buildMigrationReportCanvasBlocks(result) as any,
             channelId,
             createdBy: actorUserId,
-            visibility: 'PUBLIC',
+            visibility: CanvasVisibility.PUBLIC,
             isTemplate: false,
             isCollaborative: false,
             lastEditedBy: actorUserId,
@@ -2033,7 +2034,7 @@ export class JiraMigrationController {
             workspaceId: canvasChannel.workspaceId,
             canvasId,
             userId: actorUserId,
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
           },
@@ -2141,7 +2142,7 @@ export class JiraMigrationController {
           senderId: actorUserId,
           workspaceId: migrationReportChannel.workspaceId,
           content: messageContent,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           hasAttachment: false,
           showInChannel: true,
           metadata: {
@@ -2175,14 +2176,14 @@ export class JiraMigrationController {
           id: randomUUID(),
           conversationId,
           userId: actorUserId,
-          participationType: 'AUTHOR',
+          participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: now,
           channelId,
           workspaceId: migrationReportChannel.workspaceId,
         },
         update: {
-          participationType: 'AUTHOR',
+          participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
         },
       });

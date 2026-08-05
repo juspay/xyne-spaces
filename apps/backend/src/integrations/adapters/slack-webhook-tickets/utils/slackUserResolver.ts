@@ -1,5 +1,5 @@
 import { UserRepository } from '../../../../database/repositories/users';
-import { AuthProvider } from '@xyne/shared';
+import { AuthProvider, ChannelScopeType } from '@xyne/shared';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
@@ -590,7 +590,7 @@ function buildChannelMentionSpan(
   channel: { id: string; name: string; visibility?: string | null; scopeType?: string | null },
   quote: string,
 ): string {
-  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM';
+  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
   const channelName = channel.name || channel.id;
   return `<span data-channel-mention=${quote}${quote} data-channel-id=${quote}${escapeHtml(channel.id)}${quote} data-channel-name=${quote}${escapeHtml(channelName)}${quote} data-is-private=${quote}${String(isPrivate)}${quote} class=${quote}chat-input-channel-mention${quote}>#${escapeHtml(channelName)}</span>`;
 }

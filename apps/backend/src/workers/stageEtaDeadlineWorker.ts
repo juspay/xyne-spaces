@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
+import { ActivityType } from '@xyne/shared';
 import {
   getUsersToNotifyForTicket,
   getTicketBotActorId,
@@ -196,7 +197,7 @@ class StageEtaDeadlineWorker {
               conversationId: ticket.conversationId!,
               content: message,
               createdAt: now,
-              activityType: 'STAGE_ETA',
+              activityType: ActivityType.STAGE_ETA,
               stageId: stage.id,
             }),
           );

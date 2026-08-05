@@ -5,7 +5,7 @@ import { DatabaseClient } from '../database/client';
 import { withWorkspaceScope } from '../database/tenant/context';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
-import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { buildInvitationLink } from '@/controllers/invitationController';
@@ -178,7 +178,7 @@ export class OrganizationController {
           orgId: organization.orgId,
           name: workspaceName.trim(),
           createdBy: userId,
-          status: 'ACTIVE',
+          status: Status.ACTIVE,
           workspaceType: WorkspaceType.ENTERPRISE,
           joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
         },
@@ -201,7 +201,7 @@ export class OrganizationController {
         data: {
           orgId: organization.orgId,
           workspaceId: workspace.id,
-          role: 'ADMIN',
+          role: WorkspaceRole.ADMIN,
         },
       });
 

@@ -16,6 +16,7 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
 import { dropAllDatabases } from '@rocicorp/zero';
 import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
+import { WorkspaceType } from '@xyne/shared';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -253,7 +254,7 @@ const AuthScreen = (): ReactElement | null => {
       const response = await apiInstance.post<{
         joinRequest?: { isExisting?: boolean; status?: string };
       }>(`/community/${workspaceId}/join`, {
-        workspaceType: 'ENTERPRISE',
+        workspaceType: WorkspaceType.ENTERPRISE,
       });
       const isExisting = response.data.joinRequest?.isExisting;
       const requestStatus = response.data.joinRequest?.status;
@@ -282,7 +283,10 @@ const AuthScreen = (): ReactElement | null => {
     try {
       const res = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
         '/auth/create-workspace-pending',
-        { workspaceName: newEnterpriseWorkspaceName.trim(), workspaceType: 'ENTERPRISE' },
+        {
+          workspaceName: newEnterpriseWorkspaceName.trim(),
+          workspaceType: WorkspaceType.ENTERPRISE,
+        },
       );
       const newWorkspaceId = res.data.user.workspaceId;
       localStorage.setItem('user_id', res.data.user.id);

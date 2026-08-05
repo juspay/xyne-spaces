@@ -5,6 +5,7 @@ import { queries } from '../zero/queries.js';
 import { QueryResultType } from '@rocicorp/zero';
 import type { Channel } from '../zero/schema.js';
 import { getSyncStorage } from '../platform/syncStorage.js';
+import type { AccessType } from '../zero/types.js';
 
 // Drafts persist through the platform sync-storage bridge:
 // - Dashboard: localStorage (via the default fallback)
@@ -58,7 +59,7 @@ export type UserGroup = QueryResultType<typeof queries.getAllUserGroups>[number]
 export type UserGroupMapping = QueryResultType<typeof queries.getUserGroupMappingsByUserId>[number];
 export type UserPermission = {
   resourceName: string;
-  accessType: 'READ' | 'WRITE' | 'ADMIN';
+  accessType: AccessType;
 };
 export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUserStatus>[number];
 

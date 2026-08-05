@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
+import { ApproverType } from '@xyne/shared';
 
 /**
  * Role framework backfill controller.
@@ -734,7 +735,7 @@ export class RoleFrameworkBackfillController {
         if (!options.dryRun) {
           const result = await db.stageApprovers.updateMany({
             where: { id: { in: batchIds }, approverType: null },
-            data: { approverType: 'USER' },
+            data: { approverType: ApproverType.USER },
           });
           summary.updated += result.count;
         } else {

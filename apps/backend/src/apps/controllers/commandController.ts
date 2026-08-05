@@ -12,6 +12,7 @@ import {
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { ConversationParticipation, MessageType } from '@xyne/shared';
 
 /**
  * Insert a SYSTEM message visible only to `userId` explaining that a command or shortcut failed.
@@ -45,7 +46,7 @@ async function sendErrorNotice(opts: {
           conversationId,
           senderId: appUserId,
           content,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           hasAttachment: false,
           edited: false,
           isDeleted: false,
@@ -81,7 +82,7 @@ async function sendErrorNotice(opts: {
           conversationId: newConversationId,
           senderId: appUserId,
           content,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           hasAttachment: false,
           edited: false,
           isDeleted: false,
@@ -100,7 +101,7 @@ async function sendErrorNotice(opts: {
           id: uuidv4(),
           conversationId: newConversationId,
           userId,
-          participationType: 'AUTHOR',
+          participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: new Date(now),
           channelId,

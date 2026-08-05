@@ -12,7 +12,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -516,7 +516,7 @@ export class InvitationController {
           data: {
             orgId: org.orgId,
             workspaceId: workspace.id,
-            role: 'ADMIN',
+            role: WorkspaceRole.ADMIN,
           },
         });
 
@@ -525,7 +525,7 @@ export class InvitationController {
           data: {
             orgId: org.orgId,
             email: normalizedOwnerEmail,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
             invitedBy: req.user?.email ?? undefined,
           },
         });

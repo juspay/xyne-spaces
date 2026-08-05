@@ -475,7 +475,7 @@ export class ChatController {
         senderId: userId,
         senderName: agentSlug ?? 'agent',
         content: JSON.stringify({ type: 'agent_progress', data: payload }),
-        msgType: 'SYSTEM' as const,
+        msgType: MessageType.SYSTEM as const,
         createdAt: new Date(),
       };
       await redisService.broadcastMessageToSession(resolvedChannelId, event);

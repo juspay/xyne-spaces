@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -278,7 +278,7 @@ export interface TicketSuggestion {
   id: string;
   title: string;
   description: string;
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  priority: TicketPriority;
   suggestedAssignee: string;
   status: 'pending' | 'created' | 'dismissed';
   createdTicketId?: string;
@@ -1162,7 +1162,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       // Filter valid messages once
       const validMessages = messagesArray.filter(
-        (msg) => msg.msgType !== 'SYSTEM' && msg.senderId && msg.content?.trim()
+        (msg) => msg.msgType !== MessageType.SYSTEM && msg.senderId && msg.content?.trim()
       );
       if (!validMessages.length) return null;
 

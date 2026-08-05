@@ -5,6 +5,7 @@ import { fileSchema, messageSchema, ticketSchema, SubApp } from '@/vespa/src/typ
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { currentWorkspaceId } from '@/database/tenant/context';
+import { VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 
 const db = DatabaseClient.getInstance();
 
@@ -21,8 +22,8 @@ export const queueJiraImportMessageVespaJob = (messageId: string, userId: string
       if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       await db.vespaInsertionLogs.create({
         data: {
-          status: 'FAILED',
-          type: 'INSERT',
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.INSERT,
           entityId: messageId,
           entityType: messageSchema,
           namespace: NAMESPACE,
@@ -72,8 +73,8 @@ export const queueJiraImportAttachmentVespaJob = async (attachmentId: string, us
         if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
         await db.vespaInsertionLogs.create({
           data: {
-            status: 'FAILED',
-            type: 'INSERT',
+            status: VespaInsertionStatus.FAILED,
+            type: VespaOperationType.INSERT,
             entityId: attachmentId,
             entityType: fileSchema,
             namespace: NAMESPACE,
@@ -108,8 +109,8 @@ export const queueJiraImportTicketVespaJob = (ticketId: string, userId: string, 
       if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       await db.vespaInsertionLogs.create({
         data: {
-          status: 'FAILED',
-          type: 'INSERT',
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.INSERT,
           entityId: ticketId,
           entityType: ticketSchema,
           namespace: NAMESPACE,
@@ -140,8 +141,8 @@ export const queueJiraPurgeTicketVespaDeleteJob = (ticketId: string, userId: str
       if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       await db.vespaInsertionLogs.create({
         data: {
-          status: 'FAILED',
-          type: 'DELETE',
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.DELETE,
           entityId: ticketId,
           entityType: ticketSchema,
           namespace: NAMESPACE,
@@ -172,8 +173,8 @@ export const queueJiraPurgeMessageVespaDeleteJob = (messageId: string, userId: s
       if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       await db.vespaInsertionLogs.create({
         data: {
-          status: 'FAILED',
-          type: 'DELETE',
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.DELETE,
           entityId: messageId,
           entityType: messageSchema,
           namespace: NAMESPACE,
@@ -204,8 +205,8 @@ export const queueJiraPurgeAttachmentVespaDeleteJob = (attachmentId: string, use
       if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       await db.vespaInsertionLogs.create({
         data: {
-          status: 'FAILED',
-          type: 'DELETE',
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.DELETE,
           entityId: attachmentId,
           entityType: fileSchema,
           namespace: NAMESPACE,

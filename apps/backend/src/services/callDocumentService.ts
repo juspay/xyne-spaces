@@ -9,7 +9,7 @@ import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole } from '@xyne/shared';
+import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
@@ -1110,7 +1110,7 @@ export class CallDocumentService {
           channelId,
           workspaceId,
           createdBy: createdByUserId,
-          visibility: 'PUBLIC',
+          visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
           isCollaborative: true,
           lastEditedBy: createdByUserId,
@@ -1133,7 +1133,7 @@ export class CallDocumentService {
           canvasId,
           workspaceId,
           userId: createdByUserId,
-          role: 'OWNER',
+          role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
         },
@@ -1146,7 +1146,7 @@ export class CallDocumentService {
           canvasId,
           workspaceId,
           userId: callCreatorUserId,
-          role: 'OWNER',
+          role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
         },
@@ -1221,7 +1221,7 @@ export class CallDocumentService {
           channelId,
           workspaceId,
           createdBy: createdByUserId,
-          visibility: 'PRIVATE',
+          visibility: CanvasVisibility.PRIVATE,
           isTemplate: false,
           isCollaborative: true,
           lastEditedBy: createdByUserId,

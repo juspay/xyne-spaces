@@ -3,6 +3,7 @@ import {NAMESPACE} from '@/vespa/vespaConfig';
 import {channelSchema, projectSchema} from '@/vespa/src/types';
 import { chatContainerSchema } from '@xyne/vespa-ts/types';
 import { convert } from 'html-to-text';
+import { ChannelScopeType } from '@xyne/shared';
 
 /**
  * Transformer functions to convert Prisma models to Vespa document format
@@ -226,8 +227,8 @@ export function transformChannelToVespa(
     creator: channel.creator, // Should be email
     scopeType: channel.scopeType,
     visibility: channel.visibility,
-    isIm: channel.scopeType === 'DM',
-    isMpim: channel.scopeType === 'GROUP_DM',
+    isIm: channel.scopeType === ChannelScopeType.DM,
+    isMpim: channel.scopeType === ChannelScopeType.GROUP_DM,
     permissions: channel.permissions || [], // group of user ids in this channel
     isPrivate: channel.visibility === 'PRIVATE',
     createdBy: channel.creator, // Should be email (same as creator)

@@ -38,8 +38,7 @@ import {
   InvitationResponse,
   MeetingStatus,
   NotificationType,
-  RecordingType,
-} from '@xyne/shared';
+  RecordingType, AttachmentEntityType } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
@@ -425,7 +424,7 @@ export class CallController {
 
         const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
         const roomMetadata = JSON.stringify({
-          callType: 'HEADLESS',
+          callType: CallType.HEADLESS,
           sttModel: sttModel || 'azure',
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
@@ -2637,7 +2636,7 @@ export class CallController {
         const deleteResult = await db.messageAttachment.deleteMany({
           where: {
             entityId: { in: messageIds },
-            entityType: 'CHAT',
+            entityType: AttachmentEntityType.CHAT,
           },
         });
         logger.info(`Deleted ${deleteResult.count} attachments for recording ${callId}`);

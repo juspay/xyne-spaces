@@ -4,8 +4,7 @@ import { logger } from '@/utils/logger';
 import {
   buildSurfaceNudgeCountRowId,
   getSurfaceAreaIdField,
-  type SurfaceAreaIdField,
-} from '@xyne/shared';
+  type SurfaceAreaIdField, NudgeState } from '@xyne/shared';
 import type { Prisma, PrismaClient } from '@prisma/client';
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -104,7 +103,7 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
   const renderableNudges = await tx.surfaceNudge.findMany({
     where: {
       sourceId,
-      state: 'ACTIVE',
+      state: NudgeState.ACTIVE,
     },
     select: {
       id: true,

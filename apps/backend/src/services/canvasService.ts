@@ -10,6 +10,7 @@ import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
 
@@ -235,7 +236,7 @@ export async function createKnowledgeCanvas(
         workspaceId,
         content: content as any, // BlockNote JSON array
         createdBy: createdByUserId,
-        visibility: 'PUBLIC',
+        visibility: CanvasVisibility.PUBLIC,
         isTemplate: false,
         lastEditedBy: createdByUserId,
         lastEditedAt: now,
@@ -261,7 +262,7 @@ export async function createKnowledgeCanvas(
         canvasId,
         workspaceId,
         userId: createdByUserId,
-        role: 'OWNER',
+        role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
       },
