@@ -479,7 +479,7 @@ async function ingestTicket(
           messageId: '',
           entityId: newTicket.id,
           direction: MessageDirection.INCOMING,
-          entityType: 'TICKET' as ExternalEntityType,
+          entityType: ExternalEntityType.TICKET,
         },
         {
           externalSourceId: externalSource.id,
@@ -489,7 +489,7 @@ async function ingestTicket(
           messageId: '',
           entityId: conversation.message.messageId,
           direction: MessageDirection.INCOMING,
-          entityType: 'MESSAGE' as ExternalEntityType,
+          entityType: ExternalEntityType.MESSAGE,
         },
       ],
     });

@@ -251,12 +251,11 @@ const envSchema = Joi.object({
   SUPERPOSITION_TOKEN: Joi.string().allow('').default('123456'),
   SUPERPOSITION_ORG_ID: Joi.string().allow('').default('localorg'),
   SUPERPOSITION_WORKSPACE_ID: Joi.string().allow('').default('test'),
+  SUPERPOSITION_LOTUS_WORKSPACE_ID: Joi.string().allow('').default('lotus'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
   // Jenkins Configuration
-  JENKINS_BASE_URL: Joi.string()
-    .uri()
-    .default(''),
+  JENKINS_BASE_URL: Joi.string().uri().default(''),
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
@@ -290,9 +289,7 @@ const envSchema = Joi.object({
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
-  BITBUCKET_BASE_URL: Joi.string()
-    .allow('')
-    .default(''),
+  BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
@@ -306,6 +303,14 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  // Thread catch-up summary — comma-separated channel IDs, or "all" for every channel (empty = disabled everywhere)
+  THREAD_SUMMARY_ENABLED_CHANNELS: Joi.string().allow('').default(''),
+  THREAD_SUMMARY_MIN_MESSAGES: Joi.number().integer().min(0).default(6),
+  THREAD_SUMMARY_MESSAGE_LIMIT: Joi.number().integer().min(1).default(300),
+  THREAD_SUMMARY_LLM_TIMEOUT_MS: Joi.number().integer().min(1).default(300000),
+  THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
+  THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
+  THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
   DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
@@ -313,9 +318,7 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
-    .allow('')
-    .default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -575,8 +578,10 @@ export const config = {
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
     requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
-    communityWorkspaceUserBudget: (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
-    enterpriseWorkspaceUserBudget: (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    communityWorkspaceUserBudget:
+      (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    enterpriseWorkspaceUserBudget:
+      (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
     litellmManagementBaseUrl:
       (envVars.LITELLM_MANAGEMENT_BASE_URL as string) || (envVars.LITELLM_BASE_URL as string),
     litellmManagementAdminKey: envVars.LITELLM_MANAGEMENT_ADMIN_KEY as string,
@@ -605,8 +610,8 @@ export const config = {
     : [],
   slackIgnoredBotIds: envVars.SLACK_IGNORED_BOT_IDS
     ? envVars.SLACK_IGNORED_BOT_IDS.split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean)
+        .map((id: string) => id.trim())
+        .filter(Boolean)
     : [],
   slackMigrationFinalMessage: envVars.SLACK_MIGRATION_FINAL_MESSAGE
     ? Buffer.from(envVars.SLACK_MIGRATION_FINAL_MESSAGE, 'base64').toString('utf-8')
@@ -740,6 +745,7 @@ export const config = {
     token: envVars.SUPERPOSITION_TOKEN,
     orgId: envVars.SUPERPOSITION_ORG_ID,
     workspaceId: envVars.SUPERPOSITION_WORKSPACE_ID,
+    lotusWorkspaceId: envVars.SUPERPOSITION_LOTUS_WORKSPACE_ID,
     pollingInterval: envVars.SUPERPOSITION_POLLING_INTERVAL,
     timeout: envVars.SUPERPOSITION_TIMEOUT,
   },
@@ -808,6 +814,19 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  threadSummary: {
+    // Comma-separated channel IDs that have the AI thread catch-up summary enabled, or "all" for every channel (empty = disabled everywhere)
+    enabledChannels: (envVars.THREAD_SUMMARY_ENABLED_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
+    minMessages: envVars.THREAD_SUMMARY_MIN_MESSAGES as number,
+    messageLimit: envVars.THREAD_SUMMARY_MESSAGE_LIMIT as number,
+    llmTimeoutMs: envVars.THREAD_SUMMARY_LLM_TIMEOUT_MS as number,
+    minSummaryMaxTokens: envVars.THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS as number,
+    maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
+    transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
   desk: {
     betaChannels: (envVars.DESK_BETA_CHANNELS as string)

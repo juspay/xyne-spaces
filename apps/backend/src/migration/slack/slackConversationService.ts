@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { ChannelScopeType, ChannelRole, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelRole, ChannelVisibility, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { getMigrationMessageBlocks, getMigrationMessageFallbackText } from './utils/blockKit';
 import { postMessage } from './utils/postMessage';
 import { extractChannelHistory, extractLegacyThreadReplies, UserInfoCache, getUserInfo } from './utils/extractConversation';
@@ -23,7 +23,7 @@ import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 
 async function pushVespaJobForChannel(channelId: string, userId: string, workspaceId?: string): Promise<void> {
   vespaBackfillQueue.addJob({
@@ -35,13 +35,13 @@ async function pushVespaJobForChannel(channelId: string, userId: string, workspa
     logger.error(`[SlackMigration] Error queuing Vespa job for channel ${channelId}:`, error);
     // Log failed insertion to Postgres for later retry
     try {
-      const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+      const logWorkspaceId = workspaceId ?? currentWorkspaceId();
       if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       if (db.vespaInsertionLogs) {
         await db.vespaInsertionLogs.create({
           data: {
-            status: 'FAILED',
-            type: 'INSERT',
+            status: VespaInsertionStatus.FAILED,
+            type: VespaOperationType.INSERT,
             entityId: channelId,
             entityType: channelSchema,
             namespace: NAMESPACE,

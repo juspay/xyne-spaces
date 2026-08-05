@@ -4,7 +4,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageRequestStatus } from '@xyne/shared';
+import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageRequestStatus, ApproverType } from '@xyne/shared';
 import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
@@ -193,7 +193,7 @@ export class TicketStageTransitionService {
         const roleApproverRows = await prisma.stageApprovers.findMany({
           where: {
             transitionId: transition.id,
-            approverType: 'ROLE',
+            approverType: ApproverType.ROLE,
             roleId: { not: null },
           },
           select: { roleId: true },
@@ -201,13 +201,22 @@ export class TicketStageTransitionService {
         const roleIds = roleApproverRows
           .map(r => r.roleId)
           .filter((id): id is string => id !== null);
-        if (roleIds.length > 0) {
+        // Only live roles confer approval rights; a deactivated role must not.
+        const activeRoleIds = roleIds.length
+          ? (
+              await prisma.role.findMany({
+                where: { id: { in: roleIds }, isActive: true },
+                select: { id: true },
+              })
+            ).map(r => r.id)
+          : [];
+        if (activeRoleIds.length > 0) {
           const membership = await prisma.userRoleMapping.findFirst({
-            where: { userId, roleId: { in: roleIds } },
+            where: { userId, roleId: { in: activeRoleIds } },
           });
           if (!membership) {
             const groupMembership = await prisma.userGroupMapping.findFirst({
-              where: { userId, roleId: { in: roleIds } },
+              where: { userId, roleId: { in: activeRoleIds } },
             });
             isRoleApprover = !!groupMembership;
           } else {

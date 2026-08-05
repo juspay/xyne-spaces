@@ -261,7 +261,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');

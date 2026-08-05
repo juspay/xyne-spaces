@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { MessageType, ConversationParticipation } from '@xyne/shared';
+import { MessageType, ConversationParticipation, ChannelScopeType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, ChannelPreviousValue } from '../types';
 import { db } from '@/database/client';
@@ -25,7 +25,7 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
     const oldName = prev.name;
     let displayOldName = prev.name;
 
-    if (prev.scopeType === 'GROUP_DM') {
+    if (prev.scopeType === ChannelScopeType.GROUP_DM) {
       const userIds = oldName.split(',').filter((id) => id !== this.ctx.userID);
       const users = await db.user.findMany({
         where: { id: { in: userIds } },

@@ -129,6 +129,11 @@ class UnifiedDMService {
     const definition = await unifiedBotUserService.getBotDefinition(botUserId);
     return definition?.id ?? null;
   }
+
+  async getOrCreateDirectMessage(userAId: string, userBId: string, workspaceId: string): Promise<string> {
+    const channel = await this.getOrCreateBotDM(userAId, userBId, workspaceId);
+    return channel.id;
+  }
 }
 
 // Export singleton instance

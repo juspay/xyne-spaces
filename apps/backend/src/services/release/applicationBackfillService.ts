@@ -47,9 +47,9 @@ export class ApplicationBackfillService {
 
   private async createDefaultStages(boardId: string, createdBy: string, workspaceId: string): Promise<void> {
     const defaultStages = [
-      { name: 'TODO', eta: 1, defaultTicketStatusV2: 'TODO' as TicketStatusV2 },
-      { name: 'IN-PROGRESS', eta: 2, defaultTicketStatusV2: 'STARTED' as TicketStatusV2 },
-      { name: 'COMPLETED', eta: 3, defaultTicketStatusV2: 'COMPLETED' as TicketStatusV2 },
+      { name: 'TODO', eta: 1, defaultTicketStatusV2: TicketStatusV2.TODO },
+      { name: 'IN-PROGRESS', eta: 2, defaultTicketStatusV2: TicketStatusV2.STARTED },
+      { name: 'COMPLETED', eta: 3, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
     ];
 
     let currentMaxStageSequence = 0;

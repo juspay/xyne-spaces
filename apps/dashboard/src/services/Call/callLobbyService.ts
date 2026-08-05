@@ -1,4 +1,4 @@
-import { CallType } from '@xyne/shared';
+import { CallType, InvitationResponse } from '@xyne/shared';
 import type { CallChatMessage } from '@xyne/shared';
 import { apiInstance } from '../clients/apiClient';
 
@@ -16,7 +16,10 @@ export interface RequestToJoinResponse {
 }
 
 export interface LobbyStatusResponse {
-  response: 'REQUESTED' | 'ACCEPTED' | 'DECLINED';
+  response:
+    | InvitationResponse.REQUESTED
+    | InvitationResponse.ACCEPTED
+    | InvitationResponse.DECLINED;
 }
 
 export interface LobbyParticipant {

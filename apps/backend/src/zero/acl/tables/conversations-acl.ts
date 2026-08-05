@@ -56,47 +56,20 @@ export class ConversationsACL extends BaseACL<'conversations'> {
       throw new MutationACLError('Conversation update failed: channelId and createdBy are immutable fields', 'conversations')
     }
 
-    // Scoped to the field rather than the whole method: every conversation mutator shares
-    // this path and only checks the workspace, so tightening it wholesale would change
-    // unrelated flows. threadType is the one field a user edits directly.
-    if (Object.prototype.hasOwnProperty.call(args, 'threadType')) {
-      await this.verifyCanTagThread(args.conversationId, tx);
-    }
-    return
-  }
-
-  /**
-   * Who may change a thread's type: the same people who may start a thread in its channel.
-   * Mirrors canInsert — participants, anyone in a public channel, guests with access.
-   *
-   * The classifier is unaffected: it writes through Prisma, bypassing this layer.
-   */
-  private async verifyCanTagThread(conversationId: string, tx: Transaction<Schema>): Promise<void> {
-    const conversation = await tx.run(
-      zql.conversations.where('conversationId', conversationId).related('channel').one(),
-    );
-    const channel = conversation?.channel;
-    if (!channel) {
-      throw new MutationACLError('Conversation update failed: channel does not exist', 'conversations');
+    const conversation = await tx.run(zql.conversations.where('conversationId', args.conversationId).related('channel').one());
+    if (!conversation || !conversation.channel) {
+      throw new MutationACLError('Conversation update failed: conversation does not exist', 'conversations');
     }
 
-    if (this.ctx.role === 'GUEST') {
-      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, channel.id, {
-        allowPublicForNonGuests: true,
-      });
-      if (hasGuestAccess) {
-        return;
-      }
-      throw new MutationACLError('Conversation update failed: guest does not have access to this channel', 'conversations');
-    }
+    const channelParticipant = await tx.run(zql.channel_participants
+      .where('channelId', conversation.channel.id)
+      .where('userId', this.ctx.userID)
+      .one());
 
-    const channelParticipant = await tx.run(
-      zql.channel_participants.where('channelId', channel.id).where('userId', this.ctx.userID).one(),
-    );
-    if (channel.visibility === ChannelVisibility.PUBLIC || channelParticipant) {
+    if (conversation.channel.visibility === ChannelVisibility.PUBLIC || channelParticipant) {
       return;
     }
-    throw new MutationACLError('Conversation update failed: only channel participants can change thread tags', 'conversations');
+    throw new MutationACLError('Conversation update failed: you must be a channel participant to update this conversation', 'conversations');
   }
 
   async canDelete(args: DeleteID<TableSchema<'conversations'>>, tx: Transaction<Schema>): Promise<void> {

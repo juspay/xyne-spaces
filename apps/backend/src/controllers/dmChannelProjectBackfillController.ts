@@ -128,6 +128,7 @@ export class DmChannelProjectBackfillController {
     }
 
     return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<void> {

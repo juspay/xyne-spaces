@@ -11,9 +11,7 @@ export class CanvasFoldersACL extends BaseQueryACL<'canvas_folders'> {
   canSelect<TReturn>(query: Query<'canvas_folders', Schema, TReturn>): Query<'canvas_folders', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query
-        .whereExists('createdByUser', (u) =>
-          u.where('workspaceId', '=', this.ctx.workspaceId),
-        )
+        .where('workspaceId', '=', this.ctx.workspaceId)
         .where(({ or, cmp, exists }) =>
           or(
             cmp('createdBy', '=', this.ctx.userID),
@@ -24,8 +22,28 @@ export class CanvasFoldersACL extends BaseQueryACL<'canvas_folders'> {
         );
     }
 
-    return query.whereExists('createdByUser', u =>
-      u.where('workspaceId', '=', this.ctx.workspaceId),
-    );
+    // Scope by the folder's own workspaceId (same multi-workspace footgun as canvases —
+    // the createdByUser hop keyed off the creator's home workspace) AND gate by membership:
+    // - channel folders (channelId set) require membership of that channel,
+    // - project folders (channelId null, projectId set) require membership of a project channel,
+    // - personal folders (both null) are limited to the creator.
+    return query
+      .where('workspaceId', '=', this.ctx.workspaceId)
+      .where(({ or, and, cmp, exists }) =>
+        or(
+          cmp('createdBy', this.ctx.userID),
+          exists('channel', (ch) =>
+            ch.whereExists('participants', (p) => p.where('userId', this.ctx.userID)),
+          ),
+          and(
+            cmp('channelId', 'IS', null),
+            exists('project', (pr) =>
+              pr.whereExists('channels', (ch) =>
+                ch.whereExists('participants', (p) => p.where('userId', this.ctx.userID)),
+              ),
+            ),
+          ),
+        ),
+      );
   }
 }

@@ -1,8 +1,12 @@
 import { notificationService } from '@/services/notificationService';
+import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, flagThreadRecommendation } from '@/services/threadSummaryService';
+import { db } from '@/database/client';
 import { NotificationType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { ConversationParticipantPreviousValue, SideEffectJobConfig } from '../types';
 import { logger } from '@/utils/logger';
+
+const ON_INSERT_TIMEOUT_MS = 45_000;
 
 /**
  * When a user's conversation_participants row is updated with a new lastReadAt,
@@ -10,6 +14,51 @@ import { logger } from '@/utils/logger';
  * notification tray for that thread can be cleared.
  */
 export class ConversationParticipantsSideEffectHandler extends BaseSideEffectHandler {
+  async onInsert(job: SideEffectJobConfig): Promise<void> {
+    logger.info(`[ConversationParticipantsHandler] onInsert entity=${job.entityId} actor=${this.ctx.userID}`);
+    let timeoutHandle: NodeJS.Timeout;
+    try {
+      await Promise.race([
+        this.processInsert(job),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`onInsert timed out after ${ON_INSERT_TIMEOUT_MS}ms`)),
+            ON_INSERT_TIMEOUT_MS,
+          );
+        }),
+      ]).finally(() => clearTimeout(timeoutHandle));
+    } catch (error) {
+      logger.error(`[ConversationParticipantsHandler] Failed to process onInsert for entity ${job.entityId}:`, error);
+    }
+  }
+
+  private async processInsert(job: SideEffectJobConfig): Promise<void> {
+    const participant = await db.conversationParticipant.findUnique({
+      where: { id: job.entityId },
+      select: { conversationId: true, userId: true, channelId: true },
+    });
+
+    if (!participant) {
+      logger.warn(`[ConversationParticipantsHandler] No conversationParticipant row found for entity ${job.entityId}`);
+      return;
+    }
+
+    const { conversationId, userId, channelId } = participant;
+
+    if (this.ctx.userID === userId) {
+      logger.info(`[ConversationParticipantsHandler] Skipping self-join: user ${userId} in conversation ${conversationId}`);
+      return;
+    }
+
+    if (!isThreadSummaryEnabledForChannel(channelId)) {
+      return;
+    }
+
+    await flagThreadRecommendation(conversationId, userId);
+
+    await getOrGenerateThreadSummary(conversationId);
+  }
+
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
     const prev = job.previousValue as ConversationParticipantPreviousValue | undefined;
     const args = job.args as { lastReadAt?: number } | undefined;

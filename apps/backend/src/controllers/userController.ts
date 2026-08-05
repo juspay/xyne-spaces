@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { WorkspaceRole } from '@xyne/shared';
+import { WorkspaceRole, AuthProvider } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 import { DatabaseClient, db } from '@/database/client';
 import {logger} from '@/utils/logger';
@@ -47,7 +47,7 @@ export const createUser = async (req: Request, res: Response) => {
         name,
         email,
         providerUserId,
-        authProvider: 'API_KEY',
+        authProvider: AuthProvider.API_KEY,
         workspace: { connect: { id: workspaceId } },
         orgMember: { connect: { memberId: orgMember.memberId } },
       },

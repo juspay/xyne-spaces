@@ -18,9 +18,9 @@
  */
 
 import { logger } from '@/utils/logger';
-import { MessageType } from '@xyne/shared';
+import { MessageType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { getStorageService, type StorageService } from './storage';
 import { redisService } from './redisService';
@@ -214,8 +214,9 @@ export class GcsPollingService {
         // workspaceId stamper fills every Prisma write (ticket, conversation, etc.)
         // for this file's target workspace. Scoped per-file so multi-workspace
         // support is correct even though today all files share one channel.
-        await runWithContext(
-          { userId: this.systemUserId, workspaceId: this.workspaceId },
+        // service actor: systemUserId is a dedicated bot account, not a participant of the
+        // channels or tickets this touches, so relational predicates would return nothing.
+        await runAsServiceActor(this.systemUserId, this.workspaceId,
           () => this.processFile(file),
         );
       }
@@ -325,8 +326,8 @@ export class GcsPollingService {
         conversationId: conversation.conversationId,
         projectId: this.projectId,
         boardId: this.boardId,
-        priority: 'MEDIUM',
-        statusV2: 'TODO',
+        priority: TicketPriority.MEDIUM,
+        statusV2: TicketStatusV2.TODO,
         messageContent: `Ticket has been created, triggering workflow now.`
       });
       logger.info(`[GCS_POLLING] Created ticket ${ticket.xyneId} (${ticket.id})`);

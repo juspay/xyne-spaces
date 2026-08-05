@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { getContextOrNull } from '@/database/tenant/context';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import type {
   DataSourceColumn,
   CreateDataSourceColumnInput,
@@ -31,11 +31,11 @@ export class DataSourceColumnRepository extends BaseRepository<
       isPrimaryKey: boolean;
     }>
   ): Promise<DataSourceColumn[]> {
-    // Denormalized tenant key for newly-created column rows.
-    const ws = getContextOrNull()?.workspaceId;
-    if (!ws) {
-      throw new Error('workspaceId required: no tenant context');
-    }
+    // Denormalized tenant key for newly-created column rows — derive it from the
+    // parent table's workspace (authoritative), not ambient context, so it is
+    // correct even in sync/worker paths with no open request context (mirrors
+    // DataSourceTableRepository, which derives from its dataSource parent).
+    const ws = await resolveWorkspaceIdFromModel(this.db, 'dataSourceTable', { id: tableId });
     await this.db.dataSourceColumn.deleteMany({
       where: { tableId, columnName: { notIn: cols.map((c) => c.columnName) } },
     });

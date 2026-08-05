@@ -10,8 +10,11 @@ export class MessageSearchRepository {
 
   /**
    * Insert or update a message in the search index
-   * 
+   *
    * SECURITY: Uses parameterized queries to prevent SQL injection
+   *
+   * Raw SQL, so workspaceId is supplied explicitly. The DO UPDATE branch also writes it,
+   * so existing rows converge on the correct value as they are re-indexed.
    */
   async upsert(messageId: string, plaintextContent: string, workspaceId: string): Promise<void> {
     await this.db.$executeRawUnsafe(`

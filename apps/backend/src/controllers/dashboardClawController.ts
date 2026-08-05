@@ -241,6 +241,9 @@ export class DashboardClawController {
     const parsed = runQueryBody.safeParse(req.body);
     if (!parsed.success) return this.badRequest(res, parsed);
     const { dataSourceId, queryPlan } = parsed.data;
+    // QueryExecutor.execute repeats this check; pinning here returns a 404 rather than a
+    // 200 carrying an error string.
+    if (!(await this.requireDataSource(ctx, dataSourceId, res))) return;
 
     const plan = { ...queryPlan, dataSourceId, take: MAX_EXPLORATION_ROWS };
     try {
@@ -278,6 +281,7 @@ export class DashboardClawController {
       const parsedBody = emitBody.safeParse(req.body);
       if (!parsedBody.success) return this.badRequest(res, parsedBody);
       const { dataSourceId, draftId, args } = parsedBody.data;
+      if (!(await this.requireDataSource(ctx, dataSourceId, res))) return;
 
       // Pin any query plan to the request's data source BEFORE validation:
       // QueryPlanSchema requires dataSourceId, and the stamp stops the model

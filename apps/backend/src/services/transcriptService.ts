@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -278,7 +278,7 @@ export interface TicketSuggestion {
   id: string;
   title: string;
   description: string;
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  priority: TicketPriority;
   suggestedAssignee: string;
   status: 'pending' | 'created' | 'dismissed';
   createdTicketId?: string;
@@ -1162,7 +1162,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       // Filter valid messages once
       const validMessages = messagesArray.filter(
-        (msg) => msg.msgType !== 'SYSTEM' && msg.senderId && msg.content?.trim()
+        (msg) => msg.msgType !== MessageType.SYSTEM && msg.senderId && msg.content?.trim()
       );
       if (!validMessages.length) return null;
 
@@ -1785,6 +1785,10 @@ Output ONLY the processed transcript, nothing else.`;
       return;
     }
 
+    let pendingDetailedSummary:
+      | ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>
+      | null = null;
+
     try {
       // Get call details for summary generation and notes posting.
       const call = await repositories.calls.findByExternalId(callId);
@@ -1843,19 +1847,43 @@ Output ONLY the processed transcript, nothing else.`;
 
       const startTime = Date.now();
 
-      const [summary, title, ticketSuggestions] = await Promise.all([
-        this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-          logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-          return null;
-        }),
-        this.generateCallTitle(titleInput, callId).catch((err) => {
+      // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
+      const skipTitleGeneration = call.callType === CallType.HEADLESS;
+      if (skipTitleGeneration) {
+        logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
+      }
+      const summaryPromise = this.generateCallSummary(formattedTranscript, callId).catch((err) => {
+        logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        return null;
+      });
+      const callTitlePromise = skipTitleGeneration
+        ? Promise.resolve(null)
+        : this.generateCallTitle(titleInput, callId).catch((err) => {
           logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
-        }),
-        this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-          logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-          return [];
-        }),
+        });
+      const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript).catch((err) => {
+        logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        return [];
+      });
+
+      // Preserve the existing requirement that the short summary succeeds, but
+      // do not wait for title/ticket generation before starting the detailed
+      // summary stream. This keeps peak LLM concurrency at three: the detailed
+      // request takes the short-summary slot as soon as that request finishes.
+      const summary = await summaryPromise;
+      pendingDetailedSummary = summary
+        ? callDocumentService.generateAndPostDetailedSummary(
+            callId,
+            formattedTranscript,
+            callMessage.conversationId,
+            undefined,
+            { callTitlePromise },
+          )
+        : null;
+      const [title, ticketSuggestions] = await Promise.all([
+        callTitlePromise,
+        ticketSuggestionsPromise,
       ]);
 
       const duration = Date.now() - startTime;
@@ -1900,12 +1928,16 @@ Output ONLY the processed transcript, nothing else.`;
         // Update the call system message with the title (if generated)
         if (title) {
           try {
-            // Use Prisma transaction for atomic message update
+            // Serialize with first-chunk Canvas URL attachment. Both operations
+            // merge message metadata, so the row lock prevents either concurrent
+            // writer from replacing the other's newly-added keys.
             await db.$transaction(async (tx) => {
-              // Fetch the message within the transaction
-              const message = await tx.message.findUnique({
-                where: { messageId },
-              });
+              const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
+                SELECT "content", "metadata"
+                FROM "messages"
+                WHERE "messageId" = ${messageId}
+                FOR UPDATE
+              `;
 
               if (message) {
                 // Swap storage: message.content = AI description, metadata.callEndedText = original call text
@@ -1999,16 +2031,25 @@ Output ONLY the processed transcript, nothing else.`;
           }
         }
 
-        try {
-          await callDocumentService.generateAndPostDetailedSummary(
-            callId,
-            formattedTranscript,
-            callMessage.conversationId
-          );
-          logger.info(`Auto-generated detailed summary for call: ${callId}`);
-        } catch (error) {
-          // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-          logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+        if (pendingDetailedSummary) {
+          // Clear the fallback reference before awaiting normally. The finally
+          // block only drains a task when an earlier return/error bypasses here.
+          const detailedSummaryPromise = pendingDetailedSummary;
+          pendingDetailedSummary = null;
+          try {
+            const detailedSummaryResult = await detailedSummaryPromise;
+            if (detailedSummaryResult.success) {
+              logger.info(`Auto-generated detailed summary for call: ${callId}`);
+            } else {
+              logger.error(`[${callId}] detailed_summary_failed`, {
+                stage: 'detailed_summary_generation',
+                error: detailedSummaryResult.error || 'Unknown detailed summary failure',
+              });
+            }
+          } catch (error) {
+            // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
+            logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+          }
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
@@ -2036,6 +2077,19 @@ Output ONLY the processed transcript, nothing else.`;
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     } finally {
+      // Once started, keep the per-call lock until detailed generation settles.
+      // This covers early returns (for example, a concurrently deleted call)
+      // without leaving an unobserved stream racing the next reconciliation.
+      if (pendingDetailedSummary) {
+        try {
+          await pendingDetailedSummary;
+        } catch (error) {
+          logger.error(`[${callId}] detailed_summary_background_drain_failed`, {
+            error,
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+        }
+      }
       await releaseLock(lockHandle);
     }
   }

@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { IngestionStatus } from '@xyne/shared';
+import { IngestionStatus, VespaInsertionStatus } from '@xyne/shared';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
 import { InsertDocument, fileSchema, VespaSchema } from '@/vespa/src/types';
@@ -143,7 +143,7 @@ export class VespaFileWorker {
 					entityType,
 					workspaceId,
 					type: VespaOperationType[job.data.jobType],
-					status: 'FAILED',
+					status: VespaInsertionStatus.FAILED,
 					namespace: this.namespace,
 					errorMessage: `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
 					errorDetails: JSON.stringify({

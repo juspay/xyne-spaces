@@ -96,10 +96,9 @@ export class EmailAuthController {
       }
 
       if (!orgMember.passwordHash) {
-        // EMAIL user who was invited but password isn't set yet
-        res.status(403).json({
-          error: 'Password not set',
-          message: 'Please use forgot password to set your password.',
+        res.status(401).json({
+          error: 'Invalid credentials',
+          message: 'Email or password is incorrect',
         });
         return;
       }
@@ -315,7 +314,7 @@ export class EmailAuthController {
           role: workspaceUser.role,
           orgRole: orgMember.role,
           memberId: orgMember.memberId,
-          authProvider: 'EMAIL',
+          authProvider: AuthProvider.EMAIL,
         },
         workspaces,
         pendingUserData: {

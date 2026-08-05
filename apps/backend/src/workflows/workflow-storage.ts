@@ -1,3 +1,4 @@
+import { WorkflowExecutionMode } from '@xyne/shared';
 // Workflow storage interface for checkpoint persistence
 
 import { UpdateAgentStepInput, WorkflowStep } from '@/types/database'
@@ -243,5 +244,5 @@ export interface WorkflowStorage {
 
   // Execution mode management (MANUAL/AUTOMATIC)
   getExecutionMode(workflowExecutionId: string): Promise<string>
-  setExecutionMode(workflowExecutionId: string, mode: 'AUTOMATIC' | 'MANUAL'): Promise<void>
+  setExecutionMode(workflowExecutionId: string, mode: WorkflowExecutionMode): Promise<void>
 }

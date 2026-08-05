@@ -13,6 +13,7 @@ import { syncGoogleCalendarNow } from '@/queues/googleCalendarSyncQueue';
 import { syncMicrosoftCalendarNow } from '@/queues/microsoftCalendarSyncQueue';
 import { pubSubWatchService } from '@/pubsub';
 import { parseCalendarCredentials } from '@/database/repositories/externalSourceRepository';
+import { AuthProvider } from '@xyne/shared';
 
 const router = express.Router();
 
@@ -59,7 +60,7 @@ router.post('/google', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User email not found' });
     }
 
-    if (user.authProvider !== 'GOOGLE') {
+    if (user.authProvider !== AuthProvider.GOOGLE) {
       return res
         .status(400)
         .json({ success: false, error: 'User is not authenticated with Google' });
@@ -144,7 +145,7 @@ router.post('/microsoft', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User email not found' });
     }
 
-    if (user.authProvider !== 'MICROSOFT') {
+    if (user.authProvider !== AuthProvider.MICROSOFT) {
       return res
         .status(400)
         .json({ success: false, error: 'User is not authenticated with Microsoft' });

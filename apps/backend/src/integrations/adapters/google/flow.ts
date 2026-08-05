@@ -11,6 +11,7 @@ import { ExternalMessageRepository } from '@/database/repositories/externalMessa
 import { preDownloadGmailAttachments } from './attachments';
 import { GooglePubSubMessage, GooglePubSubData } from './types';
 import { config } from '@/config/env';
+import { MessageDirection } from '@xyne/shared';
 
 const TAG = '[GoogleFlow]';
 const externalMessageRepo = new ExternalMessageRepository();
@@ -39,7 +40,7 @@ export class GoogleFlow extends BaseFlow {
           // Only skip if this message was already ingested as INCOMING.
           // An OUTGOING record means WE sent this reply — other desks sharing
           // the same source may still need to receive it via resolveDlChannels.
-          if (existing.some(e => e.direction === 'INCOMING')) {
+          if (existing.some(e => e.direction === MessageDirection.INCOMING)) {
             logger.info(`${TAG} skipping already-ingested message ${messageId}`);
             return { __skipIngestion: true, __skipReason: `duplicate-webhook:${messageId}` };
           }
@@ -112,7 +113,7 @@ export class GoogleFlow extends BaseFlow {
       const payloads: any[] = [];
       let lastRealIndex = -1;
       for (const messageId of messageIds) {
-        if (existing.some(e => e.externalId === messageId && e.direction === 'INCOMING')) {
+        if (existing.some(e => e.externalId === messageId && e.direction === MessageDirection.INCOMING)) {
           logger.info(`${TAG} skipping already-ingested message ${messageId}`);
           payloads.push({ __skipIngestion: true, __skipReason: `duplicate-webhook:${messageId}` });
           continue;

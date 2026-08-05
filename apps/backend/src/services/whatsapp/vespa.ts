@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 
 const db = DatabaseClient.getInstance();
 
@@ -27,8 +28,8 @@ export const queueWhatsAppChannelVespaJob = (channelId: string, userId: string, 
       }
       await db.vespaInsertionLogs.create({
         data: {
-          status: 'FAILED',
-          type: 'INSERT',
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.INSERT,
           entityId: channelId,
           entityType: channelSchema,
           namespace: NAMESPACE,

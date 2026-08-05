@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { findOrCreateConversation } from '../core/conversationUtils';
@@ -243,8 +243,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runWithContext(
-        { userId: 'incoming-webhook', workspaceId: context.workspaceId },
+      await runAsServiceActor('incoming-webhook', context.workspaceId,
         async () => {
           const bodyResult = IncomingWebhookBodySchema.safeParse(context.body);
           if (!bodyResult.success) {
@@ -305,8 +304,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runWithContext(
-        { userId: 'incoming-webhook', workspaceId: context.workspaceId },
+      await runAsServiceActor('incoming-webhook', context.workspaceId,
         async () => {
           const payload = parseExactSentinelPayload(context.body);
           const webhookAction =

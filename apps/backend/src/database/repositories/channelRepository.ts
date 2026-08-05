@@ -39,7 +39,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Skip 255 char validation for DM and GROUP_DM channels
     // Their names are comma-separated user IDs (internal identifiers)
     // and can exceed 255 chars with many participants
-    const isDMChannel = data.scopeType === 'DM' || data.scopeType === 'GROUP_DM';
+    const isDMChannel = data.scopeType === ChannelScopeType.DM || data.scopeType === ChannelScopeType.GROUP_DM;
     if (!isDMChannel) {
       await this.validateString(data.name, 'name', 255);
     }
@@ -150,7 +150,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       // Their names are comma-separated user IDs (internal identifiers)
       // and can exceed 255 chars with many participants
       const channel = await this.findById(id);
-      const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
+      const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
 
       if (!isDMChannel) {
         await this.validateString(data.name, 'name', 255);
@@ -278,7 +278,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     const name = memberIds.sort().join(",");
     return await this.db.channel.findFirst({
       where: {
-        scopeType: 'GROUP_DM',
+        scopeType: ChannelScopeType.GROUP_DM,
         name: name
       }
     });

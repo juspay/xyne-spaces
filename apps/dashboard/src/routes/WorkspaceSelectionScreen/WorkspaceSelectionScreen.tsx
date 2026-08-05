@@ -6,6 +6,7 @@ import { ArrowRight, Building2, Loader2, LogOut, Plus, Users, X } from 'lucide-r
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import type { Workspace } from '../../machines/authMachine';
+import { WorkspaceType } from '@xyne/shared';
 
 interface WorkspaceWithMeta extends Workspace {
   isApprovedRequest?: boolean;
@@ -133,7 +134,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     try {
       const response = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
         '/auth/create-workspace-pending',
-        { workspaceName: newWorkspaceName.trim(), workspaceType: 'ENTERPRISE' },
+        { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
       );
       const newWorkspaceId = response.data.user.workspaceId;
       localStorage.setItem('user_id', response.data.user.id);

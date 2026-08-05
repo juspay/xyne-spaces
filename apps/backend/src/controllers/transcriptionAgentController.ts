@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CallType } from '@xyne/shared';
+import { CallType, TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -182,7 +182,7 @@ class TranscriptionAgentController {
         boardId,
         assignedTo: assignedTo || undefined,
         priority: (priority.toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'),
-        statusV2: 'TODO', // Default status for transcription agent tickets
+        statusV2: TicketStatusV2.TODO, // Default status for transcription agent tickets
       });
 
       logger.info(`[TicketTool] Ticket created: ${ticket.xyneId} (${ticket.id})`);

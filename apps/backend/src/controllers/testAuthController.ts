@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AccessType, AuthProvider } from '@xyne/shared';
+import { AccessType, AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
 import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -226,7 +226,7 @@ export class TestAuthController {
             data: {
               orgId: TestAuthController.testOrgId!,
               email: testUserData.email,
-              role: 'MEMBER',
+              role: OrgRole.MEMBER,
             },
             select: { memberId: true },
           });
@@ -247,9 +247,9 @@ export class TestAuthController {
               email: testUserData.email,
               name: testUserData.name,
               picture: testUserData.picture,
-              authProvider: 'GOOGLE' as AuthProvider,
+              authProvider: AuthProvider.GOOGLE,
               workspace: { connect: { id: TestAuthController.testWorkspaceId! } },
-              role: 'MEMBER',
+              role: WorkspaceRole.MEMBER,
               orgMember: { connect: { memberId: orgMember.memberId } },
             },
           });

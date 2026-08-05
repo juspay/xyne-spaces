@@ -14,7 +14,7 @@ import { OrgRole,
   ProjectType,
   UserStatus,
   WorkspaceRole,
-  Status, ChannelRole } from '@xyne/shared';
+  Status, ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -204,7 +204,7 @@ export class UserService {
       );
 
       // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
-      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, workspaceId);
+      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, user.workspaceId);
 
       // Add user to general channel
       await this.ensureUserInGeneralChannel(user);
@@ -635,7 +635,7 @@ export class UserService {
       const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
         where: {
           email: email,
-          status: 'APPROVED',
+          status: WorkspaceJoinRequestStatus.APPROVED,
         },
         orderBy: { updatedAt: 'desc' },
       });
@@ -829,7 +829,7 @@ export class UserService {
         where: {
           workspaceId: userData.workspaceId,
           email: userData.email,
-          status: 'APPROVED',
+          status: WorkspaceJoinRequestStatus.APPROVED,
         },
         orderBy: { updatedAt: 'desc' },
       });
@@ -851,7 +851,7 @@ export class UserService {
           data: {
             orgId: workspace.orgId,
             email: userData.email,
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
             leftAt: null,
           },
           select: { memberId: true },
@@ -933,7 +933,7 @@ export class UserService {
         data: {
           name: orgName,
           createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: 'ACTIVE'
+          status: Status.ACTIVE
         }
       });
 
@@ -943,7 +943,7 @@ export class UserService {
           orgId: organization.orgId,
           name: workspaceName,
           createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: 'ACTIVE',
+          status: Status.ACTIVE,
           workspaceType: WorkspaceType.ENTERPRISE,
           joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
         }
@@ -954,7 +954,7 @@ export class UserService {
         data: {
           orgId: organization.orgId,
           workspaceId: workspace.id,
-          role: 'ADMIN'
+          role: WorkspaceRole.ADMIN
         }
       });
 
@@ -974,7 +974,7 @@ export class UserService {
             where: { memberId: existingOrgMember.memberId },
             data: {
               orgId: organization.orgId,
-              role: 'OWNER',
+              role: OrgRole.OWNER,
               leftAt: null,
             },
           })
@@ -982,7 +982,7 @@ export class UserService {
             data: {
               orgId: organization.orgId,
               email: userData.email,
-              role: 'OWNER',
+              role: OrgRole.OWNER,
             }
           });
 
@@ -1126,7 +1126,7 @@ export class UserService {
           orgId: org.orgId,
           name: workspaceName,
           createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: 'ACTIVE',
+          status: Status.ACTIVE,
           workspaceType,
           joinPolicy,
         },
@@ -1143,7 +1143,7 @@ export class UserService {
       data: {
         orgId: org.orgId,
         workspaceId: workspace.id,
-        role: 'ADMIN',
+        role: WorkspaceRole.ADMIN,
       },
     });
 
@@ -1164,9 +1164,9 @@ export class UserService {
         email: userData.email,
         name: userData.name,
         picture: userData.picture,
-        authProvider: 'GOOGLE',
+        authProvider: AuthProvider.GOOGLE,
         workspace: { connect: { id: workspace.id } },
-        role: 'OWNER',
+        role: WorkspaceRole.OWNER,
         orgMember: { connect: { memberId: orgMember.memberId } },
       },
     });
