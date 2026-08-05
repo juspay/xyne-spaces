@@ -18,6 +18,8 @@ import {
 
 const REPORT_TEMPLATE_PATTERN =
   /^[ \t]*<template id="dpip-email-body">[\s\S]*?<\/template>/m;
+const OVERVIEW_TEMPLATE_PATTERN =
+  /^[ \t]*<template id="dpip-overview-data">[\s\S]*?<\/template>/m;
 const DEFAULT_MESSAGE = 'DPIP Daily Registry Intelligence Report';
 
 interface DpipReportBlock {
@@ -82,14 +84,39 @@ export function generateDpipReportHtml(
   );
 }
 
+export function generateDpipOverviewHtml(
+  template: string,
+  tables: Readonly<Record<DpipTableName, DpipRow[]>>,
+): string {
+  if (!OVERVIEW_TEMPLATE_PATTERN.test(template)) {
+    throw new Error('DPIP overview template payload area not found');
+  }
+
+  const payload = JSON.stringify(buildDpipReportPayload(tables));
+  return template.replace(
+    OVERVIEW_TEMPLATE_PATTERN,
+    `<template id="dpip-overview-data">${escapeHtmlText(payload)}</template>`,
+  );
+}
+
 export async function loadDpipReportTemplate(): Promise<string> {
   const configuredPath =
     process.env.DPIP_REPORT_TEMPLATE_PATH ?? 'Report.html';
   return readFile(resolve(process.cwd(), configuredPath), 'utf8');
 }
 
+export async function loadDpipOverviewTemplate(): Promise<string> {
+  const configuredPath =
+    process.env.DPIP_OVERVIEW_TEMPLATE_PATH ?? 'DPIP_Overview.html';
+  return readFile(resolve(process.cwd(), configuredPath), 'utf8');
+}
+
 export function dpipReportFileName(now = new Date()): string {
   return `dpip-daily-report-${now.toISOString().slice(0, 10)}.html`;
+}
+
+export function dpipOverviewFileName(now = new Date()): string {
+  return `dpip-overview-${now.toISOString().slice(0, 10)}.html`;
 }
 
 function requiredEnvironmentVariable(name: string): string {
@@ -110,35 +137,43 @@ function responseObject(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export async function sendDpipReportToXyne(
-  html: string,
+export async function sendDpipReportsToXyne(
+  reportHtml: string,
+  overviewHtml: string,
   fetchImplementation: typeof fetch = fetch,
   logContext?: DpipLogContext,
 ): Promise<DpipReportDelivery> {
   const apiUrl = requiredEnvironmentVariable('XYNE_SPACES_API_URL');
   const appJwt = requiredEnvironmentVariable('XYNE_SPACES_APP_JWT');
   const channelId = requiredEnvironmentVariable('XYNE_SPACES_CHANNEL_ID');
-  const fileName = dpipReportFileName();
+  const reportFileName = dpipReportFileName();
+  const overviewFileName = dpipOverviewFileName();
 
   const form = new FormData();
   form.append('channels', channelId);
-  form.append('title', DEFAULT_MESSAGE);
-  form.append('filename', fileName);
   form.append(
     'initial_comment',
     process.env.XYNE_SPACES_MESSAGE?.trim() || DEFAULT_MESSAGE,
   );
   form.append(
-    'file',
-    new Blob([html], { type: 'text/html; charset=utf-8' }),
-    fileName,
+    'files',
+    new Blob([reportHtml], { type: 'text/html; charset=utf-8' }),
+    reportFileName,
+  );
+  form.append(
+    'files',
+    new Blob([overviewHtml], { type: 'text/html; charset=utf-8' }),
+    overviewFileName,
   );
 
   const uploadStartedAt = Date.now();
   const commonLogFields = {
     ...contextLogFields(logContext),
-    file_name: fileName,
-    report_bytes: Buffer.byteLength(html, 'utf8'),
+    file_names: [reportFileName, overviewFileName],
+    report_count: 2,
+    report_bytes:
+      Buffer.byteLength(reportHtml, 'utf8') +
+      Buffer.byteLength(overviewHtml, 'utf8'),
   };
   logInfo('dpip_report_upload_started', commonLogFields);
 

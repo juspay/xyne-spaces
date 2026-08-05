@@ -643,6 +643,7 @@ function parseDpipPayload(input) {
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 var REPORT_TEMPLATE_PATTERN = /^[ \t]*<template id="dpip-email-body">[\s\S]*?<\/template>/m;
+var OVERVIEW_TEMPLATE_PATTERN = /^[ \t]*<template id="dpip-overview-data">[\s\S]*?<\/template>/m;
 var DEFAULT_MESSAGE = "DPIP Daily Registry Intelligence Report";
 function jsonValue(value) {
   return typeof value === "bigint" ? value.toString() : value;
@@ -682,12 +683,29 @@ function generateDpipReportHtml(template, tables) {
     `<template id="dpip-email-body">${escapeHtmlText(payload)}</template>`
   );
 }
+function generateDpipOverviewHtml(template, tables) {
+  if (!OVERVIEW_TEMPLATE_PATTERN.test(template)) {
+    throw new Error("DPIP overview template payload area not found");
+  }
+  const payload = JSON.stringify(buildDpipReportPayload(tables));
+  return template.replace(
+    OVERVIEW_TEMPLATE_PATTERN,
+    `<template id="dpip-overview-data">${escapeHtmlText(payload)}</template>`
+  );
+}
 async function loadDpipReportTemplate() {
   const configuredPath = process.env.DPIP_REPORT_TEMPLATE_PATH ?? "Report.html";
   return readFile(resolve(process.cwd(), configuredPath), "utf8");
 }
+async function loadDpipOverviewTemplate() {
+  const configuredPath = process.env.DPIP_OVERVIEW_TEMPLATE_PATH ?? "DPIP_Overview.html";
+  return readFile(resolve(process.cwd(), configuredPath), "utf8");
+}
 function dpipReportFileName(now = /* @__PURE__ */ new Date()) {
   return `dpip-daily-report-${now.toISOString().slice(0, 10)}.html`;
+}
+function dpipOverviewFileName(now = /* @__PURE__ */ new Date()) {
+  return `dpip-overview-${now.toISOString().slice(0, 10)}.html`;
 }
 function requiredEnvironmentVariable2(name) {
   const value = process.env[name]?.trim();
@@ -702,29 +720,34 @@ function appUploadUrl(baseUrl) {
 function responseObject(value) {
   return typeof value === "object" && value !== null ? value : void 0;
 }
-async function sendDpipReportToXyne(html, fetchImplementation = fetch, logContext) {
+async function sendDpipReportsToXyne(reportHtml, overviewHtml, fetchImplementation = fetch, logContext) {
   const apiUrl = requiredEnvironmentVariable2("XYNE_SPACES_API_URL");
   const appJwt = requiredEnvironmentVariable2("XYNE_SPACES_APP_JWT");
   const channelId = requiredEnvironmentVariable2("XYNE_SPACES_CHANNEL_ID");
-  const fileName = dpipReportFileName();
+  const reportFileName = dpipReportFileName();
+  const overviewFileName = dpipOverviewFileName();
   const form = new FormData();
   form.append("channels", channelId);
-  form.append("title", DEFAULT_MESSAGE);
-  form.append("filename", fileName);
   form.append(
     "initial_comment",
     process.env.XYNE_SPACES_MESSAGE?.trim() || DEFAULT_MESSAGE
   );
   form.append(
-    "file",
-    new Blob([html], { type: "text/html; charset=utf-8" }),
-    fileName
+    "files",
+    new Blob([reportHtml], { type: "text/html; charset=utf-8" }),
+    reportFileName
+  );
+  form.append(
+    "files",
+    new Blob([overviewHtml], { type: "text/html; charset=utf-8" }),
+    overviewFileName
   );
   const uploadStartedAt = Date.now();
   const commonLogFields = {
     ...contextLogFields(logContext),
-    file_name: fileName,
-    report_bytes: Buffer.byteLength(html, "utf8")
+    file_names: [reportFileName, overviewFileName],
+    report_count: 2,
+    report_bytes: Buffer.byteLength(reportHtml, "utf8") + Buffer.byteLength(overviewHtml, "utf8")
   };
   logInfo("dpip_report_upload_started", commonLogFields);
   let response;
@@ -941,7 +964,7 @@ http("ingestDpip", async (req, res) => {
     stageStartedAt = Date.now();
     const snapshotStartedAt = Date.now();
     const templateStartedAt = Date.now();
-    const [reportTables, reportTemplate] = await Promise.all([
+    const [reportTables, reportTemplate, overviewTemplate] = await Promise.all([
       readAllDpipTables(logContext).then(
         (tables) => {
           logInfo("dpip_report_snapshot_loaded", {
@@ -980,6 +1003,24 @@ http("ingestDpip", async (req, res) => {
           });
           throw error;
         }
+      ),
+      loadDpipOverviewTemplate().then(
+        (template) => {
+          logInfo("dpip_overview_template_loaded", {
+            ...requestLogFields,
+            duration_ms: Date.now() - templateStartedAt,
+            template_bytes: Buffer.byteLength(template, "utf8")
+          });
+          return template;
+        },
+        (error) => {
+          logError("dpip_overview_template_load_failed", {
+            ...requestLogFields,
+            duration_ms: Date.now() - templateStartedAt,
+            ...errorLogFields(error)
+          });
+          throw error;
+        }
       )
     ]);
     stage = "report_generation";
@@ -988,15 +1029,21 @@ http("ingestDpip", async (req, res) => {
       reportTemplate,
       reportTables
     );
+    const overviewHtml = generateDpipOverviewHtml(
+      overviewTemplate,
+      reportTables
+    );
     logInfo("dpip_report_generated", {
       ...requestLogFields,
       duration_ms: Date.now() - stageStartedAt,
-      report_bytes: Buffer.byteLength(reportHtml, "utf8")
+      report_bytes: Buffer.byteLength(reportHtml, "utf8"),
+      overview_bytes: Buffer.byteLength(overviewHtml, "utf8")
     });
     stage = "xyne_report_upload";
     stageStartedAt = Date.now();
-    const reportDelivery = await sendDpipReportToXyne(
+    const reportDelivery = await sendDpipReportsToXyne(
       reportHtml,
+      overviewHtml,
       fetch,
       logContext
     );

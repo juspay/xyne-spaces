@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DPIP Overview — IDPIC</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+:root{--navy:#1b3a6b;--deep:#12294d;--steel:#2e5fa3;--teal:#17697a;--amber:#b8762e;--paper:#f5f6f9;--card:#fff;--line:#e4e7ee;--text:#2b2b2b;--muted:#6b7280;--good:#1e7b4d;--bad:#b03a2e;--display:Cambria,Georgia,serif;--body:Calibri,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--text);font:14px var(--body)}h1,h2,h3,.number{font-family:var(--display)}
+.hero{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:30px 40px;color:#fff;background:linear-gradient(120deg,var(--navy),var(--deep))}
+.brand{display:flex;align-items:center;gap:16px}.mark{display:grid;place-items:center;width:66px;height:48px;border-radius:9px;background:#fff;color:var(--navy);font:700 16px var(--display);box-shadow:0 2px 8px #0003}.hero h1{margin:0;font-size:25px}.hero p{margin:4px 0 0;color:#c7d3e8;font-size:12px;letter-spacing:.5px;text-transform:uppercase}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.control{display:flex;align-items:center;gap:7px}.control label{color:#c7d3e8;font-size:11px;letter-spacing:.5px;text-transform:uppercase}.control select,.stamp{padding:8px 14px;border:1px solid #ffffff52;border-radius:20px;background:#ffffff1f;color:#fff;font:12.5px var(--body)}.control option{color:var(--text);background:#fff}
+main{max-width:1280px;margin:auto;padding:30px 40px 64px}.section{margin-bottom:34px}.section-label{margin:0 0 14px;color:var(--navy);font-size:11.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase}.scope{color:var(--muted);letter-spacing:0;text-transform:none}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.card{border:1px solid var(--line);border-radius:12px;background:var(--card);box-shadow:0 2px 6px #141e3c0d}.kpi{padding:22px 24px;border-top:3px solid var(--steel)}.kpi .label{margin-bottom:10px;color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}.kpi .number{color:var(--deep);font-size:38px;font-weight:700;line-height:1}.caption{margin-top:3px;color:#8a8f98;font-size:11px}.delta{margin-top:6px;font-size:12px;font-weight:700}.rows{display:grid;gap:9px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.row{display:flex;justify-content:space-between;font-size:12.5px}.row-label{color:var(--muted)}.row-value{font-weight:700}.up{color:var(--good)}.down{color:var(--bad)}.flat{color:#8a8f98}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}.grid-1{display:grid;grid-template-columns:1fr;gap:20px}.chart-card{padding:20px 22px}.chart-card h3{margin:0 0 4px;color:var(--deep);font-size:14px}.description{margin:0 0 12px;color:#8a8f98;font-size:11.5px}.chart{position:relative;height:270px}
+table{width:100%;border-collapse:collapse;font-size:13px}th{padding:10px 8px;border-bottom:2px solid var(--line);color:var(--muted);font-size:11px;letter-spacing:.4px;text-align:left;text-transform:uppercase}td{padding:10px 8px;border-bottom:1px solid #eef0f4;font-variant-numeric:tabular-nums}tbody tr:hover{background:#fafbfd}.empty{padding:30px;text-align:center;color:var(--muted)}
+footer{padding:22px 40px;color:#9aa0a8;font-size:11px;text-align:center}@media(max-width:850px){.kpis,.grid-2{grid-template-columns:1fr}.hero,main{padding-left:20px;padding-right:20px}.table-wrap{overflow:auto}}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="brand"><div class="mark">IDPIC</div><div><h1>DPIP Overview</h1><p>Digital Payments Intelligence Platform</p></div></div>
+  <div class="controls">
+    <div class="control"><label for="monthFilter">Month</label><select id="monthFilter"><option value="ALL">All (cumulative)</option></select></div>
+    <div class="control"><label for="bankFilter">Bank</label><select id="bankFilter"><option value="ALL">All Banks</option></select></div>
+    <div class="stamp">As of <strong id="asOf">—</strong></div>
+  </div>
+</header>
+<main>
+  <section class="section"><p class="section-label">Headline volumes <span class="scope" id="headlineScope"></span></p><div class="kpis" id="kpis"></div></section>
+  <section class="section"><p class="section-label">Trends <span class="scope" id="trendScope"></span></p><div class="grid-2">
+    <div class="card chart-card"><h3>Reporting trend</h3><p class="description">Daily reports submitted over the selected period</p><div class="chart"><canvas id="reportsTrend"></canvas></div></div>
+    <div class="card chart-card"><h3>Screening trend</h3><p class="description">Daily screenings performed over the selected period</p><div class="chart"><canvas id="screeningsTrend"></canvas></div></div>
+  </div></section>
+  <section class="section"><p class="section-label">Bank leaderboard <span class="scope" id="leaderScope"></span></p><div class="card chart-card table-wrap" id="leaderboard"></div></section>
+  <section class="section"><p class="section-label">Composition <span class="scope" id="compositionScope"></span></p>
+    <div class="grid-2">
+      <div class="card chart-card"><h3>Reports by status</h3><p class="description">Alerted versus suspected reports</p><div class="chart"><canvas id="reportsStatus"></canvas></div></div>
+      <div class="card chart-card"><h3>Screenings by status</h3><p class="description">Screening outcomes across four match statuses</p><div class="chart"><canvas id="screeningsStatus"></canvas></div></div>
+      <div class="card chart-card"><h3>Identifiers by type</h3><p class="description">Six primary identifier types plus other or unclassified</p><div class="chart"><canvas id="identifiersType"></canvas></div></div>
+      <div class="card chart-card"><h3>Identifiers by bank</h3><p class="description">Reported identifiers for every participating bank</p><div class="chart"><canvas id="identifiersBank"></canvas></div></div>
+    </div>
+  </section>
+</main>
+<footer>DPIP Overview — IDPIC. For daily operational detail, see the DPIP Registry Intelligence report.</footer>
+<template id="dpip-overview-data"></template>
+<script>
+(() => {
+  "use strict";
+  const COLORS={navy:"#1b3a6b",steel:"#2e5fa3",teal:"#17697a",amber:"#b8762e",good:"#1e7b4d",grey:"#c7ccd4",grid:"#edeff4"};
+  const METRICS=new Set(["reports_count","identifiers_count","external_entities_count","clusters_count"]);
+  const TYPE_LABELS=new Map([["aadhaar","Aadhaar"],["pan","PAN"],["bank_account","Bank Account"],["bankaccount","Bank Account"],["mobile","Mobile"],["email","Email"],["upi","UPI"]]);
+  const STATUS={alert:new Set(["alert","alerted","match","matched"]),suspect:new Set(["suspect","suspected","confirmed"]),clear:new Set(["clear","cleared"]),noMatch:new Set(["no_match","no match","nomatch"])};
+  const charts={};
+  const state={month:"ALL",bank:"ALL"};
+  const fmt=n=>Math.round(n||0).toLocaleString("en-IN");
+  const norm=v=>String(v??"").trim().toLowerCase();
+  const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+  const num=v=>{const n=Number(v);return Number.isFinite(n)&&n>=0?n:0};
+  const addDays=(iso,days)=>{const d=new Date(iso+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10)};
+  const inRange=(date,from,to)=>date>=from&&date<=to;
+  const monthLabel=key=>new Date(key+"-01T00:00:00Z").toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:"UTC"});
+  const statusIs=(value,kind)=>STATUS[kind].has(norm(value));
+  const tablePayload=JSON.parse(document.getElementById("dpip-overview-data").content.textContent||"[]");
+  const fields={reports:["identifier_type","reported_date","party_id","sub_source","status","metrics_type","metrics_value"],screenings:["screening_date","party_id","screening_status","count"]};
+  const rowsFor=name=>{const block=tablePayload.find(item=>item.table===name);if(!block||!Array.isArray(block.data)||block.data.length===0)return[];const headers=block.data[0];return block.data.slice(1).map(values=>Object.fromEntries(headers.map((field,index)=>[field,values[index]])))};
+  const reports=rowsFor("reports").filter(row=>METRICS.has(norm(row.metrics_type))).map(row=>({...row,metric:norm(row.metrics_type),value:num(row.metrics_value),date:String(row.reported_date),bank:String(row.party_id)}));
+  const screenings=rowsFor("screenings").map(row=>({...row,value:num(row.count),date:String(row.screening_date),bank:String(row.party_id)}));
+  const dates=[...reports.map(row=>row.date),...screenings.map(row=>row.date)].filter(date=>/^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
+  const banks=[...new Set([...reports.map(row=>row.bank),...screenings.map(row=>row.bank)].filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const dateMin=dates[0],dateMax=dates.at(-1);
+  const reportRows=(from,to,allBanks=false)=>reports.filter(row=>inRange(row.date,from,to)&&(allBanks||state.bank==="ALL"||row.bank===state.bank));
+  const screeningRows=(from,to,allBanks=false)=>screenings.filter(row=>inRange(row.date,from,to)&&(allBanks||state.bank==="ALL"||row.bank===state.bank));
+  const isAll=v=>["all","total","overall"].includes(norm(v));
+  const sumReports=(from,to)=>reportRows(from,to).filter(row=>row.metric==="reports_count"&&isAll(row.identifier_type)&&isAll(row.status)).reduce((total,row)=>total+row.value,0);
+  const sumIdentifiers=(from,to)=>reportRows(from,to).filter(row=>row.metric==="identifiers_count"&&isAll(row.identifier_type)&&isAll(row.status)).reduce((total,row)=>total+row.value,0);
+  function groupedScreenings(rows){
+    const groups=new Map();for(const row of rows){const key=row.date+"\0"+row.bank;const group=groups.get(key)||[];group.push(row);groups.set(key,group)}
+    return [...groups.values()].reduce((total,group)=>{const totals=group.filter(row=>isAll(row.screening_status));return total+(totals.length?totals:group).reduce((sum,row)=>sum+row.value,0)},0);
+  }
+  const sumScreenings=(from,to)=>groupedScreenings(screeningRows(from,to));
+  function delta(current,previous){if(!previous)return '<span class="flat">no prior data</span>';const pct=(current-previous)/previous*100;const cls=Math.abs(pct)<.05?"flat":pct>0?"up":"down";const arrow=cls==="flat"?"→":pct>0?"↑":"↓";return `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}%</span>`}
+  function kpi(label,valueFn,anchor){const today=valueFn(anchor,anchor),yesterday=valueFn(addDays(anchor,-1),addDays(anchor,-1));const week=valueFn(addDays(anchor,-6),anchor),priorWeek=valueFn(addDays(anchor,-13),addDays(anchor,-7));const month=valueFn(addDays(anchor,-29),anchor),priorMonth=valueFn(addDays(anchor,-59),addDays(anchor,-30));return `<article class="card kpi"><div class="label">${label}</div><div class="number">${fmt(today)}</div><div class="caption">Latest day on file</div><div class="delta">${delta(today,yesterday)} <span class="flat">vs previous day</span></div><div class="rows"><div class="row"><span class="row-label">This week</span><span class="row-value">${fmt(week)} &nbsp;${delta(week,priorWeek)}</span></div><div class="row"><span class="row-label">Trailing 30 days</span><span class="row-value">${fmt(month)} &nbsp;${delta(month,priorMonth)}</span></div></div></article>`}
+  function chart(id,config){charts[id]?.destroy();charts[id]=new Chart(document.getElementById(id),config)}
+  const chartOptions=(horizontal=false)=>({responsive:true,maintainAspectRatio:false,indexAxis:horizontal?"y":"x",scales:{x:{grid:{display:horizontal,color:COLORS.grid}},y:{grid:{display:!horizontal,color:COLORS.grid}}},plugins:{legend:{display:false}}});
+  function aggregate(rows,key,predicate=()=>true){const result=new Map();for(const row of rows.filter(predicate))result.set(row[key],(result.get(row[key])||0)+row.value);return result}
+  function render(){
+    if(!dateMax){document.getElementById("kpis").innerHTML='<div class="card empty">No report data is available.</div>';return}
+    const monthRows=state.month==="ALL"?dates:dates.filter(date=>date.startsWith(state.month));const scopeFrom=state.month==="ALL"?dateMin:monthRows[0],scopeTo=state.month==="ALL"?dateMax:monthRows.at(-1);if(!scopeFrom||!scopeTo)return;
+    const scope=state.month==="ALL"?"All-time (cumulative)":monthLabel(state.month);const bankScope=state.bank==="ALL"?scope:`${scope} · ${state.bank}`;for(const id of ["headlineScope","trendScope","compositionScope"])document.getElementById(id).textContent="— "+bankScope;document.getElementById("leaderScope").textContent="— "+scope;
+    document.getElementById("kpis").innerHTML=kpi("Total reports",sumReports,scopeTo)+kpi("Total screenings",sumScreenings,scopeTo)+kpi("Total identifiers reported",sumIdentifiers,scopeTo);
+    const days=[];for(let date=scopeFrom;date<=scopeTo;date=addDays(date,1))days.push(date);
+    chart("reportsTrend",{type:"line",data:{labels:days,datasets:[{data:days.map(date=>sumReports(date,date)),borderColor:COLORS.navy,backgroundColor:"#1b3a6b14",fill:true,tension:.25,pointRadius:0,borderWidth:2}]},options:{...chartOptions(),scales:{x:{grid:{display:false},ticks:{maxTicksLimit:8}},y:{grid:{color:COLORS.grid}}}}});
+    chart("screeningsTrend",{type:"line",data:{labels:days,datasets:[{data:days.map(date=>sumScreenings(date,date)),borderColor:COLORS.teal,backgroundColor:"#17697a14",fill:true,tension:.25,pointRadius:0,borderWidth:2}]},options:{...chartOptions(),scales:{x:{grid:{display:false},ticks:{maxTicksLimit:8}},y:{grid:{color:COLORS.grid}}}}});
+    const leaderboard=banks.map(bank=>{const previous=state.bank;state.bank=bank;const item={bank,reports:sumReports(scopeFrom,scopeTo),screenings:sumScreenings(scopeFrom,scopeTo),identifiers:sumIdentifiers(scopeFrom,scopeTo),week:sumReports(addDays(scopeTo,-6),scopeTo),prior:sumReports(addDays(scopeTo,-13),addDays(scopeTo,-7))};state.bank=previous;return item}).sort((a,b)=>b.reports-a.reports);
+    document.getElementById("leaderboard").innerHTML=`<table><thead><tr><th>Bank</th><th>Reports</th><th>Screenings</th><th>Identifiers reported</th><th>Reports, week-on-week</th></tr></thead><tbody>${leaderboard.map(row=>`<tr><td><strong>${esc(row.bank)}</strong></td><td>${fmt(row.reports)}</td><td>${fmt(row.screenings)}</td><td>${fmt(row.identifiers)}</td><td>${delta(row.week,row.prior)}</td></tr>`).join("")}</tbody></table>`;
+    const scopedReports=reportRows(scopeFrom,scopeTo),scopedScreenings=screeningRows(scopeFrom,scopeTo);
+    const reportStatus=["alert","suspect"].map(kind=>scopedReports.filter(row=>row.metric==="reports_count"&&isAll(row.identifier_type)&&statusIs(row.status,kind)).reduce((sum,row)=>sum+row.value,0));
+    chart("reportsStatus",{type:"bar",data:{labels:["Alerted","Suspected"],datasets:[{data:reportStatus,backgroundColor:[COLORS.amber,COLORS.steel]}]},options:chartOptions()});
+    const screeningStatus=["alert","suspect","clear","noMatch"].map(kind=>scopedScreenings.filter(row=>statusIs(row.screening_status,kind)).reduce((sum,row)=>sum+row.value,0));
+    chart("screeningsStatus",{type:"bar",data:{labels:["Alerted","Suspected","Cleared","No Match"],datasets:[{data:screeningStatus,backgroundColor:[COLORS.amber,COLORS.steel,COLORS.good,COLORS.grey]}]},options:chartOptions()});
+    const identifierRows=scopedReports.filter(row=>row.metric==="identifiers_count"&&isAll(row.status)&&!isAll(row.identifier_type));const byType=new Map();for(const row of identifierRows){const label=TYPE_LABELS.get(norm(row.identifier_type));if(label)byType.set(label,(byType.get(label)||0)+row.value)}const labels=["Aadhaar","PAN","Bank Account","Mobile","Email","UPI","Other/Unclassified"];const namedIdentifiers=[...byType.values()].reduce((sum,value)=>sum+value,0);const other=Math.max(0,sumIdentifiers(scopeFrom,scopeTo)-namedIdentifiers);
+    chart("identifiersType",{type:"bar",data:{labels,datasets:[{data:labels.map(label=>label==="Other/Unclassified"?other:(byType.get(label)||0)),backgroundColor:[COLORS.navy,COLORS.steel,COLORS.teal,COLORS.amber,"#c9975a","#7a8ba8",COLORS.grey]}]},options:chartOptions(true)});
+    const previous=state.bank;const identifiersByBank=banks.map(bank=>{state.bank=bank;return {bank,value:sumIdentifiers(scopeFrom,scopeTo)}}).sort((a,b)=>b.value-a.value);state.bank=previous;
+    chart("identifiersBank",{type:"bar",data:{labels:identifiersByBank.map(item=>item.bank),datasets:[{data:identifiersByBank.map(item=>item.value),backgroundColor:identifiersByBank.map(item=>item.bank===state.bank?COLORS.amber:COLORS.steel)}]},options:chartOptions()});
+  }
+  if(dateMax){document.getElementById("asOf").textContent=dateMax;const monthSelect=document.getElementById("monthFilter");for(const month of [...new Set(dates.map(date=>date.slice(0,7)))])monthSelect.add(new Option(monthLabel(month),month));const bankSelect=document.getElementById("bankFilter");for(const bank of banks)bankSelect.add(new Option(bank,bank));monthSelect.addEventListener("change",event=>{state.month=event.target.value;render()});bankSelect.addEventListener("change",event=>{state.bank=event.target.value;render()})}
+  Chart.defaults.font.family='Calibri,"Segoe UI",sans-serif';Chart.defaults.color="#556";render();
+})();
+</script>
+</body>
+</html>

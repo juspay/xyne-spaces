@@ -1,3 +1,6 @@
 import { copyFile } from 'node:fs/promises';
 
-await copyFile('Report.html', 'console-source/Report.html');
+await Promise.all([
+  copyFile('Report.html', 'console-source/Report.html'),
+  copyFile('DPIP_Overview.html', 'console-source/DPIP_Overview.html'),
+]);

@@ -4,9 +4,11 @@ import { afterEach, describe, it, mock } from 'node:test';
 
 import {
   buildDpipReportPayload,
+  dpipOverviewFileName,
   dpipReportFileName,
+  generateDpipOverviewHtml,
   generateDpipReportHtml,
-  sendDpipReportToXyne,
+  sendDpipReportsToXyne,
 } from '../src/report';
 import {
   DPIP_TABLE_NAMES,
@@ -94,6 +96,25 @@ describe('DPIP HTML report', () => {
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   });
 
+  it('injects the same escaped snapshot into the overview template', () => {
+    const tables = emptyTables();
+    tables.reports.push({
+      identifier_type: 'ALL',
+      reported_date: '2026-07-30',
+      party_id: 'bank-1',
+      sub_source: 'daily',
+      status: 'ALL',
+      metrics_type: 'reports_count',
+      metrics_value: 4n,
+    });
+    const template = '<template id="dpip-overview-data"></template>';
+
+    const html = generateDpipOverviewHtml(template, tables);
+
+    assert.match(html, /"table":"reports"/);
+    assert.match(html, /"bank-1"/);
+  });
+
   it('ignores template-tag examples inside HTML comments', () => {
     const tables = emptyTables();
     const template = `<!--
@@ -142,13 +163,12 @@ Replace content inside the <template id="dpip-email-body"> element.
   });
 
   it('uses UTC report date in attachment filename', () => {
-    assert.equal(
-      dpipReportFileName(new Date('2026-07-30T23:59:59.000Z')),
-      'dpip-daily-report-2026-07-30.html',
-    );
+    const now = new Date('2026-07-30T23:59:59.000Z');
+    assert.equal(dpipReportFileName(now), 'dpip-daily-report-2026-07-30.html');
+    assert.equal(dpipOverviewFileName(now), 'dpip-overview-2026-07-30.html');
   });
 
-  it('uploads HTML as a separate Xyne app attachment', async () => {
+  it('uploads both HTML reports as attachments on one Xyne message', async () => {
     process.env.XYNE_SPACES_API_URL = 'https://spaces.example.test/';
     process.env.XYNE_SPACES_APP_JWT = 'test-jwt';
     process.env.XYNE_SPACES_CHANNEL_ID = 'channel-1';
@@ -180,8 +200,9 @@ Replace content inside the <template id="dpip-email-body"> element.
       );
     }) as typeof fetch;
 
-    const delivery = await sendDpipReportToXyne(
+    const delivery = await sendDpipReportsToXyne(
       '<html>report</html>',
+      '<html>overview</html>',
       fakeFetch,
     );
 
@@ -196,9 +217,24 @@ Replace content inside the <template id="dpip-email-body"> element.
     assert.ok(requestInit?.body instanceof FormData);
     const form = requestInit.body;
     assert.equal(form.get('channels'), 'channel-1');
-    const file = form.get('file');
-    assert.ok(file instanceof Blob);
-    assert.equal(file.type, 'text/html; charset=utf-8');
+    assert.equal(form.get('file'), null);
+    const files = form.getAll('files');
+    assert.equal(files.length, 2);
+    assert.ok(files.every((file) => file instanceof Blob));
+    assert.ok(
+      files.every((file) => file.type === 'text/html; charset=utf-8'),
+    );
+    const fileNames = files.map((file) =>
+      file instanceof File ? file.name : '',
+    );
+    assert.match(
+      fileNames[0] ?? '',
+      /^dpip-daily-report-\d{4}-\d{2}-\d{2}\.html$/,
+    );
+    assert.match(
+      fileNames[1] ?? '',
+      /^dpip-overview-\d{4}-\d{2}-\d{2}\.html$/,
+    );
     assert.deepEqual(delivery, {
       conversationId: 'message-1',
       messageId: 'message-1',
@@ -222,7 +258,11 @@ Replace content inside the <template id="dpip-email-body"> element.
       )) as typeof fetch;
 
     await assert.rejects(
-      sendDpipReportToXyne('<html>sensitive report</html>', fakeFetch),
+      sendDpipReportsToXyne(
+        '<html>sensitive report</html>',
+        '<html>sensitive overview</html>',
+        fakeFetch,
+      ),
       /Xyne Spaces report upload failed: not_in_channel/,
     );
 
@@ -255,7 +295,11 @@ Replace content inside the <template id="dpip-email-body"> element.
     }) as typeof fetch;
 
     await assert.rejects(
-      sendDpipReportToXyne('<html>sensitive report</html>', fakeFetch),
+      sendDpipReportsToXyne(
+        '<html>sensitive report</html>',
+        '<html>sensitive overview</html>',
+        fakeFetch,
+      ),
       /fetch failed/,
     );
 

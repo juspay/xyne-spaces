@@ -17,8 +17,10 @@ import {
 } from './parser';
 import {
   generateDpipReportHtml,
+  generateDpipOverviewHtml,
+  loadDpipOverviewTemplate,
   loadDpipReportTemplate,
-  sendDpipReportToXyne,
+  sendDpipReportsToXyne,
 } from './report';
 import {
   DPIP_TABLE_NAMES,
@@ -203,7 +205,7 @@ http('ingestDpip', async (req, res) => {
     stageStartedAt = Date.now();
     const snapshotStartedAt = Date.now();
     const templateStartedAt = Date.now();
-    const [reportTables, reportTemplate] = await Promise.all([
+    const [reportTables, reportTemplate, overviewTemplate] = await Promise.all([
       readAllDpipTables(logContext).then(
         (tables) => {
           logInfo('dpip_report_snapshot_loaded', {
@@ -243,6 +245,24 @@ http('ingestDpip', async (req, res) => {
           throw error;
         },
       ),
+      loadDpipOverviewTemplate().then(
+        (template) => {
+          logInfo('dpip_overview_template_loaded', {
+            ...requestLogFields,
+            duration_ms: Date.now() - templateStartedAt,
+            template_bytes: Buffer.byteLength(template, 'utf8'),
+          });
+          return template;
+        },
+        (error: unknown) => {
+          logError('dpip_overview_template_load_failed', {
+            ...requestLogFields,
+            duration_ms: Date.now() - templateStartedAt,
+            ...errorLogFields(error),
+          });
+          throw error;
+        },
+      ),
     ]);
 
     stage = 'report_generation';
@@ -251,16 +271,22 @@ http('ingestDpip', async (req, res) => {
       reportTemplate,
       reportTables,
     );
+    const overviewHtml = generateDpipOverviewHtml(
+      overviewTemplate,
+      reportTables,
+    );
     logInfo('dpip_report_generated', {
       ...requestLogFields,
       duration_ms: Date.now() - stageStartedAt,
       report_bytes: Buffer.byteLength(reportHtml, 'utf8'),
+      overview_bytes: Buffer.byteLength(overviewHtml, 'utf8'),
     });
 
     stage = 'xyne_report_upload';
     stageStartedAt = Date.now();
-    const reportDelivery = await sendDpipReportToXyne(
+    const reportDelivery = await sendDpipReportsToXyne(
       reportHtml,
+      overviewHtml,
       fetch,
       logContext,
     );

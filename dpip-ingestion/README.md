@@ -6,9 +6,9 @@ Each successful invocation:
 
 1. Writes all six payload tables in one database transaction.
 2. Reads a consistent snapshot containing all rows from all six tables.
-3. Injects that snapshot into `Report.html`.
-4. Uploads the generated HTML as a file attachment to the configured
-   Xyne Spaces channel.
+3. Injects that snapshot into `Report.html` and `DPIP_Overview.html`.
+4. Uploads both generated HTML files as attachments on one message in the
+   configured Xyne Spaces channel.
 
 The HTML is uploaded as `text/html`; its source is not placed inline in the
 channel message.
@@ -19,7 +19,8 @@ channel message.
 - `migrations.md`: ordered database migration history.
 - `test/`: parser tests, smoke-test script, and fixtures.
 - `console-source/index.js`: generated single-file source for console deployment.
-- `Report.html`: local report and payload helper.
+- `Report.html`: detailed operational report template.
+- `DPIP_Overview.html`: cumulative/monthly overview report template.
 
 ## Commands
 
@@ -53,6 +54,8 @@ Xyne Spaces report delivery:
 - `XYNE_SPACES_MESSAGE` (optional): attachment message text.
 - `DPIP_REPORT_TEMPLATE_PATH` (optional): report template path; defaults to
   `Report.html` in the function working directory.
+- `DPIP_OVERVIEW_TEMPLATE_PATH` (optional): overview template path; defaults to
+  `DPIP_Overview.html` in the function working directory.
 
 The installed app needs `files:write`, and its app user must be a participant
 in the destination channel.
@@ -75,6 +78,7 @@ Main success events, in execution order:
 - `dpip_database_write_completed`
 - `dpip_report_snapshot_loaded`
 - `dpip_report_template_loaded`
+- `dpip_overview_template_loaded`
 - `dpip_report_generated`
 - `dpip_report_upload_started`
 - `dpip_report_upload_completed`
@@ -92,6 +96,7 @@ Failure events identify their boundary and include safe error details:
 - `dpip_database_pool_error`
 - `dpip_report_snapshot_load_failed`
 - `dpip_report_template_load_failed`
+- `dpip_overview_template_load_failed`
 - `dpip_report_upload_request_failed`
 - `dpip_report_upload_response_read_failed`
 - `dpip_report_upload_failed`
