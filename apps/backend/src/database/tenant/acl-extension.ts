@@ -100,6 +100,38 @@ function reportForeignWorkspace(model: string, operation: string, row: unknown, 
   logger.warn('[acl] create names a different workspace', { model, operation, given, enforced: ws });
 }
 
+/**
+ * workspaceId is the tenant key: once a row exists it should not move between workspaces.
+ *
+ * Diagnostic only, matching reportForeignWorkspace above. Which callers write a foreign
+ * workspaceId today is not answerable from the code, and the only place that can answer it
+ * is an environment carrying real traffic, so this reports rather than refuses. Turn it into
+ * a refusal once the log is quiet.
+ *
+ * Covers every write that carries a data payload, including the update half of upsert,
+ * which the generic data path does not see.
+ *
+ * Not deduped -- a repeat is itself the signal.
+ */
+function reportWorkspaceReassignment(
+  model: string,
+  operation: string,
+  data: unknown,
+  ws: string,
+): void {
+  const rows: unknown[] = Array.isArray(data) ? data : data != null ? [data] : [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const given = (row as { workspaceId?: unknown }).workspaceId;
+    if (given === undefined || given === null) continue;
+    const value = typeof given === 'object' && given !== null && 'set' in given
+      ? (given as { set?: unknown }).set
+      : given;
+    if (typeof value !== 'string' || value === ws) continue;
+    logger.warn('[acl] update reassigns workspaceId', { model, operation, given: value, enforced: ws });
+  }
+}
+
 const WHERE_OPS = new Set(['findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy']);
 const UNIQUE_OPS = new Set(['findUnique', 'findUniqueOrThrow']);
 const BULK_MUTATE_OPS = new Set(['updateMany', 'updateManyAndReturn', 'deleteMany']);
@@ -286,6 +318,12 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             return query(args);
           }
 
+          // workspaceId is immutable. Checked before the mutate filter so it holds even on
+          // tables whose ACL opts out of scoping.
+          if (ctx?.actor !== 'system' && isWorkspaceScopedModel(model)) {
+            reportWorkspaceReassignment(model, operation, (args as { data?: unknown }).data, ws);
+          }
+
           let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
           if (!mutateWhere) {
             // Service actors only — see the read branch.
@@ -313,7 +351,12 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
 
           // Upsert: create-or-update — authorize whichever branch will actually run.
           if (isUpsert) {
-            const a = (args ?? {}) as { where?: object; create?: unknown };
+            const a = (args ?? {}) as { where?: object; create?: unknown; update?: unknown };
+            // upsert carries its payload as create/update rather than data, so the generic
+            // immutability check above does not see it.
+            if (ctx?.actor !== 'system' && isWorkspaceScopedModel(model)) {
+              reportWorkspaceReassignment(model, operation, a.update, ws);
+            }
             const scoped = toWhereInput(model, a.where);
             const inScope = await delegate.count({ where: { AND: [scoped, mutateWhere] } });
             if (inScope === 0) {
