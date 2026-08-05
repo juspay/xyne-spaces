@@ -475,13 +475,13 @@ export class Logger implements LoggerConfig {
     const now = Date.now();
     const dedupKey = createErrorDedupKey(event, stack, extraFields);
     const previous = this.recentErrors.get(dedupKey);
-    this.recentErrors.set(dedupKey, now);
     for (const [key, timestamp] of this.recentErrors) {
       if (now - timestamp > ERROR_DEDUP_WINDOW_IN_MS) {
         this.recentErrors.delete(key);
       }
     }
     if (previous && now - previous < ERROR_DEDUP_WINDOW_IN_MS) return;
+    this.recentErrors.set(dedupKey, now);
     this.postLogMessage(
       LogLevel.ERROR,
       event,

@@ -1,12 +1,12 @@
 import { App } from './app.js';
-import { logger } from '@/utils/logger';
+import { describeRejection, logger } from '@/utils/logger';
 import { configureJAF } from '@juspay-jaf/jaf';
 
 configureJAF({ verbose: false });
 
 process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
   logger.error('UNHANDLED REJECTION', {
-    error: reason,
+    error: describeRejection(reason),
   });
 });
 

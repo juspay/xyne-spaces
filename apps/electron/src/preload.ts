@@ -231,12 +231,6 @@ const electronAPI = {
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
-  // Log listener
-  onLog: (callback: (message: any) => void) => {
-    const listener = (_event: unknown, message: any) => callback(message);
-    ipcRenderer.on('electron-log', listener);
-    return () => ipcRenderer.removeListener('electron-log', listener);
-  },
   getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
   getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),
   saveErrorReportFile: (fileName: string, buffer: ArrayBuffer | null, sourcePath: string | null) =>

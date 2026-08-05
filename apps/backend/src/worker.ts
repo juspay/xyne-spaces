@@ -4,7 +4,7 @@ import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/
 import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
 import { DatabaseClient } from '@/database/client'
 import { CommonDatabaseClient } from '@/database/commonClient'
-import { logger } from '@/utils/logger'
+import { describeRejection, logger } from '@/utils/logger'
 import { pollingService } from './workflows/services/polling-service'
 import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
@@ -47,7 +47,7 @@ import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 config()
 
 process.on('unhandledRejection', reason => {
-  logger.error('WORKER UNHANDLED REJECTION', { error: reason });
+  logger.error('WORKER UNHANDLED REJECTION', { error: describeRejection(reason) });
 });
 
 process.on('uncaughtException', error => {

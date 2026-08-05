@@ -93,6 +93,28 @@ export function serializeError(value: unknown): Record<string, unknown> {
   return serialized;
 }
 
+/**
+ * Keep global rejection handlers safe even when a promise is rejected with an
+ * arbitrary object. Passing that object to Winston directly can make its JSON
+ * formatter throw (for example, when the value contains a circular reference).
+ */
+export function describeRejection(reason: unknown): Record<string, unknown> {
+  if (reason instanceof Error) return serializeError(reason);
+
+  let value: string;
+  try {
+    value = typeof reason === 'object' ? Object.prototype.toString.call(reason) : String(reason);
+  } catch {
+    value = '[Unrepresentable value]';
+  }
+
+  return {
+    message: 'Non-error rejection',
+    type: typeof reason,
+    value,
+  };
+}
+
 const normalizeErrors = winston.format((info) => {
   const infoRecord = info as Record<string, unknown>;
   if (typeof infoRecord.stack === 'string') {
@@ -256,10 +278,21 @@ const captureErrorLog = (...args: unknown[]): winston.Logger => {
     Error.captureStackTrace?.(callSiteError, captureErrorLog);
     const lastArgument = args[args.length - 1];
     const callback = typeof lastArgument === 'function' ? args.pop() : undefined;
-    const callSiteMetadata = { stack: stackFor(callSiteError) };
-    return callback
-      ? originalError(...args, callSiteMetadata, callback)
-      : originalError(...args, callSiteMetadata);
+    const stack = stackFor(callSiteError);
+
+    if (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])) {
+      const info = args[0] as Record<string, unknown>;
+      args[0] = { ...info, stack: info['stack'] ?? stack };
+    } else if (args[1] && typeof args[1] === 'object' && !Array.isArray(args[1])) {
+      // Winston only merges the first splat object into the log info. Put the
+      // captured stack into that object instead of appending a second one.
+      const metadata = args[1] as Record<string, unknown>;
+      args[1] = { ...metadata, stack: metadata['stack'] ?? stack };
+    } else {
+      args.push({ stack });
+    }
+
+    return callback ? originalError(...args, callback) : originalError(...args);
   }
   return originalError(...args);
 };
