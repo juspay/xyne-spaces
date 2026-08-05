@@ -87,11 +87,6 @@ const ReplyLayoutV2: React.FC<{
           </span>
         )}
 
-        {/* The thread's own classification. Deliberately here rather than beside the
-            message text: this row is the thread-level affordance, so a chip here reads as
-            "this thread is an Issue" instead of appearing to label the message it sits
-            under — which is what made it clash with that message's own act chip. */}
-
         {replies.lastActivityAt && (
           <span className='relative inline-flex items-baseline text-muted-foreground whitespace-nowrap w-[140px]'>
             <span

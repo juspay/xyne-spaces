@@ -58,7 +58,6 @@ export class MessagesACL extends BaseACL<'messages'> {
       throw new MutationACLError('Message update failed: message does not exist', 'messages');
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
-
     if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
       return;
     }

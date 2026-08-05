@@ -54,9 +54,9 @@ schema chat_message {
     }
 
     field messageActs type array<string> {
-      indexing: index | attribute | summary
-      index: enable-bm25
+      indexing: attribute | summary
       attribute: fast-search
+      match: exact
     }
 
     field threadType type array<string> {
@@ -178,7 +178,7 @@ field text_fuzzy type string {
     }
 }
   fieldset default {
-    fields: text, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames, messageActs
+    fields: text, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames
   }
 
   rank-profile initial {

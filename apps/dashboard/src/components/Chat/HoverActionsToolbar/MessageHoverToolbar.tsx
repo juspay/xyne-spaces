@@ -47,9 +47,6 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
   const activeRowRef = useRef<ActiveRow | null>(null);
   activeRowRef.current = activeRow;
   const pinnedOpenRef = useRef(false);
-  // Any popover anchored in the toolbar must pin it open: reaching the popover means
-  // moving the pointer off the message row, which would otherwise hide the toolbar and
-  // unmount the popover before it can be clicked.
   pinnedOpenRef.current = isEmojiPickerOpen || isDropdownOpen;
 
   // The overlay wrapper — pointerover events from inside it must never move
