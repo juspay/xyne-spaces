@@ -1,4 +1,4 @@
-import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
+import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
