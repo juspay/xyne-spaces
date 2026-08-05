@@ -178,7 +178,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
     if (!editor) return;
 
     const updateActiveStates = (): void => {
-      setIsActive({
+      const next = {
         bold: editor.isActive('bold'),
         italic: editor.isActive('italic'),
         underline: editor.isActive('underline'),
@@ -187,7 +187,14 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
         orderedList: editor.isActive('orderedList'),
         blockquote: editor.isActive('blockquote'),
         link: editor.isActive('link'),
-      });
+      };
+      // Return the previous object when nothing changed so React can bail out.
+      // A fresh object literal never compares equal, which made every editor
+      // transaction re-render the toolbar — and, once a re-render dispatched
+      // another transaction, looped until "Maximum update depth exceeded".
+      setIsActive(prev =>
+        (Object.keys(next) as (keyof typeof next)[]).every(k => prev[k] === next[k]) ? prev : next,
+      );
     };
 
     updateActiveStates();
