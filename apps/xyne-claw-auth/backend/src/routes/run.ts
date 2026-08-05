@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
+import { spacesAppFetch } from "../lib/spaces-api.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
@@ -32,7 +33,7 @@ import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-wor
 import { getDmChannelForUserAndApp, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
-import { agentScopeAllows, sanitizeExternalRunBody } from "../lib/service-tokens.js";
+import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 
 import { createLogger } from "../logger.js";
@@ -525,7 +526,11 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const serviceToken = (res.locals ?? {})["accessToken"] as VerifiedCliToken | undefined;
     const isServiceTokenCaller = serviceToken?.client === "service";
     if (isServiceTokenCaller) {
-      const { sanitized, dropped } = sanitizeExternalRunBody(req.body as Record<string, unknown>);
+      // Channel-delivery fields (channelId/deliverTo) survive the strip ONLY
+      // when the token carries CHANNELS_POST_SCOPE; otherwise external callers
+      // still cannot address a Spaces channel.
+      const allowChannelDelivery = canPostToChannels(serviceToken?.scopes ?? []);
+      const { sanitized, dropped } = sanitizeExternalRunBody(req.body as Record<string, unknown>, { allowChannelDelivery });
       if (dropped.length > 0) {
         log.warn(`[run] service token dropped non-contract fields: ${dropped.join(", ")}`);
       }
@@ -697,6 +702,40 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       }
       if (!effectiveChannelId) {
         log.warn(`[run] dm-delivery unresolved user=${authenticatedUserId} agent=${agentSlug || "assistant"}`);
+      }
+    }
+
+    // Fail-closed channel authorization for external (service-token) callers.
+    // A CHANNELS_POST_SCOPE token may request channel delivery, but only into
+    // channels the agent's Spaces app can actually reach. The agent posts
+    // results and write-approval cards with THIS app token, so we validate the
+    // same principal here and reject up-front — otherwise an inaccessible
+    // channelId would silently drop both later (the original channelId-drop
+    // pain: HITL approval cards vanishing on API-triggered runs).
+    if (isServiceTokenCaller && effectiveChannelId) {
+      try {
+        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
+        const appToken = ciphertext && iv && authTag
+          ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey)
+          : "";
+        if (!appToken) {
+          res.status(403).json({ success: false, error: "This agent has no Spaces app credential; it cannot post to a channel" });
+          return;
+        }
+        await spacesAppFetch("/channel/info", { channelId: effectiveChannelId }, appToken);
+      } catch (channelErr) {
+        const msg = channelErr instanceof Error ? channelErr.message : String(channelErr);
+        if (/Spaces app API 404/i.test(msg) || /CHANNEL_NOT_FOUND/i.test(msg)) {
+          res.status(400).json({ success: false, error: `channel ${effectiveChannelId} not found` });
+          return;
+        }
+        if (/Spaces app API 403/i.test(msg) || /forbidden/i.test(msg)) {
+          res.status(403).json({ success: false, error: `agent's app is not a member of channel ${effectiveChannelId} — add the app to the channel first` });
+          return;
+        }
+        // Unknown/transient lookup failure: fail OPEN so a Spaces hiccup doesn't
+        // block runs (mirrors pendingActionTargetValidation in webhook.ts).
+        log.warn(`[run] channel access precheck failed open channelId=${effectiveChannelId} err=${msg.slice(0, 200)}`);
       }
     }
 

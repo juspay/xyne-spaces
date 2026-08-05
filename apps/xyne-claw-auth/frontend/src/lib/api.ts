@@ -1862,7 +1862,7 @@ export async function listOrgServiceTokens(
 export async function mintOrgServiceToken(
   userId: string,
   orgId: string,
-  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[] },
+  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[]; allowChannelPost?: boolean },
 ): Promise<MintedServiceAccessToken> {
   const data = await request<{ success: boolean; data: MintedServiceAccessToken }>(
     `${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens`,
