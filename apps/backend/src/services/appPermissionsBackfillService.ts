@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { AppPermissionStatus } from '@xyne/shared';
 
 export interface AppPermissionsBackfillConfig {
   batchSize: number;
@@ -81,7 +82,7 @@ export class AppPermissionsBackfillService {
 
       // Process all apps in this batch concurrently
       await Promise.all(
-        batch.map(async (installation: { id: string; appId: string; workspaceId: string | null }) => {
+        batch.map(async (installation: { id: string; appId: string; workspaceId: string }) => {
           const existing = await db.installedAppPermission.findMany({
             where: { installedAppId: installation.id },
             select: { permissionId: true },
@@ -96,7 +97,7 @@ export class AppPermissionsBackfillService {
                 installedAppId: installation.id,
                 workspaceId: installation.workspaceId,
                 permissionId: p.id,
-                status: 'APPROVED',
+                status: AppPermissionStatus.APPROVED,
               })),
               skipDuplicates: true,
             });

@@ -35,6 +35,7 @@ import {
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
+import { AccessType } from '@xyne/shared';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
@@ -126,14 +127,14 @@ export const filterNavItemsByPermission = (
         hasAccess = permissions.some(
           p =>
             p.resourceName === resourceName &&
-            (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
+            (p.accessType === AccessType.ADMIN || p.accessType === AccessType.WRITE),
         );
         if (resourceName === 'USER-GROUPS') {
           hasAccess ||= canManageOwnUserGroups;
         }
       } else {
         hasAccess = permissions.some(
-          p => p.resourceName === resourceName && p.accessType === 'ADMIN',
+          p => p.resourceName === resourceName && p.accessType === AccessType.ADMIN,
         );
       }
     }

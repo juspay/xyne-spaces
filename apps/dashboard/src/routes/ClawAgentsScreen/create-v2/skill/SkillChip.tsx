@@ -27,7 +27,7 @@ export function SkillChip({ label, selected, onToggle }: SkillChipProps): ReactE
     >
       <span
         className={cn(
-          'max-w-[200px] truncate text-sm font-semibold leading-5',
+          'max-w-[200px] truncate text-sm font-medium leading-5',
           selected ? 'text-foreground' : 'text-foreground/80',
         )}
       >

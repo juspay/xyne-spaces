@@ -24,6 +24,9 @@ import {
   slugify,
   type WizardState,
 } from '../create/wizardState';
+import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { wizardStateFromAgent } from './agentDraft';
+import { useSaveClawAgent } from './useSaveClawAgent';
 import { AgentColorRow } from './AgentColorRow';
 import { AutoWidthInput } from './shared/AutoWidthInput';
 import { BuiltinCapabilityRow } from './builtin/BuiltinCapabilityRow';
@@ -36,7 +39,12 @@ function inlineWidth(value: string, placeholder: string): string {
   return `${Math.max(value.length, placeholder.length) - 2}ch`;
 }
 
-const ClawAgentCreateV2 = (): ReactElement => {
+interface ClawAgentCreateV2Props {
+  agent?: Agent;
+}
+
+const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement => {
+  const isEdit = agent !== undefined;
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
@@ -51,15 +59,18 @@ const ClawAgentCreateV2 = (): ReactElement => {
     if (aiOpen) aiIntentRef.current?.focus();
   }, [aiOpen]);
 
-  const [state, setState] = useState<WizardState>(INITIAL_WIZARD_STATE);
+  const [state, setState] = useState<WizardState>(() =>
+    agent ? wizardStateFromAgent(agent) : INITIAL_WIZARD_STATE,
+  );
   const update = useCallback(
     (patch: Partial<WizardState>) => setState(prev => ({ ...prev, ...patch })),
     [],
   );
 
   const slug = effectiveSlug(state);
-  const nameCheck = useAgentNameCheck(state.name.trim(), slug);
+  const nameCheck = useAgentNameCheck(isEdit ? '' : state.name.trim(), slug);
   const createMutation = useCreateClawAgent();
+  const saveMutation = useSaveClawAgent(agent);
 
   const generate = useMutation({
     mutationFn: generateAgentPrompt,
@@ -80,14 +91,17 @@ const ClawAgentCreateV2 = (): ReactElement => {
     generate.mutate({ intent, agentName: state.name });
   };
 
-  const canCreate =
+  const canSubmit =
     state.name.trim().length > 0 &&
     slug.length > 0 &&
-    nameCheck.nameValid &&
-    !nameCheck.checking &&
+    (isEdit || (nameCheck.nameValid && !nameCheck.checking)) &&
     state.systemPrompt.trim().length > 0;
 
-  const handleCreate = (): void => {
+  const handleSubmit = (): void => {
+    if (isEdit) {
+      void saveMutation.save(state);
+      return;
+    }
     createMutation.mutate({
       slug,
       name: state.name.trim(),
@@ -111,7 +125,7 @@ const ClawAgentCreateV2 = (): ReactElement => {
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentCreateV2'>
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-          Create agent
+          {isEdit ? 'Edit agent' : 'Create agent'}
         </h1>
 
         <div className='flex w-full flex-col gap-4'>
@@ -331,7 +345,9 @@ const ClawAgentCreateV2 = (): ReactElement => {
         <div className='flex w-full items-center justify-end gap-3'>
           <Button
             variant='ghost'
-            onClick={() => void navigate(libraryPath)}
+            onClick={() =>
+              void navigate(isEdit ? `${libraryPath}/agent/${agent.slug}?tab=persona` : libraryPath)
+            }
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: cancel'
@@ -339,14 +355,14 @@ const ClawAgentCreateV2 = (): ReactElement => {
             Cancel
           </Button>
           <Button
-            onClick={handleCreate}
-            loading={createMutation.isPending}
-            disabled={!canCreate}
+            onClick={handleSubmit}
+            loading={isEdit ? saveMutation.saving : createMutation.isPending}
+            disabled={!canSubmit}
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
-            data-track-name='Create agent v2: create'
+            data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
           >
-            Create
+            {isEdit ? 'Save' : 'Create'}
           </Button>
         </div>
       </div>

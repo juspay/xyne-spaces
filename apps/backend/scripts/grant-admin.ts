@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 import { PrismaClient } from '@prisma/client';
-import { AccessType, WorkspaceRole, AuthProvider, UserStatus } from '@xyne/shared';
+import { AccessType, WorkspaceRole, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -62,7 +62,7 @@ async function grantAdmin() {
           data: {
             email,
             orgId: defaultOrg.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
           }
         });
         orgMemberId = orgMember.memberId;
@@ -162,7 +162,7 @@ async function grantAdmin() {
           data: {
             email,
             orgId: defaultOrg.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
           }
         });
         console.log('✅ Added to organization as OWNER');

@@ -11,7 +11,7 @@ import {
 } from '@juspay-jaf/jaf';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { OrgLLMServiceAccountPurpose, TicketStatus, TicketStatusV2, NudgeKind, SurfaceAreaType } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, TicketStatus, TicketStatusV2, NudgeKind, SurfaceAreaType, SurfaceLinkKind } from '@xyne/shared';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
@@ -389,11 +389,11 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
 
       const existingLink = await db.surfaceLink.findFirst({
         where: {
-          sourceType: 'MESSAGE',
+          sourceType: SurfaceAreaType.MESSAGE,
           sourceId: payload.messageId,
-          targetType: 'TICKET',
+          targetType: SurfaceAreaType.TICKET,
           targetId: entityId,
-          linkKind: 'RELATES_TO',
+          linkKind: SurfaceLinkKind.RELATES_TO,
         },
         select: { id: true },
       });

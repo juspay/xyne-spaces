@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { resolveCanvasHierarchy, GuestEntity, CanvasRole, WorkspaceRole } from '@xyne/shared';
+import { resolveCanvasHierarchy, GuestEntity, CanvasRole, WorkspaceRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -445,7 +445,7 @@ class CanvasAuthService {
             id: canvasId,
             createdBy: userId,
             workspaceId,
-            visibility: 'PRIVATE',
+            visibility: CanvasVisibility.PRIVATE,
             title: options?.title || 'Untitled Canvas',
             content: [],
             isCollaborative: true,
@@ -459,7 +459,7 @@ class CanvasAuthService {
             canvasId,
             userId,
             workspaceId,
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
           },
         }),
       ]);

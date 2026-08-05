@@ -9,6 +9,7 @@ import { Button } from '../ui/Button';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { useSummaryCache } from '../../hooks/useSummaryQuery';
 import { sanitizeHtmlString } from '../../utils/sanitizer';
+import { ChannelScopeType } from '@xyne/shared';
 
 // AI keypoints are markdown; convert **bold** → <strong>, then run through the
 // shared allowlist sanitizer so any HTML smuggled into the (prompt-injection-
@@ -641,8 +642,8 @@ export const Summary = (props: SummaryProps): ReactElement => {
     }
   };
 
-  const isDM = props.scopeType === 'DM';
-  const isGroupDM = props.scopeType === 'GROUP_DM';
+  const isDM = props.scopeType === ChannelScopeType.DM;
+  const isGroupDM = props.scopeType === ChannelScopeType.GROUP_DM;
   const isDMType = isDM || isGroupDM;
   const dmLabel = isGroupDM ? 'Group DM' : 'DM';
   const title = isThread

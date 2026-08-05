@@ -3,6 +3,7 @@ import { MessageDirection, ExternalEntityType, MessageType, ChannelRole } from '
 import { basename } from 'path';
 import { fileTypeFromBuffer } from 'file-type';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
@@ -813,7 +814,7 @@ export class WhatsAppMigrationService {
       .filter((value): value is string => typeof value === 'string' && value.length > 0);
 
     const messageRows = messageIds.length
-      ? await db.message.findMany({
+      ? await withWorkspaceScope(() => db.message.findMany({
           where: {
             messageId: { in: messageIds },
           },
@@ -822,7 +823,7 @@ export class WhatsAppMigrationService {
             conversationId: true,
             createdAt: true,
           },
-        })
+        }))
       : [];
 
     const conversationIds = [...new Set(messageRows.map(message => message.conversationId))];
@@ -922,24 +923,24 @@ export class WhatsAppMigrationService {
 
     const conversationIds = purgeData.conversationIds;
     const conversations = conversationIds.length
-      ? await db.conversation.findMany({
+      ? await withWorkspaceScope(() => db.conversation.findMany({
           where: { conversationId: { in: conversationIds } },
           select: {
             conversationId: true,
             initialMessageId: true,
             replyCount: true,
           },
-        })
+        }))
       : [];
 
     const allConversationMessages = conversationIds.length
-      ? await db.message.findMany({
+      ? await withWorkspaceScope(() => db.message.findMany({
           where: { conversationId: { in: conversationIds } },
           select: {
             messageId: true,
             conversationId: true,
           },
-        })
+        }))
       : [];
     const messagesByConversationId = new Map<string, string[]>();
     for (const row of allConversationMessages) {

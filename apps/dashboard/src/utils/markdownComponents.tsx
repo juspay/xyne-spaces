@@ -6,6 +6,7 @@ import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
+import { D2Block } from '../components/Markdown/D2Block';
 import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
@@ -56,13 +57,24 @@ const CodeBlock = ({
     );
   }
 
-  // ── Filesystem interactive graph ──
-  if (language === 'filesystem' || language === 'd2') {
+  if (language === 'filesystem') {
     return (
       <FilesystemBlock
         jsonSource={codeString}
         messageId={(props as { messageId: string }).messageId}
       />
+    );
+  }
+
+  if (language === 'd2') {
+    const looksLikeFilesystemJson = codeString.trimStart().startsWith('{');
+    return looksLikeFilesystemJson ? (
+      <FilesystemBlock
+        jsonSource={codeString}
+        messageId={(props as { messageId: string }).messageId}
+      />
+    ) : (
+      <D2Block source={codeString} messageId={(props as { messageId: string }).messageId} />
     );
   }
 

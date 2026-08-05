@@ -37,7 +37,7 @@ import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workf
 import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose, AttachmentEntityType, MessageType } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, AttachmentEntityType, MessageType, WorkflowExecutionMode } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance()
 function normalizeToolName(toolName: string): string {
@@ -102,7 +102,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
     return execution?.mode || 'AUTOMATIC'
   }
 
-  async setExecutionMode(workflowExecutionId: string, mode: 'AUTOMATIC' | 'MANUAL'): Promise<void> {
+  async setExecutionMode(workflowExecutionId: string, mode: WorkflowExecutionMode): Promise<void> {
     await this.workflowExecutionRepo.update(workflowExecutionId, { mode })
     logger.info(`🎛️ [STORAGE] Set execution mode for ${workflowExecutionId} to: ${mode}`)
   }

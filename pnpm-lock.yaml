@@ -23,6 +23,7 @@ overrides:
   '@opentelemetry/sdk-node': 0.217.0
   '@tanstack/form-core': 1.27.7
   '@tanstack/react-store': 0.8.0
+  '@terrastruct/d2': 0.1.33
   '@xmldom/xmldom': 0.8.13
   adm-zip: 0.6.0
   ajv@6: 6.14.0
@@ -760,6 +761,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.14.2
         version: 3.14.9(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@terrastruct/d2':
+        specifier: 0.1.33
+        version: 0.1.33
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)
@@ -1592,6 +1596,9 @@ importers:
       '@upstash/context7-mcp':
         specifier: ^2.1.7
         version: 2.3.0(@cfworker/json-schema@4.1.1)
+      '@xyne/litellm-client':
+        specifier: workspace:*
+        version: link:../../packages/litellm-client
       deepwiki-mcp:
         specifier: ^0.0.6
         version: 0.0.6(@cfworker/json-schema@4.1.1)
@@ -1999,6 +2006,19 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/litellm-client:
+    dependencies:
+      undici:
+        specifier: 6.27.0
+        version: 6.27.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.43
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -8429,6 +8449,9 @@ packages:
   '@teppeis/multimaps@3.0.0':
     resolution: {integrity: sha512-ID7fosbc50TbT0MK0EG12O+gAP3W3Aa/Pz4DaTtQtEvlc9Odaqi0de+xuZ7Li2GtK4HzEX7IuRWS/JmZLksR3Q==}
     engines: {node: '>=14'}
+
+  '@terrastruct/d2@0.1.33':
+    resolution: {integrity: sha512-eK5hyfGIJFolC7sUsiKvWdY9xGFctTe3d+PSijo09IYDso8psztC+A4SammizXtlwYZpnnW0AtDjfBYauceSeA==}
 
   '@tiptap/core@3.29.2':
     resolution: {integrity: sha512-oKUkiPUB7noilVYxI9lNzUD4rX17sHub+PYjMfHMWHG9A3nvIy+FdePIVIIhThKWF7ijhr3eIqHY51Bn+GAFtw==}
@@ -27623,6 +27646,8 @@ snapshots:
   '@tanstack/virtual-core@3.17.7': {}
 
   '@teppeis/multimaps@3.0.0': {}
+
+  '@terrastruct/d2@0.1.33': {}
 
   '@tiptap/core@3.29.2(@tiptap/pm@3.29.2)':
     dependencies:

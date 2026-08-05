@@ -122,7 +122,7 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
               conversationId: ticket!.conversationId!,
               senderId: this.ctx.userID,
               content,
-              activityType: 'TAGS',
+              activityType: ActivityType.TAGS,
               workspaceId: this.ctx.workspaceId,
               createdAt: now,
             }

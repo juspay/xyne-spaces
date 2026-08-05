@@ -13,9 +13,9 @@ export class WorkflowExecutionsACL extends BaseQueryACL<'workflow_executions'> {
       return denyGuestSelect(query, 'id');
     }
 
-    return query.whereExists('createdByUser', (u) =>
-      u.where('workspaceId', '=', this.ctx.workspaceId)
-    // TODO: need to add check with WorkflowExecutionUsers table as its not public currenlty
-    );
+    // Scope to the workspace via the row's own workspaceId. The old createdByUser hop
+    // dropped system/automation executions (null createdBy) — those have no
+    // createdByUser to traverse.
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

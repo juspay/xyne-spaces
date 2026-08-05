@@ -56,7 +56,7 @@ export const deleteMessageCleanup: NudgeDefinition<
         description: 'Clean up surface links and nudges for deleted message',
         actions: {
           actionType: 'DELETE_SURFACE_LINKS',
-          sourceType: 'MESSAGE',
+          sourceType: SurfaceAreaType.MESSAGE,
           sourceId: messageId,
         },
       },

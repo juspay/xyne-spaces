@@ -3,7 +3,7 @@ import { Staroflife } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawSkillFiles } from '@/hooks/useClawSkills';
-import { Clamped } from '../shared/Clamped';
+import { ProseBox } from '../shared/ProseBox';
 import { SectionHeading, Separator } from '../shared/Section';
 import { SkillFileTree } from './SkillFileTree';
 import {
@@ -166,13 +166,7 @@ export function SkillDetailPanel({
         <section className='flex w-full flex-col gap-4'>
           <SectionHeading label='Instructions' />
           {entry.skill.content ? (
-            <Clamped
-              maxHeight={PANE_HEIGHT}
-              resetKey={entry.id}
-              className='rounded-2xl border border-border bg-card p-4'
-            >
-              <Body>{entry.skill.content}</Body>
-            </Clamped>
+            <ProseBox height={PANE_HEIGHT}>{entry.skill.content}</ProseBox>
           ) : (
             <Muted>This skill has no instructions yet.</Muted>
           )}

@@ -1154,4 +1154,27 @@ export const DefaultOutlet = {
 
 export type DefaultOutlet = typeof DefaultOutlet[keyof typeof DefaultOutlet];
 
-// Define tables
+export enum Platform {
+  WEB = 'WEB',
+  ELECTRON = 'ELECTRON',
+  MOBILE = 'MOBILE',
+}
+
+export enum TriggerType {
+  CLICK = 'CLICK',
+  CHANGE = 'SELECTION_CHANGE',
+  BLUR = 'INPUT_CHANGE',
+  DB_MUTATION = 'DB_MUTATION',
+}
+
+export enum BaseTicketType {
+  Fix = 'Fix',
+  Feature = 'Feature',
+  Story = 'Story',
+  Hotfix = 'Hotfix',
+  Release = 'Release',
+  Support = 'Support',
+  DESK = 'DESK',
+  Epic = 'Epic',
+}
+

@@ -6,9 +6,10 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole } from '@xyne/shared';
+import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
@@ -1109,7 +1110,7 @@ export class CallDocumentService {
           channelId,
           workspaceId,
           createdBy: createdByUserId,
-          visibility: 'PUBLIC',
+          visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
           isCollaborative: true,
           lastEditedBy: createdByUserId,
@@ -1132,7 +1133,7 @@ export class CallDocumentService {
           canvasId,
           workspaceId,
           userId: createdByUserId,
-          role: 'OWNER',
+          role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
         },
@@ -1145,7 +1146,7 @@ export class CallDocumentService {
           canvasId,
           workspaceId,
           userId: callCreatorUserId,
-          role: 'OWNER',
+          role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
         },
@@ -1220,7 +1221,7 @@ export class CallDocumentService {
           channelId,
           workspaceId,
           createdBy: createdByUserId,
-          visibility: 'PRIVATE',
+          visibility: CanvasVisibility.PRIVATE,
           isTemplate: false,
           isCollaborative: true,
           lastEditedBy: createdByUserId,
@@ -1683,22 +1684,25 @@ A comprehensive detailed summary has been generated from this call.
       const existingMessage = await repositories.messages.findExistingDetailedSummaryMessage(conversationId, callId);
 
       if (existingMessage) {
-        // Update existing message instead of creating a new one
-        await prisma.message.update({
-          where: { messageId: existingMessage.messageId },
-          data: {
-            content: messageContent,
-            metadata: {
-              messageSubtype: 'call_detailed_summary',
-              callId,
-              canvasUrl,
-              isAiGenerated: true,
-              contentFormat: 'markdown',
-              version: version,
-              lastUpdatedAt: new Date().toISOString(),
+        // Update existing message instead of creating a new one.
+        // The row belongs to the bot, not the caller, so it runs above the caller's own scope.
+        await withWorkspaceScope(() =>
+          prisma.message.update({
+            where: { messageId: existingMessage.messageId },
+            data: {
+              content: messageContent,
+              metadata: {
+                messageSubtype: 'call_detailed_summary',
+                callId,
+                canvasUrl,
+                isAiGenerated: true,
+                contentFormat: 'markdown',
+                version: version,
+                lastUpdatedAt: new Date().toISOString(),
+              },
             },
-          },
-        });
+          }),
+        );
       } else {
         // Create new message
         await repositories.messages.create({

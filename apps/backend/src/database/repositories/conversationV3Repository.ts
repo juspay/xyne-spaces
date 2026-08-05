@@ -1,5 +1,6 @@
 import { Conversation, MessageAttachment, SurfaceNudgeCount } from '@prisma/client';
 import { DatabaseClient } from '../client';
+import { AttachmentEntityType } from '@xyne/shared';
 
 export interface ConversationV3Data {
   conversation: Conversation;
@@ -41,7 +42,7 @@ export class ConversationV3Repository {
       this.db.messageAttachment.findMany({
         where: {
           entityId: conversation.initialMessageId,
-          entityType: 'CHAT',
+          entityType: AttachmentEntityType.CHAT,
         },
       }),
       this.db.surfaceNudgeCount.findMany({
@@ -75,7 +76,7 @@ export class ConversationV3Repository {
       this.db.messageAttachment.findMany({
         where: {
           entityId: conversation.initialMessageId,
-          entityType: 'CHAT',
+          entityType: AttachmentEntityType.CHAT,
         },
       }),
       this.db.surfaceNudgeCount.findMany({

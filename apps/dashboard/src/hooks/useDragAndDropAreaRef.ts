@@ -9,6 +9,7 @@ export interface InputBoxHandle {
   insertContent: (content: string) => void;
   isSuggestionOpen: () => boolean;
   focus: () => void;
+  getHtml?: () => string;
 }
 
 interface UseDragAndDropAreaRefReturn {

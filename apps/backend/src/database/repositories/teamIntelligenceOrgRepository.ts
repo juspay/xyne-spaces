@@ -1,6 +1,8 @@
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 import { logger } from '@/utils/logger';
+import { RecapEntityType, TicketStatusV2 } from '@xyne/shared';
 
 export interface OrgSummaryDateRangeFilters {
   from: Date;
@@ -506,13 +508,13 @@ class TeamIntelligenceOrgRepository {
     const [total, recaps, channels, ticketRecords] = await Promise.all([
       db.recap.count({
         where: {
-          entityType: 'CHANNEL',
+          entityType: RecapEntityType.CHANNEL,
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
       }),
       db.recap.findMany({
         where: {
-          entityType: 'CHANNEL',
+          entityType: RecapEntityType.CHANNEL,
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
         orderBy: [{ recapDate: 'desc' }, { id: 'desc' }],
@@ -526,9 +528,10 @@ class TeamIntelligenceOrgRepository {
           userId: true,
         },
       }),
-      db.channel.findMany({
+      // Resolves names for ids already in the result set, so it runs above the caller's own scope.
+      withWorkspaceScope(() => db.channel.findMany({
         select: { id: true, name: true },
-      }),
+      })),
       db.ticket.findMany({
         where: {
           createdAt: { gte: rangeStart, lte: rangeEnd },
@@ -541,16 +544,16 @@ class TeamIntelligenceOrgRepository {
 
     const ticketMetrics = {
       totalCount: ticketRecords.length,
-      solvedCount: ticketRecords.filter((t) => t.statusV2 === 'COMPLETED').length,
-      todoCount: ticketRecords.filter((t) => t.statusV2 === 'TODO').length,
-      startedCount: ticketRecords.filter((t) => t.statusV2 === 'STARTED').length,
-      pausedCount: ticketRecords.filter((t) => t.statusV2 === 'PAUSED').length,
-      cancelledCount: ticketRecords.filter((t) => t.statusV2 === 'CANCELLED').length,
+      solvedCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.COMPLETED).length,
+      todoCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.TODO).length,
+      startedCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.STARTED).length,
+      pausedCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.PAUSED).length,
+      cancelledCount: ticketRecords.filter((t) => t.statusV2 === TicketStatusV2.CANCELLED).length,
       overdueCount: ticketRecords.filter(
         (t) =>
           t.eta !== null &&
           t.eta < now &&
-          (t.statusV2 === 'TODO' || t.statusV2 === 'STARTED' || t.statusV2 === 'PAUSED'),
+          (t.statusV2 === TicketStatusV2.TODO || t.statusV2 === TicketStatusV2.STARTED || t.statusV2 === TicketStatusV2.PAUSED),
       ).length,
     };
 

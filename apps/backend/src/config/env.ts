@@ -303,6 +303,14 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  // Thread catch-up summary — comma-separated channel IDs, or "all" for every channel (empty = disabled everywhere)
+  THREAD_SUMMARY_ENABLED_CHANNELS: Joi.string().allow('').default(''),
+  THREAD_SUMMARY_MIN_MESSAGES: Joi.number().integer().min(0).default(6),
+  THREAD_SUMMARY_MESSAGE_LIMIT: Joi.number().integer().min(1).default(300),
+  THREAD_SUMMARY_LLM_TIMEOUT_MS: Joi.number().integer().min(1).default(300000),
+  THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
+  THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
+  THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
   DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
@@ -806,6 +814,19 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  threadSummary: {
+    // Comma-separated channel IDs that have the AI thread catch-up summary enabled, or "all" for every channel (empty = disabled everywhere)
+    enabledChannels: (envVars.THREAD_SUMMARY_ENABLED_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
+    minMessages: envVars.THREAD_SUMMARY_MIN_MESSAGES as number,
+    messageLimit: envVars.THREAD_SUMMARY_MESSAGE_LIMIT as number,
+    llmTimeoutMs: envVars.THREAD_SUMMARY_LLM_TIMEOUT_MS as number,
+    minSummaryMaxTokens: envVars.THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS as number,
+    maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
+    transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
   desk: {
     betaChannels: (envVars.DESK_BETA_CHANNELS as string)

@@ -9,7 +9,7 @@ import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
-import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
 import '../types/express';
@@ -143,7 +143,7 @@ export class AuthV2Controller {
       name: googleUserData.name,
       picture: googleUserData.picture,
       workspaceId,
-      authProvider: 'GOOGLE',
+      authProvider: AuthProvider.GOOGLE,
     });
 
     // Create session
@@ -1057,7 +1057,14 @@ export class AuthV2Controller {
         `[${requestId}] mobile-exchange selected via query parameter without the x-platform header (browserInitiated=${looksBrowserInitiated})`,
       );
     }
-    const isMobileNative = nativeByHeader || nativeByQuery;
+    // The native branch is only selectable by a genuine native client, which sends neither
+    // Origin nor Sec-Fetch-Site. Anything browser-initiated takes the web branch.
+    const isMobileNative = (nativeByHeader || nativeByQuery) && !looksBrowserInitiated;
+    if ((nativeByHeader || nativeByQuery) && looksBrowserInitiated) {
+      logger.warn(
+        `[${requestId}] native mobile-exchange requested from a browser-initiated request; falling back to the web branch`,
+      );
+    }
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
@@ -2045,7 +2052,7 @@ export class AuthV2Controller {
           create: {
             orgId: existingOrgId,
             email: userData.email.toLowerCase(),
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
           },
           update: {
             leftAt: null,

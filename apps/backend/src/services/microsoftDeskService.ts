@@ -5,7 +5,7 @@
  */
 
 import crypto from 'crypto';
-import { EmailMergeMode, DeskType } from '@xyne/shared';
+import { EmailMergeMode, DeskType, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
@@ -293,14 +293,14 @@ export class MicrosoftDeskService {
     const channelId = await db.$transaction(async (tx) => {
       const channel = await tx.channel.create({
         data: {
-          scopeType: 'DEFAULT',
+          scopeType: ChannelScopeType.DEFAULT,
           name: channelData.name,
           description: channelData.description,
           visibility: channelData.visibility === 'private' ? 'PRIVATE' : 'PUBLIC',
           createdBy: channelData.userId,
           workspaceId: channelData.workspaceId,
           projectId: channelData.projectId,
-          type: 'EMAIL',
+          type: ChannelType.EMAIL,
         },
       });
 
@@ -321,7 +321,7 @@ export class MicrosoftDeskService {
         data: {
           channelId: channel.id,
           userId: channelData.userId,
-          role: 'ADMIN',
+          role: ChannelRole.ADMIN,
           workspaceId: channelData.workspaceId,
         },
       });

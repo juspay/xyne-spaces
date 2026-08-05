@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 import { PrismaClient } from '@prisma/client';
-import { AccessType, WorkspaceRole } from '@xyne/shared';
+import { AccessType, WorkspaceRole, AuthProvider, OrgRole, UserStatus } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -72,7 +72,7 @@ async function assignUserToGroup() {
           data: {
             email,
             orgId: 'xyne-default-org',
-            role: 'OWNER',
+            role: OrgRole.OWNER,
             joinedAt: new Date(),
           }
         });
@@ -82,9 +82,9 @@ async function assignUserToGroup() {
         data: {
           email,
           name: name || 'Administrator',
-          authProvider: 'GOOGLE',
+          authProvider: AuthProvider.GOOGLE,
           providerUserId: `admin-${email.replace(/[^a-zA-Z0-9]/g, '-')}`,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
           role: WorkspaceRole.ADMIN,
           workspace: {
             connect: { id: defaultWorkspace.id }

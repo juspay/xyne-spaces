@@ -275,7 +275,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       callId: incomingCallData.callId,
       callerName: incomingCallData.caller.name,
       callerEmail: incomingCallData.caller.email,
-      callType: incomingCallData.callType as 'AUDIO' | 'VIDEO',
+      callType: incomingCallData.callType,
       ...(incomingCallData.caller.picture && { callerPicture: incomingCallData.caller.picture }),
     });
 

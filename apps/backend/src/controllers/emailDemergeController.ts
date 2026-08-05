@@ -11,6 +11,7 @@ import { EmailType } from '@xyne/shared';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { emailService } from '@/services/emailService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
@@ -26,11 +27,13 @@ interface DemergeEmailRequest {
 export class EmailDemergeController {
   private emailRepo: EmailRepository;
   private channelRepo: ChannelRepository;
+  private channelParticipantRepo: ChannelParticipantRepository;
   private prisma;
 
   constructor() {
     this.emailRepo = new EmailRepository();
     this.channelRepo = new ChannelRepository();
+    this.channelParticipantRepo = new ChannelParticipantRepository();
     this.prisma = DatabaseClient.getInstance();
   }
 
@@ -92,6 +95,22 @@ export class EmailDemergeController {
       if (!channel) {
         return res.status(404).json({ error: 'Channel not found' });
       }
+
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      if (originalTicket.workspaceId !== workspaceId || channel.workspaceId !== workspaceId) {
+        return res.status(404).json({ error: 'Ticket not found' });
+      }
+      if (channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepo.isParticipant(originalTicket.channelId, userId);
+        if (!isParticipant) {
+          return res.status(403).json({ error: 'Not a member of this channel' });
+        }
+      }
+
       // Demerge is intentionally NOT gated on the inbox's auto-merge setting —
       // tickets that were auto-merged in the past must remain demerge-able even
       // after the merchant disables the setting.

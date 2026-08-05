@@ -10,6 +10,7 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -119,7 +120,7 @@ export async function createCommitAnalysisCanvas(
         content: content as any,
         workspaceId: user.workspaceId,
         createdBy: createdByUserId,
-        visibility: 'PUBLIC',
+        visibility: CanvasVisibility.PUBLIC,
         isTemplate: false,
         isCollaborative: false,
         lastEditedBy: createdByUserId,
@@ -151,7 +152,7 @@ export async function createCommitAnalysisCanvas(
         canvasId,
         workspaceId: user.workspaceId,
         userId: createdByUserId,
-        role: 'VIEWER',
+        role: CanvasRole.VIEWER,
         joinedAt: now,
         updatedAt: now,
       },

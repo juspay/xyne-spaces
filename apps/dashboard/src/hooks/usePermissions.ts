@@ -9,6 +9,7 @@ export {
 } from '@xyne/shared/hooks';
 
 import { useHasResourceAccess, usePermissions } from '@xyne/shared/hooks';
+import { AccessType } from '@xyne/shared';
 
 export const useIsMemoryAdmin = (): boolean => {
   return useHasResourceAccess('MEMORY');
@@ -18,6 +19,6 @@ export const useCanCreateWorkspace = (): boolean => {
   return permissions.some(
     permission =>
       permission.resourceName === 'WORKSPACE' &&
-      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
+      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
   );
 };
