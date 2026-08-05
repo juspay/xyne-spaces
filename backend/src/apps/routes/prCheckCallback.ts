@@ -161,6 +161,47 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
       channelId = ticket.channelId;
     }
 
+    // Object-level authorization: when an acting user is supplied (the ordinary-user
+    // dispatch path), they must have access to the ticket's channel. (Absent
+    // callerUserId = the app's own S2S call, which falls back to the Varys bot below.)
+    //
+    // Mirror the app's channel ACL, and always enforce the workspace boundary:
+    //   - PRIVATE channel → the caller must be an explicit participant of THIS channel.
+    //   - PUBLIC channel  → open to members of the channel's workspace (the "Run PR Check"
+    //     button renders to every viewer via showToAll, so ordinary viewers legitimately
+    //     have no participant row here) — but the caller must still belong to that workspace.
+    if (typeof callerUserId === 'string' && callerUserId.trim() && channelId) {
+      const chan = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { visibility: true, workspaceId: true },
+      });
+
+      let authorized = false;
+      if (chan && chan.visibility !== 'PRIVATE' && chan.workspaceId) {
+        const workspaceMembership = await db.channelParticipant.findFirst({
+          where: { userId: callerUserId, channel: { workspaceId: chan.workspaceId } },
+          select: { channelId: true },
+        });
+        authorized = !!workspaceMembership;
+      } else {
+        // PRIVATE, or a channel with no resolvable workspace → require the specific
+        // participant row (fail closed).
+        const participant = await db.channelParticipant.findUnique({
+          where: { channelId_userId: { channelId, userId: callerUserId } },
+          select: { id: true },
+        });
+        authorized = !!participant;
+      }
+
+      if (!authorized) {
+        logger.warn(
+          `[PR-Check-Callback] Rejected: user ${callerUserId} is not authorized for ticket ${ticketId}'s channel (visibility=${chan?.visibility ?? 'unknown'})`,
+        );
+        res.status(403).json({ error: 'Not authorized for this ticket' });
+        return;
+      }
+    }
+
     // Get channel info for channel name
     const channel = await db.channel.findUnique({
       where: { id: channelId },
