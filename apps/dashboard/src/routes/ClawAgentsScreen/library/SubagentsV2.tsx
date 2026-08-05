@@ -110,7 +110,7 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
                 dimmed={!subagent.enabled}
                 icon={
                   <LibraryIconTile>
-                    <Network className='size-5' />
+                    <Network className='size-4' />
                   </LibraryIconTile>
                 }
                 name={subagent.name}

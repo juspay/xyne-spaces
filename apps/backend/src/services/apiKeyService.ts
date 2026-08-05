@@ -1,7 +1,7 @@
 import crypto from 'crypto';
+import { AuthProvider, UserStatus, AccessType } from '@xyne/shared';
 import { DatabaseClient } from '../database/client';
 import { logger } from '../utils/logger';
-import { AuthProvider, UserStatus, AccessType } from '@prisma/client';
 import { CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyListItem, ApiKeyUser } from '../types/express';
 
 export class ApiKeyService {
@@ -220,7 +220,7 @@ export class ApiKeyService {
           .filter(ra => ra.resource)
           .map(ra => ({
             resource: ra.resource.name,
-            access: ra.accessType
+            access: ra.accessType as AccessType
           }));
       }
 
@@ -228,7 +228,7 @@ export class ApiKeyService {
       const allPermissions = [...userPermissions, ...groupPermissions];
 
       // Convert to scopes format for compatibility
-      const scopes = this.permissionsToScopes(allPermissions);
+      const scopes = this.permissionsToScopes(allPermissions as Parameters<typeof this.permissionsToScopes>[0]);
 
       // Determine user role (admin if has any ADMIN access)
       const isAdmin = allPermissions.some(p => p.access === AccessType.ADMIN);

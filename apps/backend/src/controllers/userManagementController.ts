@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
+import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
@@ -1048,10 +1048,9 @@ export class UserManagementController {
       }
 
       const metadata = await storageService.getFileMetadata(gcsPath);
-      const contentType = metadata.contentType || 'image/png';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
-      res.setHeader('Content-Type', contentType);
+      setSafeInlineImageHeaders(res, metadata.contentType || 'image/png');
       res.setHeader('Content-Length', fileSize);
       // Cache for 1 year - safe because picture path includes timestamp and changes on each upload
       res.setHeader('Cache-Control', 'public, max-age=31536000');

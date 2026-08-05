@@ -1,6 +1,7 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { Call, CallStatus, CallOrigin } from '@prisma/client';
+import { Call } from '@prisma/client';
+import { CallStatus, CallOrigin } from '@xyne/shared';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
@@ -249,7 +250,7 @@ export class CallValidationWorker {
 
         // Emit analytics events (call_ended + per-participant) for the Calls dashboards
         try {
-          await callSideEffectService.logCallAnalytics(call, endedAt);
+          await callSideEffectService.logCallAnalytics(call as Parameters<typeof callSideEffectService.logCallAnalytics>[0], endedAt);
         } catch (analyticsError) {
           logger.error(`[CallValidationWorker] Failed to log call analytics for ${externalId}:`, analyticsError);
         }

@@ -1,4 +1,5 @@
-import { CallStatus, CallType, type Call } from '@prisma/client';
+import { type Call } from '@prisma/client';
+import { CallStatus, CallType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 
 export interface CreateNoteTakerCallParams {

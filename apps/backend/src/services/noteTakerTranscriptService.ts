@@ -1,4 +1,4 @@
-import { Prisma, TagMethod, type Call } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -9,7 +9,7 @@ import { callDocumentService, numberTranscriptSegments, type CitationContext } f
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 import type { BuiltinRecordingSummaryTemplateId } from '@/services/recordingSummaryTemplates';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No

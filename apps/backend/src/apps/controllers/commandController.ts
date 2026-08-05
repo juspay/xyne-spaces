@@ -11,6 +11,7 @@ import {
 } from '@/database/repositories/appCommandRepository';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
 
 /**
  * Insert a SYSTEM message visible only to `userId` explaining that a command or shortcut failed.
@@ -622,6 +623,20 @@ export class CommandController {
         eventType,
       });
 
+      // Reject webhook URLs whose host resolves to an internal/private address.
+      try {
+        await assertWebhookUrlSafe(match.webhookUrl);
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          logger.warn('[COMMAND-DISPATCH] Blocked SSRF-unsafe webhook URL', {
+            appId: match.appId,
+            reason: err.message,
+          });
+          throw new Error('App webhook URL is not allowed');
+        }
+        throw err;
+      }
+
       const appResponse = await fetch(match.webhookUrl, {
         method: 'POST',
         headers: {
@@ -629,6 +644,7 @@ export class CommandController {
           'X-Xyne-Event': eventType,
         },
         body: JSON.stringify(payload),
+        redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
       });
 

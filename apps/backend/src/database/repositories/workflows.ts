@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { TicketStatusV2 } from '@xyne/shared';
 import {
   Ticket,
   CreateTicketInput,
@@ -13,7 +14,6 @@ import {
   FullWorkflowExecution,
   QueryOptions,
 } from '@/types/database';
-import { TicketStatusV2 } from '@prisma/client';
 import {
   stitchExecutionState,
   stitchExecutionStateMany,

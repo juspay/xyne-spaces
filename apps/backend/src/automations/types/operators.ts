@@ -9,6 +9,7 @@ export enum ConditionOperator {
   LT = 'lt',
   LTE = 'lte',
   EXISTS = 'exists',
+  HAS_TAG = 'has_tag',
 }
 
 export const ConditionOperatorSchema = z.nativeEnum(ConditionOperator);

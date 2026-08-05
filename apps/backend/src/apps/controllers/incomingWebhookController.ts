@@ -1,11 +1,7 @@
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import {
-  AppIncomingWebhookAction,
-  AppIncomingWebhookType,
-  Prisma,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
@@ -14,7 +10,7 @@ import { findOrCreateConversation } from '../core/conversationUtils';
 import { createTicketWithConversation } from '../core/ticketutils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
-import { MessageType } from '@xyne/shared';
+import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
 import {
   buildSentinelRawFallbackMessage,

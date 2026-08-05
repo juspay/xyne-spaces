@@ -1,8 +1,8 @@
 import { notificationService } from '@/services/notificationService';
+import { NotificationType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { ConversationParticipantPreviousValue, SideEffectJobConfig } from '../types';
 import { logger } from '@/utils/logger';
-import { NotificationType } from '@prisma/client';
 
 /**
  * When a user's conversation_participants row is updated with a new lastReadAt,

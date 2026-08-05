@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType, ActivityType, TicketReferenceRelation } from '@prisma/client';
+import { Ticket, MessageAttachment } from '@prisma/client';
 import { getContextOrNull } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
@@ -50,7 +50,17 @@ import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType, FormContextType, FormEntityType, ReleaseTrackingMode, serializeTicketMd } from '@xyne/shared';
+import { BaseTicketType,
+  FormContextType,
+  FormEntityType,
+  ReleaseTrackingMode,
+  serializeTicketMd,
+  TicketStatusV2,
+  TicketPriority,
+  AttachmentEntityType,
+  ChannelType,
+  ActivityType,
+  TicketReferenceRelation, MessageType } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -859,7 +869,7 @@ export class TicketController {
             conversationId,
             senderId: userId,
             content: `Ticket created in ${board?.name || 'Unknown Board'}: ${title}`,
-            msgType: 'SYSTEM',
+            msgType: MessageType.SYSTEM,
             metadata: { ticketId: ticket.id },
           }, initialMessageId);
           await messageMetadataService.syncInitialMessageMd(conversationId);
@@ -1238,13 +1248,13 @@ export class TicketController {
         id: ticket.id,
         title: ticket.title,
         description: ticket.description,
-        status: ticket.statusV2,
+        status: ticket.statusV2 as TicketStatusV2,
         createdBy: ticket.createdBy,
         updatedBy: ticket.updatedBy,
         assignedTo: ticket.assignedTo,
         conversationId: ticket.conversationId,
         eta: ticket.eta,
-        priority: ticket.priority,
+        priority: ticket.priority as TicketPriority,
         metadata: ticket.metadata as Record<string, any> | null,
         closedAt: ticket.closedAt,
         closedBy: ticket.closedBy,

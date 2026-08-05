@@ -1,5 +1,6 @@
 import { BaseRepository } from './base';
-import { Channel, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@prisma/client';
+import { Channel } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { formatDateTimeShort } from '@/utils/dateUtils';

@@ -9,7 +9,8 @@ import {
   PaginationOptions,
   PaginatedResult,
 } from '@/types/database';
-import { AuthProvider, Prisma, UserStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AuthProvider, UserStatus } from '@xyne/shared';
 //import { queueUserIngestion } from '@/queues/vespaQueue';
 
 export class UserRepository extends BaseRepository<User, CreateUserInput, UpdateUserInput> {

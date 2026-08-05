@@ -1,11 +1,11 @@
 import { NotificationEvent, MobilePushJobData, MobilePushPayload, DeliveryChannel } from '../types';
+import { NotificationStatus } from '@xyne/shared';
 import { notificationWorker } from '../consumers/notificationWorker';
 import { notificationRedisService } from '../config/redis';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
-import { NotificationStatus } from '@prisma/client';
 
 export class NotificationProducer {
   private logger = logger.child({ module: 'NotificationProducer' });

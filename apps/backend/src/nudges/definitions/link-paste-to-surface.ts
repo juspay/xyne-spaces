@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import type {
   NudgeDefinition,
   ActivityEventNudgePayload,
@@ -12,7 +13,7 @@ import { parseXyneUrlsFromContent } from './helpers';
 
 export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, NudgeEvaluationContext> =
   {
-    kind: 'LINK_PASTE_TO_SURFACE',
+    kind: NudgeKind.LINK_PASTE_TO_SURFACE,
     mode: 'implicit',
     trigger: {
       subscribesTo: ['MESSAGE.SENT'],
@@ -31,7 +32,7 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
         return /https?:\/\//.test(message.content);
       },
     },
-    direction: { from: 'MESSAGE', to: 'MESSAGE' },
+    direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE },
 
     async buildContext(
       _payload: ActivityEventNudgePayload,
@@ -44,7 +45,7 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
         source: {
           sourceId: runtime.messagePayload?.messageId ?? null,
           projectId: runtime.messagePayload?.projectId ?? null,
-          sourceType: 'MESSAGE',
+          sourceType: SurfaceAreaType.MESSAGE,
         },
         activityContext: EMPTY_ACTIVITY_CONTEXT,
       };

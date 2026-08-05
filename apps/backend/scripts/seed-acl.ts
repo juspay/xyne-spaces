@@ -10,9 +10,18 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  ProjectType,
+} from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
@@ -123,7 +132,7 @@ const DEFAULT_ADMIN_USER = {
   name: DEFAULT_ADMIN_EMAIL.split('@')[0],
   email: DEFAULT_ADMIN_EMAIL,
   authProvider: AuthProvider.EMAIL,
-  providerUserId: 'email-admin-seed-user-001',
+  providerUserId: `email-${DEFAULT_ADMIN_EMAIL}`,
   status: UserStatus.ACTIVE,
   role: WorkspaceRole.ADMIN,
 };
@@ -643,7 +652,7 @@ async function main() {
     // Step 8: Ensure all bot users are in OrgMember table
     console.log('\n🤖 Ensuring all bot users are in org_member table...');
     try {
-      const { UserType } = await import('@prisma/client');
+      const { UserType } = await import('@xyne/shared');
 
       // Find all bots (using string literal since UserType enum may not be generated yet)
       const botUsers = await prisma.user.findMany({

@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { AccessType } from '@xyne/shared';
 import {
   ResourceAccess,
   CreateResourceAccessInput,
@@ -8,7 +9,6 @@ import {
   PaginationOptions,
   PaginatedResult,
 } from '@/types/database';
-import { AccessType } from '@prisma/client';
 import { aclAuditService } from '@/services/aclAuditService';
 
 export class ResourceAccessRepository extends BaseRepository<ResourceAccess, CreateResourceAccessInput, UpdateResourceAccessInput> {

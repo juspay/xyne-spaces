@@ -1,5 +1,5 @@
-import { TicketPriority } from '@prisma/client';
 import { Request, Response } from 'express';
+import { TicketPriority } from '@xyne/shared';
 import { z } from 'zod';
 import { getKanbanCounts } from '@/services/tickets/kanbanCountsService';
 import { logger } from '@/utils/logger';

@@ -1,11 +1,5 @@
-import {
-  ActivityType,
-  ExternalEntityType,
-  MessageType,
-  Prisma,
-  PrismaClient,
-  TicketStatusV2,
-} from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { ActivityType, ExternalEntityType, MessageType, TicketStatusV2 } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -152,7 +146,7 @@ export class StageReconstructionService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const ignoredTicketIds = this.getIgnoredTicketIds(input.ticketIds, tickets);
+    const ignoredTicketIds = this.getIgnoredTicketIds(input.ticketIds, tickets as TicketSnapshot[]);
 
     yield { type: 'start', runId, dryRun, totalTickets: tickets.length, ignoredTicketIds };
 
@@ -164,14 +158,14 @@ export class StageReconstructionService {
     };
 
     if (!cutoff) {
-      const changes = tickets.map((ticket) => this.manualReviewChange(ticket, 'migration cutoff could not be determined'));
+      const changes = tickets.map((ticket) => this.manualReviewChange(ticket as TicketSnapshot, 'migration cutoff could not be determined'));
       totals.cannotDetermine = tickets.length;
       yield { type: 'batch', batchIndex: 0, changes, progress: { ...totals } };
     } else {
       let batchIndex = 0;
       for (let offset = 0; offset < tickets.length; offset += BATCH_SIZE) {
         const batch = tickets.slice(offset, offset + BATCH_SIZE);
-        const batchResult = await this.processBatch(batch, cutoff, dryRun, input.actorUserId);
+        const batchResult = await this.processBatch(batch as TicketSnapshot[], cutoff, dryRun, input.actorUserId);
 
         totals.needsReconstruction += batchResult.needsReconstruction;
         totals.alreadyCorrect += batchResult.alreadyCorrect;
@@ -309,11 +303,11 @@ export class StageReconstructionService {
 
     const activitiesByTicket = this.groupBy(activities, (activity) => activity.ticketId);
     const messagesByConversation = this.groupBy(messages, (message) => message.conversationId);
-    const stagesByBoard = this.groupBy(stages, (stage) => stage.boardId);
+    const stagesByBoard = this.groupBy(stages as StageSnapshot[], (stage) => stage.boardId);
     const activeStageEtaByTicket = new Map<string, ActiveStageEtaSnapshot>();
     for (const entry of activeStageEtas) {
       if (!activeStageEtaByTicket.has(entry.ticketId)) {
-        activeStageEtaByTicket.set(entry.ticketId, entry);
+        activeStageEtaByTicket.set(entry.ticketId, entry as ActiveStageEtaSnapshot);
       }
     }
 
@@ -337,7 +331,7 @@ export class StageReconstructionService {
     for (const ticket of tickets) {
       const reconstructed = this.reconstructTicket(
         ticket,
-        activitiesByTicket.get(ticket.id) ?? [],
+        (activitiesByTicket.get(ticket.id) ?? []) as ActivitySnapshot[],
         messagesByConversation.get(ticket.conversationId) ?? [],
         stagesByBoard,
         activeStageEtaByTicket.get(ticket.id),
@@ -377,12 +371,12 @@ export class StageReconstructionService {
       }
 
       batchResult.needsReconstruction += 1;
-      const change = this.changeFromState(ticket, reconstructed, reconstructedStatusV2, false);
+      const change = this.changeFromState(ticket, reconstructed, reconstructedStatusV2 as TicketStatusV2, false);
 
       if (dryRun) {
         batchResult.changes.push(change);
       } else {
-        pendingApplies.push({ ticket, stageName: reconstructed.stageName, statusV2: reconstructedStatusV2, change });
+        pendingApplies.push({ ticket, stageName: reconstructed.stageName, statusV2: reconstructedStatusV2 as TicketStatusV2, change });
       }
     }
 

@@ -1,12 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  CallType,
-  CanvasRole,
-  ConversationParticipation,
-  MessageType,
-  Prisma,
-  type EntityAccess,
-} from '@prisma/client';
+import { Prisma, type EntityAccess } from '@prisma/client';
 import {
   addReplyToData,
   EntityUserAccess,
@@ -14,6 +7,10 @@ import {
   serializeRepliesMd,
   ShareableEntityType,
   type GrantableEntityUserAccess,
+  CallType,
+  CanvasRole,
+  ConversationParticipation,
+  MessageType,
 } from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
@@ -195,7 +192,10 @@ export class RecordingSharingService {
             ? existing
             : await tx.entityAccess.update({
                 where: { id: existing.id },
-                data: { entityUserAccess: EntityUserAccess.REVOKED },
+                data: {
+                  entityUserAccess: EntityUserAccess.REVOKED,
+                  updatedAt: new Date(),
+                },
               });
         await this.syncCanvasAccess(tx, recording, actor.workspaceId, target, 'revoke');
         shares.push({ id: share.id, target, access: share.entityUserAccess });
@@ -420,7 +420,10 @@ export class RecordingSharingService {
     }
     const revokedShare = await tx.entityAccess.update({
       where: { id: existingShare.id },
-      data: { entityUserAccess: EntityUserAccess.REVOKED },
+      data: {
+        entityUserAccess: EntityUserAccess.REVOKED,
+        updatedAt: new Date(),
+      },
     });
     await this.syncCanvasAccess(tx, recording, actor.workspaceId, target, 'revoke');
 
@@ -599,7 +602,7 @@ export class RecordingSharingService {
     const share = existing
       ? await tx.entityAccess.update({
           where: { id: existing.id },
-          data: { entityUserAccess: access },
+          data: { entityUserAccess: access, updatedAt: new Date() },
         })
       : await tx.entityAccess.create({
           data: {
@@ -608,6 +611,7 @@ export class RecordingSharingService {
             shareableEntityType: ShareableEntityType.NOTE_TAKER,
             entityId: recording.id,
             entityUserAccess: access,
+            updatedAt: new Date(),
             ...targetData(target),
           },
         });

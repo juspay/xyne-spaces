@@ -10,9 +10,22 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, OrgRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType, OrgLLMServiceAccountProvider, OrgLLMServiceAccountPurpose, OrgLLMServiceAccountCredentialStatus } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  OrgLLMServiceAccountProvider,
+  OrgLLMServiceAccountPurpose,
+  OrgLLMServiceAccountCredentialStatus,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  OrgRole,
+  ProjectType,
+} from '@xyne/shared';
 import { encrypt } from '../src/services/encryptionService';
 
 const prisma = new PrismaClient();
@@ -77,7 +90,7 @@ const DEFAULT_ADMIN_USER = {
   name: 'System Administrator',
   email: 'admin@xyne.ai',
   authProvider: AuthProvider.EMAIL,
-  providerUserId: 'email-admin-seed-user-001',
+  providerUserId: 'email-admin@xyne.ai',
   status: UserStatus.ACTIVE,
 };
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MeetingStatus } from '@prisma/client';
+import { MeetingStatus } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),

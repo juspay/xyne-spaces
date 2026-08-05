@@ -1,11 +1,10 @@
 import { Request, Response } from 'express';
 import { OrganizationRepository, CreateOrganizationInput } from '../database/repositories/organizationRepository';
 import { UserRepository } from '../database/repositories/users';
-import { OrgRole, ProjectType } from '@prisma/client';
 import { DatabaseClient } from '../database/client';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { buildInvitationLink } from '@/controllers/invitationController';
@@ -224,7 +223,7 @@ export class OrganizationController {
       // 6. Create and send invitation to the workspace
       const invitation = await invitationService.createInvitation({
         email: ownerEmail.trim().toLowerCase(),
-        role: 'OWNER',
+        role: WorkspaceRole.OWNER,
         workspaceId: workspace.id,
         invitedBy: userId,
         orgId: organization.orgId,
@@ -389,7 +388,7 @@ export class OrganizationController {
       }
 
       // Validate role
-      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'];
+      const validRoles: OrgRole[] = [OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.GUEST];
       if (!validRoles.includes(role)) {
         res.status(400).json({
           error: 'Invalid role',
@@ -447,7 +446,7 @@ export class OrganizationController {
       
 
       // Validate role
-      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'];
+      const validRoles: OrgRole[] = [OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.GUEST];
       if (!role || !validRoles.includes(role)) {
         res.status(400).json({
           error: 'Invalid role',

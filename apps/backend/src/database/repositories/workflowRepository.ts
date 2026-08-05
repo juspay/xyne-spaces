@@ -1,4 +1,5 @@
-import { Workflow, WorkflowExecution, WorkflowStep, AttachmentEntityType } from '@prisma/client';
+import { Workflow, WorkflowExecution, WorkflowStep } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { DatabaseClient } from '@/database/client';
 import {logger} from '@/utils/logger';

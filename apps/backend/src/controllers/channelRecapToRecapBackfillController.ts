@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
+import { RecapEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
-import { RecapEntityType } from '@prisma/client';
 
 type BackfillOptions = {
   batchSize: number;

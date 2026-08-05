@@ -1,8 +1,8 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { DeskMetricsBackfillController } from '@/controllers/deskMetricsBackfillController';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 
 const router = Router();
 

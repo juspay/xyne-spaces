@@ -7,12 +7,12 @@
  */
 
 import { Request, Response } from 'express';
+import { EmailType } from '@xyne/shared';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { emailService } from '@/services/emailService';
 import { logger } from '@/utils/logger';
-import { EmailType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema } from '@/vespa/src/types';

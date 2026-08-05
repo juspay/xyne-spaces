@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
-import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
+import { Prisma, Tag, TagsConfig } from '@prisma/client';
+import { TagMethod } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 
 export type TxClient = Prisma.TransactionClient;
