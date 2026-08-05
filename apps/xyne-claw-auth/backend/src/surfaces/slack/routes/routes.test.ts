@@ -1241,7 +1241,13 @@ describe("Slack slash commands", () => {
       // command was registered against, not whichever one resolved inbound.
       commandConnectedSurfaceId: "team-row",
       config: {},
-      agent: { id: "agent-1", slug: "helper", name: "Helper Agent", orgId: "org-1", config: null },
+      agent: {
+        id: "agent-1",
+        slug: "helper",
+        name: "Helper Agent",
+        orgId: "org-1",
+        config: { tools: { subagents: ["spaces"] } },
+      },
     };
     mocks.resolveInboundForTenant.mockResolvedValueOnce({
       orgId: "org-1",
@@ -1285,6 +1291,7 @@ describe("Slack slash commands", () => {
       triggerSource: "slack",
       conversationId: "slack-T123-C42-111_222",
       slackDelivery: expect.objectContaining({ connectedSurfaceId: "team-row", threadTs: "111.222" }),
+      agentConfig: { tools: { subagents: ["spaces", "slack"] } },
     });
     expect(runBody.providerConfigs).toBeDefined();
     const ctx = (mocks.setSession.mock.calls as unknown as Array<[string, Record<string, any>]>)[0]![1];

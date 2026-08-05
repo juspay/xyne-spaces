@@ -110,7 +110,18 @@ const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL
  */
 const PER_AGENT_SERVER_TYPES = new Set<string>(["xyne-spaces-app-tools"]);
 
-function sessionKey(userId: string, serverType: string, agentSlug?: string): string {
+function sessionKey(
+  userId: string,
+  serverType: string,
+  agentSlug?: string,
+  credentials?: Record<string, unknown>,
+): string {
+  // Slack credentials can be supplied by the workspace that dispatched a
+  // surface run. Keep each team's env-bound child process isolated.
+  const slackTeamId = credentials?.["teamId"];
+  if (serverType === "slack" && typeof slackTeamId === "string" && slackTeamId) {
+    return `${userId}:${serverType}:team:${slackTeamId}`;
+  }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
     return `${userId}:${serverType}:${agentSlug}`;
   }
@@ -143,7 +154,7 @@ async function getOrCreateSession(
   credentials: Record<string, unknown>,
   agentSlug?: string,
 ): Promise<Client> {
-  const key = sessionKey(userId, serverType, agentSlug);
+  const key = sessionKey(userId, serverType, agentSlug, credentials);
 
   // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
   // any cache lookup. The cached child process has its token baked into env
@@ -192,6 +203,8 @@ async function getOrCreateSession(
       ? (credentials["token"] as string)
       : typeof credentials["accessToken"] === "string"
         ? (credentials["accessToken"] as string)
+        : typeof credentials["botToken"] === "string"
+          ? (credentials["botToken"] as string)
         : typeof credentials["apiKey"] === "string"
           ? (credentials["apiKey"] as string)
           : undefined;
@@ -531,6 +544,18 @@ export async function callTool(
 
 export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
   const key = sessionKey(userId, serverType, agentSlug);
+  if (serverType === "slack") {
+    const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:team:`));
+    for (const candidate of keys) {
+      const scopedSession = sessions.get(candidate);
+      if (!scopedSession) continue;
+      log.info(`[mcp/runner] evicting cached session for ${candidate}`);
+      sessions.delete(candidate);
+      await scopedSession.transport.close().catch(() => {});
+    }
+    if (keys.length === 0) log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
+    return;
+  }
   const session = sessions.get(key);
   if (session) {
     log.info(`[mcp/runner] evicting cached session for ${key}`);

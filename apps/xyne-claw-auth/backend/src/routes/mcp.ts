@@ -603,12 +603,45 @@ async function getAppTokenCredentials(userId: string): Promise<Record<string, un
  * Wrapper around loadEffectiveCredentials that adds the xyne-spaces app-token
  * fallback. Keeps the same return shape so callers can swap it in seamlessly.
  */
+async function loadSlackSurfaceCredentials(
+  sessionId: string | undefined,
+): Promise<EffectiveCredentials | null> {
+  if (!sessionId) return null;
+
+  const { getSession } = await import("./webhook.js");
+  const runCtx = await getSession(sessionId).catch(() => null);
+  const delivery = runCtx?.slackDelivery;
+  if (!delivery?.surfaceAgentId || !delivery.teamId) return null;
+
+  const { agentBotToken, connectedSurfaceBotToken } = await import("../surfaces/slack/delivery.js");
+  const botToken = delivery.connectedSurfaceId
+    ? await connectedSurfaceBotToken(delivery.connectedSurfaceId).catch(() => null)
+    : await agentBotToken(delivery.surfaceAgentId, delivery.teamId).catch(() => null);
+  if (!botToken) return null;
+
+  return {
+    credentials: { botToken, teamId: delivery.teamId },
+    source: "agent",
+    connectionId: `slack-surface:${delivery.connectedSurfaceId ?? delivery.surfaceAgentId}:${delivery.teamId}`,
+    isUserOwned: false,
+  };
+}
+
 async function loadEffectiveCredentialsWithSpacesFallback(
   userId: string,
   serverType: string,
   agentSlug?: string,
   agentOrgId?: string,
+  sessionId?: string,
 ): Promise<EffectiveCredentials | null> {
+  // A Slack-surface run must use the bot installed in the workspace that
+  // dispatched it. Do this before user/agent/global credential resolution so
+  // an unrelated personal Slack connection cannot cross workspace boundaries.
+  if (serverType === "slack") {
+    const surface = await loadSlackSurfaceCredentials(sessionId);
+    if (surface) return surface;
+  }
+
   const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId);
   if (effective) return effective;
 
@@ -746,6 +779,21 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
+    // Slack-surface runs do not require a separately configured MCP
+    // connection. The verified workspace install supplies credentials.
+    const hasSlackEntry = entries.some((entry) => entry.serverType === "slack");
+    if (!hasSlackEntry) {
+      const { getSession } = await import("./webhook.js");
+      const runCtx = await getSession(req.params.sessionId).catch(() => null);
+      if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
+        const slackServer = await prisma.mcpServer.findUnique({ where: { type: "slack" } });
+        if (slackServer) {
+          entries.push({ type: "user", serverType: "slack", serverName: slackServer.name, enforcementType: "virtual" });
+          log.info(`[mcp/tools] added virtual slack entry (surface bot token) for userId=${userId}`);
+        }
+      }
+    }
+
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
     // Fallback: if no xyne-spaces connection exists, try using the agent's app token
@@ -765,7 +813,15 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const results = await Promise.allSettled(
       entries.map(async (entry) => {
         if (!(await hasConnectorDefinition(entry.serverType))) return null;
-        const effective = await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
+        const effective = entry.serverType === "slack"
+          ? await loadEffectiveCredentialsWithSpacesFallback(
+              userId,
+              entry.serverType,
+              agentSlug,
+              sessionAgentOrgId,
+              req.params.sessionId,
+            )
+          : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
         if (!effective) return null;
         const serverTools = await listToolsForUser(userId, entry.serverType, entry.serverName, effective.credentials, agentSlug);
         return { entry, serverTools };
@@ -1211,7 +1267,13 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
-    const effective = await loadEffectiveCredentialsWithSpacesFallback(userId, serverType, agentSlug, sessionAgentOrgId);
+    const effective = await loadEffectiveCredentialsWithSpacesFallback(
+      userId,
+      serverType,
+      agentSlug,
+      sessionAgentOrgId,
+      req.params.sessionId,
+    );
     if (!effective) {
       res.status(404).json({ success: false, error: `No connection found for user and server type: ${serverType}` });
       return;
@@ -1677,7 +1739,13 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         return;
       }
 
-      const effective = await loadEffectiveCredentialsWithSpacesFallback(userId, serverType, agentSlug, sessionAgentOrgId);
+      const effective = await loadEffectiveCredentialsWithSpacesFallback(
+        userId,
+        serverType,
+        agentSlug,
+        sessionAgentOrgId,
+        req.params.sessionId,
+      );
       const credentials = effective?.credentials;
       if (!credentials) {
         res.status(404).json({ success: false, error: `No connection found for user and server type: ${serverType}` });
