@@ -267,7 +267,11 @@ export const AssignmentConfigScreen = ({
       setLocalRotationInterval(userGroup.rotationInterval ?? RotationInterval.WEEKLY);
       setLocalReassignOnUnavailable(userGroup.reassignOnUnavailable ?? false);
     }
-  }, [userGroup?.autoRotationEnabled, userGroup?.rotationInterval, userGroup?.reassignOnUnavailable]);
+  }, [
+    userGroup?.autoRotationEnabled,
+    userGroup?.rotationInterval,
+    userGroup?.reassignOnUnavailable,
+  ]);
 
   const boards = allBoards || [];
 
@@ -899,24 +903,26 @@ export const AssignmentConfigScreen = ({
             )}
           </div>
 
-          {/* Reassign on unavailability */}
+          {/* Allow reassignment on unavailability */}
           <div className='rounded-2xl border border-border bg-card p-4'>
             <div className='mb-4'>
-              <h2 className='text-sm font-semibold text-foreground'>Reassign on unavailability</h2>
+              <h2 className='text-sm font-semibold text-foreground'>
+                Allow reassignment on unavailability
+              </h2>
               <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
-                When a member of this group pauses their ticket assignment, automatically hand off
-                their open tickets to another eligible member.
+                Let members of this group choose whether to hand off their existing open tickets
+                when they pause ticket assignment.
               </p>
             </div>
 
             <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
               <div className='min-w-0'>
                 <span className='block text-[13px] font-medium text-foreground'>
-                  Reassign open tickets on unavailability
+                  Allow existing-ticket reassignment
                 </span>
                 <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
-                  Runs the same auto-assignment logic used for new tickets. Tickets with no
-                  eligible replacement stay with the unavailable member.
+                  Members can opt in from the pause dialog. If no eligible replacement exists, their
+                  tickets stay assigned to them.
                 </p>
               </div>
               <Switch
