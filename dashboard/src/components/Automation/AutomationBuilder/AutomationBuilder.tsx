@@ -482,7 +482,7 @@ export function AutomationBuilder({
 
   const handleProposeChangeNavigate = useCallback((): void => {
     if (automation?.id) {
-      void navigate(`/automations/new?fork=${automation.id}`);
+      void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
     }
   }, [automation?.id, navigate]);
 
@@ -759,7 +759,7 @@ export function AutomationBuilder({
                     return;
                   }
                   if (forkSourceAutomationId) {
-                    void navigate(`/automations/${forkSourceAutomationId}`);
+                    void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
                     return;
                   }
                   onBack();
