@@ -167,7 +167,6 @@ import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
 import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
 import teamIntelligenceRoutes from '@/team-intelligence/routes';
-import telepresenceMonitoringRoutes from '@/telepresence-monitoring/routes';
 import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
 import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
 import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
@@ -219,6 +218,17 @@ export class App {
   }
 
   private initializeMiddlewares(): void {
+    // Rate limiting keys on the client address, so Express has to be told how to find it.
+    // Set before any middleware runs, since req.ip derives from this.
+    this.app.set('trust proxy', config.trustProxy);
+    if (config.trustProxy === false && config.env !== 'development') {
+      logger.warn(
+        '[App] TRUST_PROXY is unset. If this deployment sits behind a load balancer or ' +
+        'reverse proxy, every request presents that proxy address and the rate limiters ' +
+        'share one bucket across all clients. Set TRUST_PROXY to the number of proxy hops.',
+      );
+    }
+
     // Security middleware
     this.app.use(helmet());
 
@@ -373,7 +383,6 @@ export class App {
 
     // Team intelligence sync route (S2S auth - called by Mettle)
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
-    this.app.use('/api/telepresence-monitoring', telepresenceMonitoringRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
     this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);

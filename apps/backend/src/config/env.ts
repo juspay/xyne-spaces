@@ -21,6 +21,12 @@ const envSchema = Joi.object({
   ALLOWED_MEDIA_ORIGINS: Joi.string().default(
     'http://localhost:5173/,xyne-spaces://./,xyne-spaces-dev://./,xyne-spaces-sandbox://./'
   ),
+  // How many reverse proxies sit in front of this app, or which to trust.
+  // '' (the default) trusts none, which is correct when the app is reached directly.
+  // A number is a hop count; 'true' trusts every proxy; a comma-separated list names
+  // addresses or subnets. Rate limiting keys on the client address, so an app behind a
+  // load balancer with this unset sees every request as coming from the balancer.
+  TRUST_PROXY: Joi.string().allow('').default(''),
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
@@ -466,6 +472,22 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
+/**
+ * Express's `trust proxy` setting, from TRUST_PROXY.
+ *
+ * Returns false when unset, so an app reached directly reads the peer address. A numeric
+ * value is a hop count, 'true' trusts every proxy, and anything else is passed through as
+ * Express's list form for named addresses or subnets.
+ */
+function parseTrustProxy(raw: string): boolean | number | string {
+  const value = (raw ?? '').trim();
+  if (!value || value.toLowerCase() === 'false') return false;
+  if (value.toLowerCase() === 'true') return true;
+  const hops = Number(value);
+  if (Number.isInteger(hops) && hops >= 0) return hops;
+  return value;
+}
+
 export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
@@ -496,6 +518,7 @@ export const config = {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
     max: envVars.RATE_LIMIT_MAX_REQUESTS,
   },
+  trustProxy: parseTrustProxy(envVars.TRUST_PROXY as string),
   logging: {
     level: envVars.LOG_LEVEL,
     filePath: envVars.LOG_FILE_PATH,
