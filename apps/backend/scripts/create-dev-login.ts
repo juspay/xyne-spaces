@@ -173,7 +173,7 @@ async function main() {
       });
       if (!mapped) {
         await prisma.userGroupMapping.create({
-          data: { userId: user.id, userGroupId: adminGroup.id },
+          data: { userId: user.id, userGroupId: adminGroup.id, workspaceId: workspace.id },
         });
         console.log('  ✅ Added to the ADMIN group');
       }

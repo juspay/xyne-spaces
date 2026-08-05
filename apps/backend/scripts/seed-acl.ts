@@ -26,6 +26,7 @@ import {
 } from '@xyne/shared';
 import { runAsSystem } from '../src/database/tenant/context';
 import { hashPassword } from '../src/utils/passwordUtils';
+import { vespaQueue } from '../src/queues/vespaQueue';
 
 const prisma = new PrismaClient();
 
@@ -157,6 +158,8 @@ const DEFAULT_WORKSPACE = {
 
 async function main() {
   console.log('🚀 Starting ACL system seeding...');
+
+  await vespaQueue.initialize();
 
   try {
     // Step 1: Create essential resources

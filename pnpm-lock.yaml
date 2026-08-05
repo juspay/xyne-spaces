@@ -107,6 +107,9 @@ importers:
         specifier: ^9.0.5
         version: 9.0.5
     devDependencies:
+      '@clack/prompts':
+        specifier: ^1.7.0
+        version: 1.7.0
       '@commitlint/cli':
         specifier: ^20.1.0
         version: 20.5.3(@types/node@25.9.5)(conventional-commits-parser@6.4.0)(typescript@5.9.3)
@@ -140,6 +143,9 @@ importers:
       husky:
         specifier: ^9.0.11
         version: 9.1.7
+      mprocs:
+        specifier: ^0.9.6
+        version: 0.9.6
       semantic-release:
         specifier: ^22.0.5
         version: 22.0.12(typescript@5.9.3)
@@ -15605,6 +15611,11 @@ packages:
         optional: true
       react-dom:
         optional: true
+
+  mprocs@0.9.6:
+    resolution: {integrity: sha512-sEwB5XD3/rReB47h0YbN2L5fXOLcMjF8sOEDTMr/daCLyVZfU4CegbanxO0ybiaFx0MQ/nV7yzOHmprmy2Wq9w==}
+    engines: {node: '>=0.10.0'}
+    hasBin: true
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -36883,6 +36894,8 @@ snapshots:
       '@emotion/is-prop-valid': 1.4.0
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
+
+  mprocs@0.9.6: {}
 
   mri@1.2.0: {}
 

@@ -106,7 +106,8 @@ async function assignUserToGroup() {
       await prisma.userGroupMapping.create({
         data: {
           userId: user.id,
-          userGroupId: developerGroup.id
+          userGroupId: developerGroup.id,
+          workspaceId: defaultWorkspace.id
         }
       });
       console.log(`✅ Linked user ${user.email} to DEVELOPER group`);

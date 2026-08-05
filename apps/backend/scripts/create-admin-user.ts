@@ -129,6 +129,7 @@ async function createAdminUser() {
         data: {
           userId: user.id,
           userGroupId: adminGroup.id,
+          workspaceId: defaultWorkspace.id,
         },
       });
       console.log('✅ Added to ADMIN group');
