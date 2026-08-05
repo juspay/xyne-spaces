@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BaseTool, Tool } from '@framework';
 import type { ToolExecutionContext, ToolExecutionResult } from '@framework';
-import { searchMemory } from '@/services/memoryService';
+import { searchMemory, ALL_WORKSPACES } from '@/services/memoryService';
 import { MemoryScope, VespaDocType } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 
@@ -82,6 +82,7 @@ export class SearchMemoryTool extends BaseTool<Input, Output, Output> {
         ...(input.repoUrl && { repoUrl: input.repoUrl }),
       },
       userId,
+      ALL_WORKSPACES,
     );
 
     const filteredDocs = input.excludeSessionId

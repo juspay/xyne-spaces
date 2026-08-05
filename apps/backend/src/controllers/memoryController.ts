@@ -32,8 +32,13 @@ export class MemoryController {
     try {
       const document: VespaMemoryDocument = req.body;
       const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
 
-      if (!userId) {
+      // The stored document always carries the caller's workspace, never one supplied
+      // in the request body.
+      document.workspaceId = workspaceId;
+
+      if (!userId || !workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
@@ -66,7 +71,7 @@ export class MemoryController {
 
       // The underlying insert is an upsert keyed on the caller-supplied docId, so reject when
       // the docId already belongs to another user. The owner is stored as either email or id.
-      const existingDoc = await getMemoryById(document.docId);
+      const existingDoc = await getMemoryById(document.docId, workspaceId);
       if (
         existingDoc &&
         existingDoc.userId !== user.email &&
@@ -121,8 +126,9 @@ export class MemoryController {
       const { query, scope, limit, offset, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, includeQuery, includeSummary, docId } = req.body;
 
       const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
 
-      if (!userId) {
+      if (!userId || !workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
@@ -137,6 +143,7 @@ export class MemoryController {
       const result = await searchMemory(
         { query, scope, limit, offset, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, includeQuery, includeSummary , docId },
         userId,
+        workspaceId,
       );
 
       res.status(200).json({
@@ -165,6 +172,12 @@ export class MemoryController {
     try {
       const { docId } = req.params;
 
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
       if (!docId) {
         res.status(400).json({
           success: false,
@@ -175,7 +188,7 @@ export class MemoryController {
 
       logger.info('Getting memory document', { docId });
 
-      const document = await getMemoryById(docId);
+      const document = await getMemoryById(docId, workspaceId);
 
       if (!document) {
         res.status(404).json({
@@ -215,6 +228,13 @@ export class MemoryController {
     try {
       const { docId } = req.params;
 
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+
       if (!docId) {
         res.status(400).json({
           success: false,
@@ -228,7 +248,7 @@ export class MemoryController {
       // Only the owner may modify a memory document. The doc's `userId` field stores the
       // owner's email (buildMemoryYql scope 'my'); accept the caller's email OR id to match
       // the stored convention.
-      const existingDoc = await getMemoryById(docId);
+      const existingDoc = await getMemoryById(docId, workspaceId);
       if (!existingDoc) {
         res.status(404).json({ success: false, error: 'Memory document not found' });
         return;
@@ -239,7 +259,7 @@ export class MemoryController {
         return;
       }
 
-      const updated = await updateMemory(docId, req.body);
+      const updated = await updateMemory(docId, req.body, workspaceId);
 
       if (!updated) {
         res.status(404).json({
@@ -275,6 +295,13 @@ export class MemoryController {
     try {
       const { docId } = req.params;
 
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+
       if (!docId) {
         res.status(400).json({
           success: false,
@@ -287,7 +314,7 @@ export class MemoryController {
 
       // Only the owner may delete a memory document (see updateMemoryDocument). The doc's
       // `userId` holds the owner's email.
-      const docToDelete = await getMemoryById(docId);
+      const docToDelete = await getMemoryById(docId, workspaceId);
       if (!docToDelete) {
         res.status(404).json({ success: false, error: 'Memory document not found' });
         return;
@@ -298,7 +325,7 @@ export class MemoryController {
         return;
       }
 
-      await deleteMemory(docId);
+      await deleteMemory(docId, workspaceId);
 
       res.status(204).send();
     } catch (error) {
@@ -324,8 +351,9 @@ export class MemoryController {
       const { sessionId } = req.params;
       const { docType } = req.query;
       const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
 
-      if (!userId) {
+      if (!userId || !workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
@@ -350,6 +378,7 @@ export class MemoryController {
           docType: docType as VespaDocType,
         },
         userId,
+        workspaceId,
       );
 
       res.status(200).json({
@@ -469,7 +498,8 @@ export class MemoryController {
   replaceSessionMemory = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
-      if (!userId) {
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
@@ -497,6 +527,7 @@ export class MemoryController {
       const existing = await searchMemory(
         { query: '', scope: 'all', limit: 1, offset: 0, sessionId },
         userId,
+        workspaceId,
       );
       const contextDoc = existing.documents[0];
 

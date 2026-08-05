@@ -2,7 +2,7 @@ import { Agent } from 'agentic-framework';
 import { createUserMessage } from '@framework';
 import { agentService } from './agentService';
 import { logger } from '@/utils/logger';
-import { searchMemory } from './memoryService';
+import { searchMemory, ALL_WORKSPACES } from './memoryService';
 import { MemoryScope, VespaDocType, type VespaMemoryDocument } from '@/vespa/src/types';
 import type { ConversationSourceAdapter, MemoryIngestionContext } from './conversationIngestion/types';
 
@@ -94,8 +94,8 @@ async function fetchExistingKnowledge(
   };
 
   const [sopsResult, factsResult] = await Promise.all([
-    searchMemory({ ...searchParams, docType: VespaDocType.SOP }, ''),
-    searchMemory({ ...searchParams, docType: VespaDocType.FACT }, ''),
+    searchMemory({ ...searchParams, docType: VespaDocType.SOP }, '', ALL_WORKSPACES),
+    searchMemory({ ...searchParams, docType: VespaDocType.FACT }, '', ALL_WORKSPACES),
   ]);
 
   return {

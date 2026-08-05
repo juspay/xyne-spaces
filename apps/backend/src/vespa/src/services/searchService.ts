@@ -470,7 +470,7 @@ export class SearchService {
       // caller's workspace. The flag is controlled remotely via Superposition.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
-        false,
+        true,
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
