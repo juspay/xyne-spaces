@@ -191,6 +191,10 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             // `system` is intentional; anything else reaching here has no scope to apply.
             if (ctx?.actor !== 'system')
               warnUnscoped(model, operation, ctx ? 'no-workspace' : 'no-context');
+            // Fail closed: a workspace-scoped model requires a resolved workspace.
+            if (ctx && ctx.actor !== 'system' && model && isWorkspaceScopedModel(model)) {
+              throw deny(model, operation, 'no workspace resolved for a workspace-scoped model');
+            }
             return query(args);
           }
 
@@ -234,14 +238,18 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               }
               aclWhere = { workspaceId: ws };
             }
-            // A table that declared itself unscoped (UnscopedACL) — pass straight through so
-            // findUnique keeps its native, transaction-safe behaviour.
+            // A model carrying workspaceId is always scoped to the caller's workspace,
+            // whatever its ACL returned: a table may widen within a tenant, never across one.
+            // Models without the column pass through so findUnique keeps its native,
+            // transaction-safe behaviour.
             if (isUnrestricted(aclWhere)) {
-              // Only worth noting when the model has the column; global tables are expected.
-              if (isWorkspaceScopedModel(String(model))) {
-                notePattern('[acl] table opted out of scoping', model, operation, { side: 'read' });
+              if (!isWorkspaceScopedModel(String(model))) {
+                return query(args);
               }
-              return query(args);
+              notePattern('[acl] table opted out of scoping', model, operation, { side: 'read' });
+              aclWhere = { workspaceId: ws };
+            } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(aclWhere, ws)) {
+              aclWhere = { AND: [aclWhere, { workspaceId: ws }] };
             }
             const scalarDefault = isWorkspaceOnly(aclWhere, ws);
 
@@ -338,11 +346,15 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             }
           }
 
+          // Same tenant rule as reads.
           if (isUnrestricted(mutateWhere)) {
-            if (isWorkspaceScopedModel(String(model))) {
-              notePattern('[acl] table opted out of scoping', model, operation, { side: 'write' });
+            if (!isWorkspaceScopedModel(String(model))) {
+              return query(args);
             }
-            return query(args);
+            notePattern('[acl] table opted out of scoping', model, operation, { side: 'write' });
+            mutateWhere = { workspaceId: ws };
+          } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(mutateWhere, ws)) {
+            mutateWhere = { AND: [mutateWhere, { workspaceId: ws }] };
           }
 
           // Bulk ops accept a non-unique/relational where — AND the mutate filter directly.
