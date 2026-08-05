@@ -1,0 +1,70 @@
+# LOCAL-ONLY example for a local Kubernetes sandbox controller (kind, minikube,
+# Docker Desktop, etc.). It intentionally uses a local namespace and an image
+# pull policy of Never, so a remote cluster cannot pull or deploy this image.
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: xyne-lens-local-template
+  namespace: xyne-local
+spec:
+  podTemplate:
+    metadata:
+      labels:
+        xyne.ai/sandbox: xyne-lens-local
+        xyne.ai/environment: local
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: workspace
+          image: xyne-lens:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8888
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxWarmPool
+metadata:
+  name: xyne-lens-local-warmpool
+  namespace: xyne-local
+spec:
+  replicas: 1
+  sandboxTemplateRef:
+    name: xyne-lens-local-template
+---
+# Optional where the local cluster supports NetworkPolicy. Keeps generated
+# animation code offline even during local development.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: xyne-lens-local-deny-egress
+  namespace: xyne-local
+spec:
+  podSelector:
+    matchLabels:
+      xyne.ai/sandbox: xyne-lens-local
+  policyTypes:
+    - Egress
+  egress: []

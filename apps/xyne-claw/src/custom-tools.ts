@@ -166,7 +166,13 @@ export function loadCustomTools(
   // the sandbox-* slugs in `tools.custom` — so selection is now simply "any
   // sandbox-* slug present." (The old `tools.subagents: ["sandbox"]` OR-branch
   // is gone; nothing writes that anymore.)
-  const hasSandboxSelected = [...selectedCustom].some((s) => s.startsWith("sandbox-"));
+  // Xyne Lens is a deliberately narrow sandbox capability with its own
+  // `xyne-lens-*` prefix. It shares the custom:sandbox execution source but
+  // must not require selecting (or therefore exposing) generic shell/browser
+  // sandbox tools.
+  const hasSandboxSelected = [...selectedCustom].some(
+    (s) => s.startsWith("sandbox-") || s.startsWith("xyne-lens-"),
+  );
 
   // Filter tools by agent — google/microsoft/research-agent are allowed
   // for any agent whose config selects at least one of those tools (or the

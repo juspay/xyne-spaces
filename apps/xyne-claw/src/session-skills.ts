@@ -51,7 +51,14 @@ function isBinaryContentType(contentType: string | undefined | null, relativePat
   if (contentType) {
     const ct = contentType.toLowerCase();
     if (ct.startsWith("text/")) return false;
-    if (ct === "application/json" || ct === "application/yaml" || ct === "application/xml") return false;
+    if (
+      ct === "application/json"
+      || ct === "application/yaml"
+      || ct === "application/x-yaml"
+      || ct === "application/yml"
+      || ct === "application/x-yml"
+      || ct === "application/xml"
+    ) return false;
     return true;
   }
   const dot = relativePath.lastIndexOf(".");
@@ -99,8 +106,10 @@ function findKey(lines: string[], key: string): { idx: number; value: string } |
 
 /**
  * Build a pi-compatible skill markdown file. Preserves inline frontmatter
- * when the skill body already has one; otherwise injects `name:` (slug) and
- * `description:` (DB column fallback) and YAML-escapes the description.
+ * except for `name`, which is always canonicalized to the materialized
+ * directory slug. This prevents two independently uploaded skills from being
+ * silently de-duplicated by Pi when their authors chose the same `name`.
+ * Injects `description:` (DB column fallback) and YAML-escapes the description.
  *
  * Pi requires:
  *   - `description` (non-empty, ≤1024 chars)
@@ -111,8 +120,14 @@ export function buildSkillFile(slug: string, name: string, description: string, 
   const split = splitFrontmatter(rawContent);
   const lines = [...split.frontmatterLines];
 
-  if (!findKey(lines, "name")) {
+  const skillName = findKey(lines, "name");
+  if (!skillName) {
     lines.unshift(`name: ${slug}`);
+  } else if (skillName.value !== slug) {
+    // `additionalSkillPaths` may contain skills from different sources. Pi
+    // identifies them by frontmatter name, not by their parent directory, so
+    // an uploaded bundle must not shadow an existing seeded guide.
+    lines[skillName.idx] = `name: ${slug}`;
   }
 
   const desc = findKey(lines, "description");

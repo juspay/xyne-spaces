@@ -11,6 +11,7 @@ import {
   RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
+  ProviderStallError,
   isProviderAuthError,
   isQuotaExhaustedError,
   isTransientProviderError,
@@ -118,7 +119,7 @@ import {
   writeWorkspaceTextFiles,
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
-import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
+import { toolOutputBaseDir, deleteSession, branchSession, ensureSessionDebugDir } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../gcs.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
@@ -1442,6 +1443,12 @@ async function processTask(
   // Hoisted like mcpGetPendingActions so both the success path and the catch
   // handler can include files forwarded from MCP tools in the run's attachments.
   let mcpGetAttachments: (() => Attachment[]) | undefined;
+  // Attachments emitted inside an A2A callee must become artifacts of the
+  // parent run. Unlike regular subagents, a callable agent owns an independent
+  // custom-tool collector, so retain a parent-scoped copy here for both the
+  // normal completion and error paths.
+  const delegatedAttachments: Attachment[] = [];
+  const delegatedAttachmentKeys = new Set<string>();
   // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
   // can still surface a goal suggestion the worker queued before the early
   // abort. Filled by buildSuggestGoalTool's callback when the agent calls
@@ -1948,6 +1955,16 @@ async function processTask(
     // nested tools (e.g. Bitbucket__create_pull_request), not just the
     // subagent wrapper names returned by the parent agent.
     const subagentInnerTools: string[] = [];
+    const captureDelegatedAttachment = (attachment: Attachment): void => {
+      const key = `${attachment.fileName}\u0000${attachment.mimeType}\u0000${attachment.data.length}\u0000${attachment.data.slice(0, 48)}`;
+      if (!delegatedAttachmentKeys.has(key)) {
+        delegatedAttachmentKeys.add(key);
+        delegatedAttachments.push(attachment);
+      }
+      // Stream immediately as well; final persistence is handled by
+      // resultAttachments below once the parent run completes.
+      pushAttachment(progressUrl, sessionId, attachment);
+    };
     // NOTE: the "sandbox" subagent was removed (2026-06-14). Sandbox tools now
     // mount directly on the parent (see parentHoistedTools below); playwright
     // browser tools are hoisted alongside them for sandbox-capable agents. The
@@ -2129,10 +2146,20 @@ async function processTask(
       });
     };
 
-    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, parentToolCallId, childGovernor, signal, onProgress }) => {
       const calleeSessionToken = spec.sessionToken ?? sessionToken;
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
+      const childAttachments: Attachment[] = [];
+      const childAttachmentKeys = new Set<string>();
+      const captureChildAttachment = (attachment: Attachment): void => {
+        const key = `${attachment.fileName}\u0000${attachment.mimeType}\u0000${attachment.data.length}\u0000${attachment.data.slice(0, 48)}`;
+        if (!childAttachmentKeys.has(key)) {
+          childAttachmentKeys.add(key);
+          childAttachments.push(attachment);
+        }
+        captureDelegatedAttachment(attachment);
+      };
       const calleeConfig = spec.agentConfig ?? {};
       const calleeToolsConfig = parseToolsConfig(calleeConfig);
       const calleeMeta: Record<string, string> = { userId };
@@ -2163,19 +2190,19 @@ async function processTask(
         {},
         spec.slug,
         mcpOutputDir,
-        (att) => pushAttachment(progressUrl, sessionId, att),
+        captureChildAttachment,
       );
       try {
         const calleeCustom = loadCustomTools(
           calleeConfig,
           calleeMeta,
-          (att) => pushAttachment(progressUrl, sessionId, att),
+          captureChildAttachment,
           researchContext,
           progressUrlForCustom,
           sessionId,
           SERVER.s2sKey,
           calleeSessionToken,
-          undefined,
+          parentToolCallId,
           calleeProviderConfigForTools,
           emitPlanForCustom,
         );
@@ -2251,25 +2278,112 @@ async function processTask(
         }
 
         const providerConfig = spec.provider ? spec.providerConfigs?.[spec.provider] : undefined;
-        const result = await runTask({
-          userId,
-          task: question,
-          userName,
-          userEmail,
-          customTools: calleePalette,
-          systemPromptOverride: spec.systemPrompt,
-          cwd: workspaceDir,
-          provider: spec.provider,
-          providerConfig,
-          progressUrl: undefined,
-          sessionId: `${sessionId}-a2a-${spec.slug}`,
-          skills: spec.skills,
-          abortSignal: signal,
-          progressMeta: {
-            ...(conversationId ? { conversationId } : {}),
-            agentSlug: spec.slug,
-          },
-        });
+        const childSessionId = `${sessionId}-a2a-${spec.slug}-${(parentToolCallId ?? randomUUID()).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        const childStartedAt = new Date().toISOString();
+        let result: Awaited<ReturnType<typeof runTask>>;
+        try {
+          result = await runTask({
+            userId,
+            task: question,
+            userName,
+            userEmail,
+            customTools: calleePalette,
+            systemPromptOverride: spec.systemPrompt,
+            cwd: workspaceDir,
+            provider: spec.provider,
+            providerConfig,
+            // Keep the callee's internal session scope isolated, while emitting
+            // its tool/debug trace into the parent chat run under ask_<agent>.
+            progressUrl,
+            progressSessionId: sessionId,
+            suppressStreamChunks: true,
+            sessionId: childSessionId,
+            skills: spec.skills,
+            abortSignal: signal,
+            progressMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              agentSlug: spec.slug,
+              ...(parentToolCallId ? { parentToolCallId } : {}),
+              subagentName: spec.slug,
+            },
+          });
+        } catch (error) {
+          if (conversationId && parentToolCallId) {
+            try {
+              const debugDir = await ensureSessionDebugDir(
+                buildSandboxStoreKey(userId, conversationId, agentSlug) ?? conversationId,
+              );
+              const { writeFile } = await import("node:fs/promises");
+              const safeCallId = parentToolCallId.replace(/[^a-zA-Z0-9_-]/g, "-");
+              await writeFile(
+                `${debugDir}/subagents-a2a-${spec.slug.replace(/[^a-zA-Z0-9_-]/g, "-")}-${safeCallId}.json`,
+                JSON.stringify({
+                  schemaVersion: 1,
+                  executionKind: "agent_delegation",
+                  parentSessionId: sessionId,
+                  parentToolCallId,
+                  subagentName: spec.slug,
+                  agentSlug: spec.slug,
+                  question,
+                  provider: spec.provider ?? "spaces",
+                  model: providerConfig?.model ?? spec.model ?? "shared",
+                  startedAt: childStartedAt,
+                  finishedAt: new Date().toISOString(),
+                  error: error instanceof Error ? error.message : String(error),
+                  attachments: childAttachments.map(({ fileName, mimeType }) => ({ fileName, mimeType })),
+                }, null, 2),
+                "utf8",
+              );
+            } catch (debugError) {
+              log(`A2A ${spec.slug}: failed to write error debug artifact: ${debugError instanceof Error ? debugError.message : String(debugError)}`);
+            }
+          }
+          throw error;
+        }
+        // Be defensive: both loaders normally call captureDelegatedAttachment
+        // as soon as they see an attachment marker. Merge their collectors too
+        // so a future tool implementation cannot silently lose its artifact.
+        for (const attachment of [...calleeCustom.getAttachments(), ...calleeMcp.getAttachments()]) {
+          captureChildAttachment(attachment);
+        }
+        if (conversationId && parentToolCallId) {
+          try {
+            const debugDir = await ensureSessionDebugDir(
+              buildSandboxStoreKey(userId, conversationId, agentSlug) ?? conversationId,
+            );
+            const { writeFile } = await import("node:fs/promises");
+            const safeCallId = parentToolCallId.replace(/[^a-zA-Z0-9_-]/g, "-");
+            const childTrace = {
+              schemaVersion: 1,
+              executionKind: "agent_delegation",
+              parentSessionId: sessionId,
+              parentToolCallId,
+              subagentName: spec.slug,
+              agentSlug: spec.slug,
+              question,
+              provider: spec.provider ?? "spaces",
+              model: providerConfig?.model ?? spec.model ?? "shared",
+              startedAt: childStartedAt,
+              finishedAt: new Date().toISOString(),
+              text: result.text,
+              toolsUsed: result.toolsUsed,
+              toolInvocations: result.toolInvocations,
+              tokenUsage: result.tokenUsage,
+              latency: result.latency,
+              ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+              // Keep the trace lightweight: artifact bytes stay only in the
+              // final callback payload, never in the debug JSON.
+              attachments: childAttachments.map(({ fileName, mimeType }) => ({ fileName, mimeType })),
+            };
+            await writeFile(
+              `${debugDir}/subagents-a2a-${spec.slug.replace(/[^a-zA-Z0-9_-]/g, "-")}-${safeCallId}.json`,
+              JSON.stringify(childTrace, null, 2),
+              "utf8",
+            );
+          } catch (err) {
+            log(`A2A ${spec.slug}: failed to write child debug artifact: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         if (calleeInnerTools.length > 0) {
           subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
         }
@@ -3280,7 +3394,11 @@ async function processTask(
     // (set by `/compact`). The provider-fallback machine still passes `true`
     // explicitly on empty-completion retries; this just makes the FIRST attempt
     // compact too when the user asked for it.
-    const runAttempt = (a: Attempt, forceCompactBeforeRun = compactBeforeRun === true) =>
+    const runAttempt = (
+      a: Attempt,
+      forceCompactBeforeRun = compactBeforeRun === true,
+      retryingTransient = false,
+    ) =>
       runTask({
         // Per-agent model settings. `model` is the Spaces/platform-default model
         // override — runTask only applies it on attempts with no provider
@@ -3326,6 +3444,7 @@ async function processTask(
           agentSlug: agentSlug ?? null,
         },
         forceCompactBeforeRun,
+        ...(retryingTransient ? { resumedAfterProviderStall: true } : {}),
         // submit-response verification: agent.ts wires the evidence accessor on
         // this ref so the tool can check drafts against gathered tool results.
         ...(verifyResponses && !isCopilot
@@ -3386,6 +3505,14 @@ async function processTask(
       // next provider (→ spaces) instead of dropping the run. A genuine user
       // cancel is gated out by isCancelled below before this is consulted.
       isTransientError: (err) => isTransientProviderError(err),
+      // One retry can rescue a Grid/LiteLLM model turn that never emitted text.
+      // Completed tools remain in the persistent transcript and are not replayed;
+      // an in-flight tool is deliberately never retried because its side effect
+      // is unknown.
+      canRetryTransient: (err) =>
+        err instanceof ProviderStallError && err.safeToRetry,
+      maxTransientRetriesPerAttempt: 1,
+      transientRetryDelayMs: () => 2_000,
       isCancelled: (err) =>
         err instanceof RunCancelledError || !!abortSignal?.aborted,
       hooks: {
@@ -3421,11 +3548,19 @@ async function processTask(
         },
         onRecovered: (provider) =>
           log(`Quota fallback succeeded on ${provider}.`),
+        onRetry: (provider, retry, error) => {
+          metric.count("agent_provider_stall_retry", { provider, agentSlug, retry: String(retry) });
+          log(
+            `Provider ${provider} stalled before text with no in-flight tool; retrying the same provider (${retry}/1): ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        },
       },
     });
     const result = fbResult;
 
-    const resultAttachments = [...getAttachments(), ...(mcpGetAttachments?.() ?? [])];
+    const resultAttachments = [...getAttachments(), ...(mcpGetAttachments?.() ?? []), ...delegatedAttachments];
     const pendingQuestions = getPendingQuestions();
     const hadFollowUpRecorder = pendingQuestions.some(
       (question) => question.purpose === "follow_up_suggestions",
@@ -3893,6 +4028,7 @@ async function processTask(
     const attachmentsAtError = [
       ...(customToolsResult?.getAttachments() ?? []),
       ...(mcpGetAttachments?.() ?? []),
+      ...delegatedAttachments,
     ];
     // Recover pendingActions collected during the run. Mirrors the success
     // path at ~line 1178 which merges MCP-layer + custom-tool pendingActions.

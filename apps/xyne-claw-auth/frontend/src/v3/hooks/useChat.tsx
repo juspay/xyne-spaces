@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { cancelChatRun, sendChatMessage } from "../../lib/api";
 import { resolveEffectiveParents } from "../../lib/branching";
-import type { AttachedContextRef, ChatMsg, DebugEventRecord, PendingAction, PlanTodo, StreamCallbacks, ToolInvocation } from "../../lib/api";
+import type { AttachedContextRef, ChatAttachmentMeta, ChatMsg, DebugEventRecord, PendingAction, PlanTodo, StreamCallbacks, StreamedAttachment, ToolInvocation } from "../../lib/api";
 
 /** Optional extras a single send() call can ride with. */
 export interface SendOptions {
@@ -73,6 +73,57 @@ function stableStringify(value: unknown): string {
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
+}
+
+/** Decode agent-streamed base64 without creating a giant number[] for videos. */
+function streamedAttachmentPreview(att: StreamedAttachment, messageId: string): ChatAttachmentMeta | null {
+  try {
+    const chunks: Uint8Array[] = [];
+    // Must remain divisible by four for base64 decoding. Keeping chunks small
+    // avoids the temporary multi-hundred-MiB number[] that `Array.from(atob())`
+    // creates for a large Lens MP4.
+    const chunkChars = 32_768;
+    for (let offset = 0; offset < att.data.length; offset += chunkChars) {
+      const binary = atob(att.data.slice(offset, offset + chunkChars));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      chunks.push(bytes);
+    }
+    const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    return {
+      id: `streaming-${messageId}-${att.fileName}`,
+      mimeType: att.mimeType,
+      originalFilename: att.fileName,
+      size,
+      // Re-wrap each chunk so TypeScript knows its backing storage is an
+      // ArrayBuffer (rather than the broader ArrayBufferLike generic).
+      previewUrl: URL.createObjectURL(new Blob(chunks.map((chunk) => new Uint8Array(chunk).buffer), { type: att.mimeType })),
+    };
+  } catch (error) {
+    console.warn("[useChat] streamed attachment decode failed:", error);
+    return null;
+  }
+}
+
+function appendStreamedAttachment(session: ChatSession, messageId: string, att: StreamedAttachment): ChatSession {
+  const target = session.messages.find((message) => message.id === messageId);
+  if (!target || target.attachments?.some((attachment) => attachment.originalFilename === att.fileName)) return session;
+  const attachment = streamedAttachmentPreview(att, messageId);
+  if (!attachment) return session;
+  return {
+    ...session,
+    messages: session.messages.map((message) =>
+      message.id === messageId
+        ? { ...message, attachments: [...(message.attachments ?? []), attachment] }
+        : message,
+    ),
+  };
+}
+
+function releaseAttachmentPreviews(messages: ChatMsg[], messageId: string): void {
+  for (const attachment of messages.find((message) => message.id === messageId)?.attachments ?? []) {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  }
 }
 
 function pendingActionLogicalKey(action: PendingAction): string {
@@ -526,6 +577,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               m.id === assistantId ? { ...m, content: m.content + delta } : m,
             ),
           })),
+        onAttachment: (att) => updateSession(liveKey, (s) => appendStreamedAttachment(s, assistantId, att)),
       };
 
       try {
@@ -563,6 +615,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : s;
           const withAssistantId = replaceMessageId(withUserId, assistantId, result.reply.id ?? assistantId);
           const finalAssistantId = result.reply.id ?? assistantId;
+          if (result.reply.attachments) releaseAttachmentPreviews(withAssistantId.messages, finalAssistantId);
           return {
             ...withAssistantId,
             conversationId: finalConvId,
@@ -580,6 +633,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     content: result.reply.content || m.content,
                     status: "complete",
                     parentId: result.reply.parentId ?? m.parentId,
+                    ...(result.reply.attachments ? { attachments: result.reply.attachments } : {}),
                   }
                 : m,
             ),
@@ -746,6 +800,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               m.id === assistantId ? { ...m, content: m.content + delta } : m,
             ),
           })),
+        onAttachment: (att) => updateSession(key, (s) => appendStreamedAttachment(s, assistantId, att)),
       };
 
       try {
@@ -773,6 +828,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         updateSession(key, (s) => {
           const withAssistantId = replaceMessageId(s, assistantId, result.reply.id ?? assistantId);
           const finalAssistantId = result.reply.id ?? assistantId;
+          if (result.reply.attachments) releaseAttachmentPreviews(withAssistantId.messages, finalAssistantId);
           return {
             ...withAssistantId,
             conversationId: result.conversationId,
@@ -790,6 +846,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     content: result.reply.content || m.content,
                     status: "complete",
                     parentId: result.reply.parentId ?? m.parentId,
+                    ...(result.reply.attachments ? { attachments: result.reply.attachments } : {}),
                   }
                 : m,
             ),
@@ -929,6 +986,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               m.id === assistantId ? { ...m, content: m.content + delta } : m,
             ),
           })),
+        onAttachment: (att) => updateSession(key, (s) => appendStreamedAttachment(s, assistantId, att)),
       };
 
       try {
@@ -955,6 +1013,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : s;
           const withAssistantId = replaceMessageId(withUserId, assistantId, result.reply.id ?? assistantId);
           const finalAssistantId = result.reply.id ?? assistantId;
+          if (result.reply.attachments) releaseAttachmentPreviews(withAssistantId.messages, finalAssistantId);
           return {
             ...withAssistantId,
             conversationId: result.conversationId,
@@ -972,6 +1031,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     content: result.reply.content || m.content,
                     status: "complete",
                     parentId: result.reply.parentId ?? m.parentId,
+                    ...(result.reply.attachments ? { attachments: result.reply.attachments } : {}),
                   }
                 : m,
             ),

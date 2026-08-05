@@ -7,6 +7,7 @@ import {
   X,
   Eye,
   Link2,
+  Video,
 } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -104,7 +105,7 @@ export interface BubbleMessage {
   }>;
   status?: "completed" | "failed" | "running" | "cancelled";
   images?: string[];
-  /** Non-image attachments (PDF, PPTX, DOCX, etc.) rendered as download cards. */
+  /** Non-image attachments. Videos render in a native player; other files use download cards. */
   files?: BubbleFile[];
   /** Collapsible reasoning block (shown above tool calls + text). Live-streaming when `streaming=true`. */
   reasoning?: string;
@@ -212,6 +213,11 @@ export function MessageBubble({
                       ))}
                     </div>
                   )}
+                  {hasFiles && (
+                    <div className="mb-2">
+                      <FileAttachments files={files!} userId={userId} />
+                    </div>
+                  )}
                   <div className="whitespace-pre-wrap">{content}</div>
                 </>
               ) : (
@@ -245,7 +251,7 @@ export function MessageBubble({
                   )}
                   <InlineCitations content={content} />
 
-                  {/* Non-image file attachments — rendered as download cards. */}
+                  {/* Videos play inline; remaining files render as download cards. */}
                   {hasFiles && (
                     <FileAttachments files={files!} userId={userId} />
                   )}
@@ -361,11 +367,55 @@ function FileAttachments({
   files: BubbleFile[];
   userId?: string;
 }) {
+  const videos = files.filter(isVideoFile);
+  const otherFiles = files.filter((file) => !isVideoFile(file));
+
   return (
     <div className="flex flex-col gap-1.5">
-      {files.map((f) => (
+      {videos.map((f) => (
+        <VideoAttachmentCard key={f.id} file={f} />
+      ))}
+      {otherFiles.map((f) => (
         <FileAttachmentCard key={f.id} file={f} userId={userId} />
       ))}
+    </div>
+  );
+}
+
+function isVideoFile(file: BubbleFile): boolean {
+  return file.mimeType.startsWith("video/") || /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
+}
+
+function VideoAttachmentCard({ file }: { file: BubbleFile }) {
+  const size = formatFileSize(file.size);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950/70">
+      <video
+        controls
+        preload="metadata"
+        className="block max-h-[420px] w-full bg-black"
+        aria-label={file.name}
+      >
+        <source src={file.url} type={file.mimeType} />
+        Your browser does not support embedded video. Download the file instead.
+      </video>
+      <div className="flex items-center gap-2 px-2.5 py-1.5">
+        <Video size={17} className="shrink-0 text-zinc-400" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] text-zinc-200">{file.name}</div>
+          {size && <div className="text-[10px] text-zinc-500">{size}</div>}
+        </div>
+        <a
+          href={file.url}
+          download={file.name}
+          className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
+          title={`Download ${file.name}`}
+        >
+          <Download size={12} />
+          Download
+        </a>
+      </div>
     </div>
   );
 }

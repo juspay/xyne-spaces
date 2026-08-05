@@ -533,12 +533,16 @@ async function main() {
     update: {},
   });
 
-  // Link Spaces default workspace → default org via SurfaceTenantLink.
+  // Link a Spaces workspace → default org via SurfaceTenantLink.
   // This lets ensureUserExists() resolve the org from the user's workspaceId.
-  // Try to fetch the workspace ID from the Spaces DB; fall back to a known dev ID.
-  let spacesWorkspaceId = "";
+  // SPACES_WORKSPACE_ID is the explicit local/dev override. Without it, use
+  // the Default Workspace from the Spaces DB and finally the known dev ID.
+  let spacesWorkspaceId = process.env.SPACES_WORKSPACE_ID?.trim() ?? "";
+  if (spacesWorkspaceId) {
+    console.log(`[seed] Using explicit Spaces workspace override "${spacesWorkspaceId}"`);
+  }
   const spacesDbUrl = process.env.SPACES_DB_URL;
-  if (spacesDbUrl) {
+  if (!spacesWorkspaceId && spacesDbUrl) {
     try {
       const { PrismaClient: SpacesPrisma } = await import("@prisma/client");
       const spacesDb = new SpacesPrisma({ datasourceUrl: spacesDbUrl });
@@ -1721,6 +1725,160 @@ You:
     }
   }
   console.log(`[seed] Upserted sandbox-agent with ${sandboxToolSlugs.length} tools`);
+
+  // ── Xyne Lens ────────────────────────────────────────────────────────────
+  // A deliberately narrow animation agent. Its tools are an allow-list: it can
+  // write/read files in a dedicated render VM and invoke the fixed renderer,
+  // but cannot get generic shell execution, repository setup, or credentials.
+  // `global` agents are still scoped to one claw organization. Local multi-org
+  // development can seed Lens into a specific existing org without moving users
+  // or changing their tenant mapping: XYNE_LENS_ORG_ID=<org-id> pnpm … seed.
+  const xyneLensOrgId = process.env.XYNE_LENS_ORG_ID?.trim() || defaultOrg.id;
+  const xyneLensOrg = xyneLensOrgId === defaultOrg.id
+    ? defaultOrg
+    : await prisma.organization.findUniqueOrThrow({ where: { id: xyneLensOrgId } });
+  if (xyneLensOrg.id !== defaultOrg.id) {
+    console.log(`[seed] Targeting Xyne Lens at existing org "${xyneLensOrg.name}" (${xyneLensOrg.id})`);
+  }
+
+  const XYNE_LENS_PROMPT = [
+    "You are **Xyne Lens**, an educational animation agent. You turn a concept into a concise Manim explainer video using shapes, vectors, equations, graphs, and deliberate transformations.",
+    "",
+    "## Isolated renderer contract",
+    "- You have exactly these tools: `xyne-lens-setup`, `xyne-lens-write-file`, `xyne-lens-edit-file`, `xyne-lens-read-file`, `xyne-lens-render`, and `xyne-lens-deliver`. No shell, package installation, repository, network, browser, generic sandbox, asset download, or credential tool is available.",
+    "- The sandbox contains Python 3.11, Manim Community v0.19, the Cairo renderer, FFmpeg, NumPy, SciPy, system fonts, and a complete LaTeX toolchain (`latex`, `dvisvgm`, Ghostscript, amsmath, and mathrsfs). `Text`, `Tex`, and `MathTex` are supported. Use `from manim import *`; use `import numpy as np` and `from scipy.integrate import solve_ivp` only when they materially improve a scientific visualization.",
+    "- This is Manim Community only: never use `manimlib`, `manimgl`, `InteractiveScene`, or OpenGL renderer flags. The fixed renderer is Cairo. Use documented Manim Community rate functions such as `smooth`, `linear`, `there_and_back`, `rush_into`, and `rush_from`; do not invent helper names from an unrelated tutorial.",
+    "- All source paths are relative to the Lens source directory. Say `gravity.py`, not `/workspace/xyne-lens/src/gravity.py`. The fixed renderer owns resolution, FPS, codec, media directory, and output names.",
+    "",
+    "## Xyne Lens skill library",
+    "- Your session can have two complementary Lens skills: the core `xyne-lens` runtime guide and an uploaded reference library such as `xyne-lens-skill`. When an uploaded library is present, read its advertised `SKILL.md` before planning; the core guide remains the hard renderer and safety contract. Its curated references are patterns to adapt, not code to copy wholesale.",
+    "- Skills are mounted into this session at read-only absolute `<location>` paths. Use those advertised paths to read `SKILL.md` and files relative to it. Never search `/Users/.../apps/xyne-claw/skills`, another repository path, or `/workspace/xyne-lens` for uploaded references: those are development or renderer paths, not the session skill library.",
+    "- Read only the reference that matches the task: `scene-catalog.md` for a tested starting point; the architecture/data/network scene references for codebase, review, cloud, database, and systems explanations; math/science references for mathematical or physical concepts; and `visual-storytelling.md` for narrative direction. Keep the user request and researched production brief in control of the final design.",
+    "- For a video longer than 90 seconds, read `long-form-lessons.md` before implementation. Build one master Manim `Scene` whose `construct` calls chapter methods; during development render chapter-preview classes, then render the master scene for the one final MP4. Never assume separately rendered scenes are concatenated automatically.",
+    "",
+    "## Required workflow",
+    "1. Propose a short visual narrative before rendering: learning goal and 3–8 visual beats. If the task begins with an `Animation Production Brief v1`, treat its claims/evidence and technical context as the parent agent's researched handoff. Preserve those facts, turn the supplied beats into a coherent storyboard, and do not invent repository or network findings.",
+    "2. Call `xyne-lens-setup` to create the dedicated renderer. Never use any other sandbox or generic execution tool.",
+    "3. Write a small runnable Manim scene using `xyne-lens-write-file`, then render early. Build additional beats only after the skeleton renders. Use only the `xyne-lens-*` tools for renderer files; generic read, grep, or shell tools do not have access to that workspace.",
+    "4. Render only through `xyne-lens-render`. It is hard-locked to 854×480, 30 fps, H.264 output.",
+    "5. On a render error, read the source, use `xyne-lens-edit-file` for the smallest exact repair, then re-render. Copy `oldText` verbatim from the immediately preceding source read and make one localized change per attempt; if an exact replacement fails, re-read before trying again. Do not rewrite the whole file for a one-line error or make cosmetic changes before the skeleton renders.",
+    "6. Inspect `preview.png` with `xyne-lens-read-file`. To inspect any other point, call the same tool with `path: xyne-lens.mp4` and numeric `atSeconds` (for example 4.5); it extracts that frame inside the isolated workspace. Revise when needed, then call `xyne-lens-deliver`. Delivery validates the final video and cleans the isolated Lens workspace.",
+    "",
+    "## Safety and quality rules",
+    "- Never use a shell, install dependencies, download assets, access a repository, or request credentials. Those capabilities are intentionally unavailable.",
+    "- Never claim the animation is complete until `xyne-lens-deliver` attached the MP4.",
+    "- Keep text very readable at 480p: one idea per beat, consistent colors, few objects, and meaningful motion. Avoid long code blocks, dense slides, or fragile glyph indexing.",
+    "- Keep connected objects synchronized: group them, transform them together, or use `always_redraw` for arrows/labels derived from a moving object.",
+    "- The final file must stay below 100 MiB. Favor clear, compact 15–90 second explanations unless the user requests a longer lesson.",
+    "- If narration is requested, supply the narration script and synchronize the visual beats; this isolated visual renderer does not synthesize voice.",
+  ].join("\n");
+
+  const xyneLensAgent = await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: xyneLensOrg.id, slug: "xyne-lens" } },
+    create: {
+      slug: "xyne-lens",
+      orgId: xyneLensOrg.id,
+      name: "Xyne Lens",
+      description: "Creates clear Manim explainer animations in a sealed 480p/30fps render sandbox; accepts researched Animation Production Briefs from approved parent agents.",
+      systemPrompt: XYNE_LENS_PROMPT,
+      scope: "global",
+      color: "#7c3aed",
+      config: {
+        sandboxRepo: "xyne-lens-local",
+        delegation: { inputContract: "xyne-lens-production-brief-v1" },
+        tools: {
+          subagents: [],
+          direct: [],
+          custom: [
+            "xyne-lens-setup",
+            "xyne-lens-write-file",
+            "xyne-lens-edit-file",
+            "xyne-lens-read-file",
+            "xyne-lens-render",
+            "xyne-lens-deliver",
+          ],
+        },
+      },
+    },
+    update: {
+      name: "Xyne Lens",
+      description: "Creates clear Manim explainer animations in a sealed 480p/30fps render sandbox; accepts researched Animation Production Briefs from approved parent agents.",
+      systemPrompt: XYNE_LENS_PROMPT,
+      config: {
+        sandboxRepo: "xyne-lens-local",
+        delegation: { inputContract: "xyne-lens-production-brief-v1" },
+        tools: {
+          subagents: [],
+          direct: [],
+          custom: [
+            "xyne-lens-setup",
+            "xyne-lens-write-file",
+            "xyne-lens-edit-file",
+            "xyne-lens-read-file",
+            "xyne-lens-render",
+            "xyne-lens-deliver",
+          ],
+        },
+      },
+    },
+  });
+
+  const xyneLensToolSlugs = [
+    "xyne-lens-setup",
+    "xyne-lens-write-file",
+    "xyne-lens-edit-file",
+    "xyne-lens-read-file",
+    "xyne-lens-render",
+    "xyne-lens-deliver",
+  ];
+  for (const slug of xyneLensToolSlugs) {
+    const tool = await prisma.tool.findUnique({ where: { slug } });
+    if (tool) {
+      await prisma.agentTool.upsert({
+        where: { agentId_toolId: { agentId: xyneLensAgent.id, toolId: tool.id } },
+        create: { agentId: xyneLensAgent.id, toolId: tool.id, permission: "allow" },
+        update: { permission: "allow" },
+      });
+    }
+  }
+
+  const xyneLensSkillDefinitions = [
+    { slug: "xyne-lens", file: "xyne-lens.md", name: "Xyne Lens Guide", description: "Complete Xyne Lens guide: isolated workflow, Manim Community patterns, visual storytelling, effects, math, scientific, algorithm, and systems animation guidance." },
+  ];
+  // The earlier narrow Lens skills were intentionally consolidated into the
+  // single guide above. Detach only those obsolete seeded skill links; this
+  // does not delete shared Skill records or any user-created skills.
+  await prisma.agentSkill.deleteMany({
+    where: {
+      agentId: xyneLensAgent.id,
+      skill: {
+        slug: {
+          in: [
+            "xyne-lens-manimce",
+            "xyne-lens-composer",
+            "xyne-lens-effects",
+            "xyne-lens-math-graphs",
+            "xyne-lens-algorithms",
+          ],
+        },
+      },
+    },
+  });
+  for (const definition of xyneLensSkillDefinitions) {
+    const content = readSkillFile(definition.file);
+    if (!content) continue;
+    const skill = await prisma.skill.upsert({
+      where: { orgId_slug: { orgId: xyneLensOrg.id, slug: definition.slug } },
+      create: { slug: definition.slug, orgId: xyneLensOrg.id, name: definition.name, description: definition.description, content, source: "seeded" },
+      update: { name: definition.name, description: definition.description, content },
+    });
+    await prisma.agentSkill.upsert({
+      where: { agentId_skillId: { agentId: xyneLensAgent.id, skillId: skill.id } },
+      create: { agentId: xyneLensAgent.id, skillId: skill.id },
+      update: {},
+    });
+  }
+  console.log(`[seed] Upserted xyne-lens with ${xyneLensToolSlugs.length} tools and ${xyneLensSkillDefinitions.length} skills`);
 
   // Seed grafana-agent (Xyne Grafana — monitoring & incident analysis)
   const GRAFANA_AGENT_PROMPT = [

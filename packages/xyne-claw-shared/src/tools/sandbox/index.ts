@@ -12,6 +12,8 @@ export {
   SANDBOX_CONFIG_SCHEMA,
   makeRepoSetupTool,
   getSandboxSession,
+  getSandboxTemplate,
+  forgetSandboxSession,
   probeSession,
   buildSandboxStoreKey,
   type RepoSetupConfig,

@@ -28,6 +28,21 @@ const log = createLogger("callable-agent-resolver");
 
 export type DelegationIdentityMode = "user" | "callee_app";
 export type DelegationTier = "standard" | "orchestrator";
+export type DelegationInputContract = "xyne-lens-production-brief-v1";
+
+const XYNE_LENS_PRODUCTION_BRIEF_CONTRACT: DelegationInputContract = "xyne-lens-production-brief-v1";
+
+/** Read a callee-owned, allow-listed delegation input contract. The caller
+ * never chooses this: it is advertised by the agent it has already been
+ * authorized to call. */
+function delegationInputContract(config: unknown): DelegationInputContract | undefined {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return undefined;
+  const delegation = (config as Record<string, unknown>).delegation;
+  if (!delegation || typeof delegation !== "object" || Array.isArray(delegation)) return undefined;
+  return (delegation as Record<string, unknown>).inputContract === XYNE_LENS_PRODUCTION_BRIEF_CONTRACT
+    ? XYNE_LENS_PRODUCTION_BRIEF_CONTRACT
+    : undefined;
+}
 
 export function visibleAgentWhereForRunningUser(
   runningUserId?: string,
@@ -49,6 +64,7 @@ export interface CallableAgentSpec {
   agentConfig: Record<string, unknown>;
   paramName: string;
   paramDescription: string;
+  inputContract?: DelegationInputContract;
   model?: string;
   provider?: string;
   providerOrder?: string[];
@@ -73,6 +89,7 @@ export interface CallableAgentLightSpec {
   description: string;
   paramName: string;
   paramDescription: string;
+  inputContract?: DelegationInputContract;
   identityMode: DelegationIdentityMode;
   progressLabels: string[];
 }
@@ -82,15 +99,19 @@ type AgentRowWithSkills = Prisma.AgentGetPayload<{
 }>;
 
 export function toLightweightCallableAgentSpec(
-  callee: { slug: string; name: string; description: string },
+  callee: { slug: string; name: string; description: string; config?: unknown },
   identityMode: DelegationIdentityMode = "user",
 ): CallableAgentLightSpec {
+  const inputContract = delegationInputContract(callee.config);
   return {
     slug: callee.slug,
     name: callee.name,
     description: callee.description,
-    paramName: "task",
-    paramDescription: `The complete, self-contained task for ${callee.name}. Include all context it needs — it does not see this conversation.`,
+    paramName: inputContract ? "brief" : "task",
+    paramDescription: inputContract
+      ? `A researched Animation Production Brief for ${callee.name}; include supported claims/evidence, technical context, visual beats, and acceptance criteria.`
+      : `The complete, self-contained task for ${callee.name}. Include all context it needs — it does not see this conversation.`,
+    ...(inputContract ? { inputContract } : {}),
     identityMode,
     progressLabels: [`Delegating to ${callee.name}…`],
   };
@@ -102,6 +123,7 @@ export async function hydrateCallableAgentSpec(
   identityMode: DelegationIdentityMode,
 ): Promise<CallableAgentSpec> {
   const agentConfig = stripPlatformConfigKeys(callee.config as Record<string, unknown>);
+  const inputContract = delegationInputContract(callee.config);
   const providerResolution = await resolveAgentProviderConfigs({ id: callee.id, config: callee.config });
   const requestedSubagents = parseToolsConfig(agentConfig)?.subagents ?? [];
   const customSubagents = requestedSubagents.length > 0
@@ -133,8 +155,11 @@ export async function hydrateCallableAgentSpec(
     description: callee.description,
     systemPrompt: callee.systemPrompt,
     agentConfig,
-    paramName: "task",
-    paramDescription: `The complete, self-contained task for ${callee.name}. Include all context it needs — it does not see this conversation.`,
+    paramName: inputContract ? "brief" : "task",
+    paramDescription: inputContract
+      ? `A researched Animation Production Brief for ${callee.name}; include supported claims/evidence, technical context, visual beats, and acceptance criteria.`
+      : `The complete, self-contained task for ${callee.name}. Include all context it needs — it does not see this conversation.`,
+    ...(inputContract ? { inputContract } : {}),
     ...(callee.modelId ? { model: callee.modelId } : {}),
     ...(providerResolution.parent ? { provider: providerResolution.parent } : {}),
     ...(providerResolution.providerOrder.length > 0 ? { providerOrder: providerResolution.providerOrder } : {}),
@@ -244,7 +269,7 @@ export async function resolveOrchestratorCallableAgentsForRun(
       NOT: { id: callerAgentId },
       ...visibilityBase,
     },
-    select: { id: true, slug: true, name: true, description: true },
+    select: { id: true, slug: true, name: true, description: true, config: true },
     orderBy: { name: "asc" },
   });
 
@@ -264,7 +289,7 @@ export async function resolveOrchestratorCallableAgentsForRun(
           NOT: { id: callerAgentId },
           ...visibilityBase,
         },
-        select: { id: true, slug: true, name: true, description: true },
+        select: { id: true, slug: true, name: true, description: true, config: true },
         orderBy: { name: "asc" },
       })
     : [];

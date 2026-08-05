@@ -14,10 +14,10 @@ const label = (a: A) => a.provider ?? "spaces";
 /** Build a runAttempt that yields scripted outcomes per attempt index.
  *  Each script entry is either {text} (returns), or {throw} (throws). */
 function scripted(outcomes: Array<{ text?: string; throw?: unknown }>) {
-  const calls: Array<{ provider: string; forceCompact: boolean }> = [];
-  const runAttempt = async (a: A, forceCompact: boolean): Promise<R> => {
+  const calls: Array<{ provider: string; forceCompact: boolean; retryingTransient: boolean }> = [];
+  const runAttempt = async (a: A, forceCompact: boolean, retryingTransient: boolean): Promise<R> => {
     const i = calls.length;
-    calls.push({ provider: label(a), forceCompact });
+    calls.push({ provider: label(a), forceCompact, retryingTransient });
     const o = outcomes[i]!;
     if ("throw" in o && o.throw !== undefined) throw o.throw;
     return { text: o.text ?? "" };
@@ -102,6 +102,45 @@ test("transient/stall error → falls back to next provider", async () => {
   // Matches quota semantics: no forced compaction on a thrown transient error.
   expect(calls[1]!.forceCompact).toBe(false);
   expect(onFallback).toHaveBeenCalledWith("codex", "claude", STALL);
+});
+
+test("safe no-progress stall retries the same provider once before fallback", async () => {
+  const { runAttempt, calls } = scripted([{ throw: STALL }, { text: "recovered" }]);
+  const onRetry = vi.fn();
+  const onFallback = vi.fn();
+  const out = await runWithProviderFallback<A, R>(
+    base({
+      runAttempt,
+      isTransientError: isTransient,
+      canRetryTransient: (err) => err === STALL,
+      maxTransientRetriesPerAttempt: 1,
+      hooks: { onRetry, onFallback },
+    }),
+  );
+  expect(out.result.text).toBe("recovered");
+  expect(out.completedAttempt.provider).toBe("codex");
+  expect(out.fellBackProvider).toBeNull();
+  expect(calls).toEqual([
+    { provider: "codex", forceCompact: false, retryingTransient: false },
+    { provider: "codex", forceCompact: false, retryingTransient: true },
+  ]);
+  expect(onRetry).toHaveBeenCalledWith("codex", 1, STALL);
+  expect(onFallback).not.toHaveBeenCalled();
+});
+
+test("unsafe transient stall never retries the same provider", async () => {
+  const { runAttempt, calls } = scripted([{ throw: STALL }, { text: "fallback" }]);
+  const out = await runWithProviderFallback<A, R>(
+    base({
+      runAttempt,
+      isTransientError: isTransient,
+      canRetryTransient: () => false,
+      maxTransientRetriesPerAttempt: 1,
+    }),
+  );
+  expect(out.result.text).toBe("fallback");
+  expect(calls).toHaveLength(2);
+  expect(calls[1]).toMatchObject({ provider: "claude", retryingTransient: false });
 });
 
 test("transient error that is ALSO a cancel → rethrows, no fallback", async () => {

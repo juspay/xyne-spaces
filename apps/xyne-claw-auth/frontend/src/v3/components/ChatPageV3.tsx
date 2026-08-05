@@ -49,12 +49,14 @@ import {
   listProviderCredentials,
   setUserAgentConfig,
   approveChatAction,
+  chatAttachmentDownloadUrl,
   uploadChatAttachments,
   type AttachedContextRef,
   type ContextItem,
   type ContextSearchType,
   type ConversationSummary,
   type ChatMsg,
+  type ChatAttachmentMeta,
   type PendingAction,
   type PlanTodo,
   type ProviderCredential,
@@ -1292,6 +1294,93 @@ function buildRunByMsgId(
   return next;
 }
 
+function isVideoAttachment(attachment: ChatAttachmentMeta): boolean {
+  return attachment.mimeType.startsWith("video/") || /\.(mp4|webm|mov|m4v|ogv)$/i.test(attachment.originalFilename);
+}
+
+function formatAttachmentSize(bytes?: number): string | null {
+  if (!bytes || bytes < 1) return null;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * V3's API calls carry x-user-id, but native media requests cannot set that
+ * header. Fetch the protected persisted file once, turn it into a blob URL,
+ * and let the browser's native player handle the result. Streamed attachments
+ * already have a blob URL and render immediately.
+ */
+function VideoAttachmentPreview({ attachment, userId }: { attachment: ChatAttachmentMeta; userId: string }) {
+  const [source, setSource] = useState<string | null>(attachment.previewUrl ?? null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (attachment.previewUrl) {
+      setSource(attachment.previewUrl);
+      setError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setSource(null);
+    setError(null);
+    void fetch(chatAttachmentDownloadUrl(attachment.id), {
+      credentials: "include",
+      headers: { "x-user-id": userId },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`attachment download failed (${response.status})`);
+        objectUrl = URL.createObjectURL(await response.blob());
+        setSource(objectUrl);
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        console.warn("[v3-chat] video preview failed:", reason);
+        setError("Video preview unavailable");
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.id, attachment.previewUrl, userId]);
+
+  const size = formatAttachmentSize(attachment.size);
+  return (
+    <div className="overflow-hidden rounded-lg border border-xyne-border bg-black">
+      {source ? (
+        <video controls preload="metadata" className="block max-h-[420px] w-full bg-black" aria-label={attachment.originalFilename}>
+          <source src={source} type={attachment.mimeType} />
+          Your browser does not support embedded video.
+        </video>
+      ) : (
+        <div className="flex min-h-32 items-center justify-center px-3 text-[12px] text-xyne-fg-muted">
+          {error ?? "Loading video preview…"}
+        </div>
+      )}
+      <div className="flex items-center gap-2 bg-xyne-surface px-2.5 py-1.5 text-[12px] text-xyne-fg-secondary">
+        <PaperclipIcon size={13} className="shrink-0 text-xyne-fg-tertiary" />
+        <span className="min-w-0 flex-1 truncate">{attachment.originalFilename}</span>
+        {size && <span className="shrink-0 text-[10px] text-xyne-fg-muted">{size}</span>}
+      </div>
+    </div>
+  );
+}
+
+function VideoAttachments({ attachments, userId }: { attachments: ChatAttachmentMeta[]; userId: string }) {
+  const videos = attachments.filter(isVideoAttachment);
+  if (videos.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {videos.map((attachment) => (
+        <VideoAttachmentPreview key={attachment.id} attachment={attachment} userId={userId} />
+      ))}
+    </div>
+  );
+}
+
 function MessageThread({
   messages,
   sending,
@@ -1547,7 +1636,8 @@ function MessageThread({
         const hasPlan = isStream && livePlanTodos.length > 0;
         const hasReasoning = !!msgReasoning && msgReasoning.length > 0;
         const hasText = msg.content.length > 0;
-        const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText;
+        const hasVideos = (msg.attachments ?? []).some(isVideoAttachment);
+        const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText && !hasVideos;
 
         return (
           <div key={msg.id} data-id="agent-message" className="flex items-start gap-2">
@@ -1590,6 +1680,8 @@ function MessageThread({
                   onDecline={(pa) => onDeclineAction(msg.id, pa)}
                 />
               )}
+
+              {hasVideos && <VideoAttachments attachments={msg.attachments ?? []} userId={userId} />}
 
               {hasText && (
                 <div
@@ -2634,11 +2726,21 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
                   className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface-subtle py-0.5 pl-0.5 pr-2.5 text-[11px] text-xyne-fg-secondary"
                   title={p.file.name}
                 >
-                  <img
-                    src={p.previewUrl}
-                    alt=""
-                    className="h-4 w-4 shrink-0 rounded-full object-cover"
-                  />
+                  {p.file.type.startsWith("video/") ? (
+                    <video
+                      src={p.previewUrl}
+                      muted
+                      preload="metadata"
+                      className="h-4 w-4 shrink-0 rounded-full object-cover"
+                      aria-label=""
+                    />
+                  ) : (
+                    <img
+                      src={p.previewUrl}
+                      alt=""
+                      className="h-4 w-4 shrink-0 rounded-full object-cover"
+                    />
+                  )}
                   <span className="truncate">{p.file.name}</span>
                   <button
                     type="button"
@@ -2677,7 +2779,7 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 multiple
                 onChange={handleFilePick}
                 className="hidden"
@@ -2685,8 +2787,8 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               <button
                 type="button"
                 data-id="input-btn-attach"
-                title="Attach images"
-                aria-label="Attach images"
+                title="Attach images or videos"
+                aria-label="Attach images or videos"
                 onClick={() => fileInputRef.current?.click()}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-xyne-surface-subtle text-xyne-fg-tertiary transition-colors hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
               >
@@ -3337,7 +3439,7 @@ export function ChatPageV3() {
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
 
-  // Composer attachments — images queued for upload, kept on the parent so
+  // Composer attachments — images/videos queued for upload, kept on the parent so
   // they survive composer re-renders. previewUrl is an object URL that we
   // revoke on removal / after upload completes.
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -3345,7 +3447,7 @@ export function ChatPageV3() {
   const handleAddFiles = useCallback((files: File[]) => {
     const additions: PendingFile[] = [];
     for (const file of files) {
-      if (!file.type.startsWith("image/")) continue;
+      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) continue;
       if (file.size > 25 * 1024 * 1024) continue; // 25MB cap, matches V1
       additions.push({ file, previewUrl: URL.createObjectURL(file) });
     }
@@ -3933,7 +4035,7 @@ export function ChatPageV3() {
     const placeholderText =
       text ||
       (hasFiles
-        ? `Sent ${filesSnapshot.length} image${filesSnapshot.length !== 1 ? "s" : ""}`
+        ? `Sent ${filesSnapshot.length} file${filesSnapshot.length !== 1 ? "s" : ""}`
         : `Attached ${contextSnapshot.length} context item${contextSnapshot.length !== 1 ? "s" : ""}`);
 
     setInputValue("");

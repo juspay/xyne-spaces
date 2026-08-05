@@ -1,0 +1,55 @@
+# Local-only router for kind/minikube/Docker Desktop. It is intentionally named
+# and namespaced separately from the environment router.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-router-local
+  namespace: xyne-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sandbox-router-local
+  template:
+    metadata:
+      labels:
+        app: sandbox-router-local
+        xyne.ai/environment: local
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: sandbox-router-local
+          image: us-central1-docker.pkg.dev/k8s-staging-images/agent-sandbox/sandbox-router:latest-main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PROXY_TIMEOUT_SECONDS
+              value: "300"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-router-local-svc
+  namespace: xyne-local
+spec:
+  type: ClusterIP
+  selector:
+    app: sandbox-router-local
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

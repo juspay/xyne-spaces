@@ -105,7 +105,9 @@ const app = express();
 // HMAC-check inbound webhook bodies. express.json() consumes the stream
 // otherwise; the verify callback gets the buffer before parsing.
 app.use(express.json({
-  limit: "50mb",
+  // Lens MP4s are transported in base64 until the final sink persists them.
+  // A 100 MiB file expands to roughly 133 MiB, so leave envelope headroom.
+  limit: "160mb",
   verify: (req, _res, buf) => {
     if (buf && buf.length > 0) {
       (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);

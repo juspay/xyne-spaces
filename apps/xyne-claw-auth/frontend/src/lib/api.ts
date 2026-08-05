@@ -2501,6 +2501,9 @@ export interface ChatAttachmentMeta {
   size?: number;
   width?: number | null;
   height?: number | null;
+  /** Browser-only object URL used while an agent attachment is still streaming.
+   * Replaced by the persisted attachment id in the final response. */
+  previewUrl?: string;
 }
 
 export interface ChatMsg {

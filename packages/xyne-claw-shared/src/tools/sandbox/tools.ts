@@ -18,6 +18,16 @@ function isCredentialPath(p: string): boolean {
   return /(^|\/)\.ssh(\/|$)|id_rsa|id_ed25519|\.git-credentials|\/tmp\/ssh-keys|\/tmp\/github-ssh-keys|\/tmp\/attic|\.netrc|\.npmrc|\.docker\/config|known_hosts/.test(s);
 }
 
+// Xyne Lens is intentionally a sealed, no-repository renderer. Keep its file
+// tools inside its own workspace even if a model supplies an absolute path.
+// The renderer has a separate template check as a second boundary.
+function xyneLensPathGuard(path: string, context: ToolExecutionContext): string | null {
+  if (context.meta?.["agentSlug"] !== "xyne-lens") return null;
+  const normalized = path.replaceAll("\\", "/");
+  if (normalized === "/workspace/xyne-lens" || normalized.startsWith("/workspace/xyne-lens/")) return null;
+  return "Error: Xyne Lens file access is restricted to /workspace/xyne-lens/.";
+}
+
 const SESSION_STORE = new Map<string, Session>();
 interface SessionOwner {
   userId: string;
@@ -295,6 +305,20 @@ async function probeSession(session: Session, storeKey?: string): Promise<boolea
 
 export function getSandboxSession(storeKey: string): Session | undefined {
   return SESSION_STORE.get(storeKey);
+}
+
+/** Template recorded for a live session. Consumers that require a dedicated
+ * sandbox profile (for example Xyne Lens) use this to fail closed rather than
+ * accidentally running in the caller's development sandbox. */
+export function getSandboxTemplate(storeKey: string): string | undefined {
+  return SESSION_TEMPLATE.get(storeKey);
+}
+
+/** Remove all local references after a purpose-built tool has destroyed a
+ * session itself. This does not destroy the session; it only prevents a dead
+ * sandbox from being reused by a later tool call. */
+export function forgetSandboxSession(session: Session, storeKey?: string): void {
+  evictSession(session, storeKey);
 }
 
 export { probeSession };
@@ -741,6 +765,8 @@ export const sandboxWriteFile: ToolDefinition = {
     const path = params["path"] as string;
     const content = params["content"] as string;
     const encoding = (params["encoding"] as string | undefined) ?? "utf8";
+    const lensPathError = xyneLensPathGuard(path, context);
+    if (lensPathError) return lensPathError;
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found.`;
@@ -807,6 +833,8 @@ export const sandboxReadFile: ToolDefinition = {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
     const path = params["path"] as string;
+    const lensPathError = xyneLensPathGuard(path, context);
+    if (lensPathError) return lensPathError;
     if (isCredentialPath(path)) {
       return JSON.stringify({ error: "Refused: path looks like a credential file" });
     }
@@ -886,6 +914,8 @@ export const sandboxDeliverFiles: ToolDefinition = {
     if (!Array.isArray(paths) || paths.length === 0) {
       return "Error: paths must be a non-empty array of absolute file paths.";
     }
+    const lensPathError = paths.map((p) => xyneLensPathGuard(p, context)).find(Boolean);
+    if (lensPathError) return lensPathError;
     if (paths.some((p) => isCredentialPath(p))) {
       return JSON.stringify({ error: "Refused: path looks like a credential file" });
     }

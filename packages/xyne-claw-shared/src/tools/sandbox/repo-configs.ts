@@ -25,6 +25,26 @@ const TEST_CMD = `if grep -q '"claw:test"' package.json; then npm run claw:test;
 const BACKEND_TEST_CMD = `(cd /workspace/xyne-spaces/shared && npm run build) ; ${TEST_CMD}`;
 
 export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
+  // Purpose-built renderer profile. This is deliberately a no-repository
+  // sandbox: generated Manim code has no access to a project checkout, SSH
+  // keys, package registries, or development services. Xyne Lens exposes only
+  // file tools plus its constrained renderer; generic shell tools are not put
+  // in the agent's allow-list.
+  "xyne-lens-local": {
+    slug: "sandbox-xyne-lens-setup",
+    name: "Xyne Lens local isolated render sandbox",
+    description:
+      "Provision a fresh isolated Xyne Lens render sandbox with Python, Manim Community, FFmpeg, Cairo, Pango, and system fonts already installed. " +
+      "It contains no repository, source credentials, or cloud credentials. Render only through the Xyne Lens renderer, which enforces 854×480 at 30 fps.",
+    defaultBranch: "",
+    workDir: "/workspace/xyne-lens",
+    template: "xyne-lens-local-template",
+    // A completed output is delivered and the session is destroyed by the
+    // finalize tool. These values are the fallback safety net for failures.
+    sessionTimeoutMs: 20 * 60 * 1000,
+    idleTimeoutMs: 5 * 60 * 1000,
+    steps: [],
+  },
   
   // Lightweight browser sandbox with NO repository. Pin a browser-only agent
   // (e.g. one that drives external sites via sandbox-pw-*) to this in the agent

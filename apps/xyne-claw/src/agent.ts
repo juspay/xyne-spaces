@@ -286,10 +286,35 @@ export interface DebugEventRecord {
   data: Record<string, unknown>;
 }
 
+/**
+ * Identifies a run's visible progress stream. Nested agent runs keep their own
+ * internal session IDs, but publish tool/debug rows into the parent's stream
+ * under the callable-agent wrapper that started them.
+ */
+export interface ProgressMeta {
+  conversationId?: string | null;
+  agentSlug?: string | null;
+  parentToolCallId?: string | undefined;
+  subagentName?: string | undefined;
+}
+
 interface StreamRateSample {
   offsetMs: number;
   streamsPerSec: number;
   streamsCollected: number;
+}
+
+interface DebugThinkingConfiguration {
+  /** Value selected by agent model settings / provider config / default policy. */
+  requestedLevel: string;
+  /** Pi's final value after capability clamping for the resolved model. */
+  effectiveLevel: string;
+  /** Where the requested setting came from, so precedence is inspectable. */
+  source: "agent_model_settings" | "provider_credential" | "codex_default" | "server_default" | "temperature_override";
+  /** Whether the resolved Pi model was registered as reasoning-capable. */
+  modelSupportsReasoning: boolean;
+  /** The provider request shape that disables/enables thinking for this model. */
+  wireMode: string;
 }
 
 interface DebugSessionSnapshot {
@@ -301,6 +326,10 @@ interface DebugSessionSnapshot {
   userName?: string;
   userEmail?: string;
   provider?: string;
+  /** The model resolved for this particular run (not merely the agent default). */
+  model?: string;
+  /** Requested/effective thinking selection and its provider wire representation. */
+  thinking?: DebugThinkingConfiguration;
   startedAt: string;
   finishedAt: string;
   task: string;
@@ -416,6 +445,11 @@ export class ProviderStallError extends Error {
   constructor(
     public readonly provider: string,
     public readonly idleMs: number,
+    /** A retry is safe only before the stalled model turn emitted text and
+     * when no tool is in flight. Completed tool results are already in the
+     * persistent transcript, so a resumed model can continue from them; an
+     * in-flight tool has an unknown side effect and must never be replayed. */
+    public readonly safeToRetry: boolean = false,
   ) {
     super(`Provider ${provider} stalled: no stream activity for ${idleMs}ms`);
     this.name = "ProviderStallError";
@@ -732,6 +766,48 @@ export function contextWindowFor(modelId: string | undefined): number {
     ?? Number(process.env["XYNE_CLAW_DEFAULT_CONTEXT_WINDOW"] ?? 128_000);
 }
 
+/**
+ * Kimi's OpenAI-compatible endpoint does not honor `reasoning_effort: "none"`.
+ * It returns `reasoning_content` unless the request explicitly contains
+ * `thinking: { type: "disabled" }`. In the pinned pi-ai v0.75 adapter this is
+ * the `deepseek` request shape; its `zai` shape instead emits
+ * `enable_thinking: false`, which Kimi ignores. Keep this narrow: other
+ * LiteLLM models such as GLM do honor the standard `reasoning_effort: "none"`
+ * route.
+ */
+function liteLlmThinkingCompat(modelId: string): { thinkingFormat: "deepseek" } | undefined {
+  return /(^|[\/_-])kimi(?:[\/_-]|$)/i.test(modelId)
+    ? { thinkingFormat: "deepseek" }
+    : undefined;
+}
+
+function describeThinkingWireMode(
+  model: { reasoning: boolean; api: string; compat?: unknown },
+  thinkingLevel: string,
+): string {
+  if (!model.reasoning) return "not sent (model registered without reasoning)";
+  if (model.api !== "openai-completions") return thinkingLevel === "off" ? "provider-native thinking disabled" : "provider-native reasoning";
+
+  const enabled = thinkingLevel !== "off";
+  const thinkingFormat = typeof model.compat === "object" && model.compat !== null
+    && "thinkingFormat" in model.compat
+    && typeof (model.compat as { thinkingFormat?: unknown }).thinkingFormat === "string"
+    ? (model.compat as { thinkingFormat: string }).thinkingFormat
+    : undefined;
+  switch (thinkingFormat) {
+    case "zai":
+      return `thinking: { type: \"${enabled ? "enabled" : "disabled"}\" }`;
+    case "qwen":
+      return `enable_thinking: ${enabled}`;
+    case "deepseek":
+      return `thinking: { type: \"${enabled ? "enabled" : "disabled"}\" }`;
+    default:
+      return enabled
+        ? `reasoning_effort: \"${thinkingLevel}\"`
+        : 'reasoning_effort: "none"';
+  }
+}
+
 export function resolveModel(
   modelRegistry: ModelRegistry,
   provider?: string,
@@ -923,7 +999,13 @@ export function resolveModel(
   }
 
   // Default: shared LiteLLM proxy
+  // The Spaces grid's default models (including glm-latest) support the
+  // OpenAI-compatible `reasoning_effort` parameter.  Marking this model as
+  // non-reasoning used to make pi silently omit the user-selected thinking
+  // level, leaving long server-default reasoning enabled even when an agent
+  // selected "Off". The grid accepts `none` as the explicit off value.
   const litellmModel = overrides?.model ?? LITELLM.model;
+  const litellmCompat = liteLlmThinkingCompat(litellmModel);
   modelRegistry.registerProvider("litellm", {
     baseUrl: LITELLM.url,
     apiKey: LITELLM.apiKey,
@@ -933,7 +1015,9 @@ export function resolveModel(
       {
         id: litellmModel,
         name: litellmModel,
-        reasoning: false,
+        reasoning: true,
+        thinkingLevelMap: { off: "none" },
+        ...(litellmCompat ? { compat: litellmCompat } : {}),
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: contextWindowFor(litellmModel),
@@ -1062,7 +1146,7 @@ export function pushSandboxPreview(
   progressUrl: ProgressDest,
   sessionId: string,
   payload: { sandboxId: string; sandboxPreviewUrl: string; sandboxCodePreviewUrl: string },
-  progressMeta?: { conversationId?: string | null; agentSlug?: string | null },
+  progressMeta?: ProgressMeta,
 ): void {
   if (!progressUrl) return;
   if (isEmitter(progressUrl)) {
@@ -1152,7 +1236,7 @@ interface ProgressReporter {
 function createProgressReporter(
   progressUrl: ProgressDest,
   sessionId: string,
-  progressMeta?: { conversationId?: string | null; agentSlug?: string | null },
+  progressMeta?: ProgressMeta,
 ): ProgressReporter {
   if (!progressUrl) {
     log.info(`[agent] Progress reporter: no progressUrl, skipping`);
@@ -1308,11 +1392,22 @@ export interface RunTaskOptions {
    *  `conversationId` (the session key) — claw-auth's conv-keyed index uses the
    *  RAW conversationId + agentSlug, threaded separately so /webhook/progress
    *  can fall back to it when a refired run minted a fresh sessionId. */
-  progressMeta?: { conversationId?: string | null; agentSlug?: string | null } | undefined;
+  progressMeta?: ProgressMeta | undefined;
+  /** Destination session for progress events. Used by nested A2A runs so their
+   * internal skill/session scope stays isolated while their trace remains on
+   * the parent chat run. */
+  progressSessionId?: string | undefined;
+  /** Do not stream child assistant/thinking deltas into the parent's message.
+   * Nested runs still stream tool rows and debug events. */
+  suppressStreamChunks?: boolean | undefined;
   /** Set on a fallback attempt following an EMPTY completion: compact the
    *  resumed session before prompting the next provider so it doesn't inherit
    *  the same over-window context that produced nothing (and overflow again). */
   forceCompactBeforeRun?: boolean | undefined;
+  /** Set only for a no-progress provider-stall retry. The user message is
+   * already persisted in the resumed session, so resume it with a system nudge
+   * instead of appending a duplicate task. */
+  resumedAfterProviderStall?: boolean | undefined;
   /** verifyResponses: shared ref whose `getDigest` runTask wires to the live
    *  session transcript, so the submit-response tool can verify drafts against
    *  gathered tool results. Presence implies the tool was injected (run.ts). */
@@ -1423,7 +1518,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     abortSignal,
     debugStartedAt,
     progressMeta,
+    progressSessionId,
+    suppressStreamChunks,
     forceCompactBeforeRun,
+    resumedAfterProviderStall,
     verifyResponsesRef,
     modelSettings,
     structuredOutputRef,
@@ -1441,6 +1539,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     resumedFromHandoff,
     handoff,
   } = opts;
+  const progressTargetSessionId = progressSessionId ?? sessionId ?? conversationId ?? "unknown";
+  const nestedTrace = {
+    ...(progressMeta?.parentToolCallId ? { parentToolCallId: progressMeta.parentToolCallId } : {}),
+    ...(progressMeta?.subagentName ? { subagentName: progressMeta.subagentName } : {}),
+  };
   let lastHandoffTurn = 0;
   const recordHandoffBoundary = (turn: number): void => {
     lastHandoffTurn = Math.max(lastHandoffTurn, turn);
@@ -1711,6 +1814,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const credEffort = effectiveProviderConfig?.reasoningEffort;
   const credEffortValid =
     credEffort === "low" || credEffort === "medium" || credEffort === "high";
+  let thinkingSource: DebugThinkingConfiguration["source"] = modelSettings?.thinkingLevel
+    ? "agent_model_settings"
+    : credEffortValid
+      ? "provider_credential"
+      : provider === "codex"
+        ? "codex_default"
+        : "server_default";
   let effectiveThinking: SessionThinkingLevel = modelSettings?.thinkingLevel
     ? (modelSettings.thinkingLevel as SessionThinkingLevel)
     : credEffortValid
@@ -1721,6 +1831,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   if (modelSettings?.temperature !== undefined && effectiveThinking !== "off") {
     log.info(`[agent] modelSettings.temperature=${modelSettings.temperature} set — forcing thinkingLevel off (was ${effectiveThinking})`);
     effectiveThinking = "off";
+    thinkingSource = "temperature_override";
   }
   // SECURITY (cross-session read): pi's built-in read/write/grep/find/ls are
   // NOT confined to cwd. `createReadTool(cwd)` uses cwd only as the default base
@@ -1795,6 +1906,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : allCustomTools;
 
   const { session } = await createAgentSession(options);
+  const debugThinking: DebugThinkingConfiguration = {
+    requestedLevel: effectiveThinking,
+    effectiveLevel: session.thinkingLevel,
+    source: thinkingSource,
+    modelSupportsReasoning: model.reasoning,
+    wireMode: describeThinkingWireMode(model, session.thinkingLevel),
+  };
+  log.info(
+    `[agent] Thinking configuration: requested=${debugThinking.requestedLevel} ` +
+    `effective=${debugThinking.effectiveLevel} source=${debugThinking.source} ` +
+    `wire=${debugThinking.wireMode}`,
+  );
 
   if (fastMode && fastToolController && fastCatalogNameSet.size > 0) {
     const activeSet = new Set(restoredFastActiveToolSet);
@@ -1982,6 +2105,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   };
 
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
+    const parentToolCallId = extras?.parentToolCallId ?? progressMeta?.parentToolCallId;
+    const subagentName = extras?.subagentName ?? progressMeta?.subagentName;
     const event: DebugEventRecord = {
       seq: ++debugSeq,
       at: extras?.at ?? new Date().toISOString(),
@@ -1989,12 +2114,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ...(extras?.turn != null ? { turn: extras.turn } : {}),
       ...(extras?.llmCall != null ? { llmCall: extras.llmCall } : {}),
       ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
-      ...(extras?.parentToolCallId ? { parentToolCallId: extras.parentToolCallId } : {}),
-      ...(extras?.subagentName ? { subagentName: extras.subagentName } : {}),
+      ...(parentToolCallId ? { parentToolCallId } : {}),
+      ...(subagentName ? { subagentName } : {}),
       data,
     };
     debugEvents.push(event);
-    pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
+    pushDebugProgress(progressUrl, progressTargetSessionId, event);
   };
 
   // Incremental debug snapshot — written at each assistant turn boundary (NOT
@@ -2036,6 +2161,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
+        model: model.id,
+        thinking: debugThinking,
         inProgress: true,
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
@@ -2073,9 +2200,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       kind: "stream_rate",
       turn: latency.llmTurns + 1,
       ...(llmCallSeq ? { llmCall: llmCallSeq } : {}),
+      ...nestedTrace,
       data: { streamsPerSec, streamsCollected: turnStreamCount, active },
     };
-    pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
+    pushDebugProgress(progressUrl, progressTargetSessionId, event);
   };
 
   const flushStreamRate = (active: boolean): void => {
@@ -2157,6 +2285,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
     userId,
     provider,
+    model: model.id,
+    thinking: debugThinking,
     task,
     context: context ?? null,
     systemPromptOverride: Boolean(systemPromptOverride),
@@ -2179,7 +2309,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     pushDebugEvent("mode_switch", { from: "plan", to: "auto", reason: "plan_approved" });
   }
 
-  const reportProgress = createProgressReporter(progressUrl, sessionId ?? conversationId ?? "unknown", progressMeta);
+  const reportProgress = createProgressReporter(progressUrl, progressTargetSessionId, progressMeta);
 
   try {
   // Build a lookup of toolName → progressLabels[] from subagent tools.
@@ -2231,6 +2361,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       }, {
         toolCallId: event.toolCallId,
         turn: latency.llmTurns + 1,
+        ...nestedTrace,
         ...((event as { subagentName?: string }).subagentName ? { subagentName: (event as { subagentName?: string }).subagentName } : {}),
         ...((event as { parentToolCallId?: string }).parentToolCallId ? { parentToolCallId: (event as { parentToolCallId?: string }).parentToolCallId } : {}),
       });
@@ -2240,7 +2371,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // their children (pushed with parentToolCallId) nest under a single
       // collapsible parent row instead of appearing flat at the top level
       // while the parent is still in flight.
-      pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", {
+      pushInvocation(progressUrl, progressTargetSessionId, {
         toolName: event.toolName,
         args: event.args,
         result: "",
@@ -2249,6 +2380,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         durationMs: 0,
         status: "running",
         toolCallId: event.toolCallId,
+        ...nestedTrace,
       } satisfies ToolInvocation);
     }
     if (event.type === "tool_execution_end") {
@@ -2293,6 +2425,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           durationMs: Date.now() - started.startedAt,
           status: "completed",
           toolCallId: event.toolCallId,
+          ...nestedTrace,
           ...(citations ? { citations } : {}),
           ...(debug ? { debug } : {}),
           ...(bgTask ? { background: true, backgroundState: "running" as const, backgroundTaskId: bgTask.taskId } : {}),
@@ -2300,7 +2433,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         toolInvocations.push(inv);
         invocationsSizeEstimate += fullResult.length + 200; // rough overhead per invocation
         // Stream the invocation to xyne-claw-auth so Control Center watchers see tools populate live
-        pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
+        pushInvocation(progressUrl, progressTargetSessionId, inv);
         pushDebugEvent("tool_execution_end", {
           toolName: event.toolName,
           args: cloneForDebug(started.args),
@@ -2314,6 +2447,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         }, {
           toolCallId: event.toolCallId,
           turn: latency.llmTurns + 1,
+          ...nestedTrace,
           ...((event as { subagentName?: string }).subagentName ? { subagentName: (event as { subagentName?: string }).subagentName } : {}),
           ...((event as { parentToolCallId?: string }).parentToolCallId ? { parentToolCallId: (event as { parentToolCallId?: string }).parentToolCallId } : {}),
         });
@@ -2340,7 +2474,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
             // pushSandboxPreview goes to /webhook/progress which is keyed by
             // the run sessionId (the UUID), NOT the storeKey — claw-auth
             // looks the run session up. Use sessionId here.
-            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl }, progressMeta);
+            pushSandboxPreview(progressUrl, progressTargetSessionId, { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl }, progressMeta);
           } else {
             log.info(`[agent] Sandbox preview skipped: no SESSION_STORE entry for storeKey=${storeKey} (tool=${event.toolName})`);
           }
@@ -2376,7 +2510,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           startStreamRateTimer();
           turnStreamThinkingChars += ame.delta.length;
           turnStreamChars += ame.delta.length;
-          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { reasoningDelta: ame.delta });
+          if (!suppressStreamChunks) pushStreamChunk(progressUrl, progressTargetSessionId, { reasoningDelta: ame.delta });
         } else if (ame.type === "text_delta") {
           turnStreamCount += 1;
           streamWindowCount += 1;
@@ -2384,7 +2518,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           streamedText += ame.delta;
           turnStreamTextChars += ame.delta.length;
           turnStreamChars += ame.delta.length;
-          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { textDelta: ame.delta });
+          if (!suppressStreamChunks) pushStreamChunk(progressUrl, progressTargetSessionId, { textDelta: ame.delta });
         }
       }
     }
@@ -2606,7 +2740,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       emitCancelDebugOnce("signal-already-aborted");
       throw buildCancelledError();
     }
-    if (stallSig.aborted) { stopSession(); throw new ProviderStallError(provider ?? "spaces", Date.now() - lastActivityAt); }
+    if (stallSig.aborted) {
+      stopSession();
+      throw new ProviderStallError(
+        provider ?? "spaces",
+        Date.now() - lastActivityAt,
+        streamedText.length === 0 && inflightCalls.size === 0,
+      );
+    }
 
     return await new Promise<T>((resolve, reject) => {
       const cleanup = () => {
@@ -2623,7 +2764,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         emitCancelDebugOnce("user-cancel");
         reject(buildCancelledError());
       };
-      const onStallAbort = () => { cleanup(); stopSession(); reject(new ProviderStallError(provider ?? "spaces", Date.now() - lastActivityAt)); };
+      const onStallAbort = () => {
+        cleanup();
+        stopSession();
+        reject(new ProviderStallError(
+          provider ?? "spaces",
+          Date.now() - lastActivityAt,
+          streamedText.length === 0 && inflightCalls.size === 0,
+        ));
+      };
       userSig?.addEventListener("abort", onUserAbort, { once: true });
       stallSig.addEventListener("abort", onStallAbort, { once: true });
       promise.then(
@@ -2690,6 +2839,16 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ].join("\n");
       recordPrompt(resumeNote, "resume", images?.length ?? 0);
       await promptWithAbort(() => session.prompt(`<system>${resumeNote}</system>`, images?.length ? { images } : undefined));
+    } else if (resumedAfterProviderStall) {
+      // The original user turn is already in the persistent transcript. This
+      // is a retry after a proven no-text stall with no in-flight tool, so do
+      // not append the same user task a second time.
+      const retryNote = [
+        "The previous model turn stalled before producing text.",
+        "Resume from the current transcript. Do not repeat completed tool calls; if an effect is unknown, verify it before repeating the action.",
+      ].join(" ");
+      recordPrompt(retryNote, "resume", images?.length ?? 0);
+      await promptWithAbort(() => session.prompt(`<system>${retryNote}</system>`, images?.length ? { images } : undefined));
     } else {
       // Normal resume — send the new user message as a follow-up.
       //
@@ -2818,7 +2977,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         inv.backgroundState = state;
         inv.backgroundTaskId = t.taskId;
         if (!existing) toolInvocations.push(inv);
-        pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
+        pushInvocation(progressUrl, progressTargetSessionId, inv);
         delivered.push({ taskId: t.taskId, subagentName: t.subagentName, status: t.status, durationMs, result: text });
         blocks.push(`Background subagent "${t.subagentName}" (task ${t.taskId}) ${state === "error" ? "failed" : "completed"}:\n${text}`);
       }
@@ -3084,6 +3243,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
+        model: model.id,
+        thinking: debugThinking,
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
         task,
@@ -3240,6 +3401,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(userName ? { userName } : {}),
           ...(userEmail ? { userEmail } : {}),
           ...(provider ? { provider } : {}),
+          model: model.id,
+          thinking: debugThinking,
           cancelled: true,
           startedAt: debugStartedIso,
           finishedAt: new Date().toISOString(),
