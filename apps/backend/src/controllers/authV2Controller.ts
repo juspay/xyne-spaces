@@ -1057,7 +1057,14 @@ export class AuthV2Controller {
         `[${requestId}] mobile-exchange selected via query parameter without the x-platform header (browserInitiated=${looksBrowserInitiated})`,
       );
     }
-    const isMobileNative = nativeByHeader || nativeByQuery;
+    // The native branch is only selectable by a genuine native client, which sends neither
+    // Origin nor Sec-Fetch-Site. Anything browser-initiated takes the web branch.
+    const isMobileNative = (nativeByHeader || nativeByQuery) && !looksBrowserInitiated;
+    if ((nativeByHeader || nativeByQuery) && looksBrowserInitiated) {
+      logger.warn(
+        `[${requestId}] native mobile-exchange requested from a browser-initiated request; falling back to the web branch`,
+      );
+    }
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
