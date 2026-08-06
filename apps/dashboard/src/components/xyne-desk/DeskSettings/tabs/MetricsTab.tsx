@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Switch } from '../../../ui/Switch';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { useZero } from '../../../../hooks/useZero';
 import { queries } from '../../../../zero/queries';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 
@@ -12,6 +13,7 @@ interface MetricsTabProps {
 }
 
 export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
+  const zero = useZero();
   const {
     metricsEnabled,
     setMetricsEnabled,
@@ -22,17 +24,33 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
     channelId,
   } = form;
 
-  const [ticketBoardFallback] = useCachedQuery(
-    queries.supportTicketsPageV3({
-      channelId: channelId ?? '',
-      isMember: true,
-      limit: 1,
-      start: null,
-      dir: 'forward',
-    }),
-    { enabled: !!channelId && !boardId },
-  );
-  const effectiveBoardId = boardId ?? ticketBoardFallback?.[0]?.boardId ?? null;
+  const [fallbackBoardId, setFallbackBoardId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!channelId || boardId) return;
+
+    let cancelled = false;
+    void zero
+      .run(
+        queries.supportTicketsPageV3({
+          channelId,
+          isMember: true,
+          limit: 1,
+          start: null,
+          dir: 'forward',
+        }),
+        { type: 'complete' },
+      )
+      .then(rows => {
+        if (!cancelled) setFallbackBoardId(rows[0]?.boardId ?? null);
+      });
+
+    return (): void => {
+      cancelled = true;
+    };
+  }, [boardId, channelId, zero]);
+
+  const effectiveBoardId = boardId ?? fallbackBoardId;
 
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: effectiveBoardId ?? '' }), {
     enabled: !!effectiveBoardId,
