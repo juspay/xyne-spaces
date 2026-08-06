@@ -9,18 +9,15 @@
  *   3. Compute HMAC-SHA256 over the RAW request body.
  *   4. Timing-safe compare against `X-Xyne-Signature` header (hex).
  *
- * Verification is always fail-closed: reject with 401 on any mismatch or
- * missing material. The webhook handler treats the event payload's
- * userId/channelId as authoritative and runs agents with that user's
- * credentials, so an unsigned/forged event is full impersonation. There is no
- * general environment-controlled bypass.
+ * Rollout modes (env `SPACES_WEBHOOK_VERIFY_MODE`):
+ *   - `warn` (temporary default): log verification failures and continue. This
+ *     keeps legacy unsigned Flow actions working until the Spaces signer is
+ *     deployed.
+ *   - any other value (use `enforce`): reject verification failures with 401.
  *
- * Temporary rollout bridge: `ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS` defaults to
- * `true` and permits only legacy `X-Xyne-Event: flow_action` requests whose
- * signature header is absent. Set it explicitly to `false` to close the bridge.
- * This exists solely so claw-auth can be deployed before the matching Spaces
- * flow-action signer. It does not permit mismatched signatures and must be
- * removed after the Spaces deployment is verified.
+ * Warn mode is deliberately temporary. The webhook handler trusts payload
+ * identity and can run agents with that user's credentials, so production must
+ * switch to `enforce` as soon as Spaces signs all callbacks.
  *
  * Notes / gotchas:
  *   - Requires `req.rawBody` set by the json `verify` callback in main.ts.
@@ -50,6 +47,10 @@ function parseGcmBundle(blob: string): [string, string, string] | null {
 
 function tag(key: string, reason: string): string {
   return `[verify-spaces-sig] ${key} reason=${reason}`;
+}
+
+function signaturesEnforced(): boolean {
+  return (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "warn").toLowerCase() !== "warn";
 }
 
 /**
@@ -89,15 +90,21 @@ export async function verifySpacesSignature(
   const slug = params.agentSlug;
   const lookupTag = spacesAppId ? `spacesAppId=${spacesAppId}` : `slug=${slug ?? "(none)"}`;
 
-  const reject = (reason: string, error: string, detail?: string): void => {
-    // One stable, grep-friendly log for every rejected webhook. Never include
-    // the signature, secret, or request body.
+  const verificationFailure = (reason: string, error: string, detail?: string): void => {
+    const enforce = signaturesEnforced();
+    // One stable, grep-friendly log for every failed verification. Never
+    // include the signature, secret, or request body.
     log.warn(
       tag(lookupTag, reason)
       + ` agentId=${agent?.id ?? "(not-found)"}`
-      + (detail ? ` ${detail}` : ""),
+      + (detail ? ` ${detail}` : "")
+      + (enforce ? " — rejected" : " — warn-only, passing through"),
     );
-    res.status(401).json({ success: false, error });
+    if (enforce) {
+      res.status(401).json({ success: false, error });
+      return;
+    }
+    next();
   };
 
   // 1. Resolve the agent + its stored secret.
@@ -119,21 +126,21 @@ export async function verifySpacesSignature(
   }
 
   if (!agent?.signingSecret) {
-    reject("no_stored_secret", "missing signing secret");
+    verificationFailure("no_stored_secret", "missing signing secret");
     return;
   }
 
   // 2. Decrypt with claw-auth's GCM scheme.
   const parts = parseGcmBundle(agent.signingSecret);
   if (!parts) {
-    reject("malformed_secret_blob", "malformed signing secret");
+    verificationFailure("malformed_secret_blob", "malformed signing secret");
     return;
   }
   let plaintextSecret: string;
   try {
     plaintextSecret = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
   } catch (err) {
-    reject("decrypt_failed", "secret decrypt failed", `error=${err instanceof Error ? err.message : String(err)}`);
+    verificationFailure("decrypt_failed", "secret decrypt failed", `error=${err instanceof Error ? err.message : String(err)}`);
     return;
   }
 
@@ -144,18 +151,7 @@ export async function verifySpacesSignature(
   // 4. Compare with the header.
   const received = req.headers["x-xyne-signature"];
   if (typeof received !== "string" || received.length === 0) {
-    const temporaryUnsignedFlowAction =
-      (process.env["ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS"] ?? "true") === "true" &&
-      req.headers["x-xyne-event"] === "flow_action";
-    if (temporaryUnsignedFlowAction) {
-      log.error(
-        tag(lookupTag, "temporary_unsigned_flow_action_bypass") +
-        ` agentId=${agent.id} — REMOVE after the Spaces flow-action signer is deployed`,
-      );
-      next();
-      return;
-    }
-    reject("no_signature_header", "missing X-Xyne-Signature");
+    verificationFailure("no_signature_header", "missing X-Xyne-Signature");
     return;
   }
 
@@ -164,7 +160,7 @@ export async function verifySpacesSignature(
   const matches = recBuf.length === expBuf.length && timingSafeEqual(recBuf, expBuf);
 
   if (!matches) {
-    reject("mismatch", "invalid signature", `bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
+    verificationFailure("mismatch", "invalid signature", `bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
     return;
   }
 
