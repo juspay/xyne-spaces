@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Archive,
   Check,
+  Copy,
   History,
   Loader2,
   MoreHorizontal,
@@ -149,6 +150,10 @@ export function AutomationsList({
     },
   });
 
+  const handleClone = (item: Automation): void => {
+    void navigate(`/automations/new?fork=${item.id}&clone=1`);
+  };
+
   const handleEdit = (item: Automation): void => {
     if (item.status === AutomationStatusValues.DRAFT) {
       onOpen(item);
@@ -245,6 +250,7 @@ export function AutomationsList({
                   onOpen={() => onOpen(item)}
                   onEdit={() => handleEdit(item)}
                   onShowRuns={onShowRuns ? () => onShowRuns(item) : undefined}
+                  onClone={() => handleClone(item)}
                   onDelete={() => setPendingDelete(item)}
                   onArchive={
                     isAutomationsAdmin && isLiveStatus(item.status)
@@ -407,6 +413,7 @@ interface AutomationRowProps {
   onOpen: () => void;
   onEdit: () => void;
   onShowRuns?: (() => void) | undefined;
+  onClone: () => void;
   onDelete: () => void;
   onArchive?: (() => void) | undefined;
   onToggleActive?: ((next: boolean) => void) | undefined;
@@ -419,6 +426,7 @@ function AutomationRow({
   onOpen,
   onEdit,
   onShowRuns,
+  onClone,
   onDelete,
   onArchive,
   onToggleActive,
@@ -561,6 +569,14 @@ function AutomationRow({
                   }}
                 />
               )}
+              <RowMenuButton
+                label='Clone'
+                icon={<Copy className='size-4' />}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onClone();
+                }}
+              />
               {onShowRuns && (
                 <RowMenuButton
                   label='Run history'
