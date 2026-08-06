@@ -50,6 +50,7 @@ const CreateTicketParamsSchema = z.object({
     contextId: z.string().min(1, 'Context ID is required').trim(),
     fieldValues: z.array(z.object({
       fieldId: z.string().min(1, 'Field ID is required').trim(),
+      fieldName: z.string().trim().optional(),
       fieldValue: z.string(),
       actualFieldValue: z.custom<Prisma.InputJsonValue>(() => true),
     })),
