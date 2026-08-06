@@ -129,7 +129,9 @@ export class CanvasParticipantsACL extends BaseQueryACL<
       where: { id: data.canvasId, workspaceId: this.ctx.workspaceId },
       select: { visibility: true },
     });
-    if (!canvas) return false;
+    if (!canvas) {
+      return data.userId === this.ctx.userId && data.role === CanvasRole.OWNER;
+    }
     if (canvas.visibility === CanvasVisibility.PUBLIC) return true;
 
     const existing = await this.prisma.canvasParticipant.findFirst({
