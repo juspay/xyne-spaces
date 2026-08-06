@@ -1,6 +1,5 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { McpServerIcon } from '@/components/ClawAgents/McpServerIcon';
 import { useClawMcp } from '@/hooks/useClawMcp';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
@@ -94,7 +93,6 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
           key: section.key,
           label: section.label,
           items: section.servers.map(server => {
-            const isConnected = connectedServerIds.has(server.id);
             return (
               <LibraryCard
                 key={server.id}
@@ -103,14 +101,6 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
                 dimmed={server.enabled === false}
                 icon={<McpServerIcon server={server} size='sm' />}
                 name={server.name}
-                meta={isConnected ? 'Connected' : undefined}
-                statusDot={
-                  isConnected ? (
-                    <Tooltip side='top' content='Connected'>
-                      <span className='size-2 shrink-0 rounded-full bg-emerald-500' />
-                    </Tooltip>
-                  ) : undefined
-                }
                 description={server.description ?? undefined}
               />
             );

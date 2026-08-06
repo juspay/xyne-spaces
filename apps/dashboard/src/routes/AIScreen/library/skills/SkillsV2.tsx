@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useClawSkills } from '@/hooks/useClawSkills';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
 import { groupSkillsByCategory } from '@/services/claw/agentCategory';
-import { LibraryCard, LibraryIconTile, LibraryStatusDot } from '../shared/components/LibraryCard';
+import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
   LibrarySections,
@@ -13,19 +13,6 @@ import {
 } from '../shared/components/LibraryTabShell';
 import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useCategoryFilter } from '../shared/hooks/useCategoryFilter';
-
-const getSourceLabel = (source: string): string => {
-  switch (source) {
-    case 'seeded':
-      return 'Built-in';
-    case 'user-created':
-      return 'Custom';
-    case 'uploaded':
-      return 'Uploaded';
-    default:
-      return source;
-  }
-};
 
 const SkillsV2 = ({ query }: { query: string }): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -108,14 +95,6 @@ const SkillsV2 = ({ query }: { query: string }): ReactElement => {
               dimmed={!skill.enabled}
               icon={<LibraryIconTile name={skill.name || skill.slug} />}
               name={skill.name || skill.slug}
-              meta={`${getSourceLabel(skill.source)} · ${skill.slug}`}
-              statusDot={
-                <LibraryStatusDot
-                  enabled={skill.enabled}
-                  enabledLabel='Active — agents can use this skill'
-                  disabledLabel='Disabled — agents cannot use this skill'
-                />
-              }
               description={skill.description}
             />
           )),

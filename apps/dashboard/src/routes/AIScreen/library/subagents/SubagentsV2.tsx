@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { Network } from 'lucide-react';
 import { useClawSubagents } from '@/hooks/useClawSubagents';
 import type { SubagentDef, SubagentSource } from '@/services/claw/clawSubagentsTypes';
-import { LibraryCard, LibraryIconTile, LibraryStatusDot } from '../shared/components/LibraryCard';
+import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
   LibrarySections,
@@ -102,8 +102,6 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
           key: section.key,
           label: section.label,
           items: section.items.map(subagent => {
-            const toolCount =
-              (subagent.tools?.direct?.length ?? 0) + (subagent.tools?.custom?.length ?? 0);
             return (
               <LibraryCard
                 key={subagent.name}
@@ -118,18 +116,6 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
                   </LibraryIconTile>
                 }
                 name={subagent.name}
-                meta={[
-                  subagent.source === 'builtin' ? 'Built-in' : 'Custom',
-                  `${subagent.skills.length} skills`,
-                  `${toolCount} tools`,
-                ].join(' · ')}
-                statusDot={
-                  <LibraryStatusDot
-                    enabled={subagent.enabled}
-                    enabledLabel='Enabled — available to agents'
-                    disabledLabel='Disabled — cannot be used by agents'
-                  />
-                }
                 description={subagent.description}
               />
             );

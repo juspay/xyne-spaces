@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { groupAgentsByCategory } from '@/services/claw/agentCategory';
-import { LibraryCard, LibraryIconTile, LibraryStatusDot } from '../shared/components/LibraryCard';
+import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
   LibrarySections,
@@ -92,13 +92,6 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
               testId='claw-agent-card'
               icon={<LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} />}
               name={agent.name}
-              statusDot={
-                <LibraryStatusDot
-                  enabled={agent.enabled}
-                  enabledLabel='Active — this agent is enabled and available to use'
-                  disabledLabel='Paused — this agent is disabled and cannot be used'
-                />
-              }
               description={agent.description}
             />
           )),
