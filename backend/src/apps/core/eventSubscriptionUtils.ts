@@ -8,7 +8,7 @@ import crypto from 'crypto';
 const installedAppsRepository = new InstalledAppsRepository();
 
 
-function signWebhookPayload(payload: string, signingSecret: string): string {
+export function signWebhookPayload(payload: string, signingSecret: string): string {
     return crypto
         .createHmac('sha256', signingSecret)
         .update(payload)
@@ -138,4 +138,3 @@ export async function emitEventToWorkspaceApps(
         // Don't throw - event emission failures should not break the main flow
     }
 }
-
