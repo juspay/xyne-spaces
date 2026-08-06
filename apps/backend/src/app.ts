@@ -1028,6 +1028,10 @@ export class App {
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
 
+    logger.info('Initializing message classification queue (producer)...');
+    const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
+    await messageClassificationQueue.initialize();
+
     if (config.enableTagGenerationPipeline) {
       logger.info('Initializing tag generation pipeline queue (producer)...');
       registerDeskEmailTags(tagGenerationPipeline);

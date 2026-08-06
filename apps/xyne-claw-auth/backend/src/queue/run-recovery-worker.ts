@@ -117,7 +117,7 @@ let worker: Worker<RunRecoveryJobData> | undefined;
  */
 async function runAlreadyCompleted(idempotencyKey: string): Promise<boolean> {
   try {
-    const { gcsService } = await import("../services/gcsService.js");
+    const { gcsService } = await import("../services/storageService.js");
     const buf = await gcsService.getFileBuffer(`claw-results/${idempotencyKey}.json`);
     const marker = JSON.parse(buf.toString("utf8")) as { status?: string };
     return marker.status === "completed";

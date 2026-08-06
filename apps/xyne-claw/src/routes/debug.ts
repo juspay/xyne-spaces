@@ -16,7 +16,7 @@ import path from "node:path";
 import { PATHS } from "../config.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { restoreSessionFromArchive } from "../session-store.js";
-import { gcsListDebugRuns, gcsDownloadDebugRun } from "../gcs.js";
+import { gcsListDebugRuns, gcsDownloadDebugRun } from "../storage.js";
 import { isSafeId } from "../safe-id.js";
 import { metric } from "../metrics.js";
 

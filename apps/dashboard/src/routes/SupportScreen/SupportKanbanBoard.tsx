@@ -28,6 +28,7 @@ import {
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
@@ -78,6 +79,7 @@ export interface SupportKanbanBoardProps {
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[];
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -142,6 +144,7 @@ export const SupportKanbanBoard = ({
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
+        l: ticketFilter.conversationLabelId ?? null,
       }),
     [
       channelId,
@@ -155,6 +158,7 @@ export const SupportKanbanBoard = ({
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
       dynamicFieldEntries,
+      ticketFilter.conversationLabelId,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
@@ -503,12 +507,15 @@ export const SupportKanbanBoard = ({
                         fromSequenceNumber: backwardStageChange.fromSequenceNumber,
                       }),
                     );
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: backwardStageChange.ticketId,
-                        stageName: backwardStageChange.stageName,
-                        updatedAt: Date.now(),
-                      }),
+                    void surfaceMutationError(
+                      zero.mutate(
+                        mutators.ticket.update({
+                          id: backwardStageChange.ticketId,
+                          stageName: backwardStageChange.stageName,
+                          updatedAt: Date.now(),
+                        }),
+                      ),
+                      'Failed to move ticket',
                     );
                   }
                   setShowBackwardConfirmDialog(false);

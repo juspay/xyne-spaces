@@ -11,20 +11,24 @@ const getInitials = (name: string): string => {
   }
   return name.slice(0, 2).toUpperCase();
 };
+const TILE_SIZE = { sm: 'size-8', md: 'size-10' } as const;
 
 export function LibraryIconTile({
   name,
   color,
+  size = 'sm',
   children,
 }: {
   name?: string;
   color?: string;
+  size?: keyof typeof TILE_SIZE;
   children?: ReactNode;
 }): ReactElement {
   return (
     <span
       className={cn(
-        'flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-normal shadow-sm',
+        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-normal shadow-sm',
+        TILE_SIZE[size],
 
         color ? 'text-white' : 'border border-border bg-card text-muted-foreground',
       )}

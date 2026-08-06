@@ -38,6 +38,7 @@ import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
@@ -872,6 +873,11 @@ export class TicketController {
             metadata: { ticketId: ticket.id },
           }, initialMessageId);
           await messageMetadataService.syncInitialMessageMd(conversationId);
+
+          // Ticket creation writes its message through Prisma, not a Zero mutator, so the
+          // vespa-injection handler that normally triggers classification never fires here.
+          // The thread has no user messages yet — the classifier reads the ticket instead.
+          void messageClassificationQueue.enqueueForMessage(conversationId);
 
           const ticketMd = serializeTicketMd({
             id: ticket.id,

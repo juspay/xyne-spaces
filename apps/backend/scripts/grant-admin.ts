@@ -109,7 +109,8 @@ async function grantAdmin() {
       await prisma.userGroupMapping.create({
         data: {
           userId: user.id,
-          userGroupId: adminGroup.id
+          userGroupId: adminGroup.id,
+          workspaceId: defaultWorkspace.id
         }
       });
       console.log('✅ Added to ADMIN group');
