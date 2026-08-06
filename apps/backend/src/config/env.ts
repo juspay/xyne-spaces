@@ -480,6 +480,12 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+
+  // Tenant-enforcement switches. Default true (refuse); only an explicit false relaxes,
+  // so a permissive deployment says so in its own config. Reported either way.
+  ACL_ENFORCE_WORKSPACE_IMMUTABLE: Joi.boolean().default(true),
+  ACL_ENFORCE_GUEST_WRITES: Joi.boolean().default(true),
+  ACL_ENFORCE_NO_CONTEXT: Joi.boolean().default(true),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -1017,5 +1023,10 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
+  },
+  aclEnforcement: {
+    workspaceImmutable: envVars.ACL_ENFORCE_WORKSPACE_IMMUTABLE as boolean,
+    guestWrites: envVars.ACL_ENFORCE_GUEST_WRITES as boolean,
+    noContext: envVars.ACL_ENFORCE_NO_CONTEXT as boolean,
   },
 };
