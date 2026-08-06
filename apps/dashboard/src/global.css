@@ -2866,8 +2866,8 @@ img.inline-emoji,
   color: var(--link-hover-color);
 }
 
-.bot-markdown-content strong,
-.bot-markdown-content-call-summary strong {
+.bot-markdown-content :is(strong, b),
+.bot-markdown-content-call-summary :is(strong, b) {
   font-weight: 600;
 }
 
