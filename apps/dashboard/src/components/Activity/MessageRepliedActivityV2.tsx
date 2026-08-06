@@ -106,6 +106,7 @@ export const MessageRepliedActivityV2 = ({
           <RenderMessageWithHTML
             message={latestReplyMessage.content}
             showEdited={latestReplyMessage.edited}
+            singleLinePreview
           />
         </div>
       )}

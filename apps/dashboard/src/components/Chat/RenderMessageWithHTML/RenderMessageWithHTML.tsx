@@ -59,6 +59,12 @@ interface RenderMessageWithHTMLProps {
   messageId?: string;
   conversationId?: string;
   preserveThreadRoute?: boolean;
+  /**
+   * Render code blocks as inline single-line snippets instead of full <pre>
+   * boxes. Used by condensed/line-clamped previews (e.g. the Activity feed) so
+   * a code-containing message stays on one line.
+   */
+  singleLinePreview?: boolean;
 }
 
 const MAX_HTML_LENGTH = 100000;
@@ -68,6 +74,24 @@ const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
 const CODE_BLOCK_PREVIEW_LINES = 10;
 const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 24 + 32;
+
+/**
+ * When true (provided via SingleLinePreviewContext), a code block is collapsed
+ * to an inline monospace snippet instead of a multi-line <pre> box. A block
+ * level <pre> ignores an ancestor's `line-clamp-1`/`truncate`, so in the
+ * Activity feed's condensed view a code-containing message rendered its full
+ * code box instead of a one-line preview. Consumers opt in via the
+ * `singleLinePreview` prop on RenderMessageWithHTML.
+ */
+const SingleLinePreviewContext = React.createContext(false);
+
+/**
+ * Flatten a code block's raw text into a single-line snippet for previews:
+ * collapse every run of whitespace (including newlines) to a single space and
+ * trim. Exported for unit testing.
+ */
+export const collapseCodeForPreview = (codeText: string): string =>
+  codeText.replace(/\s+/g, ' ').trim();
 
 const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   switch (kind) {
@@ -632,6 +656,42 @@ function CollapsibleCodeBlock({
       </div>
     </div>
   );
+}
+
+function PreviewAwareCodeBlock({
+  children,
+  codeText,
+  lineCount,
+  keyPrefix,
+}: {
+  children: React.ReactNode;
+  codeText: string;
+  lineCount: number;
+  keyPrefix: string;
+}): JSX.Element {
+  const isSingleLinePreview = React.useContext(SingleLinePreviewContext);
+
+  // Condensed / single-line preview: render an inline snippet so the message
+  // stays on one clamped line instead of expanding into a full code box.
+  if (isSingleLinePreview) {
+    return (
+      <code className='font-mono text-[0.85em] text-foreground/90'>
+        {collapseCodeForPreview(codeText)}
+      </code>
+    );
+  }
+
+  const copyablePre = <CopyableCodeBlock codeText={codeText}>{children}</CopyableCodeBlock>;
+
+  if (lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD) {
+    return (
+      <CollapsibleCodeBlock keyPrefix={keyPrefix} lineCount={lineCount}>
+        {copyablePre}
+      </CollapsibleCodeBlock>
+    );
+  }
+
+  return copyablePre;
 }
 
 const tokenizeToReactNodes = (
@@ -1337,25 +1397,16 @@ const parseNode = (
     const codeText = el.textContent ?? '';
     const lineCount = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
     const preElement = React.createElement(tag, props, ...children);
-    const copyablePre = (
-      <CopyableCodeBlock key={`${keyPrefix}-copyable-pre-${idx}`} codeText={codeText}>
+    return (
+      <PreviewAwareCodeBlock
+        key={`${keyPrefix}-pre-${idx}`}
+        codeText={codeText}
+        lineCount={lineCount}
+        keyPrefix={`${keyPrefix}-${idx}`}
+      >
         {preElement}
-      </CopyableCodeBlock>
+      </PreviewAwareCodeBlock>
     );
-
-    if (lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD) {
-      return (
-        <CollapsibleCodeBlock
-          key={`${keyPrefix}-collapsible-pre-${idx}`}
-          keyPrefix={`${keyPrefix}-${idx}`}
-          lineCount={lineCount}
-        >
-          {copyablePre}
-        </CollapsibleCodeBlock>
-      );
-    }
-
-    return copyablePre;
   }
 
   return React.createElement(tag, props, ...children);
@@ -1369,6 +1420,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   messageId,
   conversationId,
   preserveThreadRoute = false,
+  singleLinePreview = false,
 }): JSX.Element => {
   const navigate = useNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
@@ -1493,13 +1545,15 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   }, [parsedContent, showEdited, keyPrefix]);
 
   return (
-    <div
-      className={cn(
-        'message-html-root jp-message-html',
-        isSystemMessage ? 'text-muted-foreground' : '',
-      )}
-    >
-      {contentWithEdited}
-    </div>
+    <SingleLinePreviewContext.Provider value={singleLinePreview}>
+      <div
+        className={cn(
+          'message-html-root jp-message-html',
+          isSystemMessage ? 'text-muted-foreground' : '',
+        )}
+      >
+        {contentWithEdited}
+      </div>
+    </SingleLinePreviewContext.Provider>
   );
 };

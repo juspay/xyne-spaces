@@ -51,7 +51,11 @@ export const KeywordMatchActivity = ({
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+          <RenderMessageWithHTML
+            message={message.content}
+            showEdited={message.edited}
+            singleLinePreview
+          />
         </div>
       )}
     </ActivityItemCard>
