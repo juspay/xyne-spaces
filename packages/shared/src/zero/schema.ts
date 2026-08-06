@@ -2310,6 +2310,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['entityId'],
     destSchema: formEntityValuesTable,
   }),
+  conversationLabelMappings: many({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: conversationLabelMappingTable,
+  }),
   assignments: many({
     sourceField: ['id'],
     destField: ['ticketId'],

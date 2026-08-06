@@ -44,6 +44,7 @@ interface TicketListViewProps {
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onTicketClick: (ticket: SupportTicketRow) => void;
@@ -115,6 +116,7 @@ export const TicketListView = function TicketListView({
     lastEmailAtStart,
     lastEmailAtEnd,
     dynamicFieldFilters,
+    conversationLabelId,
   } = filter;
 
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
@@ -146,6 +148,7 @@ export const TicketListView = function TicketListView({
       dynamicFieldFilters,
       limit: fetchLimit,
       userGroups,
+      ...(conversationLabelId ? { conversationLabelId } : {}),
       start: pageStart,
       dir: 'forward',
     }),
@@ -169,6 +172,7 @@ export const TicketListView = function TicketListView({
         ds: lastEmailAtStart ?? null,
         de: lastEmailAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
+        l: conversationLabelId ?? null,
       }),
     [
       channelId,
@@ -183,6 +187,7 @@ export const TicketListView = function TicketListView({
       lastEmailAtStart,
       lastEmailAtEnd,
       dynamicFieldEntries,
+      conversationLabelId,
     ],
   );
 
@@ -259,6 +264,12 @@ export const TicketListView = function TicketListView({
             );
           case 'spam':
             return state === MailboxState.SPAM;
+          case 'sent':
+          case 'drafts':
+            // Filtered server-side by a positive exists() (sent email / reply draft by me);
+            // the exists() also runs on the client, so every fetched row already qualifies —
+            // no overlay check here.
+            return true;
           case 'inbox':
           default:
             return state === MailboxState.INBOX;

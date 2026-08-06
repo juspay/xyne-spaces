@@ -79,6 +79,7 @@ export interface SupportKanbanBoardProps {
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[];
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -143,6 +144,7 @@ export const SupportKanbanBoard = ({
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
+        l: ticketFilter.conversationLabelId ?? null,
       }),
     [
       channelId,
@@ -156,6 +158,7 @@ export const SupportKanbanBoard = ({
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
       dynamicFieldEntries,
+      ticketFilter.conversationLabelId,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
