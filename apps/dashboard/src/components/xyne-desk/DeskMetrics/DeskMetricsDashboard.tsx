@@ -85,8 +85,6 @@ const PRIORITY_BADGE: Record<string, string> = {
 };
 
 const PAGE_SIZE = 15;
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
 
 const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
   const [hour = 0, minute = 0] = time.split(':').map(Number);
@@ -109,32 +107,6 @@ export const formatDuration = (seconds: number | null): string => {
 
 const priorityLabel = (p: string): string =>
   p.charAt(0) + p.slice(1).toLowerCase().replace(/_/g, ' ');
-
-const formatTrendLabel = (dateStr: string, hourly: boolean): string => {
-  if (hourly) {
-    // dateStr = 'YYYY-MM-DD HH:00' in IST
-    const hour = parseInt(dateStr.slice(11, 13), 10);
-    const suffix = hour >= 12 ? 'pm' : 'am';
-    return `${hour % 12 || 12}${suffix}`;
-  }
-  // dateStr = 'YYYY-MM-DD' in IST
-  const [, m, d] = dateStr.split('-').map(Number);
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return `${months[(m ?? 1) - 1]} ${d}`;
-};
 
 const getCustomFieldKeys = (tickets: DeskMetricsTicketRow[]): string[] =>
   [...new Set(tickets.flatMap(t => Object.keys(t.customFields ?? {})))].sort();
@@ -821,14 +793,11 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee'>('priority');
-  const [expandedChart, setExpandedChart] = useState<'priority' | 'trend' | 'assignee' | null>(
-    null,
-  );
+  const [chartView, setChartView] = useState<'priority' | 'assignee'>('priority');
+  const [expandedChart, setExpandedChart] = useState<'priority' | 'assignee' | null>(null);
   const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
   const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
   const timeRangeParam = `${rangeStartMs}_${rangeEndMs}`;
-  const isHourly = rangeEndMs - rangeStartMs <= DAY_MS;
   const [ownerSearch, setOwnerSearch] = useState('');
   const ownerSearchInputRef = useRef<HTMLInputElement>(null);
   const [fieldKeySearch, setFieldKeySearch] = useState('');
@@ -1000,11 +969,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     color: PRIORITY_COLORS[p.priority] ?? '#94a3b8',
   }));
 
-  const trendData = useMemo(
-    () => (data?.trend ?? []).map(d => ({ ...d, label: formatTrendLabel(d.date, isHourly) })),
-    [data?.trend, isHourly],
-  );
-
   const assigneeData = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const t of data?.tickets ?? []) {
@@ -1022,13 +986,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
-
-  const tickInterval = useMemo(() => {
-    const n = trendData.length;
-    if (n <= 8) return 0;
-    if (n <= 31) return 4;
-    return Math.floor(n / 6);
-  }, [trendData.length]);
 
   const csatTotal = (data?.csat.good ?? 0) + (data?.csat.bad ?? 0);
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
@@ -2081,8 +2038,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       <div className='mb-3 flex items-center justify-between gap-3'>
                         <div className='text-sm font-medium text-foreground'>
                           {chartView === 'priority' && 'Tickets by priority'}
-                          {chartView === 'trend' &&
-                            `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                           {chartView === 'assignee' && 'Tickets by assignee'}
                         </div>
                         <div className='flex items-center gap-2'>
@@ -2100,20 +2055,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               )}
                             >
                               By Priority
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('trend')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTrend'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'trend'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              Created vs Resolved
                             </button>
                             <button
                               type='button'
@@ -2167,41 +2108,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 <RechartsTooltip cursor={false} />
                                 <Legend />
                               </PieChart>
-                            </ResponsiveContainer>
-                          </div>
-                        ))}
-
-                      {chartView === 'trend' &&
-                        (trendData.length === 0 ? (
-                          <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
-                            No data in range
-                          </div>
-                        ) : (
-                          <div className='h-[280px]'>
-                            <ResponsiveContainer width='100%' height='100%'>
-                              <BarChart data={trendData} margin={{ left: -16, right: 4 }}>
-                                <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                                <XAxis
-                                  dataKey='label'
-                                  tick={{ fontSize: 11 }}
-                                  interval={tickInterval}
-                                />
-                                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                                <RechartsTooltip cursor={false} />
-                                <Legend />
-                                <Bar
-                                  dataKey='opened'
-                                  name='Created'
-                                  fill='#6366f1'
-                                  radius={[4, 4, 0, 0]}
-                                />
-                                <Bar
-                                  dataKey='closed'
-                                  name='Resolved'
-                                  fill='#10b981'
-                                  radius={[4, 4, 0, 0]}
-                                />
-                              </BarChart>
                             </ResponsiveContainer>
                           </div>
                         ))}
@@ -2295,8 +2201,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
             <div className='mb-4 flex items-center justify-between'>
               <h2 className='text-base font-semibold text-foreground'>
                 {expandedChart === 'priority' && 'Tickets by priority'}
-                {expandedChart === 'trend' &&
-                  `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                 {expandedChart === 'assignee' && 'Tickets by assignee'}
               </h2>
               <button
@@ -2333,24 +2237,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       <RechartsTooltip cursor={false} />
                       <Legend />
                     </PieChart>
-                  </ResponsiveContainer>
-                ))}
-              {expandedChart === 'trend' &&
-                (trendData.length === 0 ? (
-                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                    No data in range
-                  </div>
-                ) : (
-                  <ResponsiveContainer width='100%' height='100%'>
-                    <BarChart data={trendData} margin={{ left: -16, right: 8 }}>
-                      <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                      <XAxis dataKey='label' tick={{ fontSize: 12 }} interval={tickInterval} />
-                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                      <RechartsTooltip cursor={false} />
-                      <Legend />
-                      <Bar dataKey='opened' name='Created' fill='#6366f1' radius={[4, 4, 0, 0]} />
-                      <Bar dataKey='closed' name='Resolved' fill='#10b981' radius={[4, 4, 0, 0]} />
-                    </BarChart>
                   </ResponsiveContainer>
                 ))}
               {expandedChart === 'assignee' &&
