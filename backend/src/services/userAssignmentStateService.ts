@@ -98,15 +98,16 @@ export class UserAssignmentStateService {
       // Schedule restoration job (single job per user)
       await assignmentReactivationQueue.scheduleReactivation(userId, unavailableUntil);
 
-      // Pausing always excludes the user from new auto-assignment. Existing tickets are
-      // only handed off when the user requests it for this pause and the group's admin
-      // configuration permits it.
-      const reassignGroups = reassignExistingTickets
-        ? await this.prisma.userGroup.findMany({
-            where: { id: { in: userGroupIds }, reassignOnUnavailable: true },
-            select: { id: true },
-          })
-        : [];
+      // For any group configured to reassign this member's open tickets while they're
+      // unavailable, hand the work off to a queue instead of scanning tickets inline here -
+      // keeps this (synchronous, user-facing) toggle call cheap regardless of backlog size.
+      const candidateGroups = await this.prisma.userGroup.findMany({
+        where: { id: { in: userGroupIds } },
+        select: { id: true, reassignOnUnavailable: true },
+      });
+      const reassignGroups = candidateGroups.filter(
+        (group) => (group.reassignOnUnavailable ?? false) === true
+      );
 
       for (const group of reassignGroups) {
         try {
