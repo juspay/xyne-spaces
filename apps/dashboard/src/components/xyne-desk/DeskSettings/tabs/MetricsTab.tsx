@@ -22,11 +22,17 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
     channelId,
   } = form;
 
-  const [channelTickets] = useCachedQuery(
-    queries.supportTicketsFilteredV3({ channelId: channelId ?? '', isMember: true }),
+  const [ticketBoardFallback] = useCachedQuery(
+    queries.supportTicketsPageV3({
+      channelId: channelId ?? '',
+      isMember: true,
+      limit: 1,
+      start: null,
+      dir: 'forward',
+    }),
     { enabled: !!channelId && !boardId },
   );
-  const effectiveBoardId = boardId ?? channelTickets?.[0]?.boardId ?? null;
+  const effectiveBoardId = boardId ?? ticketBoardFallback?.[0]?.boardId ?? null;
 
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: effectiveBoardId ?? '' }), {
     enabled: !!effectiveBoardId,
