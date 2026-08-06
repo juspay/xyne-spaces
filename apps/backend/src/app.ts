@@ -88,6 +88,7 @@ import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import boardRoutes from '@/routes/boards';
+import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -153,6 +154,8 @@ import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
+import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
+import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
@@ -742,6 +745,11 @@ export class App {
           await stageEtaDeadlineQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing board config copy queue...');
+          await boardConfigCopyQueue.initialize();
+          boardConfigCopyWorker.start();
+        })(),
+        (async () => {
           logger.info('Initializing assignment reactivation queue...');
           await assignmentReactivationQueue.initialize();
         })(),
@@ -788,6 +796,10 @@ export class App {
 
       logger.info('Initializing stage ETA deadline queue...');
       await stageEtaDeadlineQueue.initialize();
+
+      logger.info('Initializing board config copy queue...');
+      await boardConfigCopyQueue.initialize();
+      boardConfigCopyWorker.start();
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
@@ -988,6 +1000,9 @@ export class App {
 
       // Close stage ETA deadline queue
       await stageEtaDeadlineQueue.close();
+
+      // Close board config copy queue
+      await boardConfigCopyQueue.close();
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();
