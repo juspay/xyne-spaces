@@ -35,6 +35,7 @@ import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/t
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
+import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
@@ -462,7 +463,11 @@ export class TicketController {
         // ensures no client property can reach the internal ticket model.
         req.body = validationResult.data;
 
-        const cacConfig = {channelId: 'jqi4msy9uvzdeqw50t87fyus', boardId: 'cmsh9dtr5000dugwe95i5y2tp'};
+        const cacConfig = await superpositionClient.getObjectValue(
+          'error_report_channel_config',
+          null,
+          {},
+        ) as { channelId: string; boardId?: string } | null;
 
         if (!cacConfig?.channelId) {
           res.status(503).json({ error: 'Error reporting is not configured.' });
