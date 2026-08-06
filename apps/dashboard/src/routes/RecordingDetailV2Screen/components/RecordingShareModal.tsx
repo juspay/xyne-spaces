@@ -223,7 +223,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
               const label = share.userGroupId
                 ? (share.userGroup?.name ?? share.userGroupId)
                 : share.channelId
-                  ? `#${share.channel?.name ?? share.channelId}`
+                  ? `${share.channel?.name ?? share.channelId}`
                   : share.user
                     ? getUserDisplayName(share.user)
                     : share.userId;
