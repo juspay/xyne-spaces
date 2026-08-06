@@ -87,6 +87,9 @@ async function sendVarysWebhook(
       'X-Xyne-Event': 'PR_CHECK_REQUESTED',
     },
     body: JSON.stringify(payload),
+    redirect: 'manual',
+    // Fail fast if Varys stalls — this runs inside a user-facing request.
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!response.ok) {
@@ -118,6 +121,9 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
     const projectKey = typeof context.projectKey === 'string' ? context.projectKey : '';
     const repositorySlug = typeof context.repositorySlug === 'string' ? context.repositorySlug : '';
 
+    // ticketId is required: buttons are only posted for PRs with a linked
+    // ticket, and bitbot's PR_CHECK_REQUESTED contract expects it — fail here
+    // rather than sending bitbot a payload it may reject.
     if (!ticketId || !prId || !projectKey || !repositorySlug) {
       res.status(400).json({
         error: 'Missing required fields in context',
@@ -126,23 +132,79 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
       return;
     }
 
-    // Look up the ticket to get conversation and channel info
-    const ticket = await db.ticket.findUnique({
-      where: { id: ticketId },
-      select: {
-        conversationId: true,
-        channelId: true,
-      },
-    });
+    // Resolve conversation/channel: thread buttons carry them in context (the
+    // thread where the PR link was posted); ticket buttons derive them from
+    // the ticket the PR is linked to. Context values are trusted without a
+    // membership re-check because this route is S2S-key protected and the
+    // context originates from button frontmatter that only our backend writes
+    // — do not reuse this pattern on a route without those guarantees.
+    let conversationId = typeof context.conversationId === 'string' && context.conversationId ? context.conversationId : undefined;
+    let channelId = typeof context.channelId === 'string' && context.channelId ? context.channelId : undefined;
 
-    if (!ticket || !ticket.conversationId) {
-      res.status(404).json({ error: `Ticket ${ticketId} not found or has no conversation` });
-      return;
+    if (!conversationId || !channelId) {
+      // ticketId is guaranteed present (validated above), so the ticket
+      // fallback below always applies for legacy buttons lacking thread context.
+      const ticket = await db.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          conversationId: true,
+          channelId: true,
+        },
+      });
+
+      if (!ticket || !ticket.conversationId) {
+        res.status(404).json({ error: `Ticket ${ticketId} not found or has no conversation` });
+        return;
+      }
+
+      conversationId = ticket.conversationId;
+      channelId = ticket.channelId;
+    }
+
+    // Object-level authorization: when an acting user is supplied (the ordinary-user
+    // dispatch path), they must have access to the ticket's channel. (Absent
+    // callerUserId = the app's own S2S call, which falls back to the Varys bot below.)
+    //
+    // Mirror the app's channel ACL, and always enforce the workspace boundary:
+    //   - PRIVATE channel → the caller must be an explicit participant of THIS channel.
+    //   - PUBLIC channel  → open to members of the channel's workspace (the "Run PR Check"
+    //     button renders to every viewer via showToAll, so ordinary viewers legitimately
+    //     have no participant row here) — but the caller must still belong to that workspace.
+    if (typeof callerUserId === 'string' && callerUserId.trim() && channelId) {
+      const chan = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { visibility: true, workspaceId: true },
+      });
+
+      let authorized = false;
+      if (chan && chan.visibility !== 'PRIVATE' && chan.workspaceId) {
+        const workspaceMembership = await db.channelParticipant.findFirst({
+          where: { userId: callerUserId, channel: { workspaceId: chan.workspaceId } },
+          select: { channelId: true },
+        });
+        authorized = !!workspaceMembership;
+      } else {
+        // PRIVATE, or a channel with no resolvable workspace → require the specific
+        // participant row (fail closed).
+        const participant = await db.channelParticipant.findUnique({
+          where: { channelId_userId: { channelId, userId: callerUserId } },
+          select: { id: true },
+        });
+        authorized = !!participant;
+      }
+
+      if (!authorized) {
+        logger.warn(
+          `[PR-Check-Callback] Rejected: user ${callerUserId} is not authorized for ticket ${ticketId}'s channel (visibility=${chan?.visibility ?? 'unknown'})`,
+        );
+        res.status(403).json({ error: 'Not authorized for this ticket' });
+        return;
+      }
     }
 
     // Get channel info for channel name
     const channel = await db.channel.findUnique({
-      where: { id: ticket.channelId },
+      where: { id: channelId },
       select: { name: true },
     });
 
@@ -159,15 +221,15 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
 
     logger.info(
       `[PR-Check-Callback] Button clicked — sending webhook to Varys for PR #${prId} in ${repositorySlug} ` +
-      `(ticket: ${ticketId}, conversation: ${ticket.conversationId})`
+      `(ticket: ${ticketId}, conversation: ${conversationId})`
     );
 
     // Build webhook payload
     const webhookPayload: PRCheckRequestedPayload = {
       eventType: 'PR_CHECK_REQUESTED',
       payload: {
-        conversationId: ticket.conversationId,
-        channelId: ticket.channelId,
+        conversationId,
+        channelId,
         userId,
         channelName: channel?.name,
         createdAt: Date.now(),

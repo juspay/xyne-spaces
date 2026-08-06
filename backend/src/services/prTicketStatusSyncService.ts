@@ -12,6 +12,7 @@ import { evaluateAssignmentRule, evaluateRoleSlots, AssignmentType } from '@/uti
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { userResponsibilityFromRoleId, roleIdFromEnum } from '@/utils/roleFrameworkUtils';
 import { PullRequestActivityHandler } from '@/zero/side-effects/tables/pull-requests-handler';
+import { prThreadNotificationService } from '@/services/prThreadNotificationService';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
 import { db } from '@/database/client';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
@@ -521,6 +522,32 @@ export class PRTicketStatusSyncService {
     stageChange?: { oldStageName: string | null; newStageName: string },
     remainingOpenPRs?: number
   ): Promise<void> {
+    let message: string;
+    try {
+      message = this.formatPRMessage(pr, params, stageChange, remainingOpenPRs);
+    } catch (error) {
+      logger.error(`[PR-Ticket-Sync] Failed to format PR message:`, error);
+      return;
+    }
+
+    // Mirror the update to channel threads where the PR link was posted
+    // (e.g. -merge channels). Fire-and-forget; the service handles errors.
+    // Deliberately BEFORE the no-conversation early-return below: subscribed
+    // threads must get updates even when the ticket has no thread of its own.
+    void prThreadNotificationService.broadcastPRUpdate({
+      prUrl: pr.prUrl,
+      content: message,
+      senderId,
+      excludeConversationId: ticket.conversationId ?? undefined,
+      metadata: {
+        activityType: 'PR',
+        prWebhook: true,
+        prUrl: pr.prUrl,
+        prId: pr.prId,
+        prEvent: params.prEvent,
+      },
+    });
+
     if (!ticket.conversationId) {
       logger.debug(
         `[PR-Ticket-Sync] No conversation for ticket ${ticket.xyneId}, skipping message`
@@ -529,8 +556,6 @@ export class PRTicketStatusSyncService {
     }
 
     try {
-      const message = this.formatPRMessage(pr, params, stageChange, remainingOpenPRs);
-
       await recordTicketTimelineEvent({
         message: {
           conversationId: ticket.conversationId,

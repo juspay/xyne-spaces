@@ -37,6 +37,7 @@ import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
+import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -318,6 +319,37 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       select: { id: true, email: true, name: true, displayName: true, userType: true, status: true }
     });
     const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
+
+    // Top-level user message with a Bitbucket PR link in a regular channel:
+    // post the "Run PR Check" button in this thread (gated on the Varys bot
+    // being a channel participant, checked inside the service). Lets devs
+    // trigger PR checks in -merge channels without duplicating the ticket.
+    // Only the FIRST PR link in a message gets a button — one PR per post is
+    // the expected flow; post additional PRs as separate messages.
+    if (
+      conversation.initialMessageId === message.messageId &&
+      message.msgType === 'USER' &&
+      sender != null &&
+      sender.userType !== UserType.APP &&
+      channel?.scopeType === ChannelScopeType.DEFAULT &&
+      content?.includes('/pull-requests/')
+    ) {
+      prCheckApprovalService
+        .postApprovalButtonForPrLinkMessage({
+          messageId: message.messageId,
+          conversationId,
+          channelId,
+          senderId,
+          content,
+          workspaceId: this.ctx.workspaceId,
+        })
+        .catch(error => {
+          logger.error('[MessagesSideEffect] Failed to post PR check button for PR link message:', {
+            messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
     const inactiveUserIds = new Set(users.filter(u => u.status !== UserStatus.ACTIVE).map(u => u.id));
 
     const userMap = new Map(users.map(u => [u.id, u]));
