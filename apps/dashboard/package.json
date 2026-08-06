@@ -163,6 +163,7 @@
     "openai-partial-stream": "^0.3.9",
     "papaparse": "^5.5.3",
     "pdfjs-dist": "5.4.296",
+    "posthog-js": "^1.413.2",
     "prosemirror-state": "1.4.4",
     "prosemirror-view": "1.42.2",
     "radix-ui": "1.6.7",
