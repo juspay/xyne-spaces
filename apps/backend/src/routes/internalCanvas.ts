@@ -24,4 +24,13 @@ function attachInternalUser(req: Request, _res: Response, next: NextFunction): v
 router.get('/view/:canvasId', validateS2SKey, attachInternalUser, canvasController.readCanvas);
 router.patch('/view/:canvasId', validateS2SKey, attachInternalUser, canvasController.updateCanvas);
 
+// Bulk export of a channel's canvases (view-gated per canvas). See
+// CanvasController.exportChannelCanvases.
+router.get(
+  '/channel/:channelId/export',
+  validateS2SKey,
+  attachInternalUser,
+  canvasController.exportChannelCanvases,
+);
+
 export default router;

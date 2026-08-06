@@ -453,6 +453,130 @@ export class CanvasController {
     }
   };
 
+  // Bulk-export every canvas in a channel that the caller can VIEW, together
+  // with each canvas's folder placement, so callers (e.g. the export/KB-import
+  // tooling) can reconstruct the channel's folder structure in a single pass
+  // instead of issuing one read per canvas.
+  //
+  // Security: this endpoint does NOT bypass canvas-level ACL. Each candidate
+  // canvas is individually gated by canvasAuthService.checkCanvasAccess and is
+  // omitted unless the caller has VIEW access. Only view access is required —
+  // this is a read/export, never an edit.
+  exportChannelCanvases = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ error: 'channelId is required' });
+        return;
+      }
+
+      // Optional visibility filter (PUBLIC / PRIVATE); omit for everything the
+      // caller can view.
+      const visibilityParam = String(req.query.visibility ?? '').toUpperCase();
+      const visibility: 'PUBLIC' | 'PRIVATE' | undefined =
+        visibilityParam === 'PUBLIC' ? 'PUBLIC' : visibilityParam === 'PRIVATE' ? 'PRIVATE' : undefined;
+
+      // Content reads hit Y-Sweet per canvas, so the response is paginated and
+      // content can be skipped for a fast structure-only listing.
+      const includeContent = String(req.query.includeContent ?? 'true') !== 'false';
+      const rawLimit = parseInt(String(req.query.limit ?? '25'), 10);
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 25;
+      const rawOffset = parseInt(String(req.query.offset ?? '0'), 10);
+      const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+
+      const prisma = DatabaseClient.getInstance();
+
+      const where: { channelId: string; visibility?: 'PUBLIC' | 'PRIVATE' } = { channelId };
+      if (visibility) where.visibility = visibility;
+
+      // Count of canvases matching the filter (pre-ACL) so the caller can page.
+      const totalMatching = await prisma.canvas.count({ where });
+
+      const canvases = await prisma.canvas.findMany({
+        where,
+        select: { id: true, title: true, visibility: true, folderId: true, updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+        skip: offset,
+        take: limit,
+      });
+
+      // Resolve folder names for this channel once. CanvasFolder is a flat,
+      // channel-scoped set (no nested hierarchy), so a single id->name map is
+      // sufficient to reconstruct placement.
+      const folders = await prisma.canvasFolder.findMany({
+        where: { channelId },
+        select: { id: true, name: true },
+      });
+      const folderNameById = new Map(folders.map((f) => [f.id, f.name]));
+
+      const { readFromYSweet } = await import('../utils/ysweetUtils.js');
+
+      type ExportItem = {
+        id: string;
+        title: string;
+        visibility: string;
+        folderId: string | null;
+        folderName: string | null;
+        url: string;
+        markdown?: string;
+      };
+      const items: ExportItem[] = [];
+
+      for (const c of canvases) {
+        // Per-canvas ACL — skip anything the caller cannot view.
+        const auth = await canvasAuthService.checkCanvasAccess(c.id, userId);
+        if (!auth.hasAccess || !auth.canView) {
+          continue;
+        }
+
+        const item: ExportItem = {
+          id: c.id,
+          title: c.title,
+          visibility: c.visibility,
+          folderId: c.folderId ?? null,
+          folderName: c.folderId ? folderNameById.get(c.folderId) ?? null : null,
+          url: getCanvasUrl(c.id, req.user?.workspaceId),
+        };
+
+        if (includeContent) {
+          try {
+            const blocks = await readFromYSweet(c.id);
+            item.markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
+          } catch (readError) {
+            logger.warn(
+              `[CANVAS-EXPORT] Failed to read content for canvas ${c.id}: ${
+                readError instanceof Error ? readError.message : String(readError)
+              }`,
+            );
+            item.markdown = '';
+          }
+        }
+
+        items.push(item);
+      }
+
+      res.status(200).json({
+        channelId,
+        visibility: visibility ?? 'ALL',
+        totalMatching,
+        offset,
+        limit,
+        returned: items.length,
+        hasMore: offset + canvases.length < totalMatching,
+        canvases: items,
+      });
+    } catch (error) {
+      logger.error('[CANVAS-EXPORT] Error:', error);
+      res.status(500).json({ error: 'Failed to export channel canvases' });
+    }
+  };
+
   updateCanvas = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
