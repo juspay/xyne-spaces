@@ -303,7 +303,7 @@ export type RoomMachineEvent =
   | {
       type: 'NATIVE_CALL_ENDED';
       callId: string;
-      callType: 'AUDIO' | 'VIDEO';
+      callType: CallType;
       durationMs: number;
       initiatedBy: 'user' | 'callkit' | 'error';
     }
@@ -818,7 +818,7 @@ export const roomMachine = setup({
           reactNativeBridge.livekitConnect({
             token,
             serverUrl,
-            callType: callType as 'AUDIO' | 'VIDEO',
+            callType: callType,
             externalId,
             ...(roomLink && { roomLink }),
             ...(callerName && { callerName }),
@@ -1068,7 +1068,7 @@ export const roomMachine = setup({
           CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
 
         const room = new Room({
-          adaptiveStream: true,
+          adaptiveStream: false,
           dynacast: true,
           videoCaptureDefaults: {
             resolution: {
@@ -1485,9 +1485,9 @@ export const roomMachine = setup({
             const payload: {
               channelId?: string;
               scopeType?: string | null;
-              callType?: 'AUDIO' | 'VIDEO';
+              callType?: CallType;
             } = {
-              callType: context.callType as 'AUDIO' | 'VIDEO',
+              callType: context.callType,
             };
             if (context.channelId) {
               payload.channelId = context.channelId;
@@ -1582,8 +1582,8 @@ export const roomMachine = setup({
           if (isNativeCallSupported() && reactNativeBridge.isAvailable()) {
             // Find the call being joined to get its type and channel
             const call = context.activeCalls.find(c => c.externalId === context.callId);
-            const payload: { channelId?: string; callType?: 'AUDIO' | 'VIDEO' } = {
-              callType: (call?.callType as 'AUDIO' | 'VIDEO') || 'AUDIO',
+            const payload: { channelId?: string; callType?: CallType } = {
+              callType: call?.callType ?? CallType.AUDIO,
             };
             if (call?.channelId) {
               payload.channelId = call.channelId;

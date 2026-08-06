@@ -10,6 +10,7 @@ import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName
 import { cn } from '../../../utils/classNames';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 
 interface AssigneePickerProps {
   ticketId: string;
@@ -58,8 +59,11 @@ export function AssigneePicker({
   }, [users, search, gate.memberIds, selfId]);
 
   const assign = (userId: string | null): void => {
-    void zero.mutate(
-      mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
+      ),
+      'Failed to update assignee',
     );
     setOpen(false);
     setSearch('');

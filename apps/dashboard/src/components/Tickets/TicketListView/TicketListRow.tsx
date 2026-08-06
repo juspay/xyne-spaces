@@ -10,6 +10,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
 import { AssigneePicker } from './AssigneePicker';
 import { PriorityPicker } from './PriorityPicker';
+import { AutoDraftStatus } from '@xyne/shared';
 
 interface TicketListRowProps {
   ticket: TicketListItem;
@@ -135,7 +136,7 @@ export const TicketListRow = ({
     }>;
     if (drafts.length === 0) return null;
     if (drafts.some(d => d.userId !== null)) return 'user';
-    if (drafts.some(d => d.userId === null && d.autoDraftStatus === 'GENERATING'))
+    if (drafts.some(d => d.userId === null && d.autoDraftStatus === AutoDraftStatus.GENERATING))
       return 'generating';
     return 'auto';
   }, [ticket.emailDrafts]);

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType, ActivityClassification } from '@xyne/shared';
+import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -72,7 +72,7 @@ export class CanvasController {
             canvasId,
             workspaceId: req.user!.workspaceId!,
             userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
-            role: 'OWNER',
+            role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
           },
@@ -163,6 +163,9 @@ export class CanvasController {
       const finalWidth = parsedWidth || uploadedFile.width;
       const finalHeight = parsedHeight || uploadedFile.height;
 
+      if (!req.user?.workspaceId) {
+        throw new Error('workspaceId required: no authenticated workspace');
+      }
       const attachment = await this.messageAttachmentRepository.create({
         entityId: canvasId,
         entityType: AttachmentEntityType.CANVAS,
@@ -177,7 +180,7 @@ export class CanvasController {
         uploadedByUserId: userId,
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
-        workspaceId: req.user?.workspaceId ?? '',
+        workspaceId: req.user.workspaceId,
         metadata: {
           ...uploadedFile.metadata,
           canvasId,

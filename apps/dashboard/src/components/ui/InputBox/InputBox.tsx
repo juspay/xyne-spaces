@@ -191,6 +191,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
+      dockSlot,
     },
 
     ref,
@@ -1043,6 +1044,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
+        getHtml: (): string => editor?.getHTML() ?? '',
         isSuggestionOpen: (): boolean => {
           if (!editor) return false;
           const state = editor.state;
@@ -1400,6 +1402,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             {agentSlot}
           </div>
         </div>
+
+        {dockSlot}
 
         <div
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}

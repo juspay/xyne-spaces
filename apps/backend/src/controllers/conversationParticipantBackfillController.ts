@@ -3,13 +3,19 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
-type BackfillType = 'lastReplyAt' | 'channelId' | 'staleLastReplyAt' | 'orphanedParticipants';
+type BackfillType =
+  | 'lastReplyAt'
+  | 'legacyLastReadAt'
+  | 'channelId'
+  | 'staleLastReplyAt'
+  | 'orphanedParticipants';
 
 type BackfillOptions = {
   types: BackfillType[];
   batchSize: number;
   delayMs: number;
   dryRun: boolean;
+  lastReadAtCutoff: Date | null;
 };
 
 type BackfillSummary = {
@@ -19,9 +25,35 @@ type BackfillSummary = {
   errors: number;
 };
 
+type LegacyLastReadAtSummary = BackfillSummary & {
+  cutoff: string;
+};
+
+type LegacyLastReadAtCandidate = {
+  id: string;
+  conversationId: string;
+  userId: string;
+  lastReplyAt: Date | null;
+};
+
+class BackfillValidationError extends Error {}
+
 export class ConversationParticipantBackfillController {
   private static sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private static parseLastReadAtCutoff(value: unknown): Date {
+    if (typeof value !== 'string') {
+      throw new BackfillValidationError('lastReadAtCutoff is required for legacyLastReadAt');
+    }
+
+    const cutoff = new Date(value);
+    if (Number.isNaN(cutoff.getTime())) {
+      throw new BackfillValidationError('lastReadAtCutoff must be a valid timestamp');
+    }
+
+    return cutoff;
   }
 
   private static buildDefaultOptions(body: unknown): BackfillOptions {
@@ -30,11 +62,13 @@ export class ConversationParticipantBackfillController {
       batchSize: number;
       delayMs: number;
       dryRun: boolean;
+      lastReadAtCutoff: unknown;
     }>;
 
     const defaultTypes: BackfillType[] = ['lastReplyAt', 'channelId'];
     const validTypes: BackfillType[] = [
       ...defaultTypes,
+      'legacyLastReadAt',
       'staleLastReplyAt',
       'orphanedParticipants',
     ];
@@ -52,7 +86,115 @@ export class ConversationParticipantBackfillController {
     const delayMs = payload.delayMs && payload.delayMs >= 0 ? payload.delayMs : 50;
     const dryRun = payload.dryRun === true;
 
-    return { types, batchSize, delayMs, dryRun };
+    let lastReadAtCutoff: Date | null = null;
+    if (types.includes('legacyLastReadAt')) {
+      lastReadAtCutoff = ConversationParticipantBackfillController.parseLastReadAtCutoff(
+        payload.lastReadAtCutoff
+      );
+    }
+
+    return { types, batchSize, delayMs, dryRun, lastReadAtCutoff };
+  }
+
+  /**
+   * lastReadAt did not exist for legacy threads, so NULL cannot distinguish an
+   * unread thread from one read before the column was deployed. Treat a legacy
+   * participant as read when its latest reply predates the fixed rollout cutoff.
+   */
+  private static async backfillLegacyLastReadAt(
+    options: BackfillOptions
+  ): Promise<LegacyLastReadAtSummary> {
+    const cutoff = options.lastReadAtCutoff;
+    if (!cutoff) {
+      throw new BackfillValidationError('lastReadAtCutoff is required for legacyLastReadAt');
+    }
+    const summary: LegacyLastReadAtSummary = {
+      processed: 0,
+      updated: 0,
+      skipped: 0,
+      errors: 0,
+      cutoff: cutoff.toISOString(),
+    };
+    let cursor: string | null = null;
+    let batchNumber = 0;
+
+    do {
+      batchNumber += 1;
+      const participants: LegacyLastReadAtCandidate[] = await db.conversationParticipant.findMany({
+        where: {
+          lastReadAt: null,
+          lastReplyAt: { not: null, lt: cutoff },
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        select: {
+          id: true,
+          conversationId: true,
+          userId: true,
+          lastReplyAt: true,
+        },
+        orderBy: { id: 'asc' },
+        take: options.batchSize,
+      });
+
+      if (participants.length === 0) break;
+
+      cursor = participants[participants.length - 1]?.id ?? null;
+      summary.processed += participants.length;
+
+      for (const participant of participants) {
+        if (!participant.lastReplyAt) {
+          summary.skipped += 1;
+          continue;
+        }
+
+        if (options.dryRun) {
+          summary.updated += 1;
+          continue;
+        }
+
+        try {
+          // Recheck both fields so a read or post-cutoff reply racing this
+          // backfill is never overwritten.
+          const result = await db.conversationParticipant.updateMany({
+            where: {
+              id: participant.id,
+              lastReadAt: null,
+              lastReplyAt: participant.lastReplyAt,
+            },
+            data: { lastReadAt: participant.lastReplyAt },
+          });
+          if (result.count === 1) {
+            summary.updated += 1;
+          } else {
+            summary.skipped += 1;
+          }
+        } catch (error) {
+          summary.errors += 1;
+          logger.warn('[ConvParticipantBackfill] Failed legacy lastReadAt update', {
+            id: participant.id,
+            conversationId: participant.conversationId,
+            userId: participant.userId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      logger.info(`[ConvParticipantBackfill] legacy lastReadAt batch #${batchNumber} completed`, {
+        batchSize: participants.length,
+        dryRun: options.dryRun,
+        cutoff: summary.cutoff,
+        processed: summary.processed,
+        updated: summary.updated,
+        skipped: summary.skipped,
+        errors: summary.errors,
+      });
+
+      if (options.delayMs > 0) {
+        await this.sleep(options.delayMs);
+      }
+    } while (cursor);
+
+    return summary;
   }
 
   private static async findConversationIdsWithLiveReplies(
@@ -151,7 +293,7 @@ export class ConversationParticipantBackfillController {
       skipped: 0,
       errors: 0,
     };
-    const batchSize = Math.min(options.batchSize, 1_000);
+    const batchSize = options.batchSize;
     let cursor: string | null = null;
     let batchNumber = 0;
 
@@ -326,7 +468,7 @@ export class ConversationParticipantBackfillController {
       skipped: 0,
       errors: 0,
     };
-    const batchSize = Math.min(options.batchSize, 1_000);
+    const batchSize = options.batchSize;
     let cursor: string | null = null;
     let batchNumber = 0;
 
@@ -416,6 +558,11 @@ export class ConversationParticipantBackfillController {
           await ConversationParticipantBackfillController.clearStaleLastReplyAt(options);
       }
 
+      if (options.types.includes('legacyLastReadAt')) {
+        results.legacyLastReadAt =
+          await ConversationParticipantBackfillController.backfillLegacyLastReadAt(options);
+      }
+
       if (options.types.includes('channelId')) {
         results.channelId = await ConversationParticipantBackfillController.backfillChannelId(options);
       }
@@ -437,12 +584,13 @@ export class ConversationParticipantBackfillController {
       res.status(200).json(response);
     } catch (error) {
       logger.error('[ConvParticipantBackfill] Error during backfill:', error);
+      const statusCode = error instanceof BackfillValidationError ? 400 : 500;
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to run backfill',
         timestamp: new Date().toISOString(),
       };
-      res.status(500).json(response);
+      res.status(statusCode).json(response);
     }
   }
 }

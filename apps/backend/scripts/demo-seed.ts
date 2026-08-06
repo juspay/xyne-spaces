@@ -32,9 +32,9 @@ import { hashPassword } from '../src/utils/passwordUtils';
 import {
   serializeInitialMessageMd,
   serializeTicketMd,
-  MessageType as SharedMessageType,
-  TicketStatusV2 as SharedTicketStatusV2,
-  TicketPriority as SharedTicketPriority,
+  MessageType,
+  TicketStatusV2,
+  TicketPriority,
   ChannelType,
   ChannelScopeType,
   ChannelVisibility,
@@ -364,7 +364,7 @@ async function createConversation(
         conversationId,
         senderId: sender.id,
         content: line.text,
-        msgType: SharedMessageType.USER,
+        msgType: MessageType.USER,
         hasAttachment: false,
         edited: false,
         isDeleted: false,
@@ -378,10 +378,10 @@ async function createConversation(
     if (line.react) {
       const reactor = members[(line.from + 1) % members.length];
       await prisma.reaction.create({
-        data: { messageId, userId: reactor.id, emojiName: line.react },
+        data: { messageId, userId: reactor.id, emojiName: line.react, workspaceId },
       });
       await prisma.reactionCount.create({
-        data: { messageId, emojiName: line.react, count: 1 },
+        data: { messageId, emojiName: line.react, count: 1, workspaceId },
       });
     }
   }
@@ -437,7 +437,7 @@ async function createChannels(
     // The DM/channel lists read channel_stats, not channels — without a row the
     // channel does not appear in the sidebar.
     await prisma.channelStats.create({
-      data: { channelId, lastActivityAt: minsAgo(i), participantCount: members.length },
+      data: { channelId, lastActivityAt: minsAgo(i), participantCount: members.length, workspaceId },
     });
 
     for (let m = 0; m < members.length; m++) {
@@ -446,10 +446,11 @@ async function createChannels(
           channelId,
           userId: members[m].id,
           role: m === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER,
+          workspaceId,
         },
       });
       await prisma.channelUserStatus.create({
-        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general' },
+        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general', workspaceId },
       });
     }
 
@@ -652,7 +653,7 @@ async function createTickets(
           conversationId,
           senderId: reporter.id,
           content: spec.title,
-          msgType: SharedMessageType.USER,
+          msgType: MessageType.USER,
           hasAttachment: false,
           edited: false,
           isDeleted: false,
@@ -665,9 +666,8 @@ async function createTickets(
           id: ticket.id,
           title: spec.title,
           description: spec.description,
-          // Same members as the Prisma enums, but a distinct nominal type.
-          statusV2: SharedTicketStatusV2[spec.status],
-          priority: SharedTicketPriority[spec.priority],
+          statusV2: TicketStatusV2[spec.status],
+          priority: TicketPriority[spec.priority],
           assignedTo: assignee.id,
           createdBy: reporter.id,
           createdAt: createdAt.getTime(),
@@ -717,9 +717,11 @@ async function queueForVespa(workspaceId: string, orgId: string, userId: string)
   let queued = 0;
   for (const job of vespaJobs) {
     try {
+      const isUser = job.schema === 'user';
       await vespaQueue.addJob({
         schema: job.schema as never,
-        jobType: 'feed' as never,
+        jobType: (isUser ? 'update' : 'feed') as never,
+        ...(isUser ? { create: true } : {}),
         docId: job.docId,
         workspaceId,
         orgId,

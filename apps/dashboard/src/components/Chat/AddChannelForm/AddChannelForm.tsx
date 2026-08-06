@@ -35,11 +35,11 @@ import { useUserGroups } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
 import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
+import { DeskType } from '@xyne/shared';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
-type DeskType = 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
 type CallSource = 'OZONETEL';
 type Visibility = 'public' | 'private';
 
@@ -58,31 +58,31 @@ const DESK_SOURCES: ReadonlyArray<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   {
-    value: 'EMAIL',
+    value: DeskType.EMAIL,
     label: 'Personal mailbox',
     description: 'Connect a dedicated inbox via OAuth',
     icon: Mail,
   },
   {
-    value: 'DL',
+    value: DeskType.DL,
     label: 'Distribution list',
     description: 'Route a DL through the shared mailbox',
     icon: Mails,
   },
   {
-    value: 'SLACK',
+    value: DeskType.SLACK,
     label: 'Slack channel',
     description: 'Connect a Slack channel to create tickets from messages',
     icon: MessageSquareMore,
   },
   {
-    value: 'APP',
+    value: DeskType.APP,
     label: 'Xyne App',
     description: 'Connect an external system through a Xyne App over APIs',
     icon: Smartphone,
   },
   {
-    value: 'CALL',
+    value: DeskType.CALL,
     label: 'Call desk',
     description: 'Create a call-first desk that can be used in workspace Ozonetel routing',
     icon: Phone,
@@ -129,7 +129,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
-  const [deskType, setDeskType] = useState<DeskType>('EMAIL');
+  const [deskType, setDeskType] = useState<DeskType>(DeskType.EMAIL);
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
@@ -146,7 +146,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       );
       return res.data.channels;
     },
-    enabled: requireConnector && deskType === 'SLACK',
+    enabled: requireConnector && deskType === DeskType.SLACK,
   });
 
   const { data: eligibleAppsData, isLoading: isLoadingEligibleApps } = useQuery({
@@ -156,7 +156,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       const res = await apiInstance.get<{ apps: EligibleApp[] }>('/integrations/app-desk/apps');
       return res.data.apps;
     },
-    enabled: requireConnector && deskType === 'APP',
+    enabled: requireConnector && deskType === DeskType.APP,
   });
 
   const { data: workspaceMailbox } = useQuery({
@@ -167,7 +167,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const { data: ozonetelConfig } = useQuery({
     queryKey: ['workspace-ozonetel-config'],
     queryFn: () => getOzonetelConfig(),
-    enabled: requireConnector && deskType === 'CALL',
+    enabled: requireConnector && deskType === DeskType.CALL,
   });
 
   const workspaceDomain = workspaceMailbox?.displayName?.split('@')[1]?.toLowerCase() ?? '';
@@ -233,14 +233,14 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         return;
       }
       if (requireConnector) {
-        if (deskType === 'EMAIL' && !selectedConnector) return;
+        if (deskType === DeskType.EMAIL && !selectedConnector) return;
         if (
-          deskType === 'DL' &&
+          deskType === DeskType.DL &&
           (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))
         )
           return;
-        if (deskType === 'SLACK' && !selectedSlackChannelId) return;
-        if (deskType === 'APP' && !selectedInstalledAppId) return;
+        if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
+        if (deskType === DeskType.APP && !selectedInstalledAppId) return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -254,39 +254,39 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         }
         onSubmit?.(promoteData);
       } else if (requireConnector) {
-        if (deskType === 'SLACK') {
+        if (deskType === DeskType.SLACK) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'SLACK',
-            deskType: 'SLACK',
+            deskType: DeskType.SLACK,
             slackChannelId: selectedSlackChannelId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === 'APP') {
+        } else if (deskType === DeskType.APP) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'APP',
-            deskType: 'APP',
+            deskType: DeskType.APP,
             installedAppId: selectedInstalledAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === 'DL') {
+        } else if (deskType === DeskType.DL) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'EMAIL',
-            deskType: 'DL',
+            deskType: DeskType.DL,
             dlEmail: dlEmailInput,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
-        } else if (deskType === 'CALL') {
+        } else if (deskType === DeskType.CALL) {
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'CALL',
-            deskType: 'CALL',
+            deskType: DeskType.CALL,
             callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
@@ -295,7 +295,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             ...value,
             connector: selectedConnector,
             channelType: 'EMAIL',
-            deskType: 'EMAIL',
+            deskType: DeskType.EMAIL,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         }
@@ -329,13 +329,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     nameValue.length < 2 ||
     nameValue.length > 80 ||
     !projectIdValue ||
-    (requireConnector && deskType === 'EMAIL' && !selectedConnector) ||
+    (requireConnector && deskType === DeskType.EMAIL && !selectedConnector) ||
     (requireConnector &&
-      deskType === 'DL' &&
+      deskType === DeskType.DL &&
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
-    (requireConnector && deskType === 'SLACK' && !selectedSlackChannelId) ||
-    (requireConnector && deskType === 'APP' && !selectedInstalledAppId) ||
-    (requireConnector && deskType === 'CALL' && !ozonetelConfig?.configured) ||
+    (requireConnector && deskType === DeskType.SLACK && !selectedSlackChannelId) ||
+    (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
+    (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
   const submitDisabledReason = ((): string | null => {
@@ -344,15 +344,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
     if (!projectIdValue) return 'Please select a project';
     if (requireConnector) {
-      if (deskType === 'EMAIL' && !selectedConnector)
+      if (deskType === DeskType.EMAIL && !selectedConnector)
         return 'Please select an email provider (Google or Microsoft)';
-      if (deskType === 'DL') {
+      if (deskType === DeskType.DL) {
         if (!workspaceMailbox?.configured) return 'Workspace shared mailbox is not configured';
         if (!dlEmailInput) return 'Please enter a distribution list email';
         if (!isValidDlEmail(dlEmailInput)) return dlEmailError ?? 'Invalid distribution list email';
       }
-      if (deskType === 'SLACK' && !selectedSlackChannelId) return 'Please select a Slack channel';
-      if (deskType === 'CALL' && !ozonetelConfig?.configured)
+      if (deskType === DeskType.SLACK && !selectedSlackChannelId)
+        return 'Please select a Slack channel';
+      if (deskType === DeskType.CALL && !ozonetelConfig?.configured)
         return 'Ozonetel is not configured. Set it up in Desk Integrations first.';
     }
     return null;
@@ -442,7 +443,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     setDlEmailInput('');
     setSelectedSlackChannelId('');
     setSelectedInstalledAppId('');
-    if (value !== 'EMAIL') setSelectedConnector(null);
+    if (value !== DeskType.EMAIL) setSelectedConnector(null);
   };
   const selectedSource = DESK_SOURCES.find(s => s.value === deskType);
 
@@ -486,8 +487,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {/* DL Selection (when deskType === 'DL') */}
-      {requireConnector && deskType === 'DL' && (
+      {/* DL Selection (when deskType === DeskType.DL) */}
+      {requireConnector && deskType === DeskType.DL && (
         <div className='space-y-2'>
           {!workspaceMailbox?.configured ? (
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
@@ -536,7 +537,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {requireConnector && deskType === 'CALL' && (
+      {requireConnector && deskType === DeskType.CALL && (
         <div className='space-y-2'>
           <label htmlFor='call-source-select' className='text-sm font-medium text-foreground'>
             Call source <span className='text-muted-foreground'>*</span>
@@ -574,7 +575,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {/* Slack Channel Selection */}
-      {requireConnector && deskType === 'SLACK' && (
+      {requireConnector && deskType === DeskType.SLACK && (
         <div className='space-y-2'>
           <label htmlFor='slack-channel-select' className='text-sm font-medium text-foreground'>
             Slack Channel <span className='text-muted-foreground'>*</span>
@@ -634,7 +635,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {/* Xyne App Selection */}
-      {requireConnector && deskType === 'APP' && (
+      {requireConnector && deskType === DeskType.APP && (
         <div className='space-y-2'>
           <label htmlFor='app-desk-select' className='text-sm font-medium text-foreground'>
             Xyne App <span className='text-muted-foreground'>*</span>
@@ -687,7 +688,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {/* Connector Selection (for personal mailbox desks) */}
-      {requireConnector && deskType === 'EMAIL' && (
+      {requireConnector && deskType === DeskType.EMAIL && (
         <div className='space-y-2'>
           <div className='text-sm font-medium text-foreground'>
             Email Provider <span className='text-muted-foreground'>*</span>

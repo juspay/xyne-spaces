@@ -724,7 +724,7 @@ export const mapCollection = async (
 
   const attachment = collectionItem
     ? await db.messageAttachment.findFirst({
-        where: { entityId: collectionItem.id, entityType: 'COLLECTION' },
+        where: { entityId: collectionItem.id, entityType: AttachmentEntityType.COLLECTION },
       })
     : null;
 

@@ -261,7 +261,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');
@@ -348,6 +348,7 @@ async function main() {
           data: {
             userId: adminUser.id,
             userGroupId: adminGroupId,
+            workspaceId: defaultWorkspaceId,
           }
         });
         console.log('  ✅ Linked admin user to ADMIN group');

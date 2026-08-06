@@ -14,7 +14,7 @@ import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { uploadChatAttachments } from "../services/chatAttachmentService.js";
-import { gcsService } from "../services/gcsService.js";
+import { gcsService } from "../services/storageService.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import {
   buildAttachedContextPayload,

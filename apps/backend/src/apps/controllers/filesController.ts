@@ -5,7 +5,7 @@ import { ingestAttachment } from '../core/fileUtils';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService, getStorageService } from '@/services/storage/index';
-import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { normalizeStoragePath } from '@xyne/storage';
 import { setSafeDownloadHeaders } from '@/utils/safeAttachmentDownload';
 import { config } from '@/config/env';
 

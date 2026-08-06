@@ -18,10 +18,17 @@ import {
   KeyboardSensor,
 } from '@dnd-kit/core';
 import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
-import { TicketPriority, TicketStatusV2, BoardType, TicketStageRequestStatus } from '@xyne/shared';
+import {
+  TicketPriority,
+  TicketStatusV2,
+  BoardType,
+  TicketStageRequestStatus,
+  ApproverType,
+} from '@xyne/shared';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
@@ -296,10 +303,14 @@ export const SupportKanbanBoard = ({
       formId: t.formId ?? null,
       requiresApproval: t.requiresApproval ?? false, // NULL treated as false
       approvers: (t.transitionApprovers ?? []).map(
-        (a: { userId: string | null; roleId: string | null; approverType?: string | null }) => ({
+        (a: {
+          userId: string | null;
+          roleId: string | null;
+          approverType?: ApproverType | null;
+        }) => ({
           approverId: a.userId ?? a.roleId ?? '',
           // NULL approverType (legacy rows) is treated as USER.
-          approverType: (a.approverType ?? 'USER') as 'USER' | 'ROLE',
+          approverType: a.approverType ?? ApproverType.USER,
         }),
       ),
     }));
@@ -493,12 +504,15 @@ export const SupportKanbanBoard = ({
                         fromSequenceNumber: backwardStageChange.fromSequenceNumber,
                       }),
                     );
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: backwardStageChange.ticketId,
-                        stageName: backwardStageChange.stageName,
-                        updatedAt: Date.now(),
-                      }),
+                    void surfaceMutationError(
+                      zero.mutate(
+                        mutators.ticket.update({
+                          id: backwardStageChange.ticketId,
+                          stageName: backwardStageChange.stageName,
+                          updatedAt: Date.now(),
+                        }),
+                      ),
+                      'Failed to move ticket',
                     );
                   }
                   setShowBackwardConfirmDialog(false);

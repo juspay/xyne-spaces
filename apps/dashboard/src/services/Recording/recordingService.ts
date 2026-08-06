@@ -6,6 +6,7 @@
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
 import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
+import { CallType } from '@xyne/shared';
 
 export interface RecordingSession {
   /** Public Call ID used by the recording routes (same value as externalId). */
@@ -201,7 +202,7 @@ class RecordingService {
       '/calls/initiate',
       {
         isHeadless: true,
-        callType: 'AUDIO',
+        callType: CallType.AUDIO,
         sttModel: params?.sttModel || 'google',
       },
     );

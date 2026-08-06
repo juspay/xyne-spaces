@@ -8,10 +8,11 @@ import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -463,10 +464,13 @@ export class InvitationController {
       await organizationDomainService.assertCanCreateOrgForEmail(normalizedOwnerEmail);
 
       // Reject if the owner email is already an active member of any org
-      const existingMembership = await prisma.orgMember.findFirst({
-        where: { email: normalizedOwnerEmail, leftAt: null },
-        select: { orgId: true },
-      });
+      // Checks membership of ANY org, not just the caller's.
+      const existingMembership = await withWorkspaceScope(() =>
+        prisma.orgMember.findFirst({
+          where: { email: normalizedOwnerEmail, leftAt: null },
+          select: { orgId: true },
+        }),
+      );
       if (existingMembership) {
         res.status(409).json({
           error: `${ownerEmail.trim()} is already a member of an organisation`,
@@ -512,7 +516,7 @@ export class InvitationController {
           data: {
             orgId: org.orgId,
             workspaceId: workspace.id,
-            role: 'ADMIN',
+            role: WorkspaceRole.ADMIN,
           },
         });
 
@@ -521,7 +525,7 @@ export class InvitationController {
           data: {
             orgId: org.orgId,
             email: normalizedOwnerEmail,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
             invitedBy: req.user?.email ?? undefined,
           },
         });
@@ -567,9 +571,9 @@ export class InvitationController {
         });
 
         // 2. Delete org member
-        await prisma.orgMember.delete({ 
-          where: { email: normalizedOwnerEmail } 
-        });
+        await withWorkspaceScope(() =>
+          prisma.orgMember.delete({ where: { email: normalizedOwnerEmail } }),
+        );
         
         // 3. Delete workspace-organization link
         await prisma.workspaceOrganization.delete({ 

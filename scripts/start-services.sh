@@ -185,6 +185,12 @@ SELECT_ALL_LABEL="Select all optional features"
 SELECT_ALL_INDEX=1
 NUM_MENU_ITEMS=$((NUM_FEATURES + 1))
 CURSOR=$SELECT_ALL_INDEX          # start on Select all
+
+if [ -n "${XYNE_FEATURES:-}" ]; then
+    SELECTED_FEATURES="$XYNE_FEATURES"
+    echo "$SELECTED_FEATURES" | grep -qw 1 || SELECTED_FEATURES="1,${SELECTED_FEATURES}"
+else
+
 declare -a CHECKED=(1 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
 
 all_optional_features_selected() {
@@ -301,6 +307,8 @@ for i in $(seq 1 $((NUM_FEATURES - 1))); do
         SELECTED_FEATURES="${SELECTED_FEATURES},$((i + 1))"
     fi
 done
+
+fi
 
 # Determine env vars and compose profiles
 ENABLE_STORAGE=1          # always on (Chat & Tickets needs fake-gcs + minio)
@@ -629,6 +637,9 @@ else
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db OWNER xyne;" 2>/dev/null
 
+        echo -e "${BLUE}  Flushing Redis (stale queue jobs reference the dropped database)...${NC}"
+        $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+
         # Push schema with force-reset (first time setup - ensures tables are created)
         echo -e "${BLUE}  Creating database schema...${NC}"
         pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
@@ -870,18 +881,15 @@ fi
 
 if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
     echo -e "${BLUE}  Setting up xyne-claw-auth database schema...${NC}"
-    # Keep claw-auth's DATABASE_URL and other exported values inside this
-    # subshell. Sourcing its .env in the parent shell makes later Spaces commands
-    # accidentally connect to claw_auth_db instead of xyne_dev_db.
+    cd "$REPO_ROOT/apps/xyne-claw-auth/backend"
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}  Installing apps/xyne-claw-auth/backend dependencies...${NC}"
+        pnpm install
+    fi
     (
-        cd "$REPO_ROOT/apps/xyne-claw-auth/backend"
-        if [ ! -d "node_modules" ]; then
-            echo -e "${YELLOW}  Installing apps/xyne-claw-auth/backend dependencies...${NC}"
-            pnpm install
-        fi
         set -a && source .env && set +a
         if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
-            export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
+          export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
         fi
         pnpm exec prisma db push --skip-generate --accept-data-loss
         pnpm exec prisma generate

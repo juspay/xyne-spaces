@@ -6,12 +6,27 @@
 import { Request, Response } from 'express';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
 import { EmailClassificationService } from '../services/emailClassificationService.js';
+import { assertChannelMembership, assertDeskOwner } from '@/utils/channelMembership';
 import { logger } from '../utils/logger.js';
 import type { ClassificationPreviewBody } from '../types/classification.js';
 
 export class EmailClassificationController {
   private repo = new EmailClassificationRepository();
   private service = new EmailClassificationService();
+
+  private async assertChannelAccess(
+    req: Request,
+    channelId: string,
+    requireManageAccess = false,
+  ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+    const access = await assertChannelMembership(req, channelId);
+    if (!access.ok) return access;
+    if (!requireManageAccess) return { ok: true };
+
+    const preference = await this.repo.findRawPreferenceByChannelId(channelId);
+    const owned = assertDeskOwner(access, preference?.ownerUserId, 'Only the desk owner can manage classification settings');
+    return owned.ok ? { ok: true } : owned;
+  }
 
   /**
    * POST /channels/:channelId/classification/preview
@@ -27,6 +42,12 @@ export class EmailClassificationController {
     }
 
     try {
+      const access = await this.assertChannelAccess(req, channelId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
       const classificationData = await this.service.classify(channelId, emailSubject, emailBody, {
         ignoreEnabled: true,
       });
@@ -48,13 +69,36 @@ export class EmailClassificationController {
    * Update a single raw AI output field value on a ticket.
    */
   patchRawField = async (req: Request, res: Response): Promise<void> => {
-    const { ticketId } = req.params;
+    const { channelId, ticketId } = req.params;
     const { fieldName, fieldValue } = req.body as { fieldName: string; fieldValue: string };
     if (!fieldName || fieldValue === undefined) {
       res.status(400).json({ error: 'fieldName and fieldValue are required' });
       return;
     }
     try {
+      const access = await this.assertChannelAccess(req, channelId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
+      // The ticket must actually belong to the :channelId the caller was authorized against —
+      // otherwise a participant of channel A could patch a ticket living in channel B.
+      const ticket = await this.repo.findTicketById(ticketId);
+      if (!ticket || ticket.channelId !== channelId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+
+      // Constrain fieldName to keys already present in the ticket's raw AI output — this
+      // endpoint edits existing classification fields, so it must not inject arbitrary keys.
+      const classificationData = (ticket.classificationData ?? {}) as Record<string, unknown>;
+      const rawOutput = (classificationData.rawOutput ?? {}) as Record<string, unknown>;
+      if (!Object.prototype.hasOwnProperty.call(rawOutput, fieldName)) {
+        res.status(400).json({ error: 'Unknown field' });
+        return;
+      }
+
       await this.repo.patchTicketRawOutput(ticketId, fieldName, fieldValue);
       res.status(200).json({ success: true });
     } catch (error) {
@@ -77,6 +121,21 @@ export class EmailClassificationController {
     }
 
     try {
+      const access = await this.assertChannelAccess(req, channelId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
+      // The service resolves the user-group mapping from the supplied channel's config, so the
+      // ticket must actually belong to that channel — otherwise routing/ownership can be tampered
+      // by pairing an unrelated channelId with a ticket the caller cannot manage in its own channel.
+      const ticket = await this.repo.findTicketById(ticketId);
+      if (!ticket || ticket.channelId !== channelId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+
       const resolvedGroupId = await this.service.overrideClassificationValues(
         ticketId,
         channelId,

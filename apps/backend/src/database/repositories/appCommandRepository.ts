@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
-import { CommandType, CommandAccessibility } from '@xyne/shared';
+import { CommandType, CommandAccessibility, UserType } from '@xyne/shared';
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 
 export { CommandType, CommandAccessibility };
 
@@ -84,7 +84,7 @@ export class AppCommandRepository {
     filter: { commandType: CommandType; commandAccessibility?: CommandAccessibility },
   ): Promise<Array<AppCommand & { appId: string }>> {
     const participants = await db.channelParticipant.findMany({
-      where: { channelId, user: { userType: 'APP' } },
+      where: { channelId, user: { userType: UserType.APP } },
       select: { userId: true },
     });
 
@@ -139,7 +139,7 @@ export class AppCommandRepository {
     filter: { commandType: CommandType; commandAccessibility?: CommandAccessibility },
   ): Promise<AppCommandWithApp[]> {
     const participants = await db.channelParticipant.findMany({
-      where: { channelId, user: { userType: 'APP' } },
+      where: { channelId, user: { userType: UserType.APP } },
       select: { userId: true },
     });
 
@@ -209,7 +209,7 @@ export class AppCommandRepository {
     }
 
     // Denormalized tenant key sourced from the ambient tenant context.
-    const ws = getContextOrNull()?.workspaceId;
+    const ws = currentWorkspaceId();
     if (!ws) {
       throw new Error('workspaceId required: no tenant context');
     }
@@ -300,7 +300,7 @@ export class AppCommandRepository {
     commandType: CommandType,
   ) {
     const participants = await db.channelParticipant.findMany({
-      where: { channelId, user: { userType: 'APP' } },
+      where: { channelId, user: { userType: UserType.APP } },
       select: { userId: true },
     });
 

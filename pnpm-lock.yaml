@@ -23,6 +23,7 @@ overrides:
   '@opentelemetry/sdk-node': 0.217.0
   '@tanstack/form-core': 1.27.7
   '@tanstack/react-store': 0.8.0
+  '@terrastruct/d2': 0.1.33
   '@xmldom/xmldom': 0.8.13
   adm-zip: 0.6.0
   ajv@6: 6.14.0
@@ -106,6 +107,9 @@ importers:
         specifier: ^9.0.5
         version: 9.0.5
     devDependencies:
+      '@clack/prompts':
+        specifier: ^1.7.0
+        version: 1.7.0
       '@commitlint/cli':
         specifier: ^20.1.0
         version: 20.5.3(@types/node@25.9.5)(conventional-commits-parser@6.4.0)(typescript@5.9.3)
@@ -139,21 +143,15 @@ importers:
       husky:
         specifier: ^9.0.11
         version: 9.1.7
+      mprocs:
+        specifier: ^0.9.6
+        version: 0.9.6
       semantic-release:
         specifier: ^22.0.5
         version: 22.0.12(typescript@5.9.3)
 
   apps/backend:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.1017.0
-        version: 3.1097.0
-      '@aws-sdk/lib-storage':
-        specifier: 3.1017.0
-        version: 3.1017.0(@aws-sdk/client-s3@3.1097.0)
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1017.0
-        version: 3.1097.0
       '@blocknote/core':
         specifier: 0.51.4
         version: 0.51.4(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)
@@ -169,9 +167,6 @@ importers:
       '@google-cloud/pubsub':
         specifier: ^4.11.0
         version: 4.11.0
-      '@google-cloud/storage':
-        specifier: ^7.7.0
-        version: 7.21.0
       '@juspay-jaf/jaf':
         specifier: 0.1.43
         version: 0.1.43(@cfworker/json-schema@4.1.1)(ws@8.21.1)
@@ -256,6 +251,9 @@ importers:
       '@xyne/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@xyne/vespa-ts':
         specifier: 1.6.0
         version: 1.6.0(typescript@5.9.3)
@@ -760,6 +758,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.14.2
         version: 3.14.9(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@terrastruct/d2':
+        specifier: 0.1.33
+        version: 0.1.33
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)
@@ -1580,9 +1581,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.75.5
         version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6)
-      '@google-cloud/storage':
-        specifier: ^7.21.0
-        version: 7.21.0
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
@@ -1595,6 +1593,9 @@ importers:
       '@xyne/litellm-client':
         specifier: workspace:*
         version: link:../../packages/litellm-client
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       deepwiki-mcp:
         specifier: ^0.0.6
         version: 0.0.6(@cfworker/json-schema@4.1.1)
@@ -1656,9 +1657,6 @@ importers:
 
   apps/xyne-claw-auth/backend:
     dependencies:
-      '@google-cloud/storage':
-        specifier: ^7.19.0
-        version: 7.21.0
       '@mariozechner/pi-agent-core':
         specifier: 0.73.0
         version: 0.73.0(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(@opentelemetry/api@1.9.1)(ws@8.21.1)(zod@4.3.6)
@@ -1686,6 +1684,9 @@ importers:
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../../packages/storage
       bullmq:
         specifier: ^5.72.0
         version: 5.81.2(redis@5.12.1(@opentelemetry/api@1.9.1))
@@ -2063,6 +2064,34 @@ importers:
         version: 6.1.0(@types/react@19.2.17)(react@19.2.3)(xstate@5.32.5)
       typescript:
         specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/storage:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1017.0
+        version: 3.1097.0
+      '@aws-sdk/lib-storage':
+        specifier: 3.1017.0
+        version: 3.1017.0(@aws-sdk/client-s3@3.1097.0)
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1017.0
+        version: 3.1097.0
+      '@google-cloud/storage':
+        specifier: ^7.7.0
+        version: 7.21.0
+      uuid:
+        specifier: ^9.0.0
+        version: 9.0.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      '@types/uuid':
+        specifier: ^9.0.0
+        version: 9.0.8
+      typescript:
+        specifier: ^5.3.0
         version: 5.9.3
 
   packages/xyne-claw-mcp:
@@ -8445,6 +8474,9 @@ packages:
   '@teppeis/multimaps@3.0.0':
     resolution: {integrity: sha512-ID7fosbc50TbT0MK0EG12O+gAP3W3Aa/Pz4DaTtQtEvlc9Odaqi0de+xuZ7Li2GtK4HzEX7IuRWS/JmZLksR3Q==}
     engines: {node: '>=14'}
+
+  '@terrastruct/d2@0.1.33':
+    resolution: {integrity: sha512-eK5hyfGIJFolC7sUsiKvWdY9xGFctTe3d+PSijo09IYDso8psztC+A4SammizXtlwYZpnnW0AtDjfBYauceSeA==}
 
   '@tiptap/core@3.29.2':
     resolution: {integrity: sha512-oKUkiPUB7noilVYxI9lNzUD4rX17sHub+PYjMfHMWHG9A3nvIy+FdePIVIIhThKWF7ijhr3eIqHY51Bn+GAFtw==}
@@ -15580,6 +15612,11 @@ packages:
       react-dom:
         optional: true
 
+  mprocs@0.9.6:
+    resolution: {integrity: sha512-sEwB5XD3/rReB47h0YbN2L5fXOLcMjF8sOEDTMr/daCLyVZfU4CegbanxO0ybiaFx0MQ/nV7yzOHmprmy2Wq9w==}
+    engines: {node: '>=0.10.0'}
+    hasBin: true
+
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
     engines: {node: '>=4'}
@@ -16967,7 +17004,6 @@ packages:
     engines: {node: '>=0.6.0', teleport: '>=0.2.0'}
     deprecated: |-
       You or someone you depend on is using Q, the JavaScript Promise library that gave JavaScript developers strong feelings about promises. They can almost certainly migrate to the native JavaScript promise now. Thank you literally everyone for joining me in this bet against the odds. Be excellent to each other.
-
       (For a CapTP with native promises, see @endo/eventual-send and @endo/captp)
 
   qs@6.15.2:
@@ -27640,6 +27676,8 @@ snapshots:
 
   '@teppeis/multimaps@3.0.0': {}
 
+  '@terrastruct/d2@0.1.33': {}
+
   '@tiptap/core@3.29.2(@tiptap/pm@3.29.2)':
     dependencies:
       '@tiptap/pm': 3.29.2
@@ -36856,6 +36894,8 @@ snapshots:
       '@emotion/is-prop-valid': 1.4.0
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
+
+  mprocs@0.9.6: {}
 
   mri@1.2.0: {}
 

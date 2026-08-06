@@ -20,6 +20,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { ChannelScopeType, ChannelType } from '@xyne/shared';
 
 if (process.env.NODE_ENV !== 'development') {
   console.error('reset-desk-local is only allowed when NODE_ENV=development');
@@ -86,8 +87,8 @@ async function main(): Promise<void> {
     const emailChannels = await prisma.channel.findMany({
       where: {
         OR: [
-          { type: { in: ['EMAIL', 'SUPPORT', 'SLACK'] } },
-          { scopeType: 'TICKET' },
+          { type: { in: [ChannelType.EMAIL, ChannelType.SUPPORT, ChannelType.SLACK] } },
+          { scopeType: ChannelScopeType.TICKET },
         ],
       },
       select: { id: true },

@@ -9,7 +9,7 @@ import {
   type KanbanCountsRequest,
   type KanbanCountsViewMode,
 } from '../../services/ticketService';
-import { BaseTicketType } from '@xyne/shared';
+import { BaseTicketType, FormFieldType, TicketStatusV2 } from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import { websocketService } from '../../services/clients/socketClient';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
@@ -126,13 +126,13 @@ const getFormFieldGroupKeys = (
 ): string[] => {
   const value = snapshot.formFieldValues[groupBy.fieldId] ?? null;
 
-  if (groupBy.fieldType === 'MULTI_SELECT') {
+  if (groupBy.fieldType === FormFieldType.MULTI_SELECT) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
     return stringValues.length > 0 ? stringValues : ['No Value'];
   }
 
-  if (groupBy.fieldType === 'USER') {
+  if (groupBy.fieldType === FormFieldType.USER) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
     return stringValues.length > 0 ? stringValues : ['Unassigned'];
@@ -321,7 +321,9 @@ const matchesRequest = (
   }
 
   if (request.showOverdueOnly) {
-    const isTerminal = snapshot.statusV2 === 'COMPLETED' || snapshot.statusV2 === 'CANCELLED';
+    const isTerminal =
+      snapshot.statusV2 === TicketStatusV2.COMPLETED ||
+      snapshot.statusV2 === TicketStatusV2.CANCELLED;
     if (isTerminal) return false;
     if (snapshot.eta === null || snapshot.eta === undefined || snapshot.eta >= Date.now())
       return false;

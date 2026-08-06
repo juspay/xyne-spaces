@@ -59,6 +59,7 @@ import {
   Status,
   OrgRole,
   DelayedMessageStatus,
+  DraftOrigin,
   Schema,
   CollectionRole,
   VCSProviderType,
@@ -927,7 +928,10 @@ export const mutators = defineMutators({
 
         // Query for drafts in this channel for this user (follows backend logic)
         const channelDrafts = await tx.run(
-          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+          zql.draft_messages
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
         );
 
         // Find the channel-level draft (conversationId === null)
@@ -944,6 +948,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: draftMessage,
             hasAttachment: draft?.hasAttachment || false,
+            origin: DraftOrigin.user,
             updatedAt: timestamp,
             createdAt: draft?.createdAt || timestamp,
           });
@@ -1671,7 +1676,10 @@ export const mutators = defineMutators({
         } else {
           // Legacy path: scan the current draft and transfer everything.
           const channelDrafts = await tx.run(
-            zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+            zql.draft_messages
+              .where('channelId', channelId)
+              .where('userId', ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           const draft = channelDrafts.find(d => d.conversationId === null);
 
@@ -2248,7 +2256,8 @@ export const mutators = defineMutators({
           const channelDrafts = await tx.run(
             zql.draft_messages
               .where('channelId', conversation.channelId)
-              .where('userId', ctx.userID),
+              .where('userId', ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           const draft = channelDrafts.find(d => d.conversationId === conversationId);
 
@@ -2998,11 +3007,15 @@ export const mutators = defineMutators({
               .where('channelId', channelId)
               .where('userId', ctx.userID)
               .where('conversationId', conversationId)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
               .one(),
           );
         } else {
           const channelDrafts = await tx.run(
-            zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+            zql.draft_messages
+              .where('channelId', channelId)
+              .where('userId', ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           existingDraft = channelDrafts.find(d => d.conversationId === null);
         }
@@ -3019,6 +3032,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: content || '',
             hasAttachment: true,
+            origin: DraftOrigin.user,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -3126,7 +3140,10 @@ export const mutators = defineMutators({
         // rows are left in place; the send mutator claims them by id when
         // it fires (immediate or on retry).
         const channelDrafts = await tx.run(
-          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+          zql.draft_messages
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
         );
         const draft = conversationId
           ? channelDrafts.find(d => d.conversationId === conversationId)
@@ -3586,6 +3603,7 @@ export const mutators = defineMutators({
             .where('channelId', channelId)
             .where('conversationId', conversationId)
             .where('userId', ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
             .one(),
         );
 
@@ -3600,6 +3618,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: draftMessage,
             hasAttachment: draft?.hasAttachment || false,
+            origin: DraftOrigin.user,
             updatedAt: timestamp,
             createdAt: draft?.createdAt || timestamp,
           });
@@ -4783,7 +4802,7 @@ export const mutators = defineMutators({
 
             const normalizedApprovers = (stage.approvers ?? []).map(entry => ({
               approverId: entry.approverId,
-              approverType: entry.approverType === 'ROLE' ? ApproverType.ROLE : ApproverType.USER,
+              approverType: entry.approverType === ApproverType.ROLE ? ApproverType.ROLE : ApproverType.USER,
             }));
             if (stage.approverIds && stage.approverIds.length > 0) {
               for (const approverId of stage.approverIds) {
@@ -10637,7 +10656,8 @@ export const mutators = defineMutators({
         const channelDrafts = await tx.run(
           zql.draft_messages
             .where("channelId", channelId)
-            .where("userId", ctx.userID),
+            .where("userId", ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
         );
         const existingDraft = channelDrafts.find(
           (d) =>
@@ -10815,7 +10835,8 @@ export const mutators = defineMutators({
         const channelDrafts = await tx.run(
           zql.draft_messages
             .where("channelId", scheduled.channelId)
-            .where("userId", ctx.userID),
+            .where("userId", ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
         );
         const existingDraft = channelDrafts.find(
           (d) =>
@@ -10852,6 +10873,7 @@ export const mutators = defineMutators({
           userId: ctx.userID,
           content: scheduled.content,
           hasAttachment,
+          origin: DraftOrigin.user,
           createdAt: timestamp,
           updatedAt: timestamp,
         });
@@ -10904,7 +10926,11 @@ export const mutators = defineMutators({
       z.object({ id: z.string() }),
       async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
-          zql.draft_messages.where("id", id).where("userId", ctx.userID).one(),
+          zql.draft_messages
+            .where("id", id)
+            .where("userId", ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
+            .one(),
         );
         if (!draft) {
           throw new Error("Draft not found");
@@ -10922,7 +10948,11 @@ export const mutators = defineMutators({
       }),
       async ({ tx, ctx, args: { id, content, timestamp } }) => {
         const draft = await tx.run(
-          zql.draft_messages.where("id", id).where("userId", ctx.userID).one(),
+          zql.draft_messages
+            .where("id", id)
+            .where("userId", ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
+            .one(),
         );
         if (!draft) {
           throw new Error("Draft not found");
@@ -10943,7 +10973,11 @@ export const mutators = defineMutators({
       }),
       async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
-          zql.draft_messages.where("id", id).where("userId", ctx.userID).one(),
+          zql.draft_messages
+            .where("id", id)
+            .where("userId", ctx.userID)
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
+            .one(),
         );
         if (!draft) {
           throw new Error("Draft not found");

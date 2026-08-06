@@ -4,10 +4,15 @@ import { cn } from '../../../utils/classNames';
 import { useBoardSlaPolicies, useUpsertBoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
-import type { TicketPriority } from '@xyne/shared';
+import { TicketPriority } from '@xyne/shared';
 import * as Select from '@radix-ui/react-select';
 
-const PRIORITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
+const PRIORITIES = [
+  TicketPriority.CRITICAL,
+  TicketPriority.HIGH,
+  TicketPriority.MEDIUM,
+  TicketPriority.LOW,
+] as const;
 type Priority = (typeof PRIORITIES)[number];
 
 const PRIORITY_LABELS: Record<Priority, string> = {

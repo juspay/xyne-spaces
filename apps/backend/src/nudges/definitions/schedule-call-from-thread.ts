@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { CallStatus, MessageType, NudgeKind, SurfaceAreaType } from '@xyne/shared';
+import { CallStatus, MessageType, NudgeKind, SurfaceAreaType, NudgeState, ChannelScopeType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { z } from 'zod';
@@ -77,7 +77,7 @@ async function isEligibleThreadMessage(params: {
   });
 
   if (!channel?.projectId) return false;
-  if (channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM') return false;
+  if (channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM) return false;
 
   const conversation = await db.conversation.findUnique({
     where: { conversationId },
@@ -126,8 +126,8 @@ async function hasExistingXyneCall(channelId: string): Promise<boolean> {
 async function hasExistingNudgeForConversation(conversationId: string): Promise<boolean> {
   const existingNudge = await db.surfaceNudge.findFirst({
     where: {
-      nudgeKind: 'SCHEDULE_CALL_FROM_THREAD',
-      state: { in: ['ACTIVE', 'ACTED_ON'] },
+      nudgeKind: NudgeKind.SCHEDULE_CALL_FROM_THREAD,
+      state: { in: [NudgeState.ACTIVE, NudgeState.ACTED_ON] },
       actions: {
         path: ['conversationId'],
         equals: conversationId,

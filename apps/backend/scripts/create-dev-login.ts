@@ -19,7 +19,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { AuthProvider, UserStatus, WorkspaceRole } from '@xyne/shared';
+import { AuthProvider, UserStatus, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
@@ -89,7 +89,7 @@ async function main() {
   } else {
     try {
       const member = await prisma.orgMember.create({
-        data: { email, orgId, role: 'OWNER', passwordHash },
+        data: { email, orgId, role: OrgRole.OWNER, passwordHash },
         select: { memberId: true },
       });
       memberId = member.memberId;
@@ -173,7 +173,7 @@ async function main() {
       });
       if (!mapped) {
         await prisma.userGroupMapping.create({
-          data: { userId: user.id, userGroupId: adminGroup.id },
+          data: { userId: user.id, userGroupId: adminGroup.id, workspaceId: workspace.id },
         });
         console.log('  ✅ Added to the ADMIN group');
       }

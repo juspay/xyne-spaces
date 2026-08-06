@@ -94,9 +94,9 @@ export class ApiKeyService {
               data: {
                 name: userName,
                 email: userEmail,
-                authProvider: 'API_KEY',
+                authProvider: AuthProvider.API_KEY,
                 providerUserId: `env_api_${Buffer.from(userEmail).toString('base64')}`,
-                status: 'ACTIVE',
+                status: UserStatus.ACTIVE,
                 workspace: { connect: { id: workspaceId } },
                 orgMember: { connect: { memberId: orgMember.memberId } },
               }

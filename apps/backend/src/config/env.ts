@@ -70,14 +70,14 @@ const envSchema = Joi.object({
   S3_BUCKET_NAME: Joi.string().allow('').default(''),
   S3_ENDPOINT: Joi.string().allow('').default(''), // for MinIO/LocalStack in dev
   // Google Cloud Storage Configuration (Workload Identity)
-  GCS_PROJECT_ID: Joi.string().default(''),
-  GCS_BUCKET_NAME: Joi.string().default(''),
-  GCS_BUNDLE_BUCKET_NAME: Joi.string().default(''),
-  GCS_CANVAS_BUCKET_NAME: Joi.string().default(''),
-  GCS_DOCS_BUCKET_NAME: Joi.string().default(''),
+  GCS_PROJECT_ID: Joi.string().allow('').default(''),
+  GCS_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
-  FAKE_GCS_HOST: Joi.string().default('localhost:4443'),
-  TRANSCRIPTION_BUCKET_NAME: Joi.string().default(''),
+  FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
+  TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_WORKFLOW_STEPS_BUCKET_NAME: Joi.string().default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
   GCS_WORKFLOW_VR_BUCKET_NAME: Joi.string().default(''),
@@ -303,6 +303,14 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  // Thread catch-up summary — comma-separated channel IDs, or "all" for every channel (empty = disabled everywhere)
+  THREAD_SUMMARY_ENABLED_CHANNELS: Joi.string().allow('').default(''),
+  THREAD_SUMMARY_MIN_MESSAGES: Joi.number().integer().min(0).default(6),
+  THREAD_SUMMARY_MESSAGE_LIMIT: Joi.number().integer().min(1).default(300),
+  THREAD_SUMMARY_LLM_TIMEOUT_MS: Joi.number().integer().min(1).default(300000),
+  THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
+  THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
+  THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
   DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
@@ -806,6 +814,19 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  threadSummary: {
+    // Comma-separated channel IDs that have the AI thread catch-up summary enabled, or "all" for every channel (empty = disabled everywhere)
+    enabledChannels: (envVars.THREAD_SUMMARY_ENABLED_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
+    minMessages: envVars.THREAD_SUMMARY_MIN_MESSAGES as number,
+    messageLimit: envVars.THREAD_SUMMARY_MESSAGE_LIMIT as number,
+    llmTimeoutMs: envVars.THREAD_SUMMARY_LLM_TIMEOUT_MS as number,
+    minSummaryMaxTokens: envVars.THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS as number,
+    maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
+    transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
   desk: {
     betaChannels: (envVars.DESK_BETA_CHANNELS as string)

@@ -9,8 +9,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
-  ShareableEntityType,
-} from '@xyne/shared';
+  ShareableEntityType, UserResponsibility } from '@xyne/shared';
 import { z } from 'zod';
 import {
   CanvasVisibility,
@@ -351,7 +350,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.prReviewers?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'PR_REVIEWER')
+        .where('userResponsibility', UserResponsibility.PR_REVIEWER)
         .where('userId', 'IN', filters.prReviewers ?? []),
     );
   }
@@ -359,7 +358,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.qaAssigned?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'QA')
+        .where('userResponsibility', UserResponsibility.QA)
         .where('userId', 'IN', filters.qaAssigned ?? []),
     );
   }
@@ -2065,11 +2064,13 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ lastActivityAt: z.number(), id: z.string() }).nullable(),
     }),
-    ({ args: { userId, limit, start } }) => {
+    ({ ctx, args: { limit, start } }) => {
+      // Bind to the authenticated caller; the `userId` arg is kept for client
+      // compatibility but ignored.
       let query = zql.conversations
         .where('replyCount', '>', 0)
         .whereExists('participants', (participantsQuery) =>
-          participantsQuery.where('userId', userId)
+          participantsQuery.where('userId', ctx.userID)
         )
         .orderBy('lastActivityAt', 'desc');
 
@@ -2088,9 +2089,11 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ lastReplyAt: z.number(), id: z.string() }).nullable(),
     }),
-    ({ args: { userId, limit, start } }) => {
+    ({ ctx, args: { limit, start } }) => {
+      // Bind to the authenticated caller; the `userId` arg is kept for client
+      // compatibility but ignored.
       let query = zql.conversation_participants
-        .where('userId', userId)
+        .where('userId', ctx.userID)
         .where('lastReplyAt', 'IS NOT', null)
         .where('isSubscribed', true)
         .orderBy('lastReplyAt', 'desc')
@@ -4059,8 +4062,18 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('channelId', channelId)
         .where(({ or, cmp, and, exists }) =>
           or(
-            // DEFAULT visibility - visible to everyone
-            cmp('visibility', '=', LinkVisibility.DEFAULT),
+            // DEFAULT visibility - visible to members of the link's channel only.
+            and(
+              cmp('visibility', '=', LinkVisibility.DEFAULT),
+              exists('channel', (ch) =>
+                ch.where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
+                  or2(
+                    cmp2('visibility', '=', ChannelVisibility.PUBLIC),
+                    exists2('participants', (p) => p.where('userId', ctx.userID))
+                  )
+                )
+              )
+            ),
             // PERSONAL visibility - only visible to creator
             and(
               cmp('visibility', '=', LinkVisibility.PERSONAL),

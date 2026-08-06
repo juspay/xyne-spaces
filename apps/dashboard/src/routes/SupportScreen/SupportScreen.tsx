@@ -73,6 +73,8 @@ import {
 } from './supportSidebarWidth';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
+import { getApiErrorMessage } from '../../utils/apiError';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { Hashtag, Star } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -1548,10 +1550,9 @@ const SupportScreen = (): ReactElement => {
   }, []);
 
   const handleMergeSelectedTickets = useCallback(
-    async (parentTicketId: string): Promise<void> => {
-      if (selectedTickets.size < 2) return;
+    async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
+      if (ticketIds.length < 2) return;
       try {
-        const ticketIds = Array.from(selectedTickets.keys());
         await Promise.all(
           ticketIds
             .filter(id => id !== parentTicketId)
@@ -1619,7 +1620,7 @@ const SupportScreen = (): ReactElement => {
       const response = await channelService.createChannel(
         formData,
         channelType || 'EMAIL',
-        emailDeskOpts ?? { deskType: 'EMAIL' },
+        emailDeskOpts ?? { deskType: DeskType.EMAIL },
       );
       return response;
     },
@@ -1658,7 +1659,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'SLACK',
-        emailDeskOpts: { deskType: 'SLACK', slackChannelId },
+        emailDeskOpts: { deskType: DeskType.SLACK, slackChannelId },
       });
       return;
     }
@@ -1671,7 +1672,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'APP',
-        emailDeskOpts: { deskType: 'APP', installedAppId },
+        emailDeskOpts: { deskType: DeskType.APP, installedAppId },
       });
       return;
     }
@@ -1693,7 +1694,7 @@ const SupportScreen = (): ReactElement => {
         await createChannelMutation.mutateAsync({
           ...rest,
           channelType: 'CALL',
-          emailDeskOpts: { deskType: 'CALL' },
+          emailDeskOpts: { deskType: DeskType.CALL },
         });
       })();
       return;
@@ -1707,7 +1708,7 @@ const SupportScreen = (): ReactElement => {
       createChannelMutation.mutate({
         ...rest,
         channelType: 'EMAIL',
-        emailDeskOpts: { deskType: 'DL', dlEmail },
+        emailDeskOpts: { deskType: DeskType.DL, dlEmail },
       });
       return;
     }
@@ -3620,10 +3621,10 @@ export const SupportTicketDetail = ({
         if (sourceTicketXyneId && channelIdParam) {
           void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
         }
-      } catch {
+      } catch (err) {
         toast.error('Unmerge Failed', {
           id: toastId,
-          description: 'Operation failed. Please try again.',
+          description: getApiErrorMessage(err, 'Operation failed. Please try again.'),
         });
       }
     },
@@ -3962,17 +3963,22 @@ export const SupportTicketDetail = ({
       }
 
       setIsArchivingTicket(true);
-      zero.mutate(
-        mutators.ticket.archiveDeskTicket({
-          id: ticket.id,
-          updatedAt: Date.now(),
-        }),
-      );
-
-      setIsArchivingTicket(false);
       setShowArchiveConfirmDialog(false);
-      toast.success('Ticket archived successfully');
-      goBackToTicketList();
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.archiveDeskTicket({
+            id: ticket.id,
+            updatedAt: Date.now(),
+          }),
+        ),
+        'Failed to archive ticket',
+      ).then(ok => {
+        setIsArchivingTicket(false);
+        if (ok) {
+          toast.success('Ticket archived successfully');
+          goBackToTicketList();
+        }
+      });
     } catch (err) {
       setIsArchivingTicket(false);
       toast.error('Failed to archive ticket', {
@@ -5469,10 +5475,10 @@ const EmailThreadItem = ({
           });
         }
       }
-    } catch {
+    } catch (err) {
       toast.error('Unmerge Failed', {
         id: toastId,
-        description: 'Operation failed. Please try again.',
+        description: getApiErrorMessage(err, 'Operation failed. Please try again.'),
       });
     } finally {
       setIsDemerging(false);

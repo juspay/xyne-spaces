@@ -10,7 +10,7 @@ import { callShareService } from '@/services/callShareService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { transcriptService } from '@/services/transcriptService';
-import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { normalizeStoragePath } from '@xyne/storage';
 import { extractEmailAddress } from '@/utils/email';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { logger } from '@/utils/logger';

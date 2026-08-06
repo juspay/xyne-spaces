@@ -1,5 +1,5 @@
 import { UserRepository } from '../../../../database/repositories/users';
-import { AuthProvider } from '@xyne/shared';
+import { AuthProvider, ChannelScopeType } from '@xyne/shared';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
@@ -410,24 +410,32 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
     try {
       let orgMember = await dbClient.orgMember.findUnique({
         where: { email },
-        select: { memberId: true },
+        select: { memberId: true, orgId: true },
       });
+      const workspace = await dbClient.workspace.findUnique({
+        where: { id: resolvedWorkspaceId },
+        select: { orgId: true },
+      });
+      if (!workspace) {
+        logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+        return undefined;
+      }
+      // Never pull a Slack member who already belongs to a DIFFERENT org into this
+      // workspace: buildTokenFallbackList tries every configured bot token, so a fallback
+      // token can resolve an identity that belongs elsewhere. New members of THIS org are
+      // still auto-created; existing members of THIS org are still linked by email.
+      if (orgMember && orgMember.orgId !== workspace.orgId) {
+        logger.warn('[resolveApiGroup] Skipping cross-org Slack member (email belongs to another org)', { email });
+        return undefined;
+      }
       if (!orgMember) {
-        const workspace = await dbClient.workspace.findUnique({
-          where: { id: resolvedWorkspaceId },
-          select: { orgId: true },
-        });
-        if (!workspace) {
-          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
-          return undefined;
-        }
         orgMember = await dbClient.orgMember.create({
           data: {
             orgId: workspace.orgId,
             email,
             role: 'MEMBER',
           },
-          select: { memberId: true },
+          select: { memberId: true, orgId: true },
         });
         logger.info('[resolveApiGroup] OrgMember created for group member', { email });
       }
@@ -582,7 +590,7 @@ function buildChannelMentionSpan(
   channel: { id: string; name: string; visibility?: string | null; scopeType?: string | null },
   quote: string,
 ): string {
-  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM';
+  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
   const channelName = channel.name || channel.id;
   return `<span data-channel-mention=${quote}${quote} data-channel-id=${quote}${escapeHtml(channel.id)}${quote} data-channel-name=${quote}${escapeHtml(channelName)}${quote} data-is-private=${quote}${String(isPrivate)}${quote} class=${quote}chat-input-channel-mention${quote}>#${escapeHtml(channelName)}</span>`;
 }
