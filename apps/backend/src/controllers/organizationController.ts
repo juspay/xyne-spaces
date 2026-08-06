@@ -10,7 +10,7 @@ import { isOrganizationPolicyError, organizationDomainService } from '@/services
 import { buildInvitationLink } from '@/controllers/invitationController';
 import {
   initializeOrgEncryption,
-  provisionWorkspaceEncryptionForOrg,
+  provisionEncryptionEntityForOrg,
 } from '@/services/internal/encryption-client';
 import { createId } from '@paralleldrive/cuid2';
 
@@ -205,7 +205,7 @@ export class OrganizationController {
           },
         });
 
-        await provisionWorkspaceEncryptionForOrg(workspace.id, workspace.orgId);
+        await provisionEncryptionEntityForOrg(workspace.id, workspace.orgId, 'WORKSPACE');
 
         await tx.project.create({
           data: {

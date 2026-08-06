@@ -193,7 +193,7 @@ export function wrapTransactionWithEncryption(
               event: 'crypto_mutation_decrypt_run_error',
               error: error instanceof Error ? error.message : String(error),
             });
-            throw new Error('Failed to decrypt database query result');
+            return result;
           }
         };
       }
@@ -358,16 +358,20 @@ async function reEncryptForStorage(
     throw new Error(`Encrypted write on table ${tableName} has workspaceId outside authenticated workspace`);
   }
 
-  const items: Array<{ field: string; value: string; workspaceId: string }> = [];
+  const items: Array<{ field: string; value: string; workspaceId: string; entityType: string }> = [];
   for (const field of tableConfig.fields) {
     const value = clonedArgs[field];
     if (typeof value === 'string' && !value.startsWith('ENC:')) {
-      items.push({ field, value, workspaceId });
+      items.push({ field, value, workspaceId, entityType: 'WORKSPACE' });
     }
   }
 
   const encryptedValues = await batchEncryptServerValues(
-    items.map(({ value, workspaceId: itemWorkspaceId }) => ({ value, workspaceId: itemWorkspaceId })),
+    items.map(({ value, workspaceId: itemWorkspaceId, entityType }) => ({
+      value,
+      entityId: itemWorkspaceId,
+      entityType,
+    })),
   );
 
   for (const [index, item] of items.entries()) {

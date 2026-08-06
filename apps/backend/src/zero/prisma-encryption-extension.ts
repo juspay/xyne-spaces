@@ -209,17 +209,21 @@ async function encryptRecordFields(
 
   const workspaceId = await resolveWorkspaceIdForEncryptedWrite(model, tableName, record, operationKind, where);
   const encrypted = { ...record };
-  const items: Array<{ field: string; value: string; workspaceId: string }> = [];
+  const items: Array<{ field: string; value: string; workspaceId: string; entityType: string }> = [];
 
   for (const field of fields) {
     const value = encrypted[field];
     if (typeof value === 'string' && value.length > 0 && !value.startsWith('ENC:')) {
-      items.push({ field, value, workspaceId });
+      items.push({ field, value, workspaceId, entityType: 'WORKSPACE' });
     }
   }
 
   const encryptedValues = await batchEncryptServerValues(
-    items.map(({ value, workspaceId: itemWorkspaceId }) => ({ value, workspaceId: itemWorkspaceId })),
+    items.map(({ value, workspaceId: itemWorkspaceId, entityType }) => ({
+      value,
+      entityId: itemWorkspaceId,
+      entityType,
+    })),
   );
 
   for (const [index, item] of items.entries()) {

@@ -16,7 +16,7 @@ import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole,
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
-import { initializeOrgEncryption, provisionWorkspaceEncryptionForOrg } from '@/services/internal/encryption-client';
+import { initializeOrgEncryption, provisionEncryptionEntityForOrg } from '@/services/internal/encryption-client';
 
 /**
  * Extract the hostname from an Origin header value.
@@ -513,7 +513,7 @@ export class InvitationController {
           },
         });
 
-        await provisionWorkspaceEncryptionForOrg(workspace.id, workspace.orgId);
+        await provisionEncryptionEntityForOrg(workspace.id, workspace.orgId, 'WORKSPACE');
 
         // DM project required for every workspace
         await tx.project.create({

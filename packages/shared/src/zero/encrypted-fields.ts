@@ -22,7 +22,7 @@ export const encryptedFieldsConfig: Record<string, EncryptedTableConfig> = {
     fields: new Set(['replies_md', 'initial_message_md', 'parent_message_md']),
     enforceClientEncryption: true,
   },
-  // tickets: { fields: new Set(['title', 'description']), enforceClientEncryption: true }, has search issue, so no encryption enforced for now
+  // tickets: { fields: new Set(['title', 'description']), enforceClientEncryption: true }, // has search issue, so no encryption enforced for now
   // emails: { fields: new Set(['subject', 'body']), enforceClientEncryption: true },
   // email_drafts: { fields: new Set(['draftContent']), enforceClientEncryption: true },
   // draft_messages: { fields: new Set(['content']), enforceClientEncryption: true },

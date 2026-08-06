@@ -61,7 +61,6 @@
     "@blocknote/server-util": "0.51.4",
     "@clearfeed-ai/slack-to-html": "^1.1.0",
     "@clickhouse/client": "^1.18.5",
-    "@google-cloud/kms": "^5.5.1",
     "@google-cloud/pubsub": "^4.11.0",
     "@juspay-jaf/jaf": "0.1.43",
     "@langfuse/client": "^4.5.1",

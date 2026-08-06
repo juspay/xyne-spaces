@@ -164,9 +164,6 @@ importers:
       '@clickhouse/client':
         specifier: ^1.18.5
         version: 1.23.1
-      '@google-cloud/kms':
-        specifier: ^5.5.1
-        version: 5.7.0
       '@google-cloud/pubsub':
         specifier: ^4.11.0
         version: 4.11.0

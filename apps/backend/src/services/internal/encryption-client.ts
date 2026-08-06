@@ -33,19 +33,22 @@ export function isOrgEncryptionProvisioningEnabled(): boolean {
 
 export type EncryptBatchItem = {
   value: string;
-  workspaceId: string;
+  entityId: string;
+  entityType: string;
 };
 
-export type ProvisionWorkspaceEncryptionResult = {
-  workspaceId: string;
+export type ProvisionEncryptionEntityResult = {
+  entityId: string;
+  entityType: string;
   ok: boolean;
   keyId?: string;
   message?: string;
 };
 
-export type WorkspaceProvisioningTarget = {
-  workspaceId: string;
+export type EncryptionEntityProvisioningTarget = {
+  entityId: string;
   orgId: string;
+  entityType: string;
 };
 
 export async function getEncryptionPublicKey(): Promise<{
@@ -62,7 +65,6 @@ export async function registerClientKey(params: {
   sessionId: string;
   userId: string;
   orgId: string;
-  expiresAt: string;
 }): Promise<{ ok: true; sessionFingerprint: string }> {
   return await request('/internal/encryption/session/register-client-key', {
     method: 'POST',
@@ -92,14 +94,6 @@ export async function batchEncryptServerValues(items: EncryptBatchItem[]): Promi
     body: { items },
   });
   return response.items.map((item) => item.value);
-}
-
-export async function decryptMutationBody<T extends Record<string, unknown>>(body: T, sessionId: string): Promise<T> {
-  const response = await request<{ body: T }>('/internal/encryption/session/decrypt-mutation', {
-    method: 'POST',
-    body: { body, sessionId },
-  });
-  return response.body;
 }
 
 export async function decryptRequestBody<T>(body: T, sessionId: string): Promise<T> {
@@ -136,29 +130,33 @@ export async function initializeOrgEncryption(orgId: string): Promise<void> {
   });
 }
 
-export async function provisionWorkspaceEncryptionForOrg(workspaceId: string, orgId: string): Promise<void> {
+export async function provisionEncryptionEntityForOrg(
+  entityId: string,
+  orgId: string,
+  entityType: string,
+): Promise<void> {
   if (!isOrgEncryptionProvisioningEnabled()) {
     return;
   }
 
-  await request('/internal/encryption/workspace/provision', {
+  await request('/internal/encryption/entity/provision', {
     method: 'POST',
-    body: { workspaceId, orgId },
+    body: { entityId, orgId, entityType },
   });
 }
 
-export async function backfillWorkspaceEncryptionBatch(
-  workspaces: WorkspaceProvisioningTarget[],
-): Promise<ProvisionWorkspaceEncryptionResult[]> {
-  if (workspaces.length === 0) {
+export async function backfillEncryptionEntityBatch(
+  entities: EncryptionEntityProvisioningTarget[],
+): Promise<ProvisionEncryptionEntityResult[]> {
+  if (entities.length === 0) {
     return [];
   }
 
-  const response = await request<{ results: ProvisionWorkspaceEncryptionResult[] }>(
-    '/internal/encryption/workspace/backfill-provision-batch',
+  const response = await request<{ results: ProvisionEncryptionEntityResult[] }>(
+    '/internal/encryption/entity/backfill-provision-batch',
     {
       method: 'POST',
-      body: { workspaces },
+      body: { entities },
     },
   );
   return response.results;

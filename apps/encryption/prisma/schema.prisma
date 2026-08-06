@@ -9,43 +9,46 @@ datasource db {
 }
 
 model UserSessionKey {
-  sessionId String   @id
-  userId    String
+  id         String   @id @default(cuid())
+  sessionId  String   @unique
+  userId     String
   wrappedKey Bytes
-  createdAt DateTime @default(now())
-  expiresAt DateTime
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
 
-  @@index([userId])
-  @@index([expiresAt])
   @@map("user_session_keys")
 }
 
 model OrgEncryptionConfig {
-  orgId                 String   @id
+  id                    String                 @id @default(cuid())
+  orgId                 String
   provider              String
-  kmsKeyRef             String
-  useCustomerManagedKey Boolean  @default(false)
+  masterKeyRef          String
+  useCustomerManagedKey Boolean                @default(false)
   providerConfig        Json?
   status                String
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  dataEncryptionKeys    OrgDataEncryptionKey[]
 
+  @@index([orgId])
   @@map("org_encryption_configs")
 }
 
 model OrgDataEncryptionKey {
-  dekId            String    @id
-  orgId            String
-  workspaceId      String
-  wrappedDek       Bytes
-  wrappingProvider String
-  wrappingKeyRef   String
-  status           String
-  activatedAt      DateTime
-  createdAt        DateTime  @default(now())
-  rotatedAt        DateTime?
-  deactivatedAt    DateTime?
+  dekId         String              @id
+  configId      String
+  entityType    String
+  entityId      String
+  wrappedDek    Bytes
+  status        String
+  activatedAt   DateTime
+  createdAt     DateTime            @default(now())
+  rotatedAt     DateTime?
+  deactivatedAt DateTime?
+  config        OrgEncryptionConfig @relation(fields: [configId], references: [id])
 
-  @@index([workspaceId, status, activatedAt(sort: Desc)])
+  @@index([configId])
+  @@index([entityType, entityId, status])
   @@map("org_data_encryption_keys")
 }

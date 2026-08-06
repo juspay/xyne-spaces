@@ -9,8 +9,10 @@ import { logger } from '@/utils/logger';
 
 type ActiveKeyRow = {
   dekId: string;
+  configId: string;
   orgId: string;
-  workspaceId: string;
+  entityType: string;
+  entityId: string;
   wrappedDek: Buffer;
   wrappingProvider: string;
   wrappingKeyRef: string;
@@ -22,9 +24,10 @@ type ActiveKeyRow = {
 };
 
 type EncryptionConfigRow = {
+  id: string;
   orgId: string;
   provider: string;
-  kmsKeyRef: string;
+  masterKeyRef: string;
   useCustomerManagedKey: boolean;
   status: string;
   createdAt: Date;
@@ -32,6 +35,7 @@ type EncryptionConfigRow = {
 };
 
 type EffectiveWrappingTarget = {
+  configId: string;
   provider: string;
   keyRef: string;
 };
@@ -39,12 +43,18 @@ type EffectiveWrappingTarget = {
 export type ResolvedServerKey = {
   keyId: string;
   orgId: string;
-  workspaceId: string;
+  entityType: string;
+  entityId: string;
   plaintextKey: Buffer;
 };
 
 const ACTIVE_STATUS = 'ACTIVE';
+const INACTIVE_STATUS = 'INACTIVE';
 const DEK_ID_BYTES = 8;
+
+function entityCacheKey(entityType: string, entityId: string): string {
+  return JSON.stringify([entityType, entityId]);
+}
 
 class LruMap<TKey, TValue> {
   private readonly store = new Map<TKey, TValue>();
@@ -82,29 +92,44 @@ function compactDekId(): string {
 
 function toActiveKeyRow(row: {
   dekId: string;
-  orgId: string;
-  workspaceId: string;
+  configId: string;
+  entityType: string;
+  entityId: string;
   wrappedDek: Uint8Array;
-  wrappingProvider: string;
-  wrappingKeyRef: string;
   status: string;
   activatedAt: Date;
   createdAt: Date;
   rotatedAt: Date | null;
   deactivatedAt: Date | null;
+  config: {
+    orgId: string;
+    provider: string;
+    masterKeyRef: string;
+  };
 }): ActiveKeyRow {
   return {
-    ...row,
+    dekId: row.dekId,
+    configId: row.configId,
+    orgId: row.config.orgId,
+    entityType: row.entityType,
+    entityId: row.entityId,
     wrappedDek: Buffer.from(row.wrappedDek),
+    wrappingProvider: row.config.provider,
+    wrappingKeyRef: row.config.masterKeyRef,
+    status: row.status,
+    activatedAt: row.activatedAt,
+    createdAt: row.createdAt,
+    rotatedAt: row.rotatedAt,
+    deactivatedAt: row.deactivatedAt,
   };
 }
 
-export class WorkspaceServerKeyResolver {
+export class EntityServerKeyResolver {
   private readonly prisma = getRawPrismaClient();
   private readonly kms = createKmsProvider();
   private envMigrationKms: EnvKmsConnector | null = null;
   private gcpHistoryKms: GcpKmsConnector | null = null;
-  private readonly activeKeyByWorkspace = new LruMap<string, ActiveKeyRow>(
+  private readonly activeKeyByEntity = new LruMap<string, ActiveKeyRow>(
     config.enc.dekCacheMaxEntries,
   );
   private readonly plaintextKeyById = new LruMap<string, ResolvedServerKey>(
@@ -150,48 +175,52 @@ export class WorkspaceServerKeyResolver {
 
   private assertOrgMatch(row: ActiveKeyRow, orgId: string): void {
     if (row.orgId !== orgId) {
-      throw new Error(`Workspace ${row.workspaceId} encryption key belongs to a different org`);
+      throw new Error(`Entity ${row.entityType}:${row.entityId} encryption key belongs to a different org`);
     }
   }
 
-  private async rewriteExistingKey(row: ActiveKeyRow, keyRef: string): Promise<ActiveKeyRow> {
+  private async rewrapExistingDek(row: ActiveKeyRow, target: EffectiveWrappingTarget): Promise<ActiveKeyRow> {
     const plaintextKey = await this.kmsForStoredProvider(row.wrappingProvider).unwrapKey(
       row.wrappedDek,
       row.wrappingKeyRef,
       {
         keyId: row.dekId,
         orgId: row.orgId,
-        workspaceId: row.workspaceId,
+        entityType: row.entityType,
+        entityId: row.entityId,
       },
     );
 
-    const wrappedDek = await this.ensureKms().wrapKey(plaintextKey, keyRef, {
+    const wrappedDek = await this.ensureKms().wrapKey(plaintextKey, target.keyRef, {
       keyId: row.dekId,
       orgId: row.orgId,
-      workspaceId: row.workspaceId,
+      entityType: row.entityType,
+      entityId: row.entityId,
     });
 
     const updated = toActiveKeyRow(await this.prisma.orgDataEncryptionKey.update({
       where: { dekId: row.dekId },
       data: {
         wrappedDek,
-        wrappingProvider: config.enc.kmsProvider,
-        wrappingKeyRef: keyRef,
+        configId: target.configId,
         status: ACTIVE_STATUS,
         rotatedAt: null,
         deactivatedAt: null,
       },
+      include: { config: true },
     }));
 
     this.plaintextKeyById.set(updated.dekId, {
       keyId: updated.dekId,
       orgId: updated.orgId,
-      workspaceId: updated.workspaceId,
+      entityType: updated.entityType,
+      entityId: updated.entityId,
       plaintextKey,
     });
-    this.activeKeyByWorkspace.set(updated.workspaceId, updated);
-    logger.info('workspace encryption backfill rewrote active key successfully', {
-      workspaceId: updated.workspaceId,
+    this.activeKeyByEntity.set(entityCacheKey(updated.entityType, updated.entityId), updated);
+    logger.info('entity encryption backfill rewrote active key successfully', {
+      entityId: updated.entityId,
+      entityType: updated.entityType,
       orgId: updated.orgId,
       keyId: updated.dekId,
       wrappingProvider: updated.wrappingProvider,
@@ -200,13 +229,14 @@ export class WorkspaceServerKeyResolver {
     return updated;
   }
 
-  async backfillActiveKeyForWorkspace(workspaceId: string, orgId: string): Promise<ActiveKeyRow> {
-    const existing = await this.fetchActiveKeyRow(workspaceId);
+  async backfillActiveKeyForEntity(entityId: string, orgId: string, entityType: string): Promise<ActiveKeyRow> {
+    const existing = await this.fetchActiveKeyRow(entityId, entityType);
     if (!existing) {
-      logger.info('workspace encryption backfill found no active key; provisioning new key', { workspaceId });
-      const provisioned = await this.provisionKeyForWorkspace(workspaceId, orgId);
-      logger.info('workspace encryption backfill provisioned new active key', {
-        workspaceId,
+      logger.info('entity encryption backfill found no active key; provisioning new key', { entityId, entityType });
+      const provisioned = await this.provisionKeyForEntity(entityId, orgId, entityType);
+      logger.info('entity encryption backfill provisioned new active key', {
+        entityId,
+        entityType,
         orgId: provisioned.orgId,
         keyId: provisioned.dekId,
         wrappingProvider: provisioned.wrappingProvider,
@@ -218,19 +248,21 @@ export class WorkspaceServerKeyResolver {
     this.assertOrgMatch(existing, orgId);
     const wrappingTarget = await this.getEffectiveWrappingTarget(existing.orgId);
     if (this.keyMatchesBackfillTarget(existing, wrappingTarget)) {
-      logger.info('workspace encryption backfill found active key already on target wrapping key', {
-        workspaceId,
+      logger.info('entity encryption backfill found active key already on target wrapping key', {
+        entityId,
+        entityType,
         orgId: existing.orgId,
         keyId: existing.dekId,
         wrappingProvider: existing.wrappingProvider,
         wrappingKeyRef: existing.wrappingKeyRef,
       });
-      this.activeKeyByWorkspace.set(workspaceId, existing);
+      this.activeKeyByEntity.set(entityCacheKey(entityType, entityId), existing);
       return existing;
     }
 
-    logger.info('workspace encryption backfill rewriting active key to target wrapping key', {
-      workspaceId,
+    logger.info('entity encryption backfill rewriting active key to target wrapping key', {
+      entityId,
+      entityType,
       orgId: existing.orgId,
       keyId: existing.dekId,
       currentWrappingProvider: existing.wrappingProvider,
@@ -238,19 +270,20 @@ export class WorkspaceServerKeyResolver {
       targetWrappingProvider: config.enc.kmsProvider,
       targetWrappingKeyRef: wrappingTarget.keyRef,
     });
-    return await this.rewriteExistingKey(existing, wrappingTarget.keyRef);
+    return await this.rewrapExistingDek(existing, wrappingTarget);
   }
 
-  async getActiveKeyForWorkspace(workspaceId: string): Promise<ResolvedServerKey> {
-    const cached = this.activeKeyByWorkspace.get(workspaceId);
+  async getActiveKeyForEntity(entityId: string, entityType: string): Promise<ResolvedServerKey> {
+    const cacheKey = entityCacheKey(entityType, entityId);
+    const cached = this.activeKeyByEntity.get(cacheKey);
     if (cached) {
       return this.getPlaintextKeyFromRow(cached);
     }
-    const row = await this.fetchActiveKeyRow(workspaceId);
+    const row = await this.fetchActiveKeyRow(entityId, entityType);
     if (!row) {
-      throw new Error(`No active server key found for workspace ${workspaceId}`);
+      throw new Error(`No active server key found for entity ${entityType}:${entityId}`);
     }
-    this.activeKeyByWorkspace.set(workspaceId, row);
+    this.activeKeyByEntity.set(cacheKey, row);
     return this.getPlaintextKeyFromRow(row);
   }
 
@@ -262,6 +295,7 @@ export class WorkspaceServerKeyResolver {
 
     const row = await this.prisma.orgDataEncryptionKey.findUnique({
       where: { dekId: keyId },
+      include: { config: true },
     });
 
     if (!row) {
@@ -271,27 +305,34 @@ export class WorkspaceServerKeyResolver {
     return this.getPlaintextKeyFromRow(toActiveKeyRow(row));
   }
 
-  private async fetchActiveKeyRow(workspaceId: string): Promise<ActiveKeyRow | null> {
+  private async fetchActiveKeyRow(entityId: string, entityType: string): Promise<ActiveKeyRow | null> {
     const row = await this.prisma.orgDataEncryptionKey.findFirst({
       where: {
-        workspaceId,
+        entityType,
+        entityId,
         status: ACTIVE_STATUS,
       },
       orderBy: {
         activatedAt: 'desc',
       },
+      include: { config: true },
     });
 
     return row ? toActiveKeyRow(row) : null;
   }
 
   private async fetchEncryptionConfig(orgId: string): Promise<EncryptionConfigRow | null> {
-    return this.prisma.orgEncryptionConfig.findUnique({
-      where: { orgId },
+    return this.prisma.orgEncryptionConfig.findFirst({
+      where: {
+        orgId,
+        status: ACTIVE_STATUS,
+      },
+      orderBy: { updatedAt: 'desc' },
       select: {
+        id: true,
         orgId: true,
         provider: true,
-        kmsKeyRef: true,
+        masterKeyRef: true,
         useCustomerManagedKey: true,
         status: true,
         createdAt: true,
@@ -318,27 +359,38 @@ export class WorkspaceServerKeyResolver {
       keyRef = platformTarget.keyRef;
     }
 
-    if (!configRow || configRow.kmsKeyRef !== keyRef || configRow.provider !== platformTarget.provider) {
-      await this.prisma.orgEncryptionConfig.upsert({
-        where: { orgId },
-        create: {
-          orgId,
-          provider: platformTarget.provider,
-          kmsKeyRef: keyRef,
-          useCustomerManagedKey: false,
-          providerConfig: Prisma.JsonNull,
-          status: ACTIVE_STATUS,
-        },
-        update: {
-          provider: platformTarget.provider,
-          kmsKeyRef: keyRef,
-          useCustomerManagedKey: false,
-          status: ACTIVE_STATUS,
-        },
+    let effectiveConfig = configRow;
+    if (!effectiveConfig || effectiveConfig.masterKeyRef !== keyRef || effectiveConfig.provider !== platformTarget.provider) {
+      effectiveConfig = await this.prisma.$transaction(async (tx) => {
+        await tx.orgEncryptionConfig.updateMany({
+          where: { orgId, status: ACTIVE_STATUS },
+          data: { status: INACTIVE_STATUS },
+        });
+        return tx.orgEncryptionConfig.create({
+          data: {
+            orgId,
+            provider: platformTarget.provider,
+            masterKeyRef: keyRef,
+            useCustomerManagedKey: false,
+            providerConfig: Prisma.JsonNull,
+            status: ACTIVE_STATUS,
+          },
+          select: {
+            id: true,
+            orgId: true,
+            provider: true,
+            masterKeyRef: true,
+            useCustomerManagedKey: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
       });
     }
 
     return {
+      configId: effectiveConfig.id,
       provider: platformTarget.provider,
       keyRef,
     };
@@ -386,32 +438,39 @@ export class WorkspaceServerKeyResolver {
     const plaintextKey = await this.kmsForStoredProvider(row.wrappingProvider).unwrapKey(row.wrappedDek, row.wrappingKeyRef, {
       keyId: row.dekId,
       orgId: row.orgId,
-      workspaceId: row.workspaceId,
+      entityType: row.entityType,
+      entityId: row.entityId,
     });
 
     const resolved = {
       keyId: row.dekId,
       orgId: row.orgId,
-      workspaceId: row.workspaceId,
+      entityType: row.entityType,
+      entityId: row.entityId,
       plaintextKey,
     };
 
     this.plaintextKeyById.set(row.dekId, resolved);
-    this.activeKeyByWorkspace.set(row.workspaceId, row);
+    this.activeKeyByEntity.set(entityCacheKey(row.entityType, row.entityId), row);
     return resolved;
   }
 
-  async provisionKeyForWorkspace(workspaceId: string, orgId: string): Promise<ActiveKeyRow> {
-    const existing = await this.fetchActiveKeyRow(workspaceId);
+  async provisionKeyForEntity(entityId: string, orgId: string, entityType: string): Promise<ActiveKeyRow> {
+    const cacheKey = entityCacheKey(entityType, entityId);
+    const existing = await this.fetchActiveKeyRow(entityId, entityType);
     if (existing) {
       this.assertOrgMatch(existing, orgId);
-      this.activeKeyByWorkspace.set(workspaceId, existing);
+      this.activeKeyByEntity.set(cacheKey, existing);
       return existing;
     }
 
     const plaintextKey = crypto.randomBytes(32);
     const wrappingTarget = await this.getEffectiveWrappingTarget(orgId);
-    const wrappedDek = await this.ensureKms().wrapKey(plaintextKey, wrappingTarget.keyRef, { orgId, workspaceId });
+    const wrappedDek = await this.ensureKms().wrapKey(plaintextKey, wrappingTarget.keyRef, {
+      orgId,
+      entityType,
+      entityId,
+    });
     const now = new Date();
     const keyId = compactDekId();
 
@@ -419,18 +478,18 @@ export class WorkspaceServerKeyResolver {
       const inserted = toActiveKeyRow(await this.prisma.orgDataEncryptionKey.create({
         data: {
           dekId: keyId,
-          orgId,
-          workspaceId,
+          configId: wrappingTarget.configId,
+          entityType,
+          entityId,
           wrappedDek,
-          wrappingProvider: wrappingTarget.provider,
-          wrappingKeyRef: wrappingTarget.keyRef,
           status: ACTIVE_STATUS,
           activatedAt: now,
           createdAt: now,
         },
+        include: { config: true },
       }));
 
-      this.activeKeyByWorkspace.set(workspaceId, inserted);
+      this.activeKeyByEntity.set(cacheKey, inserted);
       return inserted;
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
@@ -438,15 +497,15 @@ export class WorkspaceServerKeyResolver {
       }
     }
 
-    const activeAfterRace = await this.fetchActiveKeyRow(workspaceId);
+    const activeAfterRace = await this.fetchActiveKeyRow(entityId, entityType);
     if (!activeAfterRace) {
-      throw new Error(`Failed to provision active server key for workspace ${workspaceId}`);
+      throw new Error(`Failed to provision active server key for entity ${entityType}:${entityId}`);
     }
 
     this.assertOrgMatch(activeAfterRace, orgId);
-    this.activeKeyByWorkspace.set(workspaceId, activeAfterRace);
+    this.activeKeyByEntity.set(cacheKey, activeAfterRace);
     return activeAfterRace;
   }
 }
 
-export const workspaceServerKeyResolver = new WorkspaceServerKeyResolver();
+export const entityServerKeyResolver = new EntityServerKeyResolver();

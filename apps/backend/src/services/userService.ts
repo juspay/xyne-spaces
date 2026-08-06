@@ -22,7 +22,7 @@ import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefa
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { createId } from '@paralleldrive/cuid2';
-import { initializeOrgEncryption, provisionWorkspaceEncryptionForOrg } from '@/services/internal/encryption-client';
+import { initializeOrgEncryption, provisionEncryptionEntityForOrg } from '@/services/internal/encryption-client';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -955,7 +955,7 @@ export class UserService {
             joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
-        await provisionWorkspaceEncryptionForOrg(workspace.id, workspace.orgId);
+        await provisionEncryptionEntityForOrg(workspace.id, workspace.orgId, 'WORKSPACE');
         return { organization, workspace };
       });
 
@@ -1142,7 +1142,7 @@ export class UserService {
             joinPolicy,
           },
         });
-        await provisionWorkspaceEncryptionForOrg(createdWorkspace.id, createdWorkspace.orgId);
+        await provisionEncryptionEntityForOrg(createdWorkspace.id, createdWorkspace.orgId, 'WORKSPACE');
         return createdWorkspace;
       });
     } catch (error) {

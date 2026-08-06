@@ -8,7 +8,8 @@ let kmsProviderInstance: KmsProvider | null = null;
 export interface KmsContext {
   keyId?: string;
   orgId?: string;
-  workspaceId?: string;
+  entityType?: string;
+  entityId?: string;
   sessionId?: string;
 }
 

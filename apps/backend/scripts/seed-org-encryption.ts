@@ -28,8 +28,9 @@ type ActiveDekRow = {
 };
 
 type OrgEncryptionConfigRow = {
+  id: string;
   provider: string;
-  kmsKeyRef: string;
+  masterKeyRef: string;
   useCustomerManagedKey: boolean;
   status: string;
 };
@@ -112,33 +113,47 @@ async function getDefaultWorkspaces(orgId: string): Promise<DefaultWorkspaceRow[
   );
 }
 
-async function upsertOrgEncryptionConfig(orgId: string, provider: string, keyRef: string): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO encryption.org_encryption_configs
-      ("orgId", "provider", "kmsKeyRef", "useCustomerManagedKey", "providerConfig", "status", "createdAt", "updatedAt")
-     VALUES
-      ($1, $2, $3, false, NULL, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-     ON CONFLICT ("orgId") DO UPDATE SET
-      "provider" = EXCLUDED."provider",
-      "kmsKeyRef" = EXCLUDED."kmsKeyRef",
-      "useCustomerManagedKey" = EXCLUDED."useCustomerManagedKey",
-      "providerConfig" = EXCLUDED."providerConfig",
-      "status" = EXCLUDED."status",
-      "updatedAt" = CURRENT_TIMESTAMP`,
-    orgId,
-    provider,
-    keyRef,
-    ACTIVE_STATUS,
-  );
+async function replaceOrgEncryptionConfig(
+  orgId: string,
+  provider: string,
+  keyRef: string,
+): Promise<OrgEncryptionConfigRow> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      `UPDATE encryption.org_encryption_configs
+       SET "status" = $1, "updatedAt" = CURRENT_TIMESTAMP
+       WHERE "orgId" = $2 AND "status" = $3`,
+      INACTIVE_STATUS,
+      orgId,
+      ACTIVE_STATUS,
+    );
+
+    const rows = await tx.$queryRawUnsafe<OrgEncryptionConfigRow[]>(
+      `INSERT INTO encryption.org_encryption_configs
+        ("id", "orgId", "provider", "masterKeyRef", "useCustomerManagedKey", "providerConfig", "status", "createdAt", "updatedAt")
+       VALUES
+        ($1, $2, $3, $4, false, NULL, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING "id", "provider", "masterKeyRef", "useCustomerManagedKey", "status"`,
+      crypto.randomUUID(),
+      orgId,
+      provider,
+      keyRef,
+      ACTIVE_STATUS,
+    );
+
+    return rows[0];
+  });
 }
 
 async function getOrgEncryptionConfig(orgId: string): Promise<OrgEncryptionConfigRow | null> {
   const rows = await prisma.$queryRawUnsafe<OrgEncryptionConfigRow[]>(
-    `SELECT "provider", "kmsKeyRef", "useCustomerManagedKey", "status"
+    `SELECT "id", "provider", "masterKeyRef", "useCustomerManagedKey", "status"
      FROM encryption.org_encryption_configs
-     WHERE "orgId" = $1
+     WHERE "orgId" = $1 AND "status" = $2
+     ORDER BY "updatedAt" DESC
      LIMIT 1`,
     orgId,
+    ACTIVE_STATUS,
   );
 
   return rows[0] ?? null;
@@ -152,7 +167,7 @@ function isValidOrgEncryptionConfig(
   return Boolean(
     row
       && row.provider === provider
-      && row.kmsKeyRef === keyRef
+      && row.masterKeyRef === keyRef
       && row.useCustomerManagedKey === false
       && row.status === ACTIVE_STATUS,
   );
@@ -160,10 +175,16 @@ function isValidOrgEncryptionConfig(
 
 async function getActiveDek(workspaceId: string): Promise<ActiveDekRow | null> {
   const rows = await prisma.$queryRawUnsafe<ActiveDekRow[]>(
-    `SELECT "dekId", "orgId", "workspaceId", "wrappedDek", "wrappingProvider", "wrappingKeyRef"
-     FROM encryption.org_data_encryption_keys
-     WHERE "workspaceId" = $1 AND "status" = $2
-     ORDER BY "activatedAt" DESC
+    `SELECT dek."dekId",
+            config."orgId",
+            dek."entityId" AS "workspaceId",
+            dek."wrappedDek",
+            config."provider" AS "wrappingProvider",
+            config."masterKeyRef" AS "wrappingKeyRef"
+     FROM encryption.org_data_encryption_keys dek
+     JOIN encryption.org_encryption_configs config ON config."id" = dek."configId"
+     WHERE dek."entityType" = 'WORKSPACE' AND dek."entityId" = $1 AND dek."status" = $2
+     ORDER BY dek."activatedAt" DESC
      LIMIT 1`,
     workspaceId,
     ACTIVE_STATUS,
@@ -177,7 +198,7 @@ async function deactivateActiveDeks(workspaceId: string): Promise<void> {
     `UPDATE encryption.org_data_encryption_keys
      SET "status" = $1,
          "deactivatedAt" = CURRENT_TIMESTAMP
-     WHERE "workspaceId" = $2 AND "status" = $3`,
+     WHERE "entityType" = 'WORKSPACE' AND "entityId" = $2 AND "status" = $3`,
     INACTIVE_STATUS,
     workspaceId,
     ACTIVE_STATUS,
@@ -185,10 +206,8 @@ async function deactivateActiveDeks(workspaceId: string): Promise<void> {
 }
 
 async function insertActiveDek(
-  orgId: string,
+  configId: string,
   workspaceId: string,
-  provider: string,
-  keyRef: string,
   masterKey: Buffer,
 ): Promise<string> {
   const dekId = compactDekId();
@@ -196,15 +215,13 @@ async function insertActiveDek(
 
   await prisma.$executeRawUnsafe(
     `INSERT INTO encryption.org_data_encryption_keys
-      ("dekId", "orgId", "workspaceId", "wrappedDek", "wrappingProvider", "wrappingKeyRef", "status", "activatedAt", "createdAt")
+      ("dekId", "configId", "entityType", "entityId", "wrappedDek", "status", "activatedAt", "createdAt")
      VALUES
-      ($1, $2, $3, decode($4, 'hex'), $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      ($1, $2, 'WORKSPACE', $3, decode($4, 'hex'), $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     dekId,
-    orgId,
+    configId,
     workspaceId,
     wrappedDekHex,
-    provider,
-    keyRef,
     ACTIVE_STATUS,
   );
 
@@ -234,11 +251,13 @@ async function main(): Promise<void> {
   let workspaceCount = 0;
 
   for (const org of orgs) {
-    const orgConfig = await getOrgEncryptionConfig(org.orgId);
-    const hasValidConfig = isValidOrgEncryptionConfig(orgConfig, provider, keyRef);
+    const existingOrgConfig = await getOrgEncryptionConfig(org.orgId);
+    const hasValidConfig = isValidOrgEncryptionConfig(existingOrgConfig, provider, keyRef);
+    const orgConfig = hasValidConfig && existingOrgConfig
+      ? existingOrgConfig
+      : await replaceOrgEncryptionConfig(org.orgId, provider, keyRef);
 
     if (!hasValidConfig) {
-      await upsertOrgEncryptionConfig(org.orgId, provider, keyRef);
       updatedConfigs += 1;
     }
 
@@ -263,7 +282,7 @@ async function main(): Promise<void> {
         await deactivateActiveDeks(workspace.workspaceId);
       }
 
-      await insertActiveDek(workspace.orgId, workspace.workspaceId, provider, keyRef, masterKey);
+      await insertActiveDek(orgConfig.id, workspace.workspaceId, masterKey);
       insertedKeys += 1;
     }
   }

@@ -26,7 +26,7 @@ interface ProxyConnection {
   heartbeatInterval: ReturnType<typeof setInterval> | null;
   connectTimeout: ReturnType<typeof setTimeout> | null;
   closed: boolean;
-  keyCache: Map<string, Buffer | null>;
+  clientKey: Buffer | null | undefined;
   clientMessageCount: number;
   upstreamMessageCount: number;
 }
@@ -55,13 +55,9 @@ function extractWorkspaceToken(cookies: Record<string, string>): string | undefi
 
 async function getOrCacheClientKey(conn: ProxyConnection): Promise<Buffer | null> {
   if (!conn.sessionID) return null;
-  if (conn.keyCache.has(conn.sessionID)) {
-    return conn.keyCache.get(conn.sessionID) ?? null;
-  }
-  const key = await getSessionKey(conn.sessionID);
-  conn.keyCache.set(conn.sessionID, key);
-  if (key) conn.keyCache.set(conn.sessionID, key);
-  return key;
+  if (conn.clientKey !== undefined) return conn.clientKey;
+  conn.clientKey = await getSessionKey(conn.sessionID);
+  return conn.clientKey;
 }
 
 async function transformPokeFields(
@@ -172,7 +168,7 @@ function cleanup(conn: ProxyConnection): void {
   conn.closed = true;
   if (conn.heartbeatInterval) clearInterval(conn.heartbeatInterval);
   if (conn.connectTimeout) clearTimeout(conn.connectTimeout);
-  conn.keyCache.clear();
+  conn.clientKey = undefined;
   activeConnections.delete(conn);
 }
 
@@ -264,13 +260,11 @@ function createSyncProxy(clientWs: WebSocket, req: IncomingMessage): void {
     heartbeatInterval: null,
     connectTimeout: null,
     closed: false,
-    keyCache: new Map(),
+    clientKey: undefined,
     clientMessageCount: 0,
     upstreamMessageCount: 0,
   };
   activeConnections.add(conn);
-  if (hasEncryptedFields && config.enc.clientEncryptionEnabled) void getOrCacheClientKey(conn);
-
   logger.info('sync-proxy connecting upstream', {
     userId: authData.sub,
     path: parsedUrl.pathname,
@@ -358,7 +352,6 @@ function createSyncProxy(clientWs: WebSocket, req: IncomingMessage): void {
             });
           } else {
             reportDecryptFailure(conn, error);
-            throw new Error('Failed to decrypt upstream sync data');
           }
         }
       }

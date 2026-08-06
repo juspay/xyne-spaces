@@ -5,7 +5,7 @@ import { encryptedFieldsConfig } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getRawPrismaClient } from '@/database/prisma';
-import { workspaceServerKeyResolver } from '@/encryption/dek-resolver';
+import { entityServerKeyResolver } from '@/encryption/dek-resolver';
 import {
   containsSessionEncryptedFields,
   decryptClientField,
@@ -16,12 +16,11 @@ import {
 } from '@/zero/field-crypto';
 import { getSessionKey, storeSessionKey } from '@/zero/session-key-store';
 import { setupWsUpgradeHandler, shutdownSyncProxy } from '@/sync/sync-proxy';
-import { extractAuthDataFromJWT } from '@/zero/auth';
 import { requestLogger } from '@/middleware/request-logger';
 
 const prisma = getRawPrismaClient();
-const WORKSPACE_BACKFILL_BATCH_SIZE = 50;
-const WORKSPACE_BACKFILL_BATCH_DELAY_MS = 5_000;
+const ENTITY_BACKFILL_BATCH_SIZE = 50;
+const ENTITY_BACKFILL_BATCH_DELAY_MS = 5_000;
 
 function serializeError(err: unknown) {
   if (err instanceof Error) {
@@ -113,44 +112,6 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseCookies(cookieHeader: string | undefined): Record<string, string> {
-  if (!cookieHeader) {
-    return {};
-  }
-
-  const cookies: Record<string, string> = {};
-  cookieHeader.split(';').forEach((cookie) => {
-    const [name, ...rest] = cookie.split('=');
-    if (name) {
-      cookies[name.trim()] = rest.join('=').trim();
-    }
-  });
-  return cookies;
-}
-
-function extractWorkspaceToken(cookies: Record<string, string>): string | undefined {
-  const workspaceTokenCookie = Object.keys(cookies).find((key) => key.startsWith('xyne_ws_') && key.endsWith('_token'));
-  return workspaceTokenCookie ? cookies[workspaceTokenCookie] : cookies.google_access_token;
-}
-
-function getRequestAuth(req: Request): { userId: string; workspaceId: string; sessionId: string } | null {
-  const cookies = parseCookies(req.header('cookie'));
-  const bearer = req.header('authorization');
-  const token = bearer?.startsWith('Bearer ') ? bearer.slice(7) : extractWorkspaceToken(cookies);
-  const auth = extractAuthDataFromJWT(token);
-  const sessionId = cookies.user_session_id;
-
-  if (!auth?.sub || !auth.workspaceId || !sessionId) {
-    return null;
-  }
-
-  return {
-    userId: auth.sub,
-    workspaceId: auth.workspaceId,
-    sessionId,
-  };
-}
-
 const apiApp = express();
 apiApp.use(requestLogger);
 apiApp.use(express.json({ limit: '10mb' }));
@@ -167,8 +128,9 @@ apiApp.post('/internal/encryption/server/decrypt', asyncRoute(async (req, res) =
 
 apiApp.post('/internal/encryption/server/encrypt', asyncRoute(async (req, res) => {
   const value = requireValueString(req.body?.value, 'value');
-  const workspaceId = requireString(req.body?.workspaceId, 'workspaceId');
-  ok(res, { value: await reEncryptForServer(value, workspaceId) });
+  const entityId = requireString(req.body?.entityId, 'entityId');
+  const entityType = requireString(req.body?.entityType, 'entityType');
+  ok(res, { value: await reEncryptForServer(value, entityId, entityType) });
 }));
 
 apiApp.post('/internal/encryption/server/batch-decrypt', asyncRoute(async (req, res) => {
@@ -185,42 +147,36 @@ apiApp.post('/internal/encryption/server/batch-encrypt', asyncRoute(async (req, 
   if (!Array.isArray(req.body?.items)) {
     throw new HttpError('items must be an array', 400);
   }
-  const items: Array<{ value: string; workspaceId: string }> = req.body.items.map((item: unknown, index: number) => {
+  const items: Array<{ value: string; entityId: string; entityType: string }> = req.body.items.map((item: unknown, index: number) => {
     if (!item || typeof item !== 'object') {
       throw new HttpError(`items[${index}] must be an object`, 400);
     }
     const record = item as Record<string, unknown>;
     return {
       value: requireValueString(record.value, `items[${index}].value`),
-      workspaceId: requireString(record.workspaceId, `items[${index}].workspaceId`),
+      entityId: requireString(record.entityId, `items[${index}].entityId`),
+      entityType: requireString(record.entityType, `items[${index}].entityType`),
     };
   });
   ok(res, {
     items: await Promise.all(
       items.map(async (item) => ({
-        value: await reEncryptForServer(item.value, item.workspaceId),
+        value: await reEncryptForServer(item.value, item.entityId, item.entityType),
       })),
     ),
   });
 }));
 
 apiApp.post('/internal/encryption/session/register-client-key', asyncRoute(async (req, res) => {
-  const { wrappedKey, sessionId, userId, orgId, expiresAt } = req.body as {
+  const { wrappedKey, sessionId, userId, orgId } = req.body as {
     wrappedKey?: string;
     sessionId?: string;
     userId?: string;
     orgId?: string;
-    expiresAt?: string;
   };
 
-  if (!wrappedKey || !sessionId || !userId || !orgId || !expiresAt) {
+  if (!wrappedKey || !sessionId || !userId || !orgId) {
     res.status(400).json({ error: 'Bad request', message: 'Registration context is incomplete' });
-    return;
-  }
-
-  const sessionExpiry = new Date(expiresAt);
-  if (Number.isNaN(sessionExpiry.getTime()) || sessionExpiry <= new Date()) {
-    res.status(400).json({ error: 'Bad request', message: 'expiresAt must be a future ISO timestamp' });
     return;
   }
 
@@ -243,119 +199,125 @@ apiApp.post('/internal/encryption/session/register-client-key', asyncRoute(async
     return;
   }
 
-  await storeSessionKey(sessionId, userId, orgId, aesKey, sessionExpiry);
+  await storeSessionKey(sessionId, userId, orgId, aesKey);
   ok(res, { ok: true as const, sessionFingerprint: sessionId });
 }));
 
 apiApp.post('/internal/encryption/session/delete-client-key', asyncRoute(async (req, res) => {
-  try {
-    await prisma.userSessionKey.delete({ where: { sessionId: req.body.sessionId } });
-  } catch {}
+  const sessionId = requireString(req.body?.sessionId, 'sessionId');
+  await prisma.userSessionKey.updateMany({
+    where: { sessionId, status: 'ACTIVE' },
+    data: { status: 'INACTIVE' },
+  });
   ok(res, { ok: true });
 }));
 
 apiApp.post('/internal/encryption/org/initialize', asyncRoute(async (req, res) => {
   const orgId = requireString(req.body?.orgId, 'orgId');
 
-  const wrappingTarget = await workspaceServerKeyResolver.initializeOrgEncryption(orgId);
+  const wrappingTarget = await entityServerKeyResolver.initializeOrgEncryption(orgId);
   ok(res, { ok: true, keyRef: wrappingTarget.keyRef });
 }));
 
-apiApp.post('/internal/encryption/workspace/provision', asyncRoute(async (req, res) => {
-  const workspaceId = requireString(req.body?.workspaceId, 'workspaceId');
+apiApp.post('/internal/encryption/entity/provision', asyncRoute(async (req, res) => {
+  const entityId = requireString(req.body?.entityId, 'entityId');
   const orgId = requireString(req.body?.orgId, 'orgId');
+  const entityType = requireString(req.body?.entityType, 'entityType');
 
-  const activeKey = await workspaceServerKeyResolver.provisionKeyForWorkspace(workspaceId, orgId);
+  const activeKey = await entityServerKeyResolver.provisionKeyForEntity(entityId, orgId, entityType);
   ok(res, { ok: true, keyId: activeKey.dekId });
 }));
 
-apiApp.post('/internal/encryption/workspace/backfill-provision-batch', asyncRoute(async (req, res) => {
-  const rawWorkspaces = req.body?.workspaces;
-  if (!Array.isArray(rawWorkspaces) || rawWorkspaces.length === 0) {
-    throw new HttpError('workspaces must be a non-empty array', 400);
+apiApp.post('/internal/encryption/entity/backfill-provision-batch', asyncRoute(async (req, res) => {
+  const rawEntities = req.body?.entities;
+  if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
+    throw new HttpError('entities must be a non-empty array', 400);
   }
-  const workspaces = new Map<string, { workspaceId: string; orgId: string }>();
+  const entities = new Map<string, { entityId: string; orgId: string; entityType: string }>();
 
-  rawWorkspaces.forEach((workspace: unknown, index: number) => {
-    if (!workspace || typeof workspace !== 'object') {
-      throw new HttpError(`workspaces[${index}] must be an object`, 400);
+  rawEntities.forEach((entity: unknown, index: number) => {
+    if (!entity || typeof entity !== 'object') {
+      throw new HttpError(`entities[${index}] must be an object`, 400);
     }
 
-    const record = workspace as Record<string, unknown>;
-    const workspaceId = requireString(record.workspaceId, `workspaces[${index}].workspaceId`);
-    const orgId = requireString(record.orgId, `workspaces[${index}].orgId`);
-    const duplicate = workspaces.get(workspaceId);
+    const record = entity as Record<string, unknown>;
+    const entityId = requireString(record.entityId, `entities[${index}].entityId`);
+    const orgId = requireString(record.orgId, `entities[${index}].orgId`);
+    const entityType = requireString(record.entityType, `entities[${index}].entityType`);
+    const entityKey = JSON.stringify([entityType, entityId]);
+    const duplicate = entities.get(entityKey);
     if (duplicate && duplicate.orgId !== orgId) {
-      throw new HttpError(`workspace ${workspaceId} has conflicting orgIds`, 400);
+      throw new HttpError(`${entityType} entity ${entityId} has conflicting orgIds`, 400);
     }
-    workspaces.set(workspaceId, { workspaceId, orgId });
+    entities.set(entityKey, { entityId, orgId, entityType });
   });
 
-  const workspaceTargets = [...workspaces.values()];
+  const entityTargets = [...entities.values()];
 
   const startedAt = Date.now();
-  logger.info('workspace encryption backfill batch started', {
-    requestedWorkspaceCount: rawWorkspaces.length,
-    uniqueWorkspaceCount: workspaceTargets.length,
-    batchSize: WORKSPACE_BACKFILL_BATCH_SIZE,
-    interBatchDelayMs: WORKSPACE_BACKFILL_BATCH_DELAY_MS,
+  logger.info('entity encryption backfill batch started', {
+    requestedEntityCount: rawEntities.length,
+    uniqueEntityCount: entityTargets.length,
+    batchSize: ENTITY_BACKFILL_BATCH_SIZE,
+    interBatchDelayMs: ENTITY_BACKFILL_BATCH_DELAY_MS,
   });
 
   const results = [];
-  const totalBatches = Math.ceil(workspaceTargets.length / WORKSPACE_BACKFILL_BATCH_SIZE);
+  const totalBatches = Math.ceil(entityTargets.length / ENTITY_BACKFILL_BATCH_SIZE);
 
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex += 1) {
-    const batchStart = batchIndex * WORKSPACE_BACKFILL_BATCH_SIZE;
-    const batchEnd = batchStart + WORKSPACE_BACKFILL_BATCH_SIZE;
-    const batch = workspaceTargets.slice(batchStart, batchEnd);
+    const batchStart = batchIndex * ENTITY_BACKFILL_BATCH_SIZE;
+    const batchEnd = batchStart + ENTITY_BACKFILL_BATCH_SIZE;
+    const batch = entityTargets.slice(batchStart, batchEnd);
 
-    logger.info('workspace encryption backfill batch chunk started', {
+    logger.info('entity encryption backfill batch chunk started', {
       batchNumber: batchIndex + 1,
       totalBatches,
       batchSize: batch.length,
       startPosition: batchStart + 1,
       endPosition: batchStart + batch.length,
-      totalWorkspaces: workspaceTargets.length,
+      totalEntities: entityTargets.length,
     });
 
-    const batchResults = await Promise.all(batch.map(async ({ workspaceId, orgId }, offset) => {
+    const batchResults = await Promise.all(batch.map(async ({ entityId, orgId, entityType }, offset) => {
       const position = batchStart + offset + 1;
-      logger.info('workspace encryption backfill workspace started', {
-        workspaceId,
+      logger.info('entity encryption backfill entity started', {
+        entityId,
         batchNumber: batchIndex + 1,
         position,
-        total: workspaceTargets.length,
+        total: entityTargets.length,
       });
       try {
-        const activeKey = await workspaceServerKeyResolver.backfillActiveKeyForWorkspace(workspaceId, orgId);
-        logger.info('workspace encryption backfill workspace succeeded', {
-          workspaceId,
+        const activeKey = await entityServerKeyResolver.backfillActiveKeyForEntity(entityId, orgId, entityType);
+        logger.info('entity encryption backfill entity succeeded', {
+          entityId,
           orgId: activeKey.orgId,
           keyId: activeKey.dekId,
           batchNumber: batchIndex + 1,
           position,
-          total: workspaceTargets.length,
+          total: entityTargets.length,
         });
-        return { workspaceId, ok: true, keyId: activeKey.dekId };
+        return { entityId, entityType, ok: true, keyId: activeKey.dekId };
       } catch (error) {
-        logger.error('workspace encryption backfill workspace failed', {
-          workspaceId,
+        logger.error('entity encryption backfill entity failed', {
+          entityId,
           batchNumber: batchIndex + 1,
           position,
-          total: workspaceTargets.length,
+          total: entityTargets.length,
           error: error instanceof Error ? error.message : String(error),
         });
         return {
-          workspaceId,
+          entityId,
+          entityType,
           ok: false,
-          message: error instanceof Error ? error.message : 'Failed to provision workspace encryption',
+          message: error instanceof Error ? error.message : 'Failed to provision entity encryption',
         };
       }
     }));
 
     results.push(...batchResults);
 
-    logger.info('workspace encryption backfill batch chunk completed', {
+    logger.info('entity encryption backfill batch chunk completed', {
       batchNumber: batchIndex + 1,
       totalBatches,
       batchSize: batch.length,
@@ -364,18 +326,18 @@ apiApp.post('/internal/encryption/workspace/backfill-provision-batch', asyncRout
     });
 
     if (batchIndex < totalBatches - 1) {
-      logger.info('workspace encryption backfill batch chunk sleeping', {
+      logger.info('entity encryption backfill batch chunk sleeping', {
         nextBatchNumber: batchIndex + 2,
-        delayMs: WORKSPACE_BACKFILL_BATCH_DELAY_MS,
+        delayMs: ENTITY_BACKFILL_BATCH_DELAY_MS,
       });
-      await sleep(WORKSPACE_BACKFILL_BATCH_DELAY_MS);
+      await sleep(ENTITY_BACKFILL_BATCH_DELAY_MS);
     }
   }
 
   const succeededCount = results.filter((result) => result.ok).length;
   const failedCount = results.length - succeededCount;
-  logger.info('workspace encryption backfill batch completed', {
-    workspaceCount: workspaceTargets.length,
+  logger.info('entity encryption backfill batch completed', {
+    entityCount: entityTargets.length,
     succeededCount,
     failedCount,
     durationMs: Date.now() - startedAt,

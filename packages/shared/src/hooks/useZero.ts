@@ -14,7 +14,7 @@ import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { encryptField, decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
-import { validateQueryWhereClause, wrapClientTransaction } from '../zero/client-transaction-wrapper.js';
+import { validateQueryWhereClause } from '../zero/client-transaction-wrapper.js';
 import { wasInterrupted } from './metricValidity.js';
 import { trackMutationStart, trackMutationSettled } from './pendingMutations.js';
 

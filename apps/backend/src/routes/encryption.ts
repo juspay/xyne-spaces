@@ -3,7 +3,7 @@ import { SessionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import {
-  backfillWorkspaceEncryptionBatch,
+  backfillEncryptionEntityBatch,
   getEncryptionPublicKey,
   registerClientKey,
 } from '@/services/internal/encryption-client';
@@ -56,7 +56,7 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
     return;
   }
 
-  let registrationContext: { orgId: string; expiresAt: string };
+  let orgId: string;
   try {
     const [session, workspace] = await prisma.$transaction([
       prisma.userSession.findFirst({
@@ -66,7 +66,7 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
           status: SessionStatus.ACTIVE,
           refreshTokenExpiry: { gt: new Date() },
         },
-        select: { refreshTokenExpiry: true },
+        select: { id: true },
       }),
       prisma.workspace.findFirst({
         where: {
@@ -86,10 +86,7 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
       return;
     }
 
-    registrationContext = {
-      orgId: workspace.orgId,
-      expiresAt: session.refreshTokenExpiry.toISOString(),
-    };
+    orgId = workspace.orgId;
   } catch (err) {
     logger.error('Failed to validate encryption key registration context', {
       userId: req.user.id,
@@ -105,7 +102,7 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
       wrappedKey,
       sessionId,
       userId: req.user.id,
-      ...registrationContext,
+      orgId,
     });
     res.json(result);
   } catch (err) {
@@ -147,9 +144,10 @@ router.post('/workspaces/backfill-provision', async (req: Request, res: Response
       select: { id: true, orgId: true },
     });
 
-    const results = await backfillWorkspaceEncryptionBatch(workspaces.map((workspace) => ({
-      workspaceId: workspace.id,
+    const results = await backfillEncryptionEntityBatch(workspaces.map((workspace) => ({
+      entityId: workspace.id,
       orgId: workspace.orgId,
+      entityType: 'WORKSPACE',
     })));
 
     res.json({

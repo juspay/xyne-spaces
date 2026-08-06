@@ -112,6 +112,11 @@ export async function encryptionRequestInterceptor(
     return config;
   }
 
+  // Preserve multipart uploads; encrypting FormData as a plain object drops fields/files.
+  if (config.data instanceof FormData) {
+    return config;
+  }
+
   try {
     const encryptedData = await encryptObject(config.data);
 

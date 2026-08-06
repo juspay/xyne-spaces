@@ -6,7 +6,7 @@ import {
   QueryOptions,
 } from '@/types/database';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
-import { provisionWorkspaceEncryptionForOrg } from '@/services/internal/encryption-client';
+import { provisionEncryptionEntityForOrg } from '@/services/internal/encryption-client';
 
 export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspaceInput, UpdateWorkspaceInput> {
   constructor() {
@@ -22,7 +22,7 @@ export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspa
           joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
         },
       });
-      await provisionWorkspaceEncryptionForOrg(workspace.id, workspace.orgId);
+      await provisionEncryptionEntityForOrg(workspace.id, workspace.orgId, 'WORKSPACE');
       return workspace;
     });
   }

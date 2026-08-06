@@ -1,5 +1,5 @@
 import { getRawPrismaClient } from '@/database/prisma';
-import { workspaceServerKeyResolver } from '@/encryption/dek-resolver';
+import { entityServerKeyResolver } from '@/encryption/dek-resolver';
 import {
   decodeWrappedSessionKeyPayload,
   encodeWrappedSessionKeyPayload,
@@ -12,9 +12,8 @@ export async function storeSessionKey(
   userId: string,
   orgId: string,
   aesKey: Buffer,
-  expiresAt: Date,
 ): Promise<void> {
-  const { keyRef, wrappedKey } = await workspaceServerKeyResolver.wrapSessionKeyForOrg(
+  const { keyRef, wrappedKey } = await entityServerKeyResolver.wrapSessionKeyForOrg(
     orgId,
     aesKey,
     sessionId,
@@ -23,20 +22,20 @@ export async function storeSessionKey(
 
   await db.userSessionKey.upsert({
     where: { sessionId },
-    create: { sessionId, userId, wrappedKey: payload, expiresAt },
-    update: { wrappedKey: payload, expiresAt },
+    create: { sessionId, userId, wrappedKey: payload, status: 'ACTIVE' },
+    update: { userId, wrappedKey: payload, status: 'ACTIVE' },
   });
 }
 
 export async function getSessionKey(sessionId: string): Promise<Buffer | null> {
   const row = await db.userSessionKey.findUnique({ where: { sessionId } });
-  if (!row || row.expiresAt < new Date()) {
+  if (!row || row.status !== 'ACTIVE') {
     return null;
   }
 
   try {
     const payload = decodeWrappedSessionKeyPayload(Buffer.from(row.wrappedKey));
-    return await workspaceServerKeyResolver.unwrapSessionKeyForOrg(
+    return await entityServerKeyResolver.unwrapSessionKeyForOrg(
       payload.keyRef,
       payload.wrappedKey,
       sessionId,

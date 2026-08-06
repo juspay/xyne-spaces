@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { logger } from '@/utils/logger';
-import { workspaceServerKeyResolver } from '@/encryption/dek-resolver';
+import { entityServerKeyResolver } from '@/encryption/dek-resolver';
 import { recordDecryptFailure } from '@/observability/crypto-metrics';
 import { getSessionKey } from './session-key-store';
 
@@ -113,7 +113,7 @@ export async function decryptServerField(value: string): Promise<string> {
   }
 
   try {
-    const resolved = await workspaceServerKeyResolver.getKeyById(parsed.keyId);
+    const resolved = await entityServerKeyResolver.getKeyById(parsed.keyId);
     return decryptAesGcm(parsed.data, resolved.plaintextKey);
   } catch (err) {
     recordDecryptFailure('server_field', { keyId: parsed.keyId });
@@ -146,8 +146,8 @@ export function decryptClientField(value: string, aesKey: Buffer): string {
   }
 }
 
-export async function reEncryptForServer(plaintext: string, workspaceId: string): Promise<string> {
-  const resolved = await workspaceServerKeyResolver.getActiveKeyForWorkspace(workspaceId);
+export async function reEncryptForServer(plaintext: string, entityId: string, entityType: string): Promise<string> {
+  const resolved = await entityServerKeyResolver.getActiveKeyForEntity(entityId, entityType);
   return `ENC:${SERVER_CIPHERTEXT_VERSION}|${resolved.keyId}|${encryptAesGcm(plaintext, resolved.plaintextKey)}`;
 }
 
