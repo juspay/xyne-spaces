@@ -6,6 +6,7 @@ import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
+import { useShowThreadTags } from './useShowThreadTags';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
@@ -42,6 +43,7 @@ export function usePreferencesState(enabled: boolean) {
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
+  const { showThreadTags, setShowThreadTags } = useShowThreadTags();
   const { searchMode, setSearchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
@@ -134,6 +136,8 @@ export function usePreferencesState(enabled: boolean) {
     debugSettings,
     toggleSendIndicators,
     enterSendsMessage,
+    showThreadTags,
+    setShowThreadTags,
     setEnterSendsMessage,
     searchMode,
     setSearchMode,

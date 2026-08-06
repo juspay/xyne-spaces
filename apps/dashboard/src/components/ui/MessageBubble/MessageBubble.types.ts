@@ -75,4 +75,6 @@ export interface MessageBubbleProps {
   showLinkPreview?: boolean;
   searchItemView?: boolean;
   afterTextContent?: React.ReactNode;
+  /** Rendered on the sender/timestamp line, after the timestamp. */
+  headerContent?: React.ReactNode;
 }

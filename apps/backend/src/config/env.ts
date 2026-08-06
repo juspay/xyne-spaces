@@ -196,6 +196,7 @@ const envSchema = Joi.object({
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
@@ -776,6 +777,7 @@ export const config = {
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
+  messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,
