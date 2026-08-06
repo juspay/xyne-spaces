@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Check, ChevronRight } from 'lucide-react';
+import { CheckTickSingle, ChevronRight } from '@xyne/icons';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/classNames';
 import type { RegistrationFlow, RegistrationStep } from '../hooks/useAgentRegistration';
@@ -47,7 +47,7 @@ function StepButton({
         !isActive && !isDone && 'bg-muted/50 text-muted-foreground',
       )}
     >
-      {isDone && <Check className='size-4' aria-hidden />}
+      {isDone && <CheckTickSingle className='size-4' aria-hidden />}
       {isDone ? doneLabel : label}
     </Button>
   );
@@ -80,9 +80,7 @@ export function RegistrationFlowCard({
   return (
     <section className='rounded-xl border border-border bg-muted/40 px-5 py-4'>
       <div className='mb-3 flex items-center justify-between gap-3'>
-        <h4 className='text-sm font-semibold text-foreground'>
-          Spaces App Setup — {flow.agentSlug}
-        </h4>
+        <h4 className='text-sm font-semibold text-foreground'>Spaces App Setup {flow.agentName}</h4>
         {finished && (
           <button
             type='button'

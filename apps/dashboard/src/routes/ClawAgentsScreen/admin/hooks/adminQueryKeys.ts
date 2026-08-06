@@ -13,6 +13,10 @@ export const adminAgentsKey = (userId: string, scope: AdminOrgScope): unknown[] 
   scope,
 ];
 
+export const pendingRequestsPrefix = (): unknown[] => ['claw-admin-requests'];
+
+export const adminAgentsPrefix = (userId: string): unknown[] => ['claw-admin-agents', userId];
+
 export const mcpPublishKey = (): unknown[] => ['claw-admin-mcp-publish'];
 
 export const workflowRequestsKey = (scope: AdminOrgScope): unknown[] => [

@@ -2,14 +2,14 @@ import { useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  ArrowDownToLine,
-  ArrowUpToLine,
   ChevronDown,
-  ImagePlus,
-  Plug,
+  DeleteDustbin01,
+  PhotoImagePlus,
+  PluginAddonDefault,
   Slack,
-  Trash2,
-} from 'lucide-react';
+  UserArrowDown,
+  UserArrowUp,
+} from '@xyne/icons';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -29,7 +29,8 @@ import type { AdminOrgScope } from '@/services/claw/clawAdminTypes';
 import { OrgBadge } from './components/AdminTable';
 import { TabMessage } from './components/TabMessage';
 import { RegistrationFlowCard } from './components/RegistrationFlowCard';
-import { adminAgentsKey } from './hooks/adminQueryKeys';
+import { adminAgentsKey, adminAgentsPrefix } from './hooks/adminQueryKeys';
+import { orgLabel } from './orgLabel';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 const isRegistered = (agent: Agent): boolean =>
@@ -40,14 +41,19 @@ function AgentRow({
   actions,
   showRegistration,
   showOrgLabels,
+  orgNamesById,
 }: {
   agent: Agent;
   actions: ReactElement;
   showRegistration: boolean;
   showOrgLabels: boolean;
+  orgNamesById: Record<string, string>;
 }): ReactElement {
+  const visibleOrgName = orgLabel(agent.orgId, agent.orgName, orgNamesById);
+  const ownerLabel = agent.owner?.name ?? agent.owner?.email ?? 'Unknown owner';
+
   return (
-    <li className='flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3'>
+    <li className='flex items-center justify-between gap-3 border-b border-border px-1 py-4'>
       <div className='flex min-w-0 items-center gap-3'>
         <span
           className='inline-block size-3 shrink-0 rounded-full'
@@ -56,17 +62,14 @@ function AgentRow({
         />
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
           <span className='truncate text-sm font-medium text-foreground'>{agent.name}</span>
-          <span className='truncate text-xs text-muted-foreground'>{agent.slug}</span>
-          {showOrgLabels && agent.orgName && <OrgBadge orgName={agent.orgName} />}
+          {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}
           {showRegistration ? (
             <Badge variant={isRegistered(agent) ? 'default' : 'secondary'}>
               {isRegistered(agent) ? 'Registered' : 'Not registered'}
             </Badge>
           ) : (
             agent.ownerUserId && (
-              <span className='truncate text-xs text-muted-foreground'>
-                owner: {agent.ownerUserId.slice(0, 8)}…
-              </span>
+              <span className='truncate text-xs text-muted-foreground'>owner: {ownerLabel}</span>
             )
           )}
         </div>
@@ -83,6 +86,7 @@ function AgentSection({
   renderActions,
   showRegistration,
   showOrgLabels,
+  orgNamesById,
 }: {
   heading: string;
   agents: Agent[];
@@ -90,16 +94,17 @@ function AgentSection({
   renderActions: (agent: Agent) => ReactElement;
   showRegistration: boolean;
   showOrgLabels: boolean;
+  orgNamesById: Record<string, string>;
 }): ReactElement {
   return (
-    <section className='flex flex-col gap-2'>
-      <h3 className='text-xs font-medium text-muted-foreground'>
+    <section className='flex flex-col gap-3'>
+      <h3 className='text-sm font-semibold text-foreground'>
         {heading} ({agents.length})
       </h3>
       {agents.length === 0 ? (
         <p className='text-xs text-muted-foreground'>{emptyText}</p>
       ) : (
-        <ul className='flex flex-col gap-2'>
+        <ul className='flex flex-col'>
           {agents.map(agent => (
             <AgentRow
               key={agent.id}
@@ -107,6 +112,7 @@ function AgentSection({
               actions={renderActions(agent)}
               showRegistration={showRegistration}
               showOrgLabels={showOrgLabels}
+              orgNamesById={orgNamesById}
             />
           ))}
         </ul>
@@ -118,11 +124,15 @@ function AgentSection({
 export function AgentsTab({
   userId,
   scope,
+  orgId,
+  orgNamesById,
   showOrgLabels,
   registration,
 }: {
   userId: string;
   scope: AdminOrgScope;
+  orgId: string | null;
+  orgNamesById: Record<string, string>;
   showOrgLabels: boolean;
   registration: AgentRegistration;
 }): ReactElement {
@@ -138,17 +148,19 @@ export function AgentsTab({
     queryFn: () => listClawAuthAgents(userId, { allAgents: true, orgScope: scope }),
   });
 
-  const globalAgents = useMemo(
-    () => (agents ?? []).filter(agent => agent.scope === 'global'),
-    [agents],
+  const visible = useMemo(
+    () => (orgId ? (agents ?? []).filter(agent => agent.orgId === orgId) : (agents ?? [])),
+    [agents, orgId],
   );
+
+  const globalAgents = useMemo(() => visible.filter(agent => agent.scope === 'global'), [visible]);
   const personalAgents = useMemo(
-    () => (agents ?? []).filter(agent => agent.scope !== 'global'),
-    [agents],
+    () => visible.filter(agent => agent.scope !== 'global'),
+    [visible],
   );
 
   const refresh = (): void => {
-    void queryClient.invalidateQueries({ queryKey: adminAgentsKey(userId, scope) });
+    void queryClient.invalidateQueries({ queryKey: adminAgentsPrefix(userId) });
   };
 
   const promote = useMutation({
@@ -188,13 +200,18 @@ export function AgentsTab({
     label: string,
     icon: ReactElement,
     onClick: () => void,
-    options: { disabled?: boolean; danger?: boolean; trackName?: string } = {},
-  ): ReactElement => (
-    <Tooltip content={label} side='top'>
+    options: {
+      disabled?: boolean;
+      danger?: boolean;
+      showLabel?: boolean;
+      trackName?: string;
+    } = {},
+  ): ReactElement => {
+    const button = (
       <Button
         type='button'
         variant='ghost'
-        size='icon'
+        size={options.showLabel ? 'sm' : 'icon'}
         disabled={options.disabled ?? busy}
         onClick={onClick}
         aria-label={label}
@@ -207,9 +224,18 @@ export function AgentsTab({
         }
       >
         {icon}
+        {options.showLabel && <span>{label}</span>}
       </Button>
-    </Tooltip>
-  );
+    );
+
+    return options.showLabel ? (
+      button
+    ) : (
+      <Tooltip content={label} side='top'>
+        {button}
+      </Tooltip>
+    );
+  };
 
   const registerMenu = (agent: Agent): ReactElement => {
     const registered = isRegistered(agent);
@@ -225,7 +251,7 @@ export function AgentsTab({
             data-track-name='Register agent'
             className='text-muted-foreground hover:text-foreground'
           >
-            <Plug className='size-4 text-current' />
+            <PluginAddonDefault className='size-4 text-current' />
             <span className='text-current'>
               {hasApp && !registered ? 'Resume setup' : 'Register'}
             </span>
@@ -238,13 +264,10 @@ export function AgentsTab({
             onSelect={() => registration.start(agent)}
             className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
           >
-            <Plug className='mr-2 size-4' />
+            <PluginAddonDefault className='mr-2 size-4' />
             {registered ? 'Spaces (registered)' : hasApp ? 'Spaces (resume setup)' : 'Spaces'}
           </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled
-            className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
-          >
+          <DropdownMenuItem disabled className='hidden'>
             <Slack className='mr-2 size-4' />
             Add to Slack
           </DropdownMenuItem>
@@ -254,7 +277,7 @@ export function AgentsTab({
   };
 
   return (
-    <div className='flex flex-col gap-6 pt-4'>
+    <div className='flex flex-col gap-8 pt-4'>
       {registration.flow && (
         <RegistrationFlowCard
           flow={registration.flow}
@@ -271,19 +294,23 @@ export function AgentsTab({
         emptyText='No global agents.'
         showRegistration
         showOrgLabels={showOrgLabels}
+        orgNamesById={orgNamesById}
         renderActions={agent => (
           <>
             {registerMenu(agent)}
+            {iconAction(
+              'Demote',
+              <UserArrowDown className='size-4' />,
+              () => demote.mutate(agent.slug),
+              { showLabel: true },
+            )}
             {isRegistered(agent) &&
-              iconAction('Upload photo', <ImagePlus className='size-4' />, () =>
+              iconAction('Upload photo', <PhotoImagePlus className='size-4' />, () =>
                 registration.pickPictureFor(agent.slug),
               )}
-            {iconAction('Demote', <ArrowDownToLine className='size-4' />, () =>
-              demote.mutate(agent.slug),
-            )}
             {iconAction(
               'Delete agent',
-              <Trash2 className='size-4' />,
+              <DeleteDustbin01 className='size-4' />,
               () => setDeleteTarget(agent),
               { danger: true },
             )}
@@ -297,19 +324,23 @@ export function AgentsTab({
         emptyText='No personal agents.'
         showRegistration={false}
         showOrgLabels={showOrgLabels}
+        orgNamesById={orgNamesById}
         renderActions={agent => (
           <>
             {registerMenu(agent)}
+            {iconAction(
+              'Promote',
+              <UserArrowUp className='size-4' />,
+              () => promote.mutate(agent.slug),
+              { showLabel: true },
+            )}
             {isRegistered(agent) &&
-              iconAction('Upload photo', <ImagePlus className='size-4' />, () =>
+              iconAction('Upload photo', <PhotoImagePlus className='size-4' />, () =>
                 registration.pickPictureFor(agent.slug),
               )}
-            {iconAction('Promote', <ArrowUpToLine className='size-4' />, () =>
-              promote.mutate(agent.slug),
-            )}
             {iconAction(
               'Delete agent',
-              <Trash2 className='size-4' />,
+              <DeleteDustbin01 className='size-4' />,
               () => setDeleteTarget(agent),
               { danger: true },
             )}

@@ -15,6 +15,7 @@ export type RegistrationStep = 'create' | 'install' | 'configure' | 'grant' | 'u
 
 export interface RegistrationFlow {
   agentSlug: string;
+  agentName: string;
   step: RegistrationStep;
   busy: boolean;
   error?: string | undefined;
@@ -59,6 +60,7 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
   const start = useCallback((agent: Agent): void => {
     setFlow({
       agentSlug: agent.slug,
+      agentName: agent.name,
       step: agent.spacesAppId ? 'install' : 'create',
       busy: false,
     });
@@ -66,13 +68,15 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
 
   const startForSlug = useCallback(async (userId: string, slug: string): Promise<void> => {
     let step: RegistrationStep = 'create';
+    let name = slug;
     try {
       const agent = await getClawAgentBySlug(userId, slug);
       step = !agent.spacesAppId ? 'create' : agent.spacesAppTokenConfigured ? 'done' : 'install';
+      name = agent.name ?? slug;
     } catch {
       step = 'create';
     }
-    setFlow({ agentSlug: slug, step, busy: false });
+    setFlow({ agentSlug: slug, agentName: name, step, busy: false });
   }, []);
 
   const dismiss = useCallback((): void => setFlow(null), []);

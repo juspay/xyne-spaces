@@ -1,28 +1,47 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Switch } from '@/components/ui/Switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/Select';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { useAuth } from '@/hooks/useAuth';
+import { useCachedQuery } from '@/hooks/useCachedQuery';
+import { queries } from '@/zero/queries';
 import { listClawAuthAgents } from '@/services/claw/clawAuthAgentsService';
 import { listPendingRequests } from '@/services/claw/clawAdminService';
+import { appsService } from '@/services/Apps/appsService';
 import type { AdminOrgScope } from '@/services/claw/clawAdminTypes';
 import { AgentsTab } from './AgentsTab';
 import { RequestsTab } from './RequestsTab';
-import { adminAgentsKey, pendingRequestsKey } from './hooks/adminQueryKeys';
+import { adminAgentsKey, adminAgentsPrefix, pendingRequestsKey } from './hooks/adminQueryKeys';
 import { useAgentRegistration } from './hooks/useAgentRegistration';
+import { orgLabel } from './orgLabel';
 
-const ADMIN_TABS = ['requests', 'agents'] as const;
+const ADMIN_TABS = ['agents', 'requests'] as const;
 type TabKey = (typeof ADMIN_TABS)[number];
 
 const TAB_SCOPED_PARAMS = ['q', 'status'];
 
+const MY_ORG = 'mine';
+const ALL_ORGS = 'all';
+
 export default function AdminV2(): ReactElement {
   const { user } = useAuth();
   const userId = user?.id ?? '';
+  const [workspace] = useCachedQuery(
+    queries.getWorkspaceById({ workspaceId: user?.workspaceId ?? '' }),
+  );
+  const myOrgId = workspace?.orgId ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
-  const [allOrgs, setAllOrgs] = useState(false);
+  const [orgFilter, setOrgFilter] = useState<string>(MY_ORG);
+  const allOrgs = orgFilter !== MY_ORG;
   const scope: AdminOrgScope = allOrgs ? 'all' : 'org';
+  const orgId = orgFilter === MY_ORG || orgFilter === ALL_ORGS ? null : orgFilter;
 
   const rawTab = searchParams.get('tab');
   const tab: TabKey = ADMIN_TABS.find(id => id === rawTab) ?? ADMIN_TABS[0];
@@ -36,8 +55,8 @@ export default function AdminV2(): ReactElement {
 
   const queryClient = useQueryClient();
   const refreshAgents = useCallback((): void => {
-    void queryClient.invalidateQueries({ queryKey: adminAgentsKey(userId, scope) });
-  }, [queryClient, userId, scope]);
+    void queryClient.invalidateQueries({ queryKey: adminAgentsPrefix(userId) });
+  }, [queryClient, userId]);
 
   const registration = useAgentRegistration(refreshAgents);
 
@@ -53,19 +72,81 @@ export default function AdminV2(): ReactElement {
     enabled: Boolean(userId),
   });
 
+  const { data: allOrgAgents } = useQuery({
+    queryKey: adminAgentsKey(userId, 'all'),
+    queryFn: () => listClawAuthAgents(userId, { allAgents: true, orgScope: 'all' }),
+    enabled: Boolean(userId),
+  });
+
+  const { data: allOrgRequests } = useQuery({
+    queryKey: pendingRequestsKey('all'),
+    queryFn: () => listPendingRequests(userId, 'all'),
+    enabled: Boolean(userId),
+  });
+
+  const optionAgents = useMemo(() => allOrgAgents ?? agents ?? [], [allOrgAgents, agents]);
+  const optionRequests = useMemo(
+    () => allOrgRequests ?? requests ?? [],
+    [allOrgRequests, requests],
+  );
+
+  const orgIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...optionAgents, ...optionRequests]
+            .map(row => row.orgId)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ).sort(),
+    [optionAgents, optionRequests],
+  );
+
+  const { data: orgNamesById = {} } = useQuery({
+    queryKey: ['claw-admin-org-names', orgIds],
+    queryFn: () => appsService.getOrgNames(orgIds),
+    enabled: orgIds.length > 0,
+  });
+
+  const orgOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of [...optionAgents, ...optionRequests]) {
+      if (!row.orgId || row.orgId === myOrgId || seen.has(row.orgId)) continue;
+      const label = orgLabel(row.orgId, row.orgName, orgNamesById);
+      if (label) seen.set(row.orgId, label);
+    }
+    return Array.from(seen, ([value, label]) => ({ value, label })).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [optionAgents, optionRequests, myOrgId, orgNamesById]);
+
+  const selectedOrgLabel =
+    orgFilter === MY_ORG
+      ? 'My org'
+      : orgFilter === ALL_ORGS
+        ? 'All orgs'
+        : (orgOptions.find(option => option.value === orgFilter)?.label ?? 'Organization');
+
+  const visibleAgentCount = orgId
+    ? (agents ?? []).filter(agent => agent.orgId === orgId).length
+    : (agents?.length ?? 0);
+  const visibleRequestCount = orgId
+    ? (requests ?? []).filter(request => request.orgId === orgId).length
+    : (requests?.length ?? 0);
+
   const tabs = useMemo<TabItem[]>(
     () => [
+      { id: 'agents', label: agents ? `Agents (${visibleAgentCount})` : 'Agents' },
       {
         id: 'requests',
-        label: requests && requests.length > 0 ? `Requests (${requests.length})` : 'Requests',
+        label: visibleRequestCount > 0 ? `Requests (${visibleRequestCount})` : 'Requests',
       },
-      { id: 'agents', label: agents ? `Agents (${agents.length})` : 'Agents' },
     ],
-    [requests, agents],
+    [agents, visibleAgentCount, visibleRequestCount],
   );
 
   return (
-    <div className='mx-auto flex w-full max-w-3xl flex-col px-6 pb-16'>
+    <div className='max-w-ai-content mx-auto flex w-full flex-col px-6 pb-16'>
       <div className='flex items-center gap-5 pt-5'>
         <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
           <h1 className='text-2xl font-semibold tracking-tight text-foreground'>Admin Panel</h1>
@@ -73,10 +154,20 @@ export default function AdminV2(): ReactElement {
             Manage requests, agents, admins, and platform settings
           </p>
         </div>
-        <div className='flex shrink-0 items-center gap-2 text-xs text-muted-foreground'>
-          <Switch checked={allOrgs} onCheckedChange={setAllOrgs} aria-label='Show all orgs' />
-          <span>All orgs</span>
-        </div>
+        <Select value={orgFilter} onValueChange={setOrgFilter}>
+          <SelectTrigger className='w-48 shrink-0' aria-label='Organization filter'>
+            <SelectValue>{selectedOrgLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={MY_ORG}>My org</SelectItem>
+            <SelectItem value={ALL_ORGS}>All orgs</SelectItem>
+            {orgOptions.map(option => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
@@ -101,7 +192,9 @@ export default function AdminV2(): ReactElement {
         <RequestsTab
           userId={userId}
           scope={scope}
-          showOrgLabels={allOrgs}
+          orgId={orgId}
+          orgNamesById={orgNamesById}
+          showOrgLabels={orgFilter === ALL_ORGS}
           registration={registration}
         />
       )}
@@ -109,7 +202,9 @@ export default function AdminV2(): ReactElement {
         <AgentsTab
           userId={userId}
           scope={scope}
-          showOrgLabels={allOrgs}
+          orgId={orgId}
+          orgNamesById={orgNamesById}
+          showOrgLabels={orgFilter === ALL_ORGS}
           registration={registration}
         />
       )}

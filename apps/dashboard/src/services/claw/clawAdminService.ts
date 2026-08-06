@@ -69,7 +69,7 @@ export async function listPendingRequests(
 export async function getClawAgentBySlug(
   userId: string,
   slug: string,
-): Promise<{ spacesAppId: string | null; spacesAppTokenConfigured?: boolean }> {
+): Promise<{ name?: string; spacesAppId: string | null; spacesAppTokenConfigured?: boolean }> {
   return clawApiRequest(`/agents/${encodeURIComponent(slug)}`, { userId });
 }
 
