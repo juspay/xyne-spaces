@@ -262,6 +262,26 @@ export const shortcuts = {
     allowInInputs: false,
     priority: 30,
   },
+  'message.focusPrev': {
+    keys: 'up',
+    scope: 'channel',
+    description: 'Move to previous (older) message',
+    category: 'Messages',
+    // Gated in useMessageHoverShortcuts: only fires on the message list / body or
+    // an EMPTY composer, never while typing or inside a dialog.
+    allowInInputs: true,
+    preventDefault: true,
+    priority: 30,
+  },
+  'message.focusNext': {
+    keys: 'down',
+    scope: 'channel',
+    description: 'Move to next (newer) message',
+    category: 'Messages',
+    allowInInputs: true,
+    preventDefault: true,
+    priority: 30,
+  },
 
   // ===== COMPOSER SHORTCUTS =====
   'composer.attach': {

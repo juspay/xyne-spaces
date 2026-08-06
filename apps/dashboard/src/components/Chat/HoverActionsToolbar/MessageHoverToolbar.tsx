@@ -6,6 +6,7 @@ import {
   subscribeMessageHoverActions,
 } from './messageHoverActionsRegistry';
 import { useMessageHoverShortcuts } from './useMessageHoverShortcuts';
+import { isProgrammaticScrollActive } from './messageKeyboardNav';
 
 interface MessageHoverToolbarProps {
   /** The positioned (position: relative) list container the overlay lives in. */
@@ -37,7 +38,7 @@ interface ActiveRow {
 export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ containerRef }) => {
   // Keyboard shortcuts for whichever message is hovered — registered once per
   // list here instead of once per mounted ChatBubble (~6 × ~40 effects saved).
-  useMessageHoverShortcuts();
+  useMessageHoverShortcuts(containerRef);
 
   const [activeRow, setActiveRow] = useState<ActiveRow | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -139,6 +140,9 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
 
     const handleScroll = (): void => {
       if (pinnedOpenRef.current) return;
+      // Ignore the scroll our own arrow-key navigation just triggered, so the
+      // row it selected is not immediately cleared.
+      if (isProgrammaticScrollActive()) return;
       hide();
     };
 
