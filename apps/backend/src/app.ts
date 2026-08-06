@@ -98,6 +98,7 @@ import cacConfigRoutes from '@/routes/cacConfig';
 import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
+import seedGmailSyncCursorsRoutes from '@/routes/seedGmailSyncCursors';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import ticketActivitySystemActorBackfillRoutes from '@/routes/ticketActivitySystemActorBackfill';
 import activityThreadBackfillRoutes from '@/routes/activityThreadBackfill';
@@ -413,6 +414,9 @@ export class App {
     this.app.use('/migrate/api/admin/ticket-activity-system-actor-backfill', workspaceScopedRoute, ticketActivitySystemActorBackfillRoutes);
     // Activity isThreadActivity backfill
     this.app.use('/migrate/api/admin/activity-thread-backfill', workspaceScopedRoute, activityThreadBackfillRoutes);
+    // Gmail sync-cursor seeding — one-shot, run before cursor-resuming ingestion ships.
+    // Not workspace-scoped: external_sources carries no tenant filter and the seed spans all workspaces.
+    this.app.use('/migrate/api/admin/seed-gmail-sync-cursors', seedGmailSyncCursorsRoutes);
     this.app.use('/api/admin/activity-thread-backfill', workspaceScopedRoute, activityThreadBackfillRoutes);
     // App permissions backfill — grant all permissions to all installed apps
     this.app.use('/api/admin/app-permissions-backfill', workspaceScopedRoute, appPermissionsBackfillRoutes);

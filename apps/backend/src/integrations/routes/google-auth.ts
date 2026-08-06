@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { EmailMergeMode, WorkspaceRole, DeskType, ChannelRole, ChannelScopeType, ChannelType, AccessType } from '@xyne/shared';
+import { EmailMergeMode, WorkspaceRole, DeskType, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
 import express, { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
@@ -13,8 +13,6 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
-import { authorize } from '@/middleware/authorize';
-import { BACKFILL_ADMIN_RESOURCE } from '@/middleware/backfillAdminAuth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { config as appConfig } from '@/config/env';
@@ -31,9 +29,6 @@ import { pubSubWatchService } from '@/pubsub';
 
 const TAG = '[GoogleAuth]';
 
-// Same ACL the migration/backfill endpoints use — a grantable resource permission
-// rather than a users.role string check.
-const seedCursorsAdminAuth = authorize(BACKFILL_ADMIN_RESOURCE, AccessType.ADMIN);
 const router = express.Router();
 router.use(express.json());
 
@@ -1293,35 +1288,6 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     const stack = error?.stack || '';
     logger.error(`${TAG} Error in OAuth callback: ${message}`, { stack });
     redirectCallbackError(message);
-  }
-});
-
-/**
- * POST /api/integrations/google/admin/seed-sync-cursors
- * Give every active Gmail source a starting `lastSyncCursor` from `users.getProfile`.
- * Run before the cursor-resuming ingestion path ships.
- *
- * `?dryRun=true` previews. `?overwrite=true` replaces existing cursors — safe only
- * while nothing reads the column.
- */
-router.post('/admin/seed-sync-cursors', authMiddleware.authenticate, seedCursorsAdminAuth, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
-    const overwrite = req.query.overwrite === 'true' || req.body?.overwrite === true;
-
-    const report = await GoogleService.seedSyncCursors({ dryRun, overwrite });
-
-    logger.info(`${TAG} seed-sync-cursors finished`, {
-      dryRun: report.dryRun,
-      overwrite: report.overwrite,
-      seededCount: report.seeded.length,
-      skippedCount: report.skipped.length,
-      requestedBy: req.user?.id,
-    });
-    res.json({ success: true, ...report });
-  } catch (error: any) {
-    logger.error(`${TAG} seed-sync-cursors failed`, error);
-    res.status(500).json({ success: false, error: error?.message ?? 'Unknown error' });
   }
 });
 
