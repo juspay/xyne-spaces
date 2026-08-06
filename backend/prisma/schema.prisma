@@ -2923,7 +2923,7 @@ model ExternalSource {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([workspaceId, sourceType])
+  @@index([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
   @@index([displayName])

@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { Router, Request, Response } from 'express';
 import { authV2Middleware } from '../../middleware/authV2Middleware';
 import {
@@ -131,7 +132,7 @@ async function createMicrosoftWorkspaceConnectAuthUrl(
     throw new MicrosoftDeskRouteError('microsoft_not_configured', 500);
   }
 
-  const existing = await db.externalSource.findFirst({ where: { workspaceId, sourceType: 'microsoft' } });
+  const existing = await db.externalSource.findFirst({ where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: 'microsoft' } });
   if (existing?.isActive) {
     throw new MicrosoftDeskRouteError('Workspace already has a shared desk email configured', 409);
   }

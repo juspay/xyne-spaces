@@ -14,6 +14,7 @@
  */
 
 import express, { Request, Response } from 'express';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { WorkspaceRole } from '@prisma/client';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
@@ -40,7 +41,8 @@ router.get(
     try {
       const workspaceId = req.user!.workspaceId;
       const source = await db.externalSource.findFirst({
-        where: { workspaceId, sourceType: { in: ['google', 'microsoft'] } },
+        where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] } },
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
         select: { displayName: true, sourceType: true, isActive: true },
       });
       const body: MailboxStatus = {
@@ -92,7 +94,8 @@ router.post(
 
     try {
       const source = await db.externalSource.findFirst({
-        where: { workspaceId, sourceType: { in: ['google', 'microsoft'] } },
+        where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] } },
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
         select: { id: true, sourceType: true, displayName: true, credentials: true },
       });
       if (!source) {
