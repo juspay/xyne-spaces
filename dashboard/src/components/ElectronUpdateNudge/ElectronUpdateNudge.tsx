@@ -6,6 +6,11 @@ import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
 
+// Kill switch for the Electron auto-update nudge. While false the component is
+// fully inert: no event listener is registered and nothing is rendered.
+// Flip to true to re-enable the feature (dashboard-only change, no Electron release needed).
+const ELECTRON_UPDATE_NUDGE_ENABLED = false;
+
 const NUDGE_STORAGE_KEY = 'xyne:electron-update-nudge';
 const UPDATE_ATTEMPT_STORAGE_KEY = 'xyne:electron-update-attempt';
 const UPDATE_RESULT_STORAGE_KEY = 'xyne:electron-update-result';
@@ -234,6 +239,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
   }, []);
 
   useEffect(() => {
+    if (!ELECTRON_UPDATE_NUDGE_ENABLED) return undefined;
     const electronAPI = window.electronAPI;
     if (!electronAPI?.onAppUpdateAvailable) return undefined;
 
@@ -393,6 +399,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
     setVisible(false);
   };
 
+  if (!ELECTRON_UPDATE_NUDGE_ENABLED) return null;
   if (!window.electronAPI || !nudge || !visible || !updateNudgeSlot) return null;
 
   const title =
