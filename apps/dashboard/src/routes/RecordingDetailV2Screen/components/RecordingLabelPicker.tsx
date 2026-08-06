@@ -18,7 +18,7 @@ export interface RecordingLabelPickerProps {
 const MAX_VISIBLE_LABELS = 3;
 
 const CHIP_CLASS_NAME =
-  'inline-flex items-center gap-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground';
+  'inline-flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground whitespace-nowrap scrollbar-none data-[theme=midnight]:bg-muted/50';
 
 const READ_ONLY_TRIGGER_CLASS_NAME =
   'inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
@@ -30,7 +30,7 @@ function LabelChip({ label }: { label: string }): ReactElement {
         className={cn('size-1.5 shrink-0 rounded-full', getRecordingTagDotColor(label))}
         aria-hidden='true'
       />
-      <span className='max-w-24 truncate'>{label}</span>
+      <span>{label}</span>
     </span>
   );
 }
@@ -73,7 +73,7 @@ export function RecordingLabelPicker({
   };
 
   const appliedLabels = (
-    <>
+    <span className='flex max-w-76 w-full items-center gap-1.5 overflow-x-scroll scrollbar-none'>
       {visibleLabels.map(label => (
         <LabelChip key={label} label={resolveLabel(label)} />
       ))}
@@ -85,7 +85,7 @@ export function RecordingLabelPicker({
           +{overflowCount}
         </span>
       )}
-    </>
+    </span>
   );
 
   if (!canEdit) {

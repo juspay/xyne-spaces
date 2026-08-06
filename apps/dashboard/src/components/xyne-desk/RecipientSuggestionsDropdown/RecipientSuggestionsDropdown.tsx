@@ -77,6 +77,7 @@ export const RecipientSuggestionsDropdown = ({
         top: pos.top,
         width: pos.width,
         maxHeight: DROPDOWN_MAX_HEIGHT,
+        pointerEvents: 'auto',
       }}
       className='z-50 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md recipient-suggestions-dropdown'
     >

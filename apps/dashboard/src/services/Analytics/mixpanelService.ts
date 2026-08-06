@@ -1,4 +1,5 @@
 import mixpanel from 'mixpanel-browser';
+import posthog from 'posthog-js';
 
 interface MixpanelUser {
   id: string;
@@ -22,6 +23,7 @@ interface EventProperties {
 
 class MixpanelService {
   private isInitialized = false;
+  private isPosthogInitialized = false;
   private currentUserId: string | null = null;
   private currentPlatform: string | null = null;
   private registeredProperties: string[] = [];
@@ -55,6 +57,8 @@ class MixpanelService {
   }
 
   initialize(): void {
+    this.initializePosthog();
+
     if (this.isInitialized) {
       return;
     }
@@ -90,6 +94,31 @@ class MixpanelService {
       }
     } catch {
       this.isInitialized = false;
+    }
+  }
+
+  private initializePosthog(): void {
+    if (this.isPosthogInitialized) {
+      return;
+    }
+
+    const key = import.meta.env['VITE_POSTHOG_KEY'] as string | undefined;
+    const host = import.meta.env['VITE_POSTHOG_HOST'] as string | undefined;
+
+    if (!key || key.trim() === '' || !host || host.trim() === '') {
+      return;
+    }
+
+    try {
+      /* eslint-disable @typescript-eslint/naming-convention */
+      posthog.init(key, {
+        api_host: host,
+        defaults: '2025-05-24',
+      });
+      /* eslint-enable @typescript-eslint/naming-convention */
+      this.isPosthogInitialized = true;
+    } catch {
+      this.isPosthogInitialized = false;
     }
   }
 
@@ -242,7 +271,19 @@ class MixpanelService {
    * Events are only sent to Mixpanel on production URLs
    */
   track(eventName: string, properties?: EventProperties): void {
-    if (!this.isValidEventName(eventName) || !this.isInitialized) {
+    if (!this.isValidEventName(eventName)) {
+      return;
+    }
+
+    if (this.isPosthogInitialized) {
+      try {
+        posthog.capture(eventName, this.getEnrichedProperties(properties || {}));
+      } catch {
+        // Silently fail if posthog capture fails
+      }
+    }
+
+    if (!this.isInitialized) {
       return;
     }
 
@@ -269,6 +310,21 @@ class MixpanelService {
     // Auto-initialize if not already initialized
     if (!this.isInitialized) {
       this.initialize();
+    }
+
+    if (this.isPosthogInitialized && user?.id) {
+      try {
+        const posthogProperties: Record<string, string> = {};
+        Object.keys(user).forEach(key => {
+          const value = user[key];
+          if (value !== undefined && key !== 'picture' && key !== 'id') {
+            posthogProperties[key] = value;
+          }
+        });
+        posthog.identify(user.id, posthogProperties);
+      } catch {
+        // Silently fail if posthog identify fails
+      }
     }
 
     if (!this.isInitialized || !user?.id) {
@@ -308,6 +364,14 @@ class MixpanelService {
    * Clears user ID, super properties, and user profile
    */
   reset(): void {
+    if (this.isPosthogInitialized) {
+      try {
+        posthog.reset();
+      } catch {
+        // Silently fail if posthog reset fails
+      }
+    }
+
     if (!this.isInitialized) {
       return;
     }
