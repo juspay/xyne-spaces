@@ -411,6 +411,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : userProfile?.team ? (
             <div className='flex items-center gap-2 mt-1'>
               <div className='text-lg text-muted-foreground'>{userProfile.team}</div>
+              {isOwnProfile && (
+                <button
+                  onClick={() => handleStartEdit('team', userProfile.team)}
+                  className='text-muted-foreground hover:text-muted-foreground'
+                  title='Edit team name'
+                >
+                  <Edit2 className='size-3' />
+                </button>
+              )}
             </div>
           ) : isOwnProfile ? (
             <button
