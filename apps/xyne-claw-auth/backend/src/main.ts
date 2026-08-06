@@ -81,7 +81,6 @@ import { evalsRouter } from "./routes/evals/index.js";
 import { searchEvalsRouter } from "./routes/search-evals/index.js";
 import { entityExtractionRouter } from "./routes/entity-extraction.js";
 import { cliAuthRouter } from "./routes/cli-auth.js";
-import { sdkOAuthRouter } from "./routes/sdk-oauth.js";
 import { slackRouter } from "./surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "./mcpgateway/index.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
@@ -205,9 +204,6 @@ app.use(`${BASE}/agents`, requireAuth, allowReadAccessToken("agents:read"), agen
 // its own guard (requireCliTokensEnabled / requireApproveAuth — routes/cli-auth.ts).
 // This is also where CLI tokens are MINTED, so it must never require one.
 app.use(`${BASE}/cli`, cliAuthRouter);
-// SDK authorization server. Mounted at its own prefix so `/cli` keeps first
-// refusal on its paths; per-route auth, no mount-level guard.
-app.use(`${BASE}/sdk/oauth`, sdkOAuthRouter);
 // Public Slack ingress; authenticates itself with the per-install HMAC secret.
 app.use(`${BASE}/surfaces/slack`, slackRouter);
 app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);

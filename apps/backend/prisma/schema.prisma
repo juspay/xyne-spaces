@@ -989,6 +989,64 @@ model SdkIdempotencyKey {
   @@schema("non_zero")
 }
 
+// Refresh tokens for the public Spaces SDK OAuth.
+//
+// Access tokens are short-lived RS256 JWTs verified statelessly by the backend
+// itself (no external auth server). This table is the only revocation point:
+// deleting or revoking a row stops renewal; the outstanding access token
+// expires within minutes.
+//
+// Rotation is single-use. `familyId` groups every token descended from one
+// authorization, so presenting an already-rotated token (classic signal of a
+// stolen refresh token) can revoke the whole family at once.
+model SdkRefreshToken {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  clientId    String
+  familyId    String
+  tokenHash   String    @unique
+  prefix      String
+  scopes      String[]  @default([])
+  rotatedAt   DateTime? @map("rotated_at")
+  revokedAt   DateTime? @map("revoked_at")
+  expiresAt   DateTime  @map("expires_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("sdk_refresh_tokens")
+  @@schema("non_zero")
+}
+
+// Short-lived authorization codes for SDK OAuth.
+//
+// When a user authorizes an SDK client via the browser, the backend mints a
+// one-time authorization code. The SDK then exchanges this code (via POST
+// /api/v1/oauth/token) for an access + refresh token pair.
+//
+// Codes are single-use and expire within 10 minutes.
+model SdkAuthorizationCode {
+  id          String   @id @default(cuid())
+  codeHash    String   @unique @map("code_hash")
+  userId      String
+  workspaceId String
+  memberId    String
+  clientId    String
+  scopes      String[] @default([])
+  redirectUri String?  @map("redirect_uri")
+  usedAt      DateTime? @map("used_at")
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("sdk_authorization_codes")
+  @@schema("non_zero")
+}
+
 // Call messages — in-call chat for both internal and external users
 model CallMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
