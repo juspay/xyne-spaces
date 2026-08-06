@@ -151,6 +151,8 @@ const WORKSPACE_VIEW_NUMERIC_KEYS = [
 
 const DERIVED_COLUMNS = ['stage', 'board'];
 
+const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
+
 function mergeSavedColumns(prev: Set<string>, saved: string[]): Set<string> {
   const next = new Set(saved);
   for (const key of DERIVED_COLUMNS) {
@@ -195,7 +197,7 @@ function filtersToValues(
     });
   }
   if (groupBy && groupBy !== 'none') addTicket('__groupBy', groupBy);
-  if (columns?.length) addTicket('__columns', columns.join(','));
+  if (columns) addTicket('__columns', columns.join(','));
   return values;
 }
 
@@ -350,9 +352,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
-    initialColumns?.length
-      ? new Set(initialColumns)
-      : new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
+    initialColumns ? new Set(initialColumns) : new Set(DEFAULT_VISIBLE_COLUMNS),
   );
   // The tickets table always surfaces the Stage column (parity with the Support
   // desk table, which renders TicketTable with its stage-inclusive defaults).
@@ -2608,6 +2608,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                     .split(',')
                                     .filter(Boolean);
                                   setVisibleColumns(prev => mergeSavedColumns(prev, savedColumns));
+                                } else {
+                                  setVisibleColumns(prev =>
+                                    mergeSavedColumns(prev, DEFAULT_VISIBLE_COLUMNS),
+                                  );
                                 }
                                 if (filters.boards) newFilters.boards = filters.boards;
                                 setFilters(newFilters);

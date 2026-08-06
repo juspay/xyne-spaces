@@ -42,15 +42,14 @@ const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
 function validateTicketValue(fieldName: string, fieldValue: string): void {
   const table = 'saved_user_configuration_values' as const;
 
+  if (fieldName === '__columns') return;
+
   if (!fieldValue) {
     throw new MutationACLError(`Field value cannot be empty for field: ${fieldName}`, table);
   }
 
   // Virtual UI-state field (the groupBy column name), not a real column.
   if (fieldName === '__groupBy') return;
-
-  // Virtual UI-state field (the comma-separated list of visible table columns), not a real column.
-  if (fieldName === '__columns') return;
 
   if (fieldName === 'roleAssignments') {
     const [roleId, userIdsCsv] = fieldValue.split('|');

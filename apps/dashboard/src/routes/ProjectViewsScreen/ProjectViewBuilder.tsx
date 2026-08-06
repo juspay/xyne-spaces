@@ -67,7 +67,7 @@ const ProjectViewBuilder = (): ReactElement => {
         name: ownView.name,
         filters,
         ...(groupBy ? { groupBy } : {}),
-        ...(columns?.length ? { columns } : {}),
+        ...(columns ? { columns } : {}),
       };
     }
     return sharedConfig;
@@ -101,7 +101,7 @@ const ProjectViewBuilder = (): ReactElement => {
       {...(seed?.name ? { initialName: seed.name } : {})}
       {...(seed?.filters ? { initialFilters: seed.filters } : {})}
       {...(seed?.groupBy ? { initialGroupBy: seed.groupBy } : {})}
-      {...(seed?.columns?.length ? { initialColumns: seed.columns } : {})}
+      {...(seed?.columns ? { initialColumns: seed.columns } : {})}
     />
   );
 };
