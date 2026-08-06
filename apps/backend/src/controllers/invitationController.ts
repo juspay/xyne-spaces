@@ -334,15 +334,8 @@ export class InvitationController {
         };
         if (!decoded.email) throw new Error('Invalid JWT payload');
 
-        // Email/password pending-auth tokens carry a single-use jwtId, registered in Redis
-        // at mint time by emailAuthController. Google/Microsoft OAuth tokens don't mint one,
-        // so this replay check only applies to the EMAIL provider.
-        if (decoded.provider?.toUpperCase() === 'EMAIL') {
-          if (!decoded.jwtId) {
-            res.status(401).json({ error: 'Authentication session expired. Please login again.' });
-            return;
-          }
-
+        // If the JWT contains a jwtId, verify it exists in Redis (email-flow revocable token)
+        if (decoded.jwtId) {
           const jwtKey = `pendingauth:jwtid:${decoded.jwtId}`;
           const jwtValue = await redisService.get(jwtKey);
           if (!jwtValue) {
