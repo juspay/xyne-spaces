@@ -2607,9 +2607,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                   const savedColumns = columnsEntry.fieldValue
                                     .split(',')
                                     .filter(Boolean);
-                                  setVisibleColumns(prev =>
-                                    mergeSavedColumns(prev, savedColumns),
-                                  );
+                                  setVisibleColumns(prev => mergeSavedColumns(prev, savedColumns));
                                 }
                                 if (filters.boards) newFilters.boards = filters.boards;
                                 setFilters(newFilters);
