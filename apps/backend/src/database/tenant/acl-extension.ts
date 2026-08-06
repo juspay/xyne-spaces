@@ -46,27 +46,44 @@ function isWorkspaceOnly(where: Record<string, unknown>, ws: string): boolean {
   return keys.length === 1 && keys[0] === 'workspaceId' && where.workspaceId === ws;
 }
 
-/**
- * Diagnostic counter for queries the extension could not scope, deduped by
- * `model:operation:reason` and capped at 500 entries.
+/*
+ * Everything this file logs is one of three kinds. Nothing writes to the logger directly —
+ * go through one of these so the kind is never ambiguous at the call site.
+ *
+ *   note*        deduped by shape, capped. Answers "which shapes exist", NOT "how often".
+ *                A shape appears once per process, so silence is not evidence of absence.
+ *                  [acl] query ran with no tenant scope
+ *                  [acl] ran inside a transaction
+ *                  [acl] table opted out of scoping
+ *                  [acl] clause wider than the workspace
+ *                  [acl] guest write not narrowed
+ *
+ *   logViolation every occurrence. A tenant-key violation, which is refused or merely
+ *                recorded depending on ENFORCE. A repeat is itself the signal.
+ *                  [acl] create names a different workspace
+ *                  [acl] update reassigns workspaceId
+ *
+ *   logRefused*  every occurrence. A request this file actually turned away.
+ *                  [acl] blocked
+ *                  [acl] blocked create
  */
-const unscopedSeen = new Set<string>();
+
+const NOTE_CAP = 500;
+const noteSeen = new Set<string>();
 
 /** No stack capture on purpose: `model` + `operation` + the pod label is enough to grep. */
-function warnUnscoped(model: string | undefined, operation: string, reason: string): void {
-  const key = `${model ?? '?'}:${operation}:${reason}`;
-  if (unscopedSeen.has(key) || unscopedSeen.size >= 500) return;
-  unscopedSeen.add(key);
-  logger.warn('[acl] query ran with no tenant scope', { model, operation, reason });
+function note(tag: string, model: string | undefined, operation: string, detail: Record<string, unknown> = {}): void {
+  const key = `${tag}:${model ?? '?'}:${operation}:${detail.reason ?? ''}`;
+  if (noteSeen.has(key) || noteSeen.size >= NOTE_CAP) return;
+  noteSeen.add(key);
+  logger.warn(tag, { model, operation, ...detail });
 }
 
-/** Counts query shapes worth reviewing, deduped by tag:model:operation and capped like the above. */
-const patternSeen = new Set<string>();
+function noteUnscoped(model: string | undefined, operation: string, reason: string): void {
+  note('[acl] query ran with no tenant scope', model, operation, { reason });
+}
 
-function notePattern(tag: string, model: string | undefined, operation: string, detail: Record<string, unknown> = {}): void {
-  const key = `${tag}:${model ?? '?'}:${operation}`;
-  if (patternSeen.has(key) || patternSeen.size >= 500) return;
-  patternSeen.add(key);
+function logViolation(tag: string, model: string, operation: string, detail: Record<string, unknown>): void {
   logger.warn(tag, { model, operation, ...detail });
 }
 
@@ -90,11 +107,11 @@ function notAllowedToCreate(model: string): Error {
   return new Error(`Not authorized to create ${model}`);
 }
 
-function logBlocked(model: string, operation: string, reason: string): void {
+function logRefused(model: string, operation: string, reason: string): void {
   logger.warn('[acl] blocked', { model, operation, reason });
 }
 
-function logBlockedCreate(model: string, operation: string): void {
+function logRefusedCreate(model: string, operation: string): void {
   logger.warn('[acl] blocked create', { model, operation, reason: 'canCreate returned false' });
 }
 
@@ -116,7 +133,7 @@ function reportForeignWorkspace(model: string, operation: string, row: unknown, 
   const given = (row as { workspaceId?: unknown }).workspaceId;
   // undefined -> stamp fills it. null -> a deliberate row on a nullable column.
   if (typeof given !== 'string' || given === ws) return;
-  logger.warn('[acl] create names a different workspace', { model, operation, given, enforced: ws });
+  logViolation('[acl] create names a different workspace', model, operation, { given, enforced: ws });
   if (ENFORCE.workspaceImmutable) throw outOfScope(model);
 }
 
@@ -145,7 +162,7 @@ function reportWorkspaceReassignment(
       ? (given as { set?: unknown }).set
       : given;
     if (typeof value !== 'string' || value === ws) continue;
-    logger.warn('[acl] update reassigns workspaceId', { model, operation, given: value, enforced: ws });
+    logViolation('[acl] update reassigns workspaceId', model, operation, { given: value, enforced: ws });
     if (ENFORCE.workspaceImmutable) throw outOfScope(model);
   }
 }
@@ -206,7 +223,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
         async $allOperations({ model, operation, args, query }) {
           if (txStorage.getStore() === true) {
             // Interactive transactions run on the base client; record what goes through.
-            notePattern('[acl] ran inside a transaction', model, operation);
+            note('[acl] ran inside a transaction', model, operation);
             return query(args);
           }
           const ctx = getContextOrNull();
@@ -215,7 +232,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           if (!ws || !model) {
             // `system` is intentional; anything else reaching here has no scope to apply.
             if (ctx?.actor !== 'system')
-              warnUnscoped(model, operation, ctx ? 'no-workspace' : 'no-context');
+              noteUnscoped(model, operation, ctx ? 'no-workspace' : 'no-context');
             // Widest-reaching switch: every caller not wrapped in runWithContext lands here.
             if (ENFORCE.noContext && ctx && ctx.actor !== 'system' && model && isWorkspaceScopedModel(model)) {
               throw outOfScope(model);
@@ -258,7 +275,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               // Reached when the table's ACL expressed no opinion, or the caller is a
               // service actor: fall back to plain workspace scope.
               if (!isWorkspaceScopedModel(model)) {
-                warnUnscoped(model, operation, 'no-workspace-column');
+                noteUnscoped(model, operation, 'no-workspace-column');
                 return query(args);
               }
               aclWhere = { workspaceId: ws };
@@ -268,7 +285,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             if (isUnrestricted(aclWhere)) {
               // Only worth noting when the model has the column; global tables are expected.
               if (isWorkspaceScopedModel(String(model))) {
-                notePattern('[acl] table opted out of scoping', model, operation, { side: 'read' });
+                note('[acl] table opted out of scoping', model, operation, { side: 'read' });
               }
               return query(args);
             } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(aclWhere, ws)) {
@@ -276,7 +293,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               // its own clause returned. Reported here rather than applied: a table that
               // legitimately spans workspaces would return nothing instead of erroring, and the
               // only environment that can say which tables those are is one carrying real traffic.
-              notePattern('[acl] clause wider than the workspace', model, operation, { side: 'read' });
+              note('[acl] clause wider than the workspace', model, operation, { side: 'read' });
             }
             const scalarDefault = isWorkspaceOnly(aclWhere, ws);
 
@@ -309,7 +326,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               }
               const row = (await query(patched as typeof args)) as { workspaceId?: string } | null;
               if (row && row.workspaceId !== ws) {
-                logBlocked(model, operation, 'row in another workspace');
+                logRefused(model, operation, 'row in another workspace');
                 // findUnique returns null where findUniqueOrThrow raises.
                 if (operation === 'findUniqueOrThrow') throw outOfScope(model);
                 return null;
@@ -328,7 +345,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             >)[camel];
             const row = await delegate.findFirst({ ...a, where });
             if (!row && operation === 'findUniqueOrThrow') {
-              logBlocked(model, operation, 'no row matched the relational ACL');
+              logRefused(model, operation, 'no row matched the relational ACL');
               throw outOfScope(model);
             }
             return row;
@@ -342,7 +359,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               reportForeignWorkspace(model, operation, row, ws);
               if (acl) {
                 const ok = await acl.canCreate(row as Record<string, unknown>);
-                if (!ok) { logBlockedCreate(model, operation); throw notAllowedToCreate(model); }
+                if (!ok) { logRefusedCreate(model, operation); throw notAllowedToCreate(model); }
               }
             }
             return query(args);
@@ -354,16 +371,13 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             reportWorkspaceReassignment(model, operation, (args as { data?: unknown }).data, ws);
           }
 
-          // Guest reads are narrowed by around thirty table ACLs; guest writes are not narrowed
-          // anywhere. Record which model and operation a guest actually reaches so the set can be
-          // enumerated from real traffic before deciding what to refuse. Reports only.
           let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
 
           // A guest writes only what a guest can read: intersect the two rather than
           // restating the rule in every table ACL. Reported for every guest write; the
           // intersection needs a table ACL to read from, and ACL_ENFORCE_GUEST_WRITES on.
           if (ctx?.role === 'GUEST' && ctx.actor === 'user') {
-            notePattern('[acl] guest write not narrowed', model, operation);
+            note('[acl] guest write not narrowed', model, operation);
             if (ENFORCE.guestWrites && acl) {
               const guestRead = (await acl.getWhereClause()) as Record<string, unknown> | null;
               if (guestRead && !isUnrestricted(guestRead)) {
@@ -377,19 +391,19 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           if (!mutateWhere) {
             // Service actors only — see the read branch.
             if (!isWorkspaceScopedModel(model)) {
-              warnUnscoped(model, operation, 'no-workspace-column');
+              noteUnscoped(model, operation, 'no-workspace-column');
               return query(args);
             }
             mutateWhere = { workspaceId: ws };
           }
           if (isUnrestricted(mutateWhere)) {
             if (isWorkspaceScopedModel(String(model))) {
-              notePattern('[acl] table opted out of scoping', model, operation, { side: 'write' });
+              note('[acl] table opted out of scoping', model, operation, { side: 'write' });
             }
             return query(args);
           } else if (isWorkspaceScopedModel(String(model)) && !isWorkspaceOnly(mutateWhere, ws)) {
             // Same reporting rule as reads.
-            notePattern('[acl] clause wider than the workspace', model, operation, { side: 'write' });
+            note('[acl] clause wider than the workspace', model, operation, { side: 'write' });
           }
 
           // Bulk ops accept a non-unique/relational where — AND the mutate filter directly.
@@ -415,14 +429,14 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               const exists = await delegate.count({ where: scoped });
               if (exists > 0) {
                 // The row exists, but not in the caller's scope — an upsert would update it.
-                logBlocked(model, operation, 'upsert target in another workspace');
+                logRefused(model, operation, 'upsert target in another workspace');
                 throw outOfScope(model);
               }
               // Row doesn't exist → this upsert will insert; gate it like a create.
               reportForeignWorkspace(model, operation, a.create, ws);
               if (acl) {
                 const ok = await acl.canCreate((a.create ?? {}) as Record<string, unknown>);
-                if (!ok) { logBlockedCreate(model, operation); throw notAllowedToCreate(model); }
+                if (!ok) { logRefusedCreate(model, operation); throw notAllowedToCreate(model); }
               }
             }
             return query(args);
@@ -433,7 +447,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           const a = (args ?? {}) as { where?: object };
           const n = await delegate.count({ where: { AND: [toWhereInput(model, a.where), mutateWhere] } });
           if (n === 0) {
-            logBlocked(model, operation, 'target row not in the caller\'s scope');
+            logRefused(model, operation, 'target row not in the caller\'s scope');
             throw outOfScope(model);
           }
           return query(args);
