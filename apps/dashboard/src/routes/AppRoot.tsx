@@ -24,6 +24,7 @@ import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
 import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
+import { RequireClawAdmin } from './AIScreen/RequireClawAdmin';
 import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
 import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
 import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
@@ -207,6 +208,7 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/AILibraryScreen';
+import AIAdminScreen from './AIScreen/AIAdminScreen';
 import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
@@ -840,6 +842,14 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
+                  {
+                    path: 'admin',
+                    element: (
+                      <RequireClawAdmin>
+                        <AIAdminScreen />
+                      </RequireClawAdmin>
+                    ),
+                  },
                   { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
                   { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
                   { path: 'library/skill/create', element: <AISkillCreateScreen /> },

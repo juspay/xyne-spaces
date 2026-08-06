@@ -13,6 +13,8 @@ import {
   CHAT_SIDEBAR_MIN_WIDTH,
 } from '../../routes/ChatScreen/chatSidebarWidth';
 import { cn } from '../../utils/classNames';
+import { useAuth } from '../../hooks/useAuth';
+import { ClawAdminAccessContext, useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
 
 interface AIShellProps {
   activeSessionId?: string | undefined;
@@ -38,6 +40,8 @@ export function AIShell({
   children,
 }: AIShellProps): ReactElement {
   const sidebarPanelRef = useRef<PanelImperativeHandle>(null);
+  const { user } = useAuth();
+  const adminAccess = useClawAdminAccessQuery(user?.id);
 
   useSidebarResizeShortcut({
     panelRef: sidebarPanelRef,
@@ -46,43 +50,45 @@ export function AIShell({
   });
 
   return (
-    <ResizableGroup
-      orientation='horizontal'
-      className='flex h-full align-top'
-      autoSaveId='ai-screen-resize'
-    >
-      <Panel
-        id='ai-sidebar-panel'
-        panelRef={sidebarPanelRef}
-        defaultSize={CHAT_SIDEBAR_DEFAULT_WIDTH}
-        minSize={CHAT_SIDEBAR_MIN_WIDTH}
-        maxSize={CHAT_SIDEBAR_MAX_WIDTH}
-        groupResizeBehavior='preserve-pixel-size'
+    <ClawAdminAccessContext.Provider value={adminAccess}>
+      <ResizableGroup
+        orientation='horizontal'
+        className='flex h-full align-top'
+        autoSaveId='ai-screen-resize'
       >
-        <aside id='ai-sidebar' aria-label='AI Sidebar' className='h-full w-full'>
-          <AISidebar
-            activeSessionId={activeSessionId}
-            onCreateChat={onCreateChat}
-            onSelectSession={onSelectSession}
-            onAccount={onAccount}
-            mobileOpen={mobileOpen}
-            onMobileOpenChange={onMobileOpenChange}
-          />
-        </aside>
-      </Panel>
-
-      <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-        <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-      </Separator>
-
-      <Panel id='ai-main' minSize='30%'>
-        <div
-          ref={mainRef}
-          className={cn('relative flex h-full min-w-0 flex-1 flex-col', mainClassName)}
+        <Panel
+          id='ai-sidebar-panel'
+          panelRef={sidebarPanelRef}
+          defaultSize={CHAT_SIDEBAR_DEFAULT_WIDTH}
+          minSize={CHAT_SIDEBAR_MIN_WIDTH}
+          maxSize={CHAT_SIDEBAR_MAX_WIDTH}
+          groupResizeBehavior='preserve-pixel-size'
         >
-          {children}
-        </div>
-      </Panel>
-    </ResizableGroup>
+          <aside id='ai-sidebar' aria-label='AI Sidebar' className='h-full w-full'>
+            <AISidebar
+              activeSessionId={activeSessionId}
+              onCreateChat={onCreateChat}
+              onSelectSession={onSelectSession}
+              onAccount={onAccount}
+              mobileOpen={mobileOpen}
+              onMobileOpenChange={onMobileOpenChange}
+            />
+          </aside>
+        </Panel>
+
+        <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+          <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+        </Separator>
+
+        <Panel id='ai-main' minSize='30%'>
+          <div
+            ref={mainRef}
+            className={cn('relative flex h-full min-w-0 flex-1 flex-col', mainClassName)}
+          >
+            {children}
+          </div>
+        </Panel>
+      </ResizableGroup>
+    </ClawAdminAccessContext.Provider>
   );
 }

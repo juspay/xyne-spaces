@@ -16,8 +16,14 @@ export { ClawApiError } from './clawRequest';
  * Fetches the list of agents the given user can see. `userId` is the internal
  * Spaces user id (useAuth().user.id).
  */
-export async function listClawAuthAgents(userId: string): Promise<Agent[]> {
-  return clawApiRequest<Agent[]>(`/agents?userId=${encodeURIComponent(userId)}`);
+export async function listClawAuthAgents(
+  userId: string,
+  options: { allAgents?: boolean; orgScope?: 'org' | 'all' } = {},
+): Promise<Agent[]> {
+  const params = new URLSearchParams({ userId });
+  if (options.allAgents) params.set('scope', 'all');
+  if (options.orgScope === 'all') params.set('orgScope', 'all');
+  return clawApiRequest<Agent[]>(`/agents?${params.toString()}`);
 }
 
 /** Fetches a single agent's full detail by slug. */
