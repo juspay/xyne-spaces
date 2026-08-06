@@ -1,6 +1,6 @@
 import { type ReactElement } from 'react';
 import { AIShell } from '../../components/AIScreen/AIShell';
-import ClawAgentCreateV2 from '../ClawAgentsScreen/create-v2/ClawAgentCreateV2';
+import ClawAgentCreateV2 from '../ClawAgentsScreen/library/agents/create/ClawAgentCreateV2';
 import { useAIChatHandoff } from './useAIChatHandoff';
 
 const AIAgentCreateScreen = (): ReactElement => {

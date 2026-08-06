@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { AIShell } from '../../components/AIScreen/AIShell';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useClawAgentDetail } from '../../hooks/useClawAgentDetail';
-import ClawAgentCreateV2 from '../ClawAgentsScreen/create-v2/ClawAgentCreateV2';
+import ClawAgentCreateV2 from '../ClawAgentsScreen/library/agents/create/ClawAgentCreateV2';
 import { useAIChatHandoff } from './useAIChatHandoff';
 
 const AIAgentEditScreen = (): ReactElement => {
