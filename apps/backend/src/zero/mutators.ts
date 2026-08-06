@@ -620,6 +620,7 @@ async function assignFullRoles(
     boardId,
     createdBy,
     projectId,
+    channelId: channelId ?? undefined,
   });
 
   const primaryUserId = primaryUserIdOf(fullResult);
@@ -9830,7 +9831,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           phoneNumber: z.string().nullable().optional(),
           dob: z.number().nullable().optional(),
           manager: z.string().nullable().optional(),
-          metadata: z.string().nullable().optional(),
           timestamp: z.number(),
           profileId: z.string(),
         }),
@@ -9856,7 +9856,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             phoneNumber?: string | null;
             dob?: number | null;
             manager?: string | null;
-            metadata?: string | null;
             updatedAt: number;
             createdAt: number;
           } = {
@@ -9869,7 +9868,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(params.phoneNumber !== undefined && { phoneNumber: params.phoneNumber }),
             ...(params.dob !== undefined && { dob: params.dob }),
             ...(params.manager !== undefined && { manager: params.manager }),
-            ...(params.metadata !== undefined && { metadata: params.metadata }),
             updatedAt: now,
             createdAt: existingProfile ? existingProfile.createdAt || now : now,
           };

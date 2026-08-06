@@ -7128,7 +7128,6 @@ export const mutators = defineMutators({
         phoneNumber: z.string().nullable().optional(),
         dob: z.number().nullable().optional(),
         manager: z.string().nullable().optional(),
-        metadata: z.string().nullable().optional(),
         timestamp: z.number(),
         profileId: z.string(),
       }),
@@ -7143,7 +7142,6 @@ export const mutators = defineMutators({
           phoneNumber,
           dob,
           manager,
-          metadata,
           timestamp,
           profileId: inputProfileId,
         },
@@ -7166,7 +7164,6 @@ export const mutators = defineMutators({
           phoneNumber?: string | null;
           dob?: number | null;
           manager?: string | null;
-          metadata?: string | null;
           updatedAt: number;
           createdAt: number;
         } = {
@@ -7179,7 +7176,6 @@ export const mutators = defineMutators({
           ...(phoneNumber !== undefined && { phoneNumber }),
           ...(dob !== undefined && { dob }),
           ...(manager !== undefined && { manager }),
-          ...(metadata !== undefined && { metadata }),
           updatedAt: timestamp,
           createdAt: existingProfile ? existingProfile.createdAt || timestamp : timestamp,
         };
