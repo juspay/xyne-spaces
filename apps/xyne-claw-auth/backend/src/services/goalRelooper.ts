@@ -17,6 +17,16 @@ import { activeGoalRepository } from "../repositories/activeGoalRepository.js";
 import { judgeGoalViaClaw } from "./goalJudgeClient.js";
 import type { Prisma } from "@prisma/client";
 
+export const GOAL_CONDITION_MAX_LENGTH = 2_000;
+
+/** Canonical, bounded form used by both goal-card signing and execution. */
+export function normalizeGoalCondition(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const normalized = input.replace(/\s+/gu, " ").trim();
+  if (!normalized) return null;
+  return normalized.slice(0, GOAL_CONDITION_MAX_LENGTH);
+}
+
 const NEXT_TURN_TASK_TEMPLATE = (
   condition: string,
   ctx?: { turnCount?: number; maxTurns?: number },

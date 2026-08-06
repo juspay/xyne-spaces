@@ -1,8 +1,26 @@
+import { createHmac } from "node:crypto";
+import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
+
 const requiredEnv = (name: string): string => {
   const val = process.env[name];
   if (!val) throw new Error(`Missing required env: ${name}`);
   return val;
 };
+
+const rootEncryptionKey = Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex");
+if (rootEncryptionKey.length !== 32) {
+  throw new Error("ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hex characters");
+}
+
+const dataEncryptionKey = derivePurposeKey(rootEncryptionKey, "data-encryption/aes-256-gcm/v1");
+const actionSigningKey = derivePurposeKey(rootEncryptionKey, "action-approval/hmac-sha256/v1");
+const sessionSigningKey = derivePurposeKey(rootEncryptionKey, "session-token/hmac-sha256/v1");
+const oauthStateSigningKey = derivePurposeKey(rootEncryptionKey, "oauth-state/hmac-sha256/v1");
+const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("xyne-claw-auth/session-token/v1").digest();
+
+// Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
+// the derived data key; reads fall back to the legacy root during migration.
+registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
@@ -13,7 +31,13 @@ export const CONFIG = {
   // traffic off the public ingress (~100k+ progress events/day in prod).
   // Falls back to `selfUrl` so single-node / dev deployments keep working.
   internalUrl: process.env["AUTH_SERVICE_INTERNAL_URL"] ?? process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
-  encryptionKey: Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex"),
+  encryptionKey: dataEncryptionKey,
+  actionSigningKey,
+  sessionSigningKey,
+  oauthStateSigningKey,
+  legacyActionSigningKey: rootEncryptionKey,
+  legacySessionSigningKey,
+  legacyOauthStateSigningKey: rootEncryptionKey,
   // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
   // value (the two services are independently keyed). Used ONLY to decrypt
   // `installed_apps.signingSecret` read from the Spaces DB during the
