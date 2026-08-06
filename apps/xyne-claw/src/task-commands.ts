@@ -33,8 +33,8 @@ const TASK_COMMANDS: TaskCommand[] = [
       "The user's message begins with the /explainer command: an explicit order to produce a narrated " +
       "explainer video with the create-video-explainer tool. Create a writable sandbox first if this " +
       "conversation does not already have one, write the storyboard, then render — invoking the command " +
-      "IS the user's approval, so do not ask for confirmation. Command-mode rendering automatically " +
-      "attaches the MP4 without burned-in captions. Do not call sandbox-deliver-files and do not add a " +
+      "IS the user's approval, so do not ask for confirmation. Rendering always attaches the MP4 with " +
+      "audio-only narration and no burned-in captions. Do not call sandbox-deliver-files and do not add a " +
       "textual final response; the video attachment is the response.",
     nudge:
       "This run was started with the /explainer command: it MUST produce a narrated explainer video via " +
@@ -44,6 +44,28 @@ const TASK_COMMANDS: TaskCommand[] = [
     missingToolInstruction:
       "The /explainer runtime could not mount create-video-explainer. Tell the user plainly that video " +
       "rendering is temporarily unavailable and do not attempt a workaround.",
+  },
+  {
+    command: "/record-skill",
+    requiredTool: "create-skill",
+    autoTools: ["sandbox-create", "analyze-skill-recording", "create-skill"],
+    instruction:
+      "The user's message begins with /record-skill and includes a screen recording that demonstrates a reusable workflow. " +
+      "Create or reuse this conversation's writable coding sandbox, then call analyze-skill-recording for every attached " +
+      "recording. Study the returned chronological contact sheet carefully and turn the demonstrated workflow into a precise, " +
+      "general-purpose SKILL.md. Preserve observed steps, decision points, validation, and failure handling, but do not invent " +
+      "unseen credentials, commands, or product behavior. Then call create-skill with the complete draft. create-skill is the " +
+      "human approval boundary: it queues an Approve/Decline card and does not persist anything until approval. Do not ask for " +
+      "storyboard or draft approval before calling it, and do not claim the skill was saved before the approval action succeeds.",
+    nudge:
+      "This run was started with /record-skill and MUST submit a skill draft through create-skill before finishing. Analyze every " +
+      "attached recording in the current sandbox with analyze-skill-recording first, then call create-skill. The create-skill " +
+      "approval card is the user's review step. EXCEPTION: if analyze-skill-recording failed or no recording was available, do NOT " +
+      "draft a skill from the filename or guesswork — tell the user plainly that the recording could not be analyzed and stop. " +
+      "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+    missingToolInstruction:
+      "The /record-skill runtime could not mount its recording analyzer or create-skill approval tool. Tell the user plainly " +
+      "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
   },
 ];
 

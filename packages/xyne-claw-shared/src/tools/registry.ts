@@ -30,6 +30,7 @@ import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
+import * as recordSkill from "./record-skill/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -214,6 +215,7 @@ register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
 register(sandbox.gitRead);
 register(videoExplainer.createVideoExplainer);
+register(recordSkill.analyzeSkillRecording);
 
 // Register sandbox-pw tools (browser via @playwright/mcp through sandbox-router-test)
 for (const t of sandboxPw.SANDBOX_PW_TOOLS) register(t);

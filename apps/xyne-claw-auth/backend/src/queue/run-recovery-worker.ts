@@ -50,6 +50,16 @@ interface RecoveryDispatchPayload {
     focus?: string;
     mode?: "review";
   };
+  /** /record-skill recording refs. Same excess-property-strip hazard as
+   *  `experiment` above: the /run handler re-binds these in Redis under the NEW
+   *  sessionId on every dispatch, so losing them on a recovery hop leaves
+   *  analyze-skill-recording 404ing against the dead session's binding. */
+  recordingRefs?: Array<{
+    attachmentId: string;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+  }>;
   agentConfig?: Record<string, unknown>;
   fastMode?: boolean;
   resumedFromHandoff?: boolean;
@@ -287,6 +297,9 @@ async function enqueueLockContentionRun(state: RunRecoveryState): Promise<boolea
     // Keep the experiment context across the queue hop, or the drained run comes
     // back without its ledger tools (see RecoveryDispatchPayload.experiment).
     ...(dispatchPayload.experiment ? { experiment: dispatchPayload.experiment } : {}),
+    // Keep recording refs across the hop, or the drained /record-skill run
+    // re-dispatches with no Redis binding and analyze-skill-recording 404s.
+    ...(dispatchPayload.recordingRefs?.length ? { recordingRefs: dispatchPayload.recordingRefs } : {}),
     // This run already dispatched once (and persisted its user ChatMessage) before
     // hitting session_locked — the drain re-dispatch must NOT re-persist it, or the
     // retried turn shows up as a duplicate root user row (a branch).

@@ -44,7 +44,7 @@ const ATTACHMENT_GLOBAL_RE = /\[ATTACHMENT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]
 // the model can see the image) — they are NOT pushed into allAttachments and
 // will NOT be delivered to the user. Use when the agent needs to look at a
 // file for self-verification without leaking it to the chat thread.
-const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)$/;
+const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)(?:\n([\s\S]*))?$/;
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
@@ -318,12 +318,17 @@ export function loadCustomTools(
           const fileName = inspectMatch[1]!;
           const mimeType = inspectMatch[2]!;
           const data = inspectMatch[3]!;
+          const inspectionSummary = inspectMatch[4]?.trim();
           const isImage = mimeType.startsWith("image/");
           log.info(`[inspect] ${ct.slug} fileName=${fileName} mime=${mimeType} bytes=${data.length} (NOT delivered to user)`);
           if (isImage) {
             return {
               content: [
-                { type: "text" as const, text: `Inspected ${fileName} (visible to you only — call sandbox-deliver-files to send it to the user).` },
+                {
+                  type: "text" as const,
+                  text: inspectionSummary ||
+                    `Inspected ${fileName} (visible to you only — call sandbox-deliver-files to send it to the user).`,
+                },
                 { type: "image" as const, data, mimeType },
               ],
               details: {},

@@ -11,11 +11,11 @@ Use `create-video-explainer` to turn a concise storyboard into a narrated MP4. T
 
 ### `/explainer` command mode
 
-When the user's task starts with `/explainer`, the command itself is explicit approval to draft and render. Do not show the storyboard, ask for confirmation, or stop between drafting and rendering. Call `create-video-explainer` in the same run. Command mode disables burned-in captions and attaches the MP4 automatically; do not call `sandbox-deliver-files` and do not add a textual final response.
+When the user's task starts with `/explainer`, the command itself is explicit approval to draft and render. Do not show the storyboard, ask for confirmation, or stop between drafting and rendering. Call `create-video-explainer` in the same run. The renderer never burns captions into the video and attaches the MP4 automatically; do not call `sandbox-deliver-files` and do not add a textual final response.
 
 ### Ordinary video requests
 
-Outside `/explainer` command mode, show the complete storyboard and receive explicit approval before rendering. Rendering is the expensive step; stop after presenting the storyboard and render only after an affirmative response. Ordinary direct tool use burns in captions by default unless the runtime specifies otherwise.
+Outside `/explainer` command mode, show the complete storyboard and receive explicit approval before rendering. Rendering is the expensive step; stop after presenting the storyboard and render only after an affirmative response. Narration remains audio-only; never add visible captions.
 
 ## Storyboard shape
 

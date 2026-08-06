@@ -16,7 +16,8 @@ export const createVideoExplainer: ToolDefinition = {
     "manim (a Manim/Cairo Python scene) and d2 (an ordered list of D2 architecture board " +
     "snapshots faded into a progressive reveal). Every engine renders in this same sandbox — " +
     "no separate box — and needs no internet: narration TTS is fetched by the runtime and " +
-    "injected as a file. Outside /explainer command mode, show the storyboard and obtain approval " +
+    "injected as a file. Narration is audio-only; the renderer never burns captions into the video. " +
+    "Outside /explainer command mode, show the storyboard and obtain approval " +
     "before calling this tool. A leading /explainer command already grants approval: render immediately, " +
     "without asking again. The tool attaches the MP4 directly; do not call sandbox-deliver-files afterward.",
   source: "custom:sandbox",
@@ -145,10 +146,7 @@ export const createVideoExplainer: ToolDefinition = {
       });
     }
     try {
-      const commandMode = context.meta?.["taskCommand"] === "/explainer";
-      const composition = await composeVideo(session, context, storyboard, {
-        burnCaptions: !commandMode,
-      });
+      const composition = await composeVideo(session, context, storyboard);
       const video = await session.files.read(composition.outputPath);
       const fileName = composition.outputPath.split("/").pop() ?? "explainer.mp4";
       return `[ATTACHMENT:${fileName}:video/mp4]\n${video.toString("base64")}`;

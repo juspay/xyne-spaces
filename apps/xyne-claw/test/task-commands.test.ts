@@ -47,3 +47,44 @@ describe("/explainer task command", () => {
     expect(savedConfig).toEqual({ tools: { custom: ["todo-read"] } });
   });
 });
+
+describe("/record-skill task command", () => {
+  it("matches only the leading command token", () => {
+    expect(parseTaskCommand("/record-skill make this reusable")?.command).toBe("/record-skill");
+    expect(parseTaskCommand("  /RECORD-SKILL\nname it deploy-check")?.command).toBe("/record-skill");
+    expect(parseTaskCommand("please /record-skill this")).toBeNull();
+    expect(parseTaskCommand("/record-skills this")).toBeNull();
+  });
+
+  it("force-mounts the sandbox analyzer and approval-gated skill writer", () => {
+    const command = parseTaskCommand("/record-skill");
+    expect(command?.autoTools).toEqual([
+      "sandbox-create",
+      "analyze-skill-recording",
+      "create-skill",
+    ]);
+
+    const loaded = loadCustomTools(
+      { tools: { custom: [] } },
+      { userId: "u1", conversationId: "c1", agentSlug: "a1", taskCommand: "/record-skill" },
+      undefined,
+      undefined,
+      undefined,
+      "session-1",
+      "s2s-key",
+      "session-token",
+      undefined,
+      undefined,
+      undefined,
+      command?.autoTools,
+    );
+    const names = loaded.tools.map((tool) => tool.name);
+    expect(names).toContain("sandbox-create");
+    expect(names).toContain("analyze-skill-recording");
+    expect(names).toContain("create-skill");
+  });
+
+  it("executes immediately instead of entering plan mode", () => {
+    expect(resolveTaskCommandMode("/record-skill", "plan")).toBe("auto");
+  });
+});

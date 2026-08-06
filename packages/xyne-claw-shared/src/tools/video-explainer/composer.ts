@@ -53,11 +53,6 @@ export interface CompositionResult {
   scenes: SceneTiming[];
 }
 
-export interface CompositionOptions {
-  /** Burn narration text into the video. Defaults to true for direct tool use. */
-  burnCaptions?: boolean;
-}
-
 function authUrl(context: ToolExecutionContext): string {
   return (
     context.config["XYNE_CLAW_AUTH_URL"] ??
@@ -133,39 +128,6 @@ async function requestNarration(
     throw new Error(payload.error || `claw-auth TTS returned HTTP ${response.status}`);
   }
   return Buffer.from(payload.data.audioBase64, "base64");
-}
-
-/**
- * Burned-in caption as an ASS file. NOT srt+force_style: without an explicit
- * PlayRes, libass sizes force_style numbers against its default 384x288
- * canvas, so "FontSize=28, MarginV=72" renders as ~105px text floating in
- * the middle of a 1080p frame. Declaring PlayRes 1920x1080 makes every
- * number below mean real pixels: 44px text, bottom-center, 56px up.
- */
-function captionFile(narration: string, duration: number): string {
-  const centis = Math.max(0, Math.round(duration * 100));
-  const end =
-    `${Math.floor(centis / 360_000)}:` +
-    `${String(Math.floor((centis % 360_000) / 6_000)).padStart(2, "0")}:` +
-    `${String(Math.floor((centis % 6_000) / 100)).padStart(2, "0")}.` +
-    `${String(centis % 100).padStart(2, "0")}`;
-  const safeCaption = narration.replace(/[{}]/g, "").replace(/\r?\n/g, "\\N");
-  return [
-    "[Script Info]",
-    "ScriptType: v4.00+",
-    "PlayResX: 1920",
-    "PlayResY: 1080",
-    "WrapStyle: 0",
-    "",
-    "[V4+ Styles]",
-    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    "Style: Caption,DejaVu Sans,44,&H00FFFFFF,&H00FFFFFF,&H00101824,&H60101824,0,0,0,0,100,100,0,0,3,12,0,2,160,160,56,1",
-    "",
-    "[Events]",
-    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    `Dialogue: 0,0:00:00.00,${end},Caption,,0,0,0,,${safeCaption}`,
-    "",
-  ].join("\n");
 }
 
 /**
@@ -403,12 +365,10 @@ export async function composeVideo(
   session: Session,
   context: ToolExecutionContext,
   storyboard: Storyboard,
-  options: CompositionOptions = {},
 ): Promise<CompositionResult> {
   const renderId = randomUUID();
   const workDir = `${WORK_ROOT}/${renderId}`;
   const outputPath = `${RESULTS_DIR}/explainer-${renderId}.mp4`;
-  const burnCaptions = options.burnCaptions !== false;
 
   try {
     await run(
@@ -450,13 +410,6 @@ export async function composeVideo(
 
       // Narration-first: the longer of narration/animation plus a fixed tail.
       const segmentSeconds = computeSegmentSeconds(narrationSeconds, animationSeconds);
-      const captionPath = `${workDir}/scene-${index}.ass`;
-      if (burnCaptions) {
-        await session.files.write(
-          captionPath,
-          Buffer.from(captionFile(scene.narration, segmentSeconds)),
-        );
-      }
 
       if (clipPath) {
         // Animated: freeze the last frame to fill the segment (video never
@@ -466,7 +419,7 @@ export async function composeVideo(
           session,
           `ffmpeg -y -i '${clipPath}' -i '${audioPath}' ` +
             `-filter_complex "[0:v]tpad=stop_mode=clone:stop_duration=${stopDuration.toFixed(3)},` +
-            `${burnCaptions ? `subtitles='${captionPath}',` : ""}fps=${FPS}[v];[1:a]apad[a]" ` +
+            `fps=${FPS}[v];[1:a]apad[a]" ` +
             `-map "[v]" -map "[a]" -t ${segmentSeconds.toFixed(3)} ` +
             `-c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -b:a 192k '${workDir}/segment-${index}.mp4'`,
           180_000,
@@ -475,7 +428,6 @@ export async function composeVideo(
         await run(
           session,
           `ffmpeg -y -loop 1 -i '${workDir}/scene-${index}.png' -i '${audioPath}' ` +
-            `${burnCaptions ? `-vf "subtitles='${captionPath}'" ` : ""}` +
             `-af apad -t ${segmentSeconds.toFixed(3)} -r ${FPS} -c:v libx264 -preset medium -pix_fmt yuv420p ` +
             `-c:a aac -b:a 192k '${workDir}/segment-${index}.mp4'`,
           120_000,
@@ -506,7 +458,7 @@ export async function composeVideo(
     return { outputPath, scenes: timings };
   } finally {
     // Keep only the uniquely named deliverable. Intermediate scripts, source,
-    // captions, audio, frames, and partial clips are removed on success and on
+    // audio, frames, and partial clips are removed on success and on
     // every failure path, so later renders cannot discover stale artifacts.
     await run(session, `rm -rf -- '${workDir}'`).catch(() => undefined);
   }

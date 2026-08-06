@@ -410,6 +410,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     providerConfigs,
     progressUrl,
     attachments,
+    recordingRefs,
     contextFiles,
     additionalInstructions,
     researchContext,
@@ -493,6 +494,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     >;
     progressUrl?: string;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+    recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
     contextFiles?: Array<{ path: string; content: string }>;
     additionalInstructions?: string;
     researchContext?: {
@@ -788,6 +790,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       providerConfigs,
       progressUrl,
       attachments,
+      recordingRefs,
       contextFiles,
       additionalInstructions,
       researchContext,
@@ -909,6 +912,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         providerConfigs,
         emitter,
         attachments,
+        recordingRefs,
         contextFiles,
         additionalInstructions,
         researchContext,
@@ -1013,6 +1017,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     providerConfigs,
     progressUrl,
     attachments,
+    recordingRefs,
     contextFiles,
     additionalInstructions,
     researchContext,
@@ -1353,6 +1358,9 @@ async function processTask(
   attachments:
     | Array<{ fileName: string; mimeType: string; data: string }>
     | undefined,
+  recordingRefs:
+    | Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>
+    | undefined,
   contextFiles: Array<{ path: string; content: string }> | undefined,
   additionalInstructions: string | undefined,
   researchContext:
@@ -1390,6 +1398,11 @@ async function processTask(
   lateFollowUpCallbackUrl?: string,
 ): Promise<void> {
   let mcpCleanup: (() => Promise<void>) | undefined;
+  // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
+  // workspaces are deleted whole in the finally, but a persistent cwd survives
+  // the run — without explicit cleanup, up-to-1GB screen captures accumulate
+  // under <cwd>/.context/recordings/ forever.
+  const stagedRecordingAbsPaths: string[] = [];
   const tid = traceId ?? sessionId.slice(0, 8);
   const log = (msg: string) => clog.info(`[run] [${tid}] ${msg}`);
   const logErr = (msg: string, err?: unknown) =>
@@ -1606,10 +1619,16 @@ async function processTask(
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
     // in attachment-ingest.ts. derivedContextFiles ordering is significant —
     // see that module's header.
+    // Parse command contracts before attachment ingestion. /record-skill keeps
+    // the raw recording for a fixed-command sandbox analyzer rather than
+    // spending ffmpeg CPU in the long-lived claw pod.
+    const taskCommand = parseTaskCommand(task);
+    const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
       pdfBuffers: pdfBuffersByName,
       videoKeyframes,
+      videoBuffers: videoBuffersByName,
       imageAttachments,
       textAttachments,
       xlsxAttachments,
@@ -1617,11 +1636,21 @@ async function processTask(
       docxAttachments,
       pptxAttachments,
       htmlAttachments,
-    } = await ingestAttachments(attachments, log);
+      videoAttachments,
+    } = await ingestAttachments(attachments, log, { deferVideoProcessing: recordSkillCommand });
 
     const mergedContextFiles = [
       ...(contextFiles ?? []),
       ...derivedContextFiles,
+      ...(recordSkillCommand
+        ? (recordingRefs ?? []).map((recording) => ({
+            path: `${recording.fileName}.video.md`,
+            content:
+              `# Recording: ${recording.fileName}\n\n` +
+              `This ${recording.fileSize}-byte recording is registered for the sandbox-backed ` +
+              `\`analyze-skill-recording\` tool.\n`,
+          }))
+        : []),
     ];
 
     // Use provided cwd, repo workspace, or create an ephemeral workspace
@@ -1642,6 +1671,29 @@ async function processTask(
         pdfBuffersByName.map((p) => ({ path: p.fileName, data: p.buf })),
       );
       log(`Raw PDF originals kept: ${writtenBin.length}`);
+    }
+    // /record-skill only: retain the raw recording in the ephemeral run
+    // workspace until analyze-skill-recording copies it into this
+    // conversation's sandbox. The workspace is deleted by normal run cleanup.
+    const recordingFiles: Array<{
+      fileName: string;
+      mimeType: string;
+      fileSize?: number;
+      relPath?: string;
+      attachmentId?: string;
+    }> = (recordingRefs ?? []).map((recording) => ({ ...recording }));
+    if (videoBuffersByName.length > 0) {
+      for (const video of videoBuffersByName) {
+        const requestedPath = `recordings/${video.fileName}`;
+        const [writtenPath] = await writeWorkspaceBinaryFiles(workspaceDir, [
+          { path: requestedPath, data: video.buf },
+        ]);
+        if (writtenPath) {
+          recordingFiles.push({ fileName: video.fileName, mimeType: video.mimeType, relPath: writtenPath });
+          if (requestCwd) stagedRecordingAbsPaths.push(join(workspaceDir, writtenPath));
+        }
+      }
+      log(`Record-skill originals staged: ${recordingFiles.length}`);
     }
 
     const toolPermissions =
@@ -1676,7 +1728,6 @@ async function processTask(
 
     // Task commands are parsed before custom-tool loading so command-owned
     // tools can be force-mounted for this run without mutating Agent.config.
-    const taskCommand = parseTaskCommand(task);
     const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
 
     const meta: Record<string, string> = { userId };
@@ -1686,6 +1737,12 @@ async function processTask(
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
+    if (recordingFiles.length > 0) {
+      // Server-authored metadata consumed only by analyze-skill-recording. The
+      // tool validates containment under workspaceDir before reading anything.
+      meta["recordingWorkspaceDir"] = workspaceDir;
+      meta["recordingFiles"] = JSON.stringify(recordingFiles);
+    }
     if (experiment) {
       meta["experimentId"] = experiment.id;
       meta["experimentEpoch"] = String(experiment.epoch);
@@ -3179,6 +3236,16 @@ async function processTask(
         label: `${a.fileName} (html, converted to markdown)`,
         path: toWorkspaceContextPath(a.fileName),
       })),
+      ...videoAttachments.map((a) => ({
+        label: recordSkillCommand
+          ? `${a.fileName} (screen recording; analyze with analyze-skill-recording)`
+          : `${a.fileName} (video, sampled to a visual narrative)`,
+        path: toWorkspaceContextPath(`${a.fileName}.video.md`),
+      })),
+      ...(recordSkillCommand ? (recordingRefs ?? []).map((recording) => ({
+        label: `${recording.fileName} (screen recording, ${Math.ceil(recording.fileSize / 1024 / 1024)} MB; analyze with analyze-skill-recording)`,
+        path: toWorkspaceContextPath(`${recording.fileName}.video.md`),
+      })) : []),
     ];
     if (attachmentEntries.length > 0) {
       const attachmentContext = [
@@ -4260,6 +4327,13 @@ async function processTask(
       // Clean up ephemeral workspace. (Host-side git worktrees no longer
       // exist — repo work happens in the sandbox.)
       await deleteWorkspace(sessionId).catch(() => {});
+    } else if (stagedRecordingAbsPaths.length > 0) {
+      // Persistent cwd survives the run — remove the raw recordings we staged
+      // into it (the sandbox has its own copy once analysis ran).
+      const { unlink } = await import("node:fs/promises");
+      for (const p of stagedRecordingAbsPaths) {
+        await unlink(p).catch(() => {});
+      }
     }
     // Free the per-run plan/todo state (todo-write store) so it doesn't
     // accumulate across runs. No-op when the run never used todo-write.

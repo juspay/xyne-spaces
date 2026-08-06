@@ -51,6 +51,8 @@ export interface IngestedAttachments {
   pdfBuffers: Array<{ fileName: string; buf: Buffer }>;
   /** Keyframes extracted from videos, injected into the opening prompt. */
   videoKeyframes: VideoKeyframe[];
+  /** Raw recordings retained only for /record-skill's sandbox analyzer. */
+  videoBuffers: Array<{ fileName: string; mimeType: string; buf: Buffer }>;
   /** Per-type attachment lists the prompt-builder still references by name. */
   imageAttachments: AttachmentInput[];
   textAttachments: TextAttachmentFile[];
@@ -59,6 +61,14 @@ export interface IngestedAttachments {
   docxAttachments: AttachmentInput[];
   pptxAttachments: AttachmentInput[];
   htmlAttachments: AttachmentInput[];
+  videoAttachments: AttachmentInput[];
+}
+
+export interface IngestAttachmentOptions {
+  /** Keep videos raw for the sandbox-backed /record-skill analyzer instead of
+   * running ffmpeg in the xyne-claw pod. Ordinary attachment behavior is
+   * unchanged when false/omitted. */
+  deferVideoProcessing?: boolean;
 }
 
 /** Decode an attachment's base64 payload to bytes (handles data-URI prefixes). */
@@ -127,6 +137,7 @@ async function convertAll(
 export async function ingestAttachments(
   attachments: AttachmentInput[] | undefined,
   log: (message: string) => void,
+  options: IngestAttachmentOptions = {},
 ): Promise<IngestedAttachments> {
   const all = attachments ?? [];
 
@@ -170,9 +181,20 @@ export async function ingestAttachments(
   // Video — narrative file + keyframes for the prompt.
   const videoAttachments = all.filter((a) => isVideoAttachment(a.fileName, a.mimeType));
   const videoKeyframes: VideoKeyframe[] = [];
+  const videoBuffers: Array<{ fileName: string; mimeType: string; buf: Buffer }> = [];
   const videoDerived = await Promise.all(
     videoAttachments.map(async (a) => {
-      const { narrative, keyframes } = await videoBufferToContext(decode(a), a.fileName);
+      const buf = decode(a);
+      if (options.deferVideoProcessing) {
+        videoBuffers.push({ fileName: a.fileName, mimeType: a.mimeType, buf });
+        return {
+          path: `${a.fileName}.video.md`,
+          content:
+            `# Recording: ${a.fileName}\n\n` +
+            `This recording is staged for the sandbox-backed \`analyze-skill-recording\` tool.\n`,
+        };
+      }
+      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName);
       videoKeyframes.push(...keyframes);
       return { path: `${a.fileName}.video.md`, content: narrative };
     }),
@@ -210,6 +232,7 @@ export async function ingestAttachments(
     derivedContextFiles,
     pdfBuffers,
     videoKeyframes,
+    videoBuffers,
     imageAttachments,
     textAttachments,
     xlsxAttachments,
@@ -217,5 +240,6 @@ export async function ingestAttachments(
     docxAttachments,
     pptxAttachments,
     htmlAttachments,
+    videoAttachments,
   };
 }

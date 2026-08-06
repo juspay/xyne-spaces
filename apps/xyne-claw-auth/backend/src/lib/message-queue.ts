@@ -106,6 +106,16 @@ export interface QueuedMessage {
     focus?: string;
     mode?: "review";
   };
+  /** /record-skill recording refs. Carried for the same reason as `experiment`:
+   *  the redispatch rebuilds the /run payload field-by-field, and a dropped ref
+   *  list re-binds NOTHING in Redis for the new sessionId — analyze-skill-recording
+   *  then 404s ("No recordings are registered for this run") mid-conversation. */
+  recordingRefs?: Array<{
+    attachmentId: string;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+  }>;
   /**
    * True when this run's user ChatMessage was ALREADY persisted on its original
    * dispatch — set by the lock-contention re-queue (a run that dispatched, hit

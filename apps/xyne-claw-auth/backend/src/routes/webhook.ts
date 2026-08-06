@@ -968,11 +968,30 @@ async function postGoalPhase(
 interface ResolvedAgent {
   id: string;
   slug: string;
+  /** Display name — the text a leftover "@Display Name" mention carries. */
+  name: string;
   orgId: string;
   appToken: string;
   spacesAppId: string;
   spacesAppUserId: string;
   isDefault: boolean;
+}
+
+/**
+ * Strip a leftover leading "@<agent mention>" so a slash command lands at byte
+ * zero. Matches only the given names verbatim (display name first, slug as
+ * fallback) — never a generic @-token+words pattern, which cannot distinguish
+ * a multi-word display name from the user's own prose.
+ */
+function stripLeadingAgentMention(text: string, names: Array<string | null | undefined>): string {
+  for (const raw of names) {
+    const name = raw?.trim();
+    if (!name) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^@${escaped}(?=\\s|$)`, "i");
+    if (re.test(text)) return text.replace(re, "").trimStart();
+  }
+  return text;
 }
 
 async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
@@ -982,6 +1001,7 @@ async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent
     return {
       id: agent.id,
       slug: agent.slug,
+      name: agent.name ?? agent.slug,
       orgId: agent.orgId,
       appToken: decryptStoredField(agent.spacesAppToken),
       spacesAppId: agent.spacesAppId,
@@ -1001,6 +1021,7 @@ async function getDefaultAgent(): Promise<ResolvedAgent | null> {
   return {
     slug: agent.slug,
     id: agent.id,
+    name: agent.name ?? agent.slug,
     orgId: agent.orgId,
     appToken: decryptStoredField(agent.spacesAppToken),
     spacesAppId: agent.spacesAppId,
@@ -1286,6 +1307,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agent = {
         id: agentRow.id,
         slug: agentRow.slug,
+        name: agentRow.name ?? agentRow.slug,
         orgId: agentRow.orgId ?? null,
         appToken: decryptStoredField(agentRow.spacesAppToken),
         spacesAppId: agentRow.spacesAppId,
@@ -1358,6 +1380,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agent = {
         id: agentRow.id,
         slug: agentRow.slug,
+        name: agentRow.name ?? agentRow.slug,
         orgId: agentRow.orgId ?? null,
         appToken: decryptStoredField(agentRow.spacesAppToken),
         spacesAppId: agentRow.spacesAppId,
@@ -1438,7 +1461,18 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   const userText = payload.cleanContent?.trim();
   if (!userText) return;
-  const explainerCommand = /^\/explainer(?:\s|$)/i.test(userText.trimStart());
+  // Commands whose leading slash is an execution contract in xyne-claw. Keep
+  // them out of auto-goal/plan mode: both transforms strip or suspend the
+  // command before the runtime can mount its command-owned tools.
+  // cleanContent usually removes the bot mention, but some Spaces event
+  // producers leave a leading "@Display Name" behind. Strip ONLY this agent's
+  // own mention (exact display name, or slug as fallback). A generic
+  // "@word word..." strip is unanchorable: word-classes can't tell display-name
+  // tokens from the user's prose, so "@Bot how do I use /explainer" would lose
+  // "how do I use" and force command mode on a question.
+  const taskCommandText = stripLeadingAgentMention(userText, [agent.name, agent.slug]);
+  const immediateTaskCommand = /^\/(?:explainer|record-skill)(?:\s|$)/i.test(taskCommandText);
+  const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
     return;
@@ -1480,7 +1514,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const rawSlash = parseSlashCommand(userText);
   const slash =
     rawSlash ??
-    (autoGoalEnabled && !explainerCommand ? parseSlashCommand(`/goal ${userText}`) : null);
+    (autoGoalEnabled && !immediateTaskCommand ? parseSlashCommand(`/goal ${userText}`) : null);
   const experimentCommand = parseExperimentCommand(userText);
 
   if (experimentCommand) {
@@ -1938,7 +1972,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       intercept.replyToUser,
     );
   } else {
-    task = userText;
+    task = immediateTaskCommand ? taskCommandText : userText;
   }
 
   // `/upgrade` — explicit user opt-in to the agent's premium provider for
@@ -2460,6 +2494,16 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const userCookieHeader = userCookieParts.length > 0 ? userCookieParts.join("; ") : undefined;
 
     const inboundAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    // Large /record-skill videos travel as authenticated references. The
+    // internal /run proxy binds these to its newly minted session; xyne-claw
+    // later streams the bytes through claw-auth into the sandbox in bounded
+    // chunks. Never base64 a screen recording into the 50 MB JSON body.
+    const inboundRecordingRefs: Array<{
+      attachmentId: string;
+      fileName: string;
+      mimeType: string;
+      fileSize: number;
+    }> = [];
     // Mime allow-list for what xyne-claw's /run can consume. Must stay in
     // sync with TEXT_ATTACHMENT_MIME_TYPES / TEXT_ATTACHMENT_EXTENSIONS and
     // the xlsx/pdf detectors in xyne-claw/src/routes/run.ts — claw-auth
@@ -2505,6 +2549,56 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (!isAllowedAttachment(att)) {
           log.warn(
             `Skipping attachment ${att.attachmentId} (${att.fileName}, ${att.mimeType}) — not in claw-auth allow-list. Update isAllowedAttachment in webhook.ts.`,
+          );
+          continue;
+        }
+        const videoExtMatch = /\.(mov|mp4|m4v|webm|avi|mkv|mpg|mpeg|wmv|flv)$/i.exec(att.fileName ?? "");
+        const isVideoRecording = att.mimeType?.toLowerCase().startsWith("video/") || videoExtMatch !== null;
+        if (recordSkillCommand && isVideoRecording) {
+          // A dropped recording must TELL the user — a /record-skill run that
+          // silently loses its video still force-mounts analyze-skill-recording
+          // and pressures the model to draft a skill from nothing.
+          const notifyRecordingDropped = (reason: string) => {
+            log.warn(`Skipping /record-skill recording ${att.attachmentId} (${att.fileName}) — ${reason}`);
+            if (!payload.conversationId) return;
+            void spacesAppFetch("/chat/postMessage", {
+              channelId: payload.channelId,
+              conversationId: payload.conversationId,
+              markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+              userId: agent.spacesAppUserId,
+              metadata: { contentFormat: "markdown" },
+            }, agent.appToken).catch(() => {});
+          };
+          const fileSize = Number(att.fileSize);
+          if (!Number.isFinite(fileSize) || fileSize <= 0) {
+            notifyRecordingDropped("its size was not reported by the upload — please re-upload it");
+            continue;
+          }
+          if (fileSize > 1024 * 1024 * 1024) {
+            notifyRecordingDropped("it exceeds the 1 GB recording limit");
+            continue;
+          }
+          // claw-auth's /run consumer validates each ref strictly; normalize
+          // HERE (the producer) so a client that stored a .mov as
+          // application/octet-stream doesn't get rejected downstream.
+          if (inboundRecordingRefs.length >= 4) {
+            notifyRecordingDropped("at most 4 recordings are analyzed per run");
+            continue;
+          }
+          const normalizedMime = att.mimeType?.toLowerCase().startsWith("video/")
+            ? att.mimeType
+            : `video/${(videoExtMatch?.[1] ?? "mp4").toLowerCase()}`;
+          const safeFileName = (att.fileName ?? `recording-${att.attachmentId}`)
+            .replace(/[/\\]/g, "_")
+            .slice(0, 255);
+          inboundRecordingRefs.push({
+            attachmentId: att.attachmentId,
+            fileName: safeFileName,
+            mimeType: normalizedMime,
+            fileSize,
+          });
+          log.info(
+            `Deferred /record-skill recording ${att.attachmentId} (${safeFileName}, ${fileSize} bytes, ${normalizedMime}) to sandbox stream`,
           );
           continue;
         }
@@ -2639,6 +2733,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
+      ...(inboundRecordingRefs.length > 0 ? { recordingRefs: inboundRecordingRefs } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled (memory-search tool),
       // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
@@ -2656,7 +2751,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // /webhook path only serves interactive mentions (USER_MENTIONED /
       // APP_MENTIONED / DIRECT_MESSAGE); scheduled/automation runs arrive via the
       // separate S2S handler and must NOT be configured with planMode.
-      ...(planModeEnabled && !explainerCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
@@ -2691,7 +2786,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // Plan mode (see dispatchPayload): 'plan' only when the agent opts in AND
       // this is a non-twin interactive mention. Absent ⇒ 'auto' (today's flow).
       // The plan-approval flow-action flips this to 'auto' for Turn 2.
-      ...(planModeEnabled && !explainerCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // ── Per-user twin FIFO gate ───────────────────────────────────────────────
@@ -3213,6 +3308,10 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       // Experiment epochs re-dispatched from the queue must keep their context,
       // else claw injects no experiment-ledger/-review tools on the retry.
       ...(msg.experiment ? { experiment: msg.experiment } : {}),
+      // /record-skill refs must survive the hop too — /run re-binds them in
+      // Redis under the fresh sessionId; without this the retried run's
+      // analyze-skill-recording finds no registered recordings (404).
+      ...(msg.recordingRefs?.length ? { recordingRefs: msg.recordingRefs } : {}),
       // A lock-contention retry already persisted its user message on the first
       // dispatch — skip re-persisting so the retry doesn't create a duplicate
       // root user row (branch). Proactively-queued mentions leave this unset and
