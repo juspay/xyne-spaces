@@ -96,6 +96,16 @@ export interface QueuedMessage {
   context?: string;
   resultForwardUrl?: string;
   resolveMentions?: boolean;
+  /** Experiment context (/experiment). Carried so a lock-contention re-queue of
+   *  an experiment epoch keeps its ledger tools on drain — xyne-claw injects
+   *  experiment-ledger/-review/end-experiment ONLY when this reaches /run. */
+  experiment?: {
+    id: string;
+    epoch: number;
+    deadlineAt: string;
+    focus?: string;
+    mode?: "review";
+  };
   /**
    * True when this run's user ChatMessage was ALREADY persisted on its original
    * dispatch — set by the lock-contention re-queue (a run that dispatched, hit

@@ -34,6 +34,22 @@ interface RecoveryDispatchPayload {
   channelId: string;
   context?: string;
   detached?: boolean;
+  /** Experiment context (/experiment). MUST be carried: xyne-claw injects the
+   *  experiment-ledger / experiment-review / end-experiment tools ONLY when this
+   *  is present on the /run body (routes/run.ts normalizeExperimentContext →
+   *  buildExperimentTools). It used to be dropped here — TypeScript silently
+   *  strips the excess property when the dispatch payload is stored, so every
+   *  recovery re-dispatch (watchdog timeout, drain handoff, lock defer) landed
+   *  WITHOUT the tools and the agent could no longer write to its own ledger
+   *  ("Tool experiment-review not found"). Long epochs are exactly the runs that
+   *  get recovered, so the first restart silently disarmed the experiment. */
+  experiment?: {
+    id: string;
+    epoch: number;
+    deadlineAt: string;
+    focus?: string;
+    mode?: "review";
+  };
   agentConfig?: Record<string, unknown>;
   fastMode?: boolean;
   resumedFromHandoff?: boolean;
@@ -268,6 +284,9 @@ async function enqueueLockContentionRun(state: RunRecoveryState): Promise<boolea
     ...(dispatchPayload.context ? { context: dispatchPayload.context } : {}),
     ...(sessionContext.resultForwardUrl ? { resultForwardUrl: sessionContext.resultForwardUrl } : {}),
     ...(sessionContext.resolveMentions ? { resolveMentions: sessionContext.resolveMentions } : {}),
+    // Keep the experiment context across the queue hop, or the drained run comes
+    // back without its ledger tools (see RecoveryDispatchPayload.experiment).
+    ...(dispatchPayload.experiment ? { experiment: dispatchPayload.experiment } : {}),
     // This run already dispatched once (and persisted its user ChatMessage) before
     // hitting session_locked — the drain re-dispatch must NOT re-persist it, or the
     // retried turn shows up as a duplicate root user row (a branch).

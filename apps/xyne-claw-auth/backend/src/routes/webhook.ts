@@ -3197,6 +3197,9 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: msg.channelId,
       ...(msg.context ? { context: msg.context } : {}),
+      // Experiment epochs re-dispatched from the queue must keep their context,
+      // else claw injects no experiment-ledger/-review tools on the retry.
+      ...(msg.experiment ? { experiment: msg.experiment } : {}),
       // A lock-contention retry already persisted its user message on the first
       // dispatch — skip re-persisting so the retry doesn't create a duplicate
       // root user row (branch). Proactively-queued mentions leave this unset and
