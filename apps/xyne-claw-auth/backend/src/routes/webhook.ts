@@ -2765,16 +2765,24 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // request: no healthy upstream" (observed prod 2026-08-05) even though a
     // retry two seconds later would have succeeded. Mirrors the retry the /run
     // proxy already does (routes/run.ts fetchClawRunWithRetry).
-    const DISPATCH_RETRIES = 2;
-    const DISPATCH_RETRY_DELAY_MS = 2_000;
+    //
+    // The ladder must OUTLAST a claw rollout, not just a blip: envoy keeps
+    // returning 503 for the full pod-boot window (image pull + boot +
+    // readiness, 1–3 min observed prod 2026-08-06 — a 2s×2 ladder exhausted in
+    // 4.5s and still posted the "briefly unavailable" notice for every mention
+    // landing mid-deploy). This runs after the webhook was ack'd, so waiting
+    // here blocks no caller; the message is already acked and the queue slot
+    // is held for this conversation.
+    const DISPATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
     const isTransientUpstream = (status: number, body: string): boolean =>
       status === 502 || status === 503 || status === 504 ||
       /no healthy upstream|upstream connect error|connection (refused|reset)|EAI_AGAIN|ECONNREFUSED|fetch failed/i.test(body);
 
     const fetchRunWithRetry = async (): Promise<Awaited<ReturnType<typeof fetchRun>>> => {
       let lastRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
-      for (let attempt = 0; attempt <= DISPATCH_RETRIES; attempt++) {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAY_MS));
+      const attempts = DISPATCH_RETRY_DELAYS_MS.length + 1;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAYS_MS[attempt - 1]));
         const res = await fetchRun();
         if (res.ok) return res;
         // Peek at the body WITHOUT consuming the caller's copy.
@@ -2782,8 +2790,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (!isTransientUpstream(res.status, peek)) return res;
         lastRes = res;
         log.warn(
-          `Dispatch attempt ${attempt + 1}/${DISPATCH_RETRIES + 1} hit transient upstream (${res.status}) for agent=${agent.slug}` +
-          (attempt < DISPATCH_RETRIES ? " — retrying" : " — giving up"),
+          `Dispatch attempt ${attempt + 1}/${attempts} hit transient upstream (${res.status}) for agent=${agent.slug}` +
+          (attempt < attempts - 1 ? ` — retrying in ${DISPATCH_RETRY_DELAYS_MS[attempt]! / 1000}s` : " — giving up"),
         );
       }
       return lastRes!;
