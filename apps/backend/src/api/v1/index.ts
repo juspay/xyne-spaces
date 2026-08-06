@@ -16,19 +16,20 @@ import { authn } from './middleware/authn';
 import { v1ErrorHandler, v1NotFound } from './middleware/errorHandler';
 import { registerRoutes } from './manifest/register';
 import { readsAvailable } from './engine/queries';
-import { platformRoutes } from './domains/platform';
 import { searchRoutes } from './domains/search';
-import { userRoutes } from './domains/users';
 import type { RouteDefinition } from './manifest/types';
 import { oauthRouter } from './oauth';
 import { oauthConfig } from './oauth/config';
 
-/** Every domain's manifest, in one place for the router and the tooling. */
+/**
+ * Routes that require custom API handlers (not available via Zero fallback).
+ *
+ * Most SDK operations use /zero/query-fallback and /zero/push-fallback to
+ * reuse existing Zero queries/mutators. Only operations that need custom
+ * logic (like search which delegates to Vespa) are defined here.
+ */
 export const allRoutes: readonly RouteDefinition[] = [
-  ...platformRoutes,
   ...searchRoutes,
-  ...userRoutes,
-  // Next: channels/conversations/messages, then work management, then the rest.
 ];
 
 export function createV1Router(): Router {
