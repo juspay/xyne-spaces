@@ -14,8 +14,16 @@ export interface EmailFetchJobData {
   isDlMemberSync?: boolean;
 }
 
+export interface ReconnectCatchupJobData {
+  sourceId: string;
+  watchHistoryId: string;
+  requesterUserId?: string;
+}
+
+export type EmailFetchQueueJobData = EmailFetchJobData | ReconnectCatchupJobData;
+
 class EmailFetchQueue {
-  private queue: Bull.Queue<EmailFetchJobData> | null = null;
+  private queue: Bull.Queue<EmailFetchQueueJobData> | null = null;
   private isInitialized = false;
   private isInitializing = false;
 
@@ -24,7 +32,7 @@ class EmailFetchQueue {
     this.isInitializing = true;
 
     try {
-      this.queue = new Bull<EmailFetchJobData>('email-fetch', {
+      this.queue = new Bull<EmailFetchQueueJobData>('email-fetch', {
         redis: {
           ...redisService.getRedisConfig(),
           lazyConnect: false,
@@ -72,7 +80,7 @@ class EmailFetchQueue {
     });
   }
 
-  getQueue(): Bull.Queue<EmailFetchJobData> {
+  getQueue(): Bull.Queue<EmailFetchQueueJobData> {
     if (!this.queue) {
       throw new Error('[EMAIL-FETCH-QUEUE] Queue not initialized — call initialize() first');
     }
@@ -94,3 +102,20 @@ class EmailFetchQueue {
 }
 
 export const emailFetchQueue = new EmailFetchQueue();
+
+export async function enqueueReconnectCatchup(params: ReconnectCatchupJobData): Promise<void> {
+  try {
+    if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+    await emailFetchQueue.getQueue().add(
+      'reconnect-catchup',
+      params,
+      { jobId: `catchup:${params.sourceId}` },
+    );
+    logger.info('[EMAIL-FETCH-QUEUE] Queued reconnect catch-up', { sourceId: params.sourceId });
+  } catch (error) {
+    logger.error('[EMAIL-FETCH-QUEUE] Failed to queue reconnect catch-up', {
+      sourceId: params.sourceId,
+      error,
+    });
+  }
+}

@@ -25,7 +25,7 @@ import {
   sanitizeReturnPath,
 } from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
-import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { emailFetchQueue, enqueueReconnectCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
 
@@ -276,6 +276,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
     mode: 'workspace',
     workspaceId,
     platform,
+    userId: req.user!.id,
     timestamp: Date.now(),
   });
 
@@ -306,6 +307,7 @@ async function createGoogleChannelEmailWorkspaceAuthUrl(
     workspaceId,
     returnPath,
     platform,
+    userId: req.user!.id,
     timestamp: Date.now(),
   });
 
@@ -893,6 +895,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         channelId: stateData.channelId,
         sourceId: sourceRow.id,
       });
+
+      await enqueueReconnectCatchup({
+        sourceId: sourceRow.id,
+        watchHistoryId: reEncrypted.watchResult.historyId,
+        requesterUserId: stateData.userId,
+      });
+      
       const params = new URLSearchParams({
         emailReconnected: 'true',
         provider: 'google',
@@ -942,7 +951,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
+            ...(existingForWorkspace.lastSyncCursor == null && {
+              lastSyncCursor: network.watchResult.historyId,
+            }),
           },
+        });
+
+        await enqueueReconnectCatchup({
+          sourceId: existingForWorkspace.id,
+          watchHistoryId: network.watchResult.historyId,
+          requesterUserId: stateData.userId,
         });
       } else {
         try {
@@ -955,6 +973,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
               workspaceId,
               credentials: network.encryptedCredentials,
               isActive: true,
+              lastSyncCursor: network.watchResult.historyId,
             },
           });
         } catch (e: any) {
@@ -1137,7 +1156,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
+            ...(existingSource.lastSyncCursor == null && {
+              lastSyncCursor: network.watchResult.historyId,
+            }),
           },
+        });
+
+        await enqueueReconnectCatchup({
+          sourceId: existingSource.id,
+          watchHistoryId: network.watchResult.historyId,
+          requesterUserId: stateData.userId,
         });
       } else {
         await db.externalSource.create({
@@ -1149,6 +1177,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             workspaceId,
             credentials: network.encryptedCredentials,
             isActive: true,
+            lastSyncCursor: network.watchResult.historyId,
           },
         });
       }
@@ -1270,6 +1299,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             ownerUserId: cd.userId,
             isActive: true,
             workspaceId: cd.workspaceId,
+            lastSyncCursor: network.watchResult.historyId,
           },
         });
 
