@@ -2087,7 +2087,6 @@ const SupportScreen = (): ReactElement => {
     (labelId: string): void => {
       if (selectedLabel?.id !== labelId) return;
       setSelectedLabel(null);
-      setDeskView('tickets');
       setViewMode('list');
     },
     [selectedLabel?.id],

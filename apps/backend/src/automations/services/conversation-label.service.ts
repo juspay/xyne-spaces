@@ -1,4 +1,5 @@
-import { MailboxState, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { MailboxState } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
