@@ -357,17 +357,14 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           // Guest reads are narrowed by around thirty table ACLs; guest writes are not narrowed
           // anywhere. Record which model and operation a guest actually reaches so the set can be
           // enumerated from real traffic before deciding what to refuse. Reports only.
-          if (ctx?.role === 'GUEST' && ctx.actor === 'user') {
-            notePattern('[acl] guest write not narrowed', model, operation);
-          }
-
           let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
 
           // A guest writes only what a guest can read: intersect the two rather than
-          // restating the rule in every table ACL.
-          if (ctx?.role === 'GUEST' && ctx.actor === 'user' && acl) {
+          // restating the rule in every table ACL. Reported for every guest write; the
+          // intersection needs a table ACL to read from, and ACL_ENFORCE_GUEST_WRITES on.
+          if (ctx?.role === 'GUEST' && ctx.actor === 'user') {
             notePattern('[acl] guest write not narrowed', model, operation);
-            if (ENFORCE.guestWrites) {
+            if (ENFORCE.guestWrites && acl) {
               const guestRead = (await acl.getWhereClause()) as Record<string, unknown> | null;
               if (guestRead && !isUnrestricted(guestRead)) {
                 mutateWhere = !mutateWhere || isUnrestricted(mutateWhere)
