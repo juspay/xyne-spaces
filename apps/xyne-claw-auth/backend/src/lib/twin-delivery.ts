@@ -1,12 +1,22 @@
 import { CONFIG } from "../config.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "./mention-transform.js";
 import { buildSpacesMentionLookupsDb } from "./mention-lookups.js";
+import { getSpacesUserById } from "./spaces-db.js";
 import { createLogger } from "../logger.js";
 import { resolveTwinReplyTarget } from "./twin-reply-target.js";
 
 export { resolveTwinReplyTarget } from "./twin-reply-target.js";
 
 const log = createLogger("twin-delivery");
+
+/** Build the canonical Spaces mention span (renders as a pill AND notifies).
+ *  Same shape the webhook cycle-limit path emits. */
+function buildUserMentionSpan(userId: string, name: string): string {
+  const esc = (v: string) =>
+    v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const safeName = esc(name);
+  return `<span data-mention="" data-mention-type="user" data-user-id="${esc(userId)}" data-username="${safeName}" class="chat-input-mention">@${safeName}</span>`;
+}
 
 /**
  * Shared execution of an APPROVED Digital Twin delivery — react AS the user on
@@ -138,6 +148,32 @@ export async function executeTwinApprovalDelivery(
       );
     }
     markdownText = expandSpacesMentions(markdownText);
+
+    // Tag the triggerer: the person who @mentioned the owner (and thereby woke
+    // the Twin) is @tagged at the START of the reply, so they get notified of
+    // the response. Deterministic — build the span straight from senderId (no
+    // fuzzy name match). Skip when: the triggerer IS the owner (self-tag), the
+    // destination is a DM (the recipient is already notified / not a channel
+    // member), or the reply already mentions them (the Twin wrote their name).
+    // Fail-open: a name-lookup miss just skips the prefix.
+    if (
+      ctx.senderId &&
+      ctx.senderId !== ctx.mentionedUserId &&
+      ctx.destinationKind !== "dm_sender" &&
+      ctx.destinationKind !== "dm" &&
+      !markdownText.includes(`data-user-id="${ctx.senderId}"`)
+    ) {
+      try {
+        const sender = await getSpacesUserById(ctx.senderId, "twin-delivery");
+        if (sender?.name) {
+          markdownText = `${buildUserMentionSpan(ctx.senderId, sender.name)} ${markdownText}`;
+        }
+      } catch (err) {
+        log.warn(
+          `[twin-delivery] triggerer tag lookup failed — posting without prefix: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/postAsUser`, {
       method: "POST",
