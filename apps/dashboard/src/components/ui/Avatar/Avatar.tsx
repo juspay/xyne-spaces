@@ -58,7 +58,7 @@ function AvatarRoot({
   return (
     <AvatarPrimitive.Root
       data-slot='avatar'
-      className={cn('relative flex shrink-0 overflow-hidden rounded-sm', className)}
+      className={cn('relative flex shrink-0 overflow-hidden rounded-[inherit]', className)}
       {...props}
     />
   );
@@ -228,7 +228,7 @@ const Avatar = ({
   return (
     <div
       className={cn(
-        'relative inline-flex shrink-0 visual-regression-hide',
+        'relative inline-flex shrink-0 visual-regression-hide rounded-sm',
         sizeClass,
         roundedClass,
         className,
