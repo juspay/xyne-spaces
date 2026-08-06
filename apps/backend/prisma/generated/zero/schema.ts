@@ -733,6 +733,22 @@ export const pullRequestsTable = table("pull_requests")
   })
   .primaryKey("id");
 
+export const prThreadLinkTable = table("pr_thread_links")
+  .columns({
+    id: string(),
+    prUrl: string(),
+    prId: number(),
+    projectKey: string(),
+    repositorySlug: string(),
+    conversationId: string(),
+    channelId: string(),
+    messageId: string(),
+    workspaceId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_ingestion_batches_v2")
   .columns({
     id: string(),
@@ -4685,6 +4701,7 @@ export const schema = createSchema(
       resourceAccessTable,
       aclAuditLogTable,
       pullRequestsTable,
+      prThreadLinkTable,
       teamIntelligenceIngestionBatchV2Table,
       teamIntelligenceUserIngestionV2Table,
       teamIntelligenceTeamSummaryV2Table,
@@ -4969,6 +4986,7 @@ export type Resource = Row<typeof schema.tables.resources>;
 export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
+export type PrThreadLink = Row<typeof schema.tables.pr_thread_links>;
 export type TeamIntelligenceIngestionBatchV2 = Row<typeof schema.tables.team_intelligence_ingestion_batches_v2>;
 export type TeamIntelligenceUserIngestionV2 = Row<typeof schema.tables.team_intelligence_user_ingestions_v2>;
 export type TeamIntelligenceTeamSummaryV2 = Row<typeof schema.tables.team_intelligence_team_summaries_v2>;
