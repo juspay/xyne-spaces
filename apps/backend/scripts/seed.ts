@@ -348,6 +348,7 @@ async function main() {
           data: {
             userId: adminUser.id,
             userGroupId: adminGroupId,
+            workspaceId: defaultWorkspaceId,
           }
         });
         console.log('  ✅ Linked admin user to ADMIN group');
