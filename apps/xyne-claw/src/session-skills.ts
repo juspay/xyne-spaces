@@ -21,6 +21,18 @@ import { createLogger } from "./logger.js";
 const log = createLogger("session-skills");
 
 /**
+ * Absolute path of the session-scoped skills overlay dir for a given scope.
+ * `<dataDir>/session-skills/<sessionScope>`. `PATHS.dataDir` may be relative,
+ * so we `resolve()` — pi resolves `additionalSkillPaths` against the session
+ * cwd, not process.cwd(), so absolute is mandatory. Single source of truth for
+ * this path, shared by writeSessionSkills / deleteSessionSkills / the live
+ * harness-overlay tools.
+ */
+export function sessionSkillsDir(sessionScope: string): string {
+  return resolve(join(PATHS.dataDir, "session-skills", sessionScope));
+}
+
+/**
  * Delete a session-skills scope dir. Skills are materialized per run and per
  * subagent invocation under `session-skills/<scope>/` and are only needed while
  * that run executes — without this they accumulate forever and fill the disk.
@@ -28,7 +40,7 @@ const log = createLogger("session-skills");
  */
 export async function deleteSessionSkills(sessionScope: string): Promise<void> {
   if (!sessionScope) return;
-  const skillsDir = resolve(join(PATHS.dataDir, "session-skills", sessionScope));
+  const skillsDir = sessionSkillsDir(sessionScope);
   await rm(skillsDir, { recursive: true, force: true }).catch(() => {});
 }
 
@@ -253,9 +265,7 @@ export async function writeSessionSkills(
 ): Promise<string | null> {
   if (!sessionScope || !skills?.length) return null;
 
-  // PATHS.dataDir can be relative — pi resolves `additionalSkillPaths`
-  // against the session cwd, not process.cwd(), so absolute is mandatory.
-  const skillsDir = resolve(join(PATHS.dataDir, "session-skills", sessionScope));
+  const skillsDir = sessionSkillsDir(sessionScope);
   await mkdir(skillsDir, { recursive: true });
 
   for (const skill of skills) {

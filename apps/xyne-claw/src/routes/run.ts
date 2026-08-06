@@ -183,6 +183,14 @@ function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<st
   return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
 }
 
+// Continual-harness Phase 1 gate: the live session-skill overlay tools are
+// OFF by default and opt-in per agent via `agentConfig.continualHarness`. Kept
+// as a separate flag (not folded into fastMode) so it can be rolled out to a
+// pilot set of agents independently.
+function effectiveHarnessOverlay(agentConfig: Record<string, unknown> | undefined): boolean {
+  return agentConfig?.["continualHarness"] === true || agentConfig?.["continualHarness"] === "true";
+}
+
 function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const obj = raw as Record<string, unknown>;
@@ -3453,6 +3461,7 @@ async function processTask(
         finalAnswerMaxTurns: channelId ? 2 : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: backgroundSubagentRegistry,
+        enableHarnessOverlay: effectiveHarnessOverlay(agentConfig),
         fastMode: fastModeEnabled,
         ...(fastModeEnabled ? { fastToolCatalogNames: fastCatalogNames } : {}),
         ...(fastModeEnabled ? { fastToolController } : {}),
