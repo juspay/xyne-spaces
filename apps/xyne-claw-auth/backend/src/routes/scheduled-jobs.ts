@@ -16,7 +16,7 @@ import { agentRunRepository, chatMessageRepository } from "../repositories/index
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
+import { requireStrictS2S, requireResultToken } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
@@ -1108,7 +1108,16 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
 // mounted under requireAuth (which accepts a browser cookie) for job
 // management, so without this an ordinary logged-in user could POST a forged
 // result that posts a message as the agent into the job owner's channel.
-router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
+//
+// requireStrictS2S alone only proves "a trusted pod sent this" — it does NOT
+// bind the callback to a specific run, so any holder of the shared S2S key
+// could POST a forged result for ANY job id and have us post arbitrary content
+// as the agent into the owner's channel. requireResultToken closes that: the
+// pod echoes the run's per-run sessionToken (minted in run.ts /internal/run,
+// bound to this sessionId) as x-session-token, and we verify token.sid ===
+// payload.sessionId. Same layering the sibling result callbacks already use
+// (run.ts POST /sessions/:id/result, webhook.ts POST /result).
+router.post("/:id/result", requireStrictS2S, requireResultToken((req) => (req.body as { sessionId?: string })?.sessionId), async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const payload = req.body as {
     sessionId?: string;

@@ -342,3 +342,84 @@ describe("main.ts requireAuth mount policy", () => {
     ).toEqual([]);
   });
 });
+
+describe("requireResultToken — scheduled-jobs /result per-run gate", () => {
+  // The scheduled-jobs /result route extracts the run's sessionId from the
+  // request BODY (the pod posts it there), unlike run.ts which reads a path
+  // param. Mirror that exact extractor so the test guards the real wiring.
+  const scheduledExtractor = (req: Request): string | undefined =>
+    (req.body as { sessionId?: string })?.sessionId;
+
+  // The helper above returns before res/next mutate; run through a thin wrapper
+  // that actually calls the middleware and reads final state.
+  async function run(opts: { token?: string; body?: unknown }): Promise<{
+    statusCode: number;
+    error: string | undefined;
+    nextCalled: boolean;
+  }> {
+    const { requireResultToken } = await import("./require-auth.js");
+    const req = {
+      headers: opts.token ? { "x-session-token": opts.token } : {},
+      body: opts.body ?? {},
+    } as unknown as Request;
+    let statusCode = 0;
+    let error: string | undefined;
+    const res = {
+      status(code: number) {
+        statusCode = code;
+        return this;
+      },
+      json(payload: { error?: string }) {
+        error = payload?.error;
+        return this;
+      },
+    } as unknown as Response;
+    let nextCalled = false;
+    const next: NextFunction = () => {
+      nextCalled = true;
+    };
+    requireResultToken(scheduledExtractor)(req, res, next);
+    return { statusCode, error, nextCalled };
+  }
+
+  async function mint(sessionId: string): Promise<string> {
+    const { mintSessionToken } = await import("../lib/session-tokens.js");
+    return mintSessionToken({
+      sessionId,
+      userId: "user-1",
+      agentSlug: "xyne-spaces-architect",
+      ttlSeconds: 3600,
+    });
+  }
+
+  it("calls next() when the token's sid matches the body sessionId", async () => {
+    const token = await mint("sess-abc");
+    const out = await run({ token, body: { sessionId: "sess-abc" } });
+    expect(out.nextCalled).toBe(true);
+    expect(out.statusCode).toBe(0);
+  });
+
+  it("rejects (401) when the token is for a different session", async () => {
+    const token = await mint("sess-abc");
+    const out = await run({ token, body: { sessionId: "sess-OTHER" } });
+    expect(out.nextCalled).toBe(false);
+    expect(out.statusCode).toBe(401);
+    expect(out.error).toContain("sid-mismatch");
+  });
+
+  it("rejects (401) when no x-session-token header is present (S2S key alone)", async () => {
+    const out = await run({ body: { sessionId: "sess-abc" } });
+    expect(out.nextCalled).toBe(false);
+    expect(out.statusCode).toBe(401);
+    expect(out.error).toContain("malformed");
+  });
+
+  it("rejects (401) when the token signature is tampered", async () => {
+    const token = await mint("sess-abc");
+    const tampered = token.slice(0, -2) + (token.endsWith("aa") ? "bb" : "aa");
+    const out = await run({ token: tampered, body: { sessionId: "sess-abc" } });
+    expect(out.nextCalled).toBe(false);
+    expect(out.statusCode).toBe(401);
+    expect(out.error).toContain("bad-signature");
+  });
+});
