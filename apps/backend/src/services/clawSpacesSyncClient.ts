@@ -32,6 +32,7 @@ export interface ClawSyncUserPayload {
   orgName?: string | null;
   createdBySpacesUserId?: string | null;
   status?: string;
+  grantClawAdmin?: boolean;
 }
 
 export class ClawSpacesSyncError extends Error {
@@ -168,6 +169,7 @@ class ClawSpacesSyncClient {
       spacesUserId: value.spacesUserId,
       role: value.role,
       status: value.status,
+      grantClawAdmin: value.grantClawAdmin,
     };
 
     return JSON.stringify(safePayload);

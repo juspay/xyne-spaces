@@ -226,6 +226,14 @@ class AIProvisioningWorker {
     const workspacePayload = await this.buildWorkspacePayload(userPayload.spacesWorkspaceId);
     const userBudget = this.getUserLiteLLMBudget(workspaceType);
 
+    const isFirstOrgMember = await this.isFirstOrgMember(
+      userPayload.spacesOrgId,
+      userPayload.spacesOrgMemberId,
+    );
+    if (isFirstOrgMember) {
+      clawUserPayload.grantClawAdmin = true;
+    }
+
     await clawSpacesSyncClient.syncOrg(orgPayload);
     await clawSpacesSyncClient.syncWorkspace(workspacePayload);
     await clawSpacesSyncClient.syncUser(clawUserPayload);
@@ -690,6 +698,15 @@ class AIProvisioningWorker {
       createdBySpacesUserId: user.workspace.createdBy,
       status: user.status,
     };
+  }
+
+  private async isFirstOrgMember(orgId: string, orgMemberId: string): Promise<boolean> {
+    const firstMember = await this.prisma.orgMember.findFirst({
+      where: { orgId, leftAt: null },
+      orderBy: { joinedAt: 'asc' },
+      select: { memberId: true },
+    });
+    return firstMember?.memberId === orgMemberId;
   }
 
   private isRetryable(error: unknown): boolean {
