@@ -128,7 +128,6 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
             }
           : undefined,
       });
-
     } catch (error) {
       logger.error('[TicketTagMappingsSideEffectHandler] Failed to handle tag activity:', {
         ticketId,

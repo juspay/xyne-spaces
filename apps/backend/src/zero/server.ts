@@ -103,7 +103,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
         select: { role: true },
       }),
     ]);
-
+  
     // If JWT is valid but DB records missing, that's a data inconsistency - fail fast
     if (!user || !orgMember) {
       logger.error('Auth data inconsistency: JWT valid but DB records missing', {
@@ -125,7 +125,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       role: user.role,
       orgRole: orgMember.role,
     } as AuthData;
-
+    
   } catch (error) {
     logger.error('JWT verification failed:', error);
     return undefined;

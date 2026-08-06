@@ -3435,7 +3435,7 @@ export class JiraMigrationImportService {
                 skipDuplicates: true,
               });
 
-                return createdTicket;
+              return createdTicket;
             });
 
             ticketId = ticket.id;

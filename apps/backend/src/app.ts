@@ -218,7 +218,6 @@ export class App {
   constructor() {
     this.app = express();
     this.httpServer = createServer(this.app);
-
     this.initializeMiddlewares();
     this.initializeRoutes();
     this.initializeErrorHandling();

@@ -595,7 +595,6 @@ export class TicketRepository {
         await recordTicketTimelineEvent({
           message: {
             conversationId: currentTicket.conversationId,
-            ...(currentTicket.workspaceId ? { workspaceId: currentTicket.workspaceId } : {}),
             senderId: updatedBy,
             content: statusMessage,
             activityType: ActivityType.STATUS,
