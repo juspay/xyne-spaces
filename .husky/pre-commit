@@ -35,6 +35,11 @@ else
   echo "   Install it: brew install gitleaks   (https://github.com/gitleaks/gitleaks)"
 fi
 
+# New-table tenant-scoping guard: new Prisma models must have a non-nullable workspaceId/orgId
+# Runs early (before the expensive backend build/typecheck) so it fails fast.
+echo "Running tenant-key (workspaceId/orgId) guard..."
+bash scripts/validate-workspace-id.sh || exit 1
+
 # Get list of changed files
 CHANGED_FILES=$(git diff --cached --name-only)
 
