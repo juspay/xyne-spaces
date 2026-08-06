@@ -9,5 +9,6 @@ const filesController = new FilesController();
 router.post('/filesUpload', requirePermission('files:write'), validateChannelAccessForPost, filesController.uploadFiles);
 router.get('/info/:attachmentId', requirePermission('files:read'), filesController.getFileInfo);
 router.get('/download/:attachmentId', requirePermission('files:read'), filesController.downloadFile);
+router.get('/signed-url/:attachmentId', requirePermission('files:read'), filesController.getSignedDownloadUrl);
 
 export default router;

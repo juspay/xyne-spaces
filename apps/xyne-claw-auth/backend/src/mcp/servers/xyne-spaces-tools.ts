@@ -4506,6 +4506,103 @@ const spacesThreadAttachments: ToolDef = {
   },
 };
 
+type SignedUrlFetcher = (attachmentId: string) => Promise<SignedAttachmentUrlResponse>;
+
+// Shared body for spaces-fetch-attachment. The ONLY thing that differs between
+// user mode and app mode is HOW we obtain the short-lived signed URL:
+//   - user handler → GET /api/attachments/:id/signed-url  (user session token)
+//   - appHandler   → GET /api/apps/files/signed-url/:id    (agent app token, files:read)
+// Once we have the storage-signed URL, extraction/download is identical because
+// the signed URL is fetched directly from storage and needs no Spaces auth.
+async function fetchAttachmentImpl(
+  attachmentId: string,
+  getSignedUrl: SignedUrlFetcher,
+): Promise<ToolResult> {
+  try {
+    if (!attachmentId) return err("attachmentId is required");
+
+    // Look up metadata so we can name the file correctly downstream.
+    const meta = (await interact({
+      model: "messageAttachment",
+      operation: "findMany",
+      where: { id: { equals: attachmentId }, isDeleted: { equals: false } },
+      take: 1,
+    })) as MessageAttachmentRow[];
+    if (!meta || meta.length === 0) {
+      return err(`Attachment ${attachmentId} not found or deleted`);
+    }
+    const m = meta[0]!;
+
+    let signed: SignedAttachmentUrlResponse;
+    try {
+      signed = await getSignedUrl(attachmentId);
+    } catch (signedErr) {
+      const sizeText = formatAttachmentBytes(m.size);
+      return err(
+        `Could not get a short-lived download link for attachment "${m.originalFilename}" (${m.mimetype}, ${sizeText}). ` +
+        `Spaces denied or failed the signed-url request: ${signedErr instanceof Error ? signedErr.message : String(signedErr)}. ` +
+        "This uses the same attachment permissions as the normal Spaces download; confirm the file is still in the thread and that the requester can access it.",
+      );
+    }
+
+    // Sanitise filename to keep it within .context/ — strip path separators
+    // and leading dots so the agent can't be tricked into reading outside.
+    const signedName = signed.filename || m.originalFilename;
+    const signedMimeType = signed.mimeType || m.mimetype || "application/octet-stream";
+    const safeName = signedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+    const declaredSize = Number.isFinite(signed.size) && signed.size > 0 ? signed.size : m.size;
+    const expiryText = `${signed.expiresInMinutes} minute${signed.expiresInMinutes === 1 ? "" : "s"}`;
+
+    if (isReadableAttachment(safeName, signedMimeType)) {
+      try {
+        const files = await ingestAttachmentToMarkdown(safeName, signedMimeType, signed.url, declaredSize);
+        if (files.length === 0) {
+          return ok(
+            `Fetched attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) via a ${expiryText} signed URL, ` +
+            "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
+          );
+        }
+        const rendered = files
+          .map((f) => `# ${f.path}\n\n${f.content}`)
+          .join("\n\n---\n\n");
+        return ok(
+          `Fetched attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) via a ${expiryText} signed URL and extracted it to markdown. ` +
+          `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
+        );
+      } catch (ingestErr) {
+        return err(
+          `Could not extract attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) from the ${expiryText} signed URL: ` +
+          `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
+          `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the signed URL expired.`,
+        );
+      }
+    }
+
+    if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+      return err(
+        `Attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
+        `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
+        `This file type is not supported by the text extraction path, so only a ${expiryText} signed URL was available and the file was not returned as base64 through MCP. ` +
+        "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+      );
+    }
+
+    const buffer = await downloadSmallAttachmentFromSignedUrl(safeName, signedMimeType, declaredSize, signed.url)
+      .catch((downloadErr) => {
+        throw new Error(
+          `Could not download unsupported attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) from the ${expiryText} signed URL: ` +
+          `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+        );
+      });
+
+    // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
+    // base64 and writes the buffer to .context/<fileName> in the workspace.
+    return ok(`[SPACES_ATTACHMENT:${safeName}:${signedMimeType}]\n${buffer.toString("base64")}`);
+  } catch (e) {
+    return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 const spacesFetchAttachment: ToolDef = {
   name: "spaces-fetch-attachment",
   description:
@@ -4519,93 +4616,27 @@ const spacesFetchAttachment: ToolDef = {
     },
     required: ["attachmentId"],
   },
+  // User mode: resolve the signed URL through the user-session attachment route.
   async handler(args) {
-    try {
-      const attachmentId = String(args["attachmentId"] ?? "");
-      if (!attachmentId) return err("attachmentId is required");
-
-      // Look up metadata so we can name the file correctly downstream.
-      const meta = (await interact({
-        model: "messageAttachment",
-        operation: "findMany",
-        where: { id: { equals: attachmentId }, isDeleted: { equals: false } },
-        take: 1,
-      })) as MessageAttachmentRow[];
-      if (!meta || meta.length === 0) {
-        return err(`Attachment ${attachmentId} not found or deleted`);
-      }
-      const m = meta[0]!;
-
-      let signed: SignedAttachmentUrlResponse;
-      try {
-        signed = (await spacesFetch(
-          `/api/attachments/${encodeURIComponent(attachmentId)}/signed-url`,
-        )) as SignedAttachmentUrlResponse;
-      } catch (signedErr) {
-        const sizeText = formatAttachmentBytes(m.size);
-        return err(
-          `Could not get a short-lived download link for attachment "${m.originalFilename}" (${m.mimetype}, ${sizeText}). ` +
-          `Spaces denied or failed the signed-url request: ${signedErr instanceof Error ? signedErr.message : String(signedErr)}. ` +
-          "This uses the same attachment permissions as the normal Spaces download; confirm the file is still in the thread and that the requester can access it.",
-        );
-      }
-
-      // Sanitise filename to keep it within .context/ — strip path separators
-      // and leading dots so the agent can't be tricked into reading outside.
-      const signedName = signed.filename || m.originalFilename;
-      const signedMimeType = signed.mimeType || m.mimetype || "application/octet-stream";
-      const safeName = signedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
-      const declaredSize = Number.isFinite(signed.size) && signed.size > 0 ? signed.size : m.size;
-      const expiryText = `${signed.expiresInMinutes} minute${signed.expiresInMinutes === 1 ? "" : "s"}`;
-
-      if (isReadableAttachment(safeName, signedMimeType)) {
-        try {
-          const files = await ingestAttachmentToMarkdown(safeName, signedMimeType, signed.url, declaredSize);
-          if (files.length === 0) {
-            return ok(
-              `Fetched attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) via a ${expiryText} signed URL, ` +
-              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
-            );
-          }
-          const rendered = files
-            .map((f) => `# ${f.path}\n\n${f.content}`)
-            .join("\n\n---\n\n");
-          return ok(
-            `Fetched attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) via a ${expiryText} signed URL and extracted it to markdown. ` +
-            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
-          );
-        } catch (ingestErr) {
-          return err(
-            `Could not extract attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) from the ${expiryText} signed URL: ` +
-            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
-            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the signed URL expired.`,
-          );
-        }
-      }
-
-      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
-        return err(
-          `Attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
-          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
-          `This file type is not supported by the text extraction path, so only a ${expiryText} signed URL was available and the file was not returned as base64 through MCP. ` +
-          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
-        );
-      }
-
-      const buffer = await downloadSmallAttachmentFromSignedUrl(safeName, signedMimeType, declaredSize, signed.url)
-        .catch((downloadErr) => {
-          throw new Error(
-            `Could not download unsupported attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) from the ${expiryText} signed URL: ` +
-            `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
-          );
-        });
-
-      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
-      // base64 and writes the buffer to .context/<fileName> in the workspace.
-      return ok(`[SPACES_ATTACHMENT:${safeName}:${signedMimeType}]\n${buffer.toString("base64")}`);
-    } catch (e) {
-      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    const attachmentId = String(args["attachmentId"] ?? "");
+    return fetchAttachmentImpl(attachmentId, async (id) =>
+      (await spacesFetch(
+        `/api/attachments/${encodeURIComponent(id)}/signed-url`,
+      )) as SignedAttachmentUrlResponse,
+    );
+  },
+  // App mode (headless / automation runs — agent app identity, no user session):
+  // resolve the signed URL through the app-token route, gated by `files:read`.
+  // Without this, app-mode runs 401 on the user attachment route and can list
+  // but never download attachments.
+  async appHandler(args) {
+    const attachmentId = String(args["attachmentId"] ?? "");
+    return fetchAttachmentImpl(attachmentId, async (id) =>
+      (await appFetch(
+        `/files/signed-url/${encodeURIComponent(id)}`,
+        { method: "GET" },
+      )) as SignedAttachmentUrlResponse,
+    );
   },
 };
 
