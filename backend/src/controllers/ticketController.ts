@@ -698,6 +698,20 @@ export class TicketController {
         }
       }
 
+      let formFieldChangesForEmit: FormFieldChanges | undefined;
+      if (formFields.length > 0) {
+        const fieldsWithValues = formFields
+          .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
+          .map((f: any) => ({
+            fieldId: f.id,
+            fieldName: f.fieldName,
+            actualFieldValue: dynamicFields[f.fieldName],
+          }));
+        if (fieldsWithValues.length > 0) {
+          formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
+        }
+      }
+
       // Wrap all database operations in a transaction for data integrity
       const { ticket } = await prisma.$transaction(async (tx) => {
         // Generate xyneId using project-scoped format
@@ -737,6 +751,7 @@ export class TicketController {
             ticketType,
             stageName,
             dynamicFields: dynamicFields as Record<string, string>,
+            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           const ticketMd = serializeTicketMd({
@@ -847,20 +862,6 @@ export class TicketController {
           conversationId = conversation.conversationId;
 
           const newConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelId!);
-
-          let formFieldChangesForEmit: FormFieldChanges | undefined;
-          if (formFields.length > 0) {
-            const fieldsWithValues = formFields
-              .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
-              .map((f: any) => ({
-                fieldId: f.id,
-                fieldName: f.fieldName,
-                actualFieldValue: dynamicFields[f.fieldName],
-              }));
-            if (fieldsWithValues.length > 0) {
-              formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
-            }
-          }
 
           ticket = await this.ticketRepository.createTicket({
             title,
