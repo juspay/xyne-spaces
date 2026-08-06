@@ -466,6 +466,14 @@ export class ACLFactory {
       return new ResourceAccessACL(ctx, prisma)
     case 'scheduledMessage':
       return new ScheduledMessagesACL(ctx, prisma)
+    // SDK API idempotency records. Infrastructure, not tenant data: the table has
+    // no workspaceId column, so the base clause ({ workspaceId }) would generate
+    // SQL against a column that does not exist. Rows are already scoped by userId
+    // at every call site (the unique key is (userId, endpoint, key)), and they are
+    // written through raw SQL inside the mutator's own transaction rather than
+    // this path.
+    case 'sdkIdempotencyKey':
+      return new UnscopedACL(ctx, prisma)
     case 'sessionRecordingFile':
       return new BaseQueryACL(ctx, prisma)
     case 'stagePRStatusMapping':

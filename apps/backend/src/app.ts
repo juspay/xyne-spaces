@@ -200,6 +200,8 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import { createV1Router } from '@/api/v1';
+import { v1Config } from '@/api/v1/config';
 
 
 export class App {
@@ -753,14 +755,20 @@ export class App {
 
     this.app.use('/internal', internalRoutes);
 
-    // API versioning placeholder
-    this.app.use('/api/v1', (_req, res) => {
-      res.json({
-        success: true,
-        message: 'API v1 endpoint - ready for implementation',
-        timestamp: new Date().toISOString(),
+    // Public SDK API. Owns its own auth (RS256 tokens from xyne-claw-auth),
+    // rate limiting, and error envelope, so it is mounted without the session
+    // middleware the internal routes above use. Off unless SDK_API_ENABLED=true.
+    if (v1Config.enabled) {
+      this.app.use('/api/v1', createV1Router());
+      logger.info('Public SDK API mounted at /api/v1');
+    } else {
+      this.app.use('/api/v1', (_req, res) => {
+        res.status(404).json({
+          success: false,
+          error: 'The public SDK API is not enabled on this deployment.',
+        });
       });
-    });
+    }
   }
 
   private initializeErrorHandling(): void {

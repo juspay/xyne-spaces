@@ -23,6 +23,7 @@ model User {
   skills                Skill[]
   providerCredentials   UserProviderCredentials[]
   surfaceAccessTokens   SurfaceAccessToken[]
+  sdkRefreshTokens      SdkRefreshToken[]
   surfaceIdentities     UserSurfaceIdentity[]
   subagentConfigs       UserSubagentConfig[]
   createdChainWorkflows AgentChainWorkflow[]       @relation("CreatedChainWorkflows")
@@ -382,6 +383,39 @@ model SurfaceAgentInstall {
 
   @@unique([surfaceAgentId, surfaceTenantId])
   @@map("surface_agent_installs")
+}
+
+/// Refresh tokens for the public Spaces SDK (OAuth device + refresh grants).
+///
+/// Access tokens are short-lived signed JWTs the Spaces resource server verifies
+/// statelessly, so this table is the only revocation point: deleting or revoking
+/// a row stops renewal, and the outstanding access token expires within minutes.
+///
+/// Rotation is single-use. `familyId` groups every token descended from one
+/// device authorization, so presenting an already-rotated token (the classic
+/// signal of a stolen refresh token) can revoke the whole family at once.
+model SdkRefreshToken {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId       String
+  clientId    String
+  familyId    String
+  tokenHash   String    @unique
+  prefix      String
+  scopes      String[]  @default([])
+  /// Set when this token is exchanged, so a second use is detectable.
+  rotatedAt   DateTime?
+  revokedAt   DateTime?
+  expiresAt   DateTime
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("sdk_refresh_tokens")
 }
 
 model SurfaceAccessToken {

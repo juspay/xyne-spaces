@@ -83,7 +83,7 @@ if (replicaDbProvider) {
 
 let serverSchemaCache: any | null = null;
 
-async function fetchServerSchema(): Promise<any> {
+export async function fetchServerSchema(): Promise<any> {
   if (!serverSchemaCache) {
     serverSchemaCache = await dbProvider.transaction(async (tx) => {
       return await getServerSchema(tx.dbTransaction, schema);
@@ -441,12 +441,12 @@ export async function handleQueries(request: Request): Promise<any> {
   }
 }
 
-type ZeroResultFormat = {
+export type ZeroResultFormat = {
   singular?: boolean;
   relationships?: Record<string, ZeroResultFormat>;
 };
 
-function conformToZeroShape(node: unknown, format: ZeroResultFormat | undefined): void {
+export function conformToZeroShape(node: unknown, format: ZeroResultFormat | undefined): void {
   if (!node || !format?.relationships) return;
   if (Array.isArray(node)) {
     for (const item of node) conformToZeroShape(item, format);

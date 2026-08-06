@@ -1,0 +1,37 @@
+{
+  "name": "@xyne/spaces-contract",
+  "version": "0.1.0",
+  "description": "Shared API contract for the Xyne Spaces public API: error codes, scopes, and response schemas",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./exclusions.json": "./src/exclusions.json"
+  },
+  "files": [
+    "dist",
+    "src/exclusions.json",
+    "openapi"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "pnpm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "typescript": "^5.7.0"
+  }
+}

@@ -172,6 +172,8 @@ export type SpacesAuthCaller =
   | "require-auth"
   | "scheduled-job"
   | "write-action"
+  | "sdk-oauth"
+  | "sdk-oauth-refresh"
   | "clone-owner-dm"
   | "skill-update-owner-dm"
   | "awakening"
@@ -277,6 +279,62 @@ export interface SpacesUserProfile {
   /// The user's current Spaces workspace (public.users.workspaceId). Used by
   /// JIT to map the user to a claw org via SurfaceTenantLink. May be null.
   workspaceId: string | null;
+}
+
+/**
+ * The principal claims an SDK access token carries.
+ *
+ * Resolved once at mint time rather than on every request, so the Spaces
+ * resource server can verify tokens statelessly — it only re-reads the *roles*
+ * (which must stay database-authoritative) and never has to ask claw-auth who
+ * the caller is.
+ */
+export interface SpacesSdkPrincipal {
+  id: string;
+  email: string;
+  name: string;
+  workspaceId: string;
+  /// public.users.orgMemberId → org_members.memberId, which the resource server
+  /// uses to load the caller's org role.
+  memberId: string;
+}
+
+export async function getSpacesSdkPrincipal(
+  userId: string,
+  caller: SpacesAuthCaller = "unknown",
+): Promise<SpacesSdkPrincipal | null> {
+  const client = getClient();
+  if (!client || !userId) return null;
+
+  try {
+    const rows = await client.$queryRaw<
+      Array<{ id: string; email: string; name: string; workspaceId: string | null; memberId: string | null }>
+    >`
+      SELECT id, email, name, "workspaceId", "orgMemberId" AS "memberId"
+      FROM public.users
+      WHERE id = ${userId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    if (!row || !row.workspaceId || !row.memberId) {
+      log.warn(
+        `[spaces-db] sdk-principal userId=${userId} caller=${caller} result=incomplete workspace=${!!row?.workspaceId} member=${!!row?.memberId}`,
+      );
+      return null;
+    }
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      workspaceId: row.workspaceId,
+      memberId: row.memberId,
+    };
+  } catch (err) {
+    log.warn(
+      `[spaces-db] sdk-principal userId=${userId} caller=${caller} result=error err=${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
 }
 
 /**
