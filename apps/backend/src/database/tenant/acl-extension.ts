@@ -12,6 +12,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { getContextOrNull, currentWorkspaceId, isRequestContext } from './context';
 import { ACLFactory } from '@/database/acl';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const txStorage = new AsyncLocalStorage<boolean>();
 
@@ -69,28 +70,46 @@ function notePattern(tag: string, model: string | undefined, operation: string, 
   logger.warn(tag, { model, operation, ...detail });
 }
 
-/**
- * Build the error thrown when a row is out of the caller's scope, logging it first.
- * Every denial in this file goes through here or `denyCreate` so refusals are never silent.
+/*
+ * Refusals are split in two: the error a caller receives, and the line written to the log.
+ * Nothing here does both, so a call site never has to guess whether raising also logged —
+ * it logs when it says so. Sites that have already logged their own specifics raise the
+ * error alone rather than logging the same event twice.
  */
-function deny(model: string, operation: string, reason: string): Error {
-  logger.warn('[acl] blocked', { model, operation, reason });
+
+/**
+ * Reads as not-found on purpose. A caller probing another workspace must not be able to
+ * tell "this row exists but you may not have it" from "this row does not exist".
+ */
+function outOfScope(model: string): Error {
   return new Error(`No ${model} found for the current workspace`);
 }
 
-function denyCreate(model: string, operation: string): Error {
-  logger.warn('[acl] blocked create', { model, operation, reason: 'canCreate returned false' });
+/** A create carries no such risk — the row does not exist yet — so it can be explicit. */
+function notAllowedToCreate(model: string): Error {
   return new Error(`Not authorized to create ${model}`);
 }
 
+function logBlocked(model: string, operation: string, reason: string): void {
+  logger.warn('[acl] blocked', { model, operation, reason });
+}
+
+function logBlockedCreate(model: string, operation: string): void {
+  logger.warn('[acl] blocked create', { model, operation, reason: 'canCreate returned false' });
+}
+
+/** Whether each class of check refuses or only reports. Read once; echoed at startup. */
+const ENFORCE = {
+  workspaceImmutable: config.aclEnforcement.workspaceImmutable,
+  guestWrites: config.aclEnforcement.guestWrites,
+  noContext: config.aclEnforcement.noContext,
+} as const;
+
+logger.info('[acl] enforcement mode', ENFORCE);
+
 /**
- * Report an insert that names a workspace other than the one being enforced.
- *
- * Diagnostic only. Workspace provisioning legitimately writes rows carrying a newly
- * created workspace's id while a different workspace is the enforced one, so this is
- * reported rather than rejected.
- *
- * Not deduped — a repeat is itself the signal.
+ * An insert naming a workspace other than the enforced one. Refused when
+ * ACL_ENFORCE_WORKSPACE_IMMUTABLE is on. Not deduped — a repeat is itself the signal.
  */
 function reportForeignWorkspace(model: string, operation: string, row: unknown, ws: string): void {
   if (!row || typeof row !== 'object') return;
@@ -98,15 +117,13 @@ function reportForeignWorkspace(model: string, operation: string, row: unknown, 
   // undefined -> stamp fills it. null -> a deliberate row on a nullable column.
   if (typeof given !== 'string' || given === ws) return;
   logger.warn('[acl] create names a different workspace', { model, operation, given, enforced: ws });
+  if (ENFORCE.workspaceImmutable) throw outOfScope(model);
 }
 
 /**
  * workspaceId is the tenant key: once a row exists it should not move between workspaces.
  *
- * Diagnostic only, matching reportForeignWorkspace above. Which callers write a foreign
- * workspaceId today is not answerable from the code, and the only place that can answer it
- * is an environment carrying real traffic, so this reports rather than refuses. Turn it into
- * a refusal once the log is quiet.
+ * Refused when ACL_ENFORCE_WORKSPACE_IMMUTABLE is on.
  *
  * Covers every write that carries a data payload, including the update half of upsert,
  * which the generic data path does not see.
@@ -129,6 +146,7 @@ function reportWorkspaceReassignment(
       : given;
     if (typeof value !== 'string' || value === ws) continue;
     logger.warn('[acl] update reassigns workspaceId', { model, operation, given: value, enforced: ws });
+    if (ENFORCE.workspaceImmutable) throw outOfScope(model);
   }
 }
 
@@ -198,6 +216,10 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             // `system` is intentional; anything else reaching here has no scope to apply.
             if (ctx?.actor !== 'system')
               warnUnscoped(model, operation, ctx ? 'no-workspace' : 'no-context');
+            // Widest-reaching switch: every caller not wrapped in runWithContext lands here.
+            if (ENFORCE.noContext && ctx && ctx.actor !== 'system' && model && isWorkspaceScopedModel(model)) {
+              throw outOfScope(model);
+            }
             return query(args);
           }
 
@@ -287,8 +309,9 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               }
               const row = (await query(patched as typeof args)) as { workspaceId?: string } | null;
               if (row && row.workspaceId !== ws) {
-                if (operation === 'findUniqueOrThrow') throw deny(model, operation, 'row in another workspace');
-                logger.warn('[acl] blocked', { model, operation, reason: 'row in another workspace' });
+                logBlocked(model, operation, 'row in another workspace');
+                // findUnique returns null where findUniqueOrThrow raises.
+                if (operation === 'findUniqueOrThrow') throw outOfScope(model);
                 return null;
               }
               if (row && !wanted) delete (row as { workspaceId?: string }).workspaceId;
@@ -305,7 +328,8 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             >)[camel];
             const row = await delegate.findFirst({ ...a, where });
             if (!row && operation === 'findUniqueOrThrow') {
-              throw deny(model, operation, 'no row matched the relational ACL');
+              logBlocked(model, operation, 'no row matched the relational ACL');
+              throw outOfScope(model);
             }
             return row;
           }
@@ -318,7 +342,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               reportForeignWorkspace(model, operation, row, ws);
               if (acl) {
                 const ok = await acl.canCreate(row as Record<string, unknown>);
-                if (!ok) throw denyCreate(model, operation);
+                if (!ok) { logBlockedCreate(model, operation); throw notAllowedToCreate(model); }
               }
             }
             return query(args);
@@ -338,6 +362,21 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           }
 
           let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
+
+          // A guest writes only what a guest can read: intersect the two rather than
+          // restating the rule in every table ACL.
+          if (ctx?.role === 'GUEST' && ctx.actor === 'user' && acl) {
+            notePattern('[acl] guest write not narrowed', model, operation);
+            if (ENFORCE.guestWrites) {
+              const guestRead = (await acl.getWhereClause()) as Record<string, unknown> | null;
+              if (guestRead && !isUnrestricted(guestRead)) {
+                mutateWhere = !mutateWhere || isUnrestricted(mutateWhere)
+                  ? guestRead
+                  : { AND: [mutateWhere, guestRead] };
+              }
+            }
+          }
+
           if (!mutateWhere) {
             // Service actors only — see the read branch.
             if (!isWorkspaceScopedModel(model)) {
@@ -379,13 +418,14 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               const exists = await delegate.count({ where: scoped });
               if (exists > 0) {
                 // The row exists, but not in the caller's scope — an upsert would update it.
-                throw deny(model, operation, 'upsert target in another workspace');
+                logBlocked(model, operation, 'upsert target in another workspace');
+                throw outOfScope(model);
               }
               // Row doesn't exist → this upsert will insert; gate it like a create.
               reportForeignWorkspace(model, operation, a.create, ws);
               if (acl) {
                 const ok = await acl.canCreate((a.create ?? {}) as Record<string, unknown>);
-                if (!ok) throw denyCreate(model, operation);
+                if (!ok) { logBlockedCreate(model, operation); throw notAllowedToCreate(model); }
               }
             }
             return query(args);
@@ -396,7 +436,8 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           const a = (args ?? {}) as { where?: object };
           const n = await delegate.count({ where: { AND: [toWhereInput(model, a.where), mutateWhere] } });
           if (n === 0) {
-            throw deny(model, operation, 'target row not in the caller\'s scope');
+            logBlocked(model, operation, 'target row not in the caller\'s scope');
+            throw outOfScope(model);
           }
           return query(args);
         },
