@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, powerMonitor } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
 import { showRecordingPill, hideRecordingPill, isPillWindow } from './recording-pill-window';
@@ -169,11 +169,38 @@ export function initRecordingPillVisibility(): void {
   app.on('browser-window-focus', handleWindowFocus);
   app.on('browser-window-blur', handleWindowBlur);
 
+  // A screen lock is not necessarily a lid close (it can be automatic or
+  // user-initiated), so only react to system suspension. This includes lid
+  // close while leaving an active recording alone when the screen merely locks.
+  const handleSuspend = (): void => {
+    if (!active) return;
+
+    // Clear the main-process state first. The renderer can be frozen before it
+    // has a chance to acknowledge the stop; if we leave `active` set here, the
+    // focus/blur events emitted while macOS sleeps or wakes can recreate the
+    // floating `Recording` pill as a blank BrowserWindow.
+    syncRecordingState(false);
+
+    minimized = false;
+    cancelPendingPillSync();
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // This must be a synchronous stop in the renderer. A deferred stop (the
+      // normal tray/pill path) can be overtaken by macOS freezing the renderer
+      // during lid-close suspension, leaving the LiveKit room alive.
+      mainWindow.webContents.send('recording:system-suspend');
+    }
+    hideRecordingPill();
+    log.info('[RecordingController] Stop requested because the system is suspending');
+  };
+  powerMonitor.on('suspend', handleSuspend);
+
   app.once('will-quit', () => {
     cancelPendingPillSync();
     clearFocusRequested();
     app.removeListener('browser-window-focus', handleWindowFocus);
     app.removeListener('browser-window-blur', handleWindowBlur);
+    powerMonitor.removeListener('suspend', handleSuspend);
   });
 }
 

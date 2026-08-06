@@ -522,6 +522,17 @@ export const NotificationHandler: React.FC = () => {
     });
   }, [isElectron]);
 
+  // macOS freezes the renderer immediately after the Electron main process
+  // receives `powerMonitor.suspend` (including a lid close). Do not use the
+  // normal deferred `requestStop` path here: disconnect LiveKit immediately so
+  // the recording session is finalized before the process is suspended.
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
+    return window.electronAPI.onRecordingSystemSuspend(() => {
+      sendRecordingEvent({ type: 'stopRecording' });
+    });
+  }, [isElectron]);
+
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
   const wasRecordingActiveRef = useRef<boolean | null>(null);

@@ -105,6 +105,7 @@ import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { getRecordingStatus, sendRecordingEvent } from '../hooks/useRecordingStore';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -323,6 +324,28 @@ const AppRoot = (): ReactElement => {
     setPendingRecordingFilePath(filePath);
     setIsErrorReportOpen(true);
   });
+
+  // Do not stop an active recording merely because the document becomes hidden:
+  // that also happens when a user locks their screen or switches apps. Browsers
+  // do not expose a reliable lid-close event, so retain only the actual page
+  // unload safeguard below.
+  useEffect(() => {
+    const stopRecordingBeforePageIsFrozen = (): void => {
+      const status = getRecordingStatus();
+      if (status === 'starting') {
+        // Let the start sequence complete and consume the pending stop rather
+        // than allowing its in-flight connection to revive a stopped session.
+        sendRecordingEvent({ type: 'requestStop' });
+      } else if (status === 'recording' || status === 'paused') {
+        sendRecordingEvent({ type: 'stopRecording' });
+      }
+    };
+
+    window.addEventListener('pagehide', stopRecordingBeforePageIsFrozen);
+    return (): void => {
+      window.removeEventListener('pagehide', stopRecordingBeforePageIsFrozen);
+    };
+  }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
   useShortcutById(
     'global.composeMessage',

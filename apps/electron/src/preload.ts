@@ -149,6 +149,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('reload-active-browser-tab', listener);
   },
 
+  onRecordingSystemSuspend: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:system-suspend', listener);
+    return () => ipcRenderer.removeListener('recording:system-suspend', listener);
+  },
+
   onAuthSuccess: (callback: (data?: ElectronAuthData) => void) => {
     const listener = (_event: unknown, data?: ElectronAuthData) => callback(data);
     ipcRenderer.on('auth:success', listener);
