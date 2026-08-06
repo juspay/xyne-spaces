@@ -1219,7 +1219,11 @@ async function postWriteApprovalAction(args: {
 
   await spacesAppFetch("/chat/postMessage", {
     channelId: ctx.channelId,
-    conversationId: ctx.conversationId,
+    // Same empty-conversationId guard as the result post: an API/event-triggered
+    // run has no thread, so posting the approval card with conversationId: ""
+    // 400s in Spaces' channel-validation middleware and the card silently never
+    // appears. Omit when empty → the card posts as a top-level channel message.
+    ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
     flow: writeFlow,
     userId: ctx.spacesAppUserId,
   }, token);
@@ -5386,7 +5390,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.info(`Posting result: channelId=${ctx.channelId} conversationId=${ctx.conversationId} resultLen=${prepared.text.length} userId=${ctx.spacesAppUserId}`);
           await spacesAppFetch("/chat/postMessage", {
             channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
+            // Channel-bound, thread-less runs (API/event-triggered) carry an
+            // empty conversationId. Sending "" explicitly fails Spaces'
+            // ChannelValidationSchema (conversationId is .min(1).optional() —
+            // "" is a string, not undefined, so it trips .min(1) → 400
+            // "Validation error"). Omit it when empty so Spaces treats the post
+            // as a top-level channel message and creates a fresh thread.
+            ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
             markdownText: prepared.text,
             userId: ctx.spacesAppUserId,
             metadata: convMetadata,
