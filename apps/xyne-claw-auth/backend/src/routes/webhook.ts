@@ -6117,8 +6117,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
 // Register the agent-specific webhook route (AFTER /result to avoid param catch).
 // `verifySpacesSignature` HMAC-checks the body using the agent's per-app
-// signing secret stored in agents.signingSecret. It fails closed by default;
-// SPACES_WEBHOOK_VERIFY_MODE=warn is only an explicit rollout escape hatch.
+// signing secret stored in agents.signingSecret and always fails closed.
 //
 // The bare-path `/webhook` (no agent slug) used to fall through to a
 // default-agent dispatch — verified dead in 7d of prod logs (0 hits across

@@ -143,8 +143,7 @@ async function consumeAgentCallAction(messageId: string): Promise<boolean> {
 // original raw bytes, Spaces' X-Xyne-Signature, and the agent slug; here we
 // re-run the per-agent HMAC check so context.userId is bound to a payload
 // Spaces actually signed. verifySpacesSignature keys off req.params.agentSlug,
-// so pin it from the forwarded header first. Honors the same
-// SPACES_WEBHOOK_VERIFY_MODE warn/enforce rollout switch.
+// so pin it from the forwarded header first. Verification always fails closed.
 function pinAgentSlugFromHeader(req: Request, _res: Response, next: NextFunction): void {
   const slug = req.headers["x-agent-slug"];
   if (typeof slug === "string" && slug.trim()) {

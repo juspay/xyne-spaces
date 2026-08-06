@@ -2323,8 +2323,8 @@ router.post("/:slug/configure-webhook", async (req: Request<{ slug: string }>, r
     // HMAC-check inbound webhook bodies. Best-effort — if Spaces is reachable
     // for configureWebhook (just succeeded above) it's almost certainly
     // reachable for signing-secret too. On failure we log and leave the
-    // signature column null; verify middleware stays warn-only for this agent
-    // until a future call (or the backfill script) succeeds.
+    // signature column null; fail-closed verification rejects this agent's
+    // webhooks until a future call (or the backfill script) succeeds.
     await fetchAndStoreSigningSecretFromSpacesApi({
       agentId: agent.id,
       spacesAppId: agent.spacesAppId,
