@@ -81,10 +81,11 @@ function diagnoseMismatch(rawBody: Buffer, secret: string, received: string): st
   return `match=${hit} parses=${parses} bodyBytes=${rawBody.length} bodySha=${bodySha}`;
 }
 
-export async function verifySpacesSignature(
+async function verifySpacesSignatureImpl(
   req: Request,
   res: Response,
   next: NextFunction,
+  enforce: boolean,
 ): Promise<void> {
   const params = req.params as { agentSlug?: string; spacesAppId?: string };
   const spacesAppId = params.spacesAppId;
@@ -110,7 +111,7 @@ export async function verifySpacesSignature(
   }
 
   if (!agent?.signingSecret) {
-    if (!ENFORCE) {
+    if (!enforce) {
       log.warn(tag(lookupTag, "no_stored_secret") + " — warn-only, passing through");
       return next();
     }
@@ -122,7 +123,7 @@ export async function verifySpacesSignature(
   const parts = parseGcmBundle(agent.signingSecret);
   if (!parts) {
     log.warn(tag(lookupTag, "malformed_secret_blob") + " — treating as no secret");
-    if (!ENFORCE) return next();
+    if (!enforce) return next();
     res.status(401).json({ success: false, error: "malformed signing secret" });
     return;
   }
@@ -131,7 +132,7 @@ export async function verifySpacesSignature(
     plaintextSecret = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
   } catch (err) {
     log.warn(tag(lookupTag, "decrypt_failed") + ` — ${err instanceof Error ? err.message : String(err)}`);
-    if (!ENFORCE) return next();
+    if (!enforce) return next();
     res.status(401).json({ success: false, error: "secret decrypt failed" });
     return;
   }
@@ -144,7 +145,7 @@ export async function verifySpacesSignature(
   const received = req.headers["x-xyne-signature"];
   if (typeof received !== "string" || received.length === 0) {
     log.warn(tag(lookupTag, "no_signature_header") + " — caller did not sign request");
-    if (!ENFORCE) return next();
+    if (!enforce) return next();
     res.status(401).json({ success: false, error: "missing X-Xyne-Signature" });
     return;
   }
@@ -155,10 +156,31 @@ export async function verifySpacesSignature(
 
   if (!matches) {
     log.warn(tag(lookupTag, "mismatch") + ` — bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
-    if (!ENFORCE) return next();
+    if (!enforce) return next();
     res.status(401).json({ success: false, error: "invalid signature" });
     return;
   }
 
   next();
+}
+
+export async function verifySpacesSignature(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  return verifySpacesSignatureImpl(req, res, next, ENFORCE);
+}
+
+/**
+ * Strict Spaces HMAC verifier for identity-sensitive internal forwards. Unlike
+ * verifySpacesSignature, this never honors SPACES_WEBHOOK_VERIFY_MODE=warn:
+ * callers that trust body-supplied human identity must fail closed.
+ */
+export async function verifySpacesSignatureEnforced(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  return verifySpacesSignatureImpl(req, res, next, true);
 }

@@ -1,7 +1,8 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { executeTwinApprovalDelivery, type TwinDeliveryContext } from "../lib/twin-delivery.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import { createLogger } from "../logger.js";
+import { verifySpacesSignatureEnforced } from "../middleware/verify-spaces-signature.js";
 
 const log = createLogger("twin-draft");
 
@@ -9,8 +10,10 @@ const log = createLogger("twin-draft");
  * S2S endpoint for the in-thread Digital Twin reply-draft flow (the replacement
  * for the approval DM card). The Spaces backend owns the draft (Redis, owner-
  * only) and forwards the user's approve/decline here — claw-auth owns the Twin's
- * tested DELIVERY (react/post as the user) and FEEDBACK recording. Mounted under
- * requireStrictS2S, so only a trusted service (Spaces) reaches it.
+ * tested DELIVERY (react/post as the user) and FEEDBACK recording. The route is
+ * S2S-gated AND re-verifies Spaces' per-app HMAC over the raw approval body,
+ * because the body supplies the approving human identity and the draft that will
+ * be posted as that human.
  *
  * The delivery-execution context comes from the SERVER-SIDE Redis draft (Spaces
  * reads it, not the client), so the reply's destination can't be tampered with.
@@ -36,9 +39,27 @@ interface ForwardedDraft {
   senderId?: string;
   channelName?: string;
   incomingTask?: string;
+  spacesAppId?: string;
 }
 
-twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
+function forwardedDraftFromBody(body: unknown): ForwardedDraft {
+  if (!body || typeof body !== "object") return {};
+  const draft = (body as { draft?: unknown }).draft;
+  return draft && typeof draft === "object" ? draft as ForwardedDraft : {};
+}
+
+export function pinTwinDraftSpacesAppId(req: Request, res: Response, next: NextFunction): void {
+  const draft = forwardedDraftFromBody(req.body);
+  const spacesAppId = typeof draft.spacesAppId === "string" ? draft.spacesAppId.trim() : "";
+  if (!spacesAppId) {
+    res.status(400).json({ error: "draft.spacesAppId is required" });
+    return;
+  }
+  (req.params as Record<string, string>)["spacesAppId"] = spacesAppId;
+  next();
+}
+
+twinDraftInternalRouter.post("/action", pinTwinDraftSpacesAppId, verifySpacesSignatureEnforced, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as {
     action?: unknown;
     actorUserId?: unknown;
