@@ -56,7 +56,7 @@ import {
   RecordingContentTabs,
   type RecordingSummaryTemplate,
 } from './components/RecordingContentTabs';
-import { SummaryGenerationPanel } from './components/SummaryGenerationPanel';
+import { SummaryGenerationPanel } from './components/SummaryGenerationPill/SummaryGenerationPanel';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { GoogleDocPreviewModal } from './components/GoogleDocPreviewModal';
@@ -136,6 +136,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
     useState<BuiltinRecordingSummaryTemplateId | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
+  // Summary Generation panel states
+  const [summaryRunNonce, setSummaryRunNonce] = useState(0);
+  const [summaryFailed, setSummaryFailed] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
   /** Set once the audio poll below gives up, so the player stops implying progress. */
   const [audioPollExhausted, setAudioPollExhausted] = useState(false);
@@ -300,6 +303,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // A summary asked for on a previous visit is still pending, so restore the skeleton.
   useEffect(() => {
     setAwaitingSummary(isSummaryRequested(recordingId));
+    setSummaryFailed(false);
     setLocalSessionEnded(false);
     ownedLiveSessionRef.current = null;
     wasLiveRef.current = false;
@@ -496,7 +500,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setPendingSummaryTemplateId(summaryTemplateId);
     handleTabSelect('summary');
     markSummaryRequested(recordingId);
+    setSummaryRunNonce(value => value + 1);
     setAwaitingSummary(true);
+    setSummaryFailed(false);
     setIsRegeneratingSummary(true);
     try {
       const result = await recordingService.regenerateSummary(
@@ -529,6 +535,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       // Drop the placeholder too: a failed request leaves nothing on its way, and
       // leaving the mark set would restore the skeleton on the next visit.
       setAwaitingSummary(false);
+      setSummaryFailed(true);
       clearSummaryRequested(recordingId);
       const message = axios.isAxiosError(err)
         ? (err.response?.data as { error?: string } | undefined)?.error
@@ -896,16 +903,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 </div>
                 {transcriptText ? (
                   <Tooltip content='Open transcript' side='left'>
-                    <button
-                      type='button'
+                    <Button
                       onClick={openTranscriptPanel}
-                      className='inline-flex size-8 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                      variant='ghost'
+                      className='inline-flex size-8 items-center justify-center rounded-xl border border-border/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                       aria-label='Open transcript'
                       data-track-category='RecordingDetailV2'
                       data-track-name='open_transcript_panel'
                     >
                       <SidebarRightOpen className='size-4' aria-hidden='true' variant='Solid' />
-                    </button>
+                    </Button>
                   </Tooltip>
                 ) : null}
               </div>
@@ -919,6 +926,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   isAwaiting={awaitingSummary}
                   canGenerate={hasTranscript}
                   onGenerate={handleGenerateSummaryClick}
+                  hasFailed={summaryFailed}
+                  generationRunId={summaryRunNonce}
+                  onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
             </section>

@@ -152,7 +152,7 @@ export function RecordingLabelPicker({
   };
 
   const appliedLabels = (
-    <span className='flex max-w-76 w-full items-center gap-1.5 overflow-x-scroll scrollbar-none'>
+    <span className='flex max-w-72 w-full items-center gap-1.5 overflow-x-scroll scrollbar-none'>
       {visibleLabels.map(label => (
         <LabelChip key={label} label={resolveLabel(label)} />
       ))}
