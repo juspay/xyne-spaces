@@ -186,7 +186,7 @@ export class DeskMetricsRepository {
       )`;
 
     const frtStop = frtStopSql();
-    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, trend, agents] =
+    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, agents] =
       await Promise.all([
         this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
         this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
@@ -194,7 +194,6 @@ export class DeskMetricsRepository {
         this.stageCounts(db, cohortCte),
         this.priorityBreakdown(db, cohortCte),
         this.csatStats(db, channelId, gte, lte, assigneeId, customFieldExists),
-        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, assigneeId, customFieldExists),
         this.agentPerformance(
           db,
           cohortCte,
@@ -220,7 +219,7 @@ export class DeskMetricsRepository {
         stageCounts,
       },
       priority,
-      trend,
+      trend: [],
       tickets,
       agents,
     };
@@ -663,100 +662,6 @@ export class DeskMetricsRepository {
     };
   }
 
-  private async trendByDay(
-    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
-    channelId: string,
-    gte: Date,
-    lte: Date,
-    resolvedPredicate: Prisma.Sql,
-    assigneeId?: string | null,
-    customFieldExists: Prisma.Sql = Prisma.sql``,
-  ): Promise<Array<{ date: string; opened: number; closed: number }>> {
-    const rangeDays = (lte.getTime() - gte.getTime()) / DAY_MS;
-    const hourly = rangeDays <= 1;
-    const bucketFn = hourly
-      ? Prisma.sql`to_char(date_trunc('hour', (ta."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
-      : Prisma.sql`to_char(date_trunc('day',  (ta."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
-    const bucketFnR = hourly
-      ? Prisma.sql`to_char(date_trunc('hour', (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
-      : Prisma.sql`to_char(date_trunc('day',  (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
-
-    const ticketFilter = activeTicketFilter(assigneeId);
-
-    const [openedRows, closedRows] = await Promise.all([
-      db.$queryRaw<Array<{ day: string; count: number }>>(
-        Prisma.sql`
-          SELECT ${bucketFn} AS day, COUNT(*)::int AS count
-          FROM "public"."ticket_activities" ta
-          WHERE ta."channelId" = ${channelId}
-            AND ta."activityType" = 'TICKET_CREATED'
-            AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-            ${ticketFilter}
-            ${customFieldExists}
-          GROUP BY 1
-        `,
-      ),
-      db.$queryRaw<Array<{ day: string; count: number }>>(
-        Prisma.sql`
-          SELECT ${bucketFnR} AS day, COUNT(*)::int AS count
-          FROM (
-            SELECT ta."ticketId", MAX(ta."timestamp") AS first_resolved
-            FROM "public"."ticket_activities" ta
-            WHERE ta."channelId" = ${channelId} AND ${resolvedPredicate}
-              ${ticketFilter}
-              ${customFieldExists}
-            GROUP BY ta."ticketId"
-          ) r
-          WHERE r.first_resolved >= ${gte} AND r.first_resolved <= ${lte}
-          GROUP BY 1
-        `,
-      ),
-    ]);
-
-    const opened = new Map(openedRows.map(r => [r.day, r.count]));
-    const closed = new Map(closedRows.map(r => [r.day, r.count]));
-
-    // Fill all buckets so the chart has no gaps
-    const buckets: string[] = [];
-    const HOUR_MS = 60 * 60 * 1000;
-    const IST_TZ = 'Asia/Kolkata';
-    const toISTDateStr = (ms: number): string =>
-      new Date(ms).toLocaleDateString('en-CA', { timeZone: IST_TZ }); // → 'YYYY-MM-DD'
-    const toISTHourStr = (ms: number): string => {
-      const d = new Date(ms);
-      const date = d.toLocaleDateString('en-CA', { timeZone: IST_TZ });
-      const hour = d.toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' }).slice(0, 2);
-      return `${date} ${hour}:00`;
-    };
-    const floorToISTDay = (ms: number): number =>
-      new Date(`${toISTDateStr(ms)}T00:00:00+05:30`).getTime();
-    const floorToISTHour = (ms: number): number => {
-      const d = new Date(ms);
-      const date = d.toLocaleDateString('en-CA', { timeZone: IST_TZ });
-      const hour = d.toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' }).slice(0, 2);
-      return new Date(`${date}T${hour}:00:00+05:30`).getTime();
-    };
-
-    if (hourly) {
-      const startHour = floorToISTHour(gte.getTime());
-      const endHour   = floorToISTHour(lte.getTime());
-      for (let t = startHour; t <= endHour; t += HOUR_MS) {
-        buckets.push(toISTHourStr(t));
-      }
-    } else {
-      const startDay = floorToISTDay(gte.getTime());
-      const endDay   = floorToISTDay(lte.getTime());
-      for (let t = startDay; t <= endDay; t += DAY_MS) {
-        buckets.push(toISTDateStr(t));
-      }
-    }
-
-    return buckets.map(date => ({
-      date,
-      opened: opened.get(date) ?? 0,
-      closed: closed.get(date) ?? 0,
-    }));
-  }
 }
 
 export const deskMetricsRepository = new DeskMetricsRepository();
