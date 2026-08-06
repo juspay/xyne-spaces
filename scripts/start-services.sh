@@ -181,73 +181,33 @@ FEATURE_LABELS=(
     "Feature Flags     (superposition)"
 )
 NUM_FEATURES=${#FEATURE_LABELS[@]}
-SELECT_ALL_LABEL="Select all optional features"
-SELECT_ALL_INDEX=1
-NUM_MENU_ITEMS=$((NUM_FEATURES + 1))
-CURSOR=$SELECT_ALL_INDEX          # start on Select all
 
 if [ -n "${XYNE_FEATURES:-}" ]; then
     SELECTED_FEATURES="$XYNE_FEATURES"
     echo "$SELECTED_FEATURES" | grep -qw 1 || SELECTED_FEATURES="1,${SELECTED_FEATURES}"
 else
 
+CURSOR=1                          # start on Xyne-Claw (first toggleable item)
 declare -a CHECKED=(1 0 0 0 0 0 0 0 0)  # index 0 = Chat & Tickets, always on
 
-all_optional_features_selected() {
-    local i
-    for i in $(seq 1 $((NUM_FEATURES - 1))); do
-        [ "${CHECKED[$i]:-0}" = "1" ] || return 1
-    done
-    return 0
-}
-
 render_menu() {
-    local all_selected=0
-    local any_selected=0
-    local box feature_index i label menu_index
-
-    if all_optional_features_selected; then
-        all_selected=1
-    fi
-    for i in $(seq 1 $((NUM_FEATURES - 1))); do
-        if [ "${CHECKED[$i]:-0}" = "1" ]; then
-            any_selected=1
-            break
-        fi
-    done
-
     echo ""
     echo -e "${BOLD}Which features do you need?${NC} ${YELLOW}(▲/▼ move, space toggle, enter confirm)${NC}"
     echo ""
-    for menu_index in $(seq 0 $((NUM_MENU_ITEMS - 1))); do
-        if [ "$menu_index" -eq 0 ]; then
-            label="${FEATURE_LABELS[0]}"
+    for i in $(seq 0 $((NUM_FEATURES - 1))); do
+        if [ "$i" -eq 0 ]; then
             box="${GREEN}[x]${NC}"
-        elif [ "$menu_index" -eq "$SELECT_ALL_INDEX" ]; then
-            label="$SELECT_ALL_LABEL"
-            if [ "$all_selected" = "1" ]; then
-                box="${GREEN}[x]${NC}"
-            elif [ "$any_selected" = "1" ]; then
-                box="${YELLOW}[-]${NC}"
-            else
-                box="[ ]"
-            fi
+        elif [ "${CHECKED[$i]}" = "1" ]; then
+            box="${GREEN}[x]${NC}"
         else
-            feature_index=$((menu_index - 1))
-            label="${FEATURE_LABELS[$feature_index]}"
-            if [ "${CHECKED[$feature_index]:-0}" = "1" ]; then
-                box="${GREEN}[x]${NC}"
-            else
-                box="[ ]"
-            fi
+            box="[ ]"
         fi
-
-        if [ "$menu_index" -eq "$CURSOR" ]; then
-            echo -e "  ${CYAN}> ${box} ${label}${NC}"
-        elif [ "$menu_index" -eq 0 ]; then
-            echo -e "    ${box} ${CYAN}${label}${NC}"
+        if [ "$i" -eq "$CURSOR" ]; then
+            echo -e "  ${CYAN}> ${box} ${FEATURE_LABELS[$i]}${NC}"
+        elif [ "$i" -eq 0 ]; then
+            echo -e "    ${box} ${CYAN}${FEATURE_LABELS[$i]}${NC}"
         else
-            echo -e "    ${box} ${label}"
+            echo -e "    ${box} ${FEATURE_LABELS[$i]}"
         fi
     done
     echo ""
@@ -263,7 +223,7 @@ trap restore_cursor EXIT
 tput civis 2>/dev/null || true     # hide cursor
 
 render_menu
-MOVE_LINES=$((NUM_MENU_ITEMS + 4))
+MOVE_LINES=$((NUM_FEATURES + 4))
 while true; do
     IFS= read -rsn1 key
     case "$key" in
@@ -273,22 +233,12 @@ while true; do
                 '[A')               # up
                     [ "$CURSOR" -gt 1 ] && CURSOR=$((CURSOR - 1)) ;;
                 '[B')               # down
-                    [ "$CURSOR" -lt $((NUM_MENU_ITEMS - 1)) ] && CURSOR=$((CURSOR + 1)) ;;
+                    [ "$CURSOR" -lt $((NUM_FEATURES - 1)) ] && CURSOR=$((CURSOR + 1)) ;;
             esac
             ;;
-        ' ')                        # space — toggle Select all or one optional feature
-            if [ "$CURSOR" -eq "$SELECT_ALL_INDEX" ]; then
-                if all_optional_features_selected; then
-                    new_state=0
-                else
-                    new_state=1
-                fi
-                for i in $(seq 1 $((NUM_FEATURES - 1))); do
-                    CHECKED[$i]=$new_state
-                done
-            elif [ "$CURSOR" -gt "$SELECT_ALL_INDEX" ]; then
-                feature_index=$((CURSOR - 1))
-                CHECKED[$feature_index]=$((1 - CHECKED[$feature_index]))
+        ' ')                        # space — toggle (feature 0 is always on)
+            if [ "$CURSOR" -gt 0 ]; then
+                CHECKED[$CURSOR]=$((1 - CHECKED[$CURSOR]))
             fi
             ;;
         '')                         # enter — confirm
