@@ -156,9 +156,9 @@ function writeJson(path, value) {
   } catch {}
 }
 
-function runStartServices(environment) {
+function runBashScript(scriptName, args = [], environment = {}) {
   return new Promise((resolvePromise) => {
-    const child = spawn("bash", [join("scripts", "start-services.sh")], {
+    const child = spawn("bash", [join("scripts", scriptName), ...args], {
       cwd: repoRoot,
       stdio: "inherit",
       env: { ...process.env, ...environment },
@@ -179,11 +179,14 @@ function runStartServices(environment) {
     });
     child.on("error", (error) => {
       for (const [name, handler] of handlers) process.off(name, handler);
-      console.error(`Unable to start start-services.sh: ${error.message}`);
+      console.error(`Unable to start ${scriptName}: ${error.message}`);
       resolvePromise(127);
     });
   });
 }
+
+const runStartServices = (environment) =>
+  runBashScript("start-services.sh", [], environment);
 
 const canUseModule = (specifier) => {
   try {
@@ -193,10 +196,34 @@ const canUseModule = (specifier) => {
   }
 };
 
-async function promptForFeatures() {
-  const clack = await import("@clack/prompts");
-  await printXyneBanner("infrastructure");
-  clack.intro("Xyne Spaces — infrastructure");
+async function promptFreshStart(clack) {
+  const mode = await clack.select({
+    message: "How should the infrastructure start?",
+    options: [
+      {
+        value: "keep",
+        label: "Reuse existing data",
+        hint: "keep containers, volumes, and databases",
+      },
+      {
+        value: "fresh",
+        label: "Fresh start",
+        hint: "wipe this project's containers, volumes, and databases first (pnpm run reset)",
+      },
+    ],
+  });
+  if (clack.isCancel(mode)) return null;
+  if (mode !== "fresh") return false;
+
+  const sure = await clack.confirm({
+    message: "Really wipe every local database, bucket, and volume for this checkout?",
+    initialValue: false,
+  });
+  if (clack.isCancel(sure)) return null;
+  return sure === true;
+}
+
+async function promptForFeatures(clack) {
   clack.log.info("Chat & Tickets always runs: postgres, redis, zero-cache, fake-gcs, minio.");
 
   const saved = readJson(featuresFile)?.features;
@@ -270,7 +297,21 @@ async function main() {
     return runStartServices({});
   }
 
-  const selection = await promptForFeatures();
+  const clack = await import("@clack/prompts");
+  await printXyneBanner("infrastructure");
+  clack.intro("Xyne Spaces — infrastructure");
+
+  const fresh = await promptFreshStart(clack);
+  if (fresh === null) {
+    clack.cancel("Cancelled — no services started.");
+    return 130;
+  }
+  if (fresh) {
+    const resetCode = await runBashScript("reset-local.sh", ["-y"]);
+    if (resetCode !== 0) return resetCode;
+  }
+
+  const selection = await promptForFeatures(clack);
   if (selection === null) return 130;
   writeJson(featuresFile, { features: selection });
   const numbersValue = featuresToNumbers(selection);
