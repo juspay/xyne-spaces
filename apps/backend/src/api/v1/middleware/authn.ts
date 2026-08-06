@@ -1,12 +1,13 @@
 import type { NextFunction, Request, Response } from 'express';
-import { createRemoteJWKSet, jwtVerify, errors as joseErrors } from 'jose';
+import { jwtVerify, errors as joseErrors } from 'jose';
 import type { Scope } from '@xyne/spaces-contract';
 import type { AuthData } from '@/zero/mutators';
 import type { Context } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiError } from '../errors';
-import { v1Config } from '../config';
+import { oauthConfig } from '../oauth/config';
+import { getPublicKey, getKeyId } from '../oauth/tokens';
 
 export interface SdkAuth {
   readonly authData: AuthData;
@@ -25,31 +26,15 @@ declare global {
   }
 }
 
-let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-
-function getJwks(): ReturnType<typeof createRemoteJWKSet> {
-  if (!jwks) {
-    const url = v1Config.jwksUrl;
-    if (!url) {
-      throw new ApiError(
-        'service_misconfigured',
-        'SDK_JWKS_URL is not configured; the API cannot verify access tokens.',
-      );
-    }
-    // jose caches the key set and refetches on unknown `kid`, so key rotation
-    // needs no redeploy here.
-    jwks = createRemoteJWKSet(new URL(url));
-  }
-  return jwks;
-}
-
 /**
  * Verify an SDK access token and build the acting principal.
  *
- * Deliberately mirrors `extractAuthDataFromJWT` (src/zero/server.ts) in one
- * respect: roles are re-read from the database rather than trusted from the
- * token. A token minted before a demotion must not keep elevated access, and
- * the mutator ACL layer reads role/orgRole from this object.
+ * The backend is both AS and RS, so token verification uses the local public
+ * key rather than fetching from an external JWKS endpoint.
+ *
+ * Roles are re-read from the database rather than trusted from the token.
+ * A token minted before a demotion must not keep elevated access, and the
+ * mutator ACL layer reads role/orgRole from this object.
  */
 export async function authn(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
@@ -59,17 +44,41 @@ export async function authn(req: Request, _res: Response, next: NextFunction): P
     }
     const token = header.slice(7).trim();
 
+    // Verify that OAuth is configured before attempting verification
+    if (!oauthConfig.isConfigured) {
+      throw new ApiError(
+        'service_misconfigured',
+        'SDK OAuth is not configured; the API cannot verify access tokens.',
+      );
+    }
+
     let payload: Record<string, unknown>;
     try {
-      const verified = await jwtVerify(token, getJwks(), {
-        issuer: v1Config.issuer,
-        audience: v1Config.audience,
+      const publicKey = getPublicKey();
+      const verified = await jwtVerify(token, publicKey, {
+        issuer: oauthConfig.issuer,
+        audience: oauthConfig.audience,
         algorithms: ['RS256'],
       });
       payload = verified.payload as Record<string, unknown>;
+
+      // Verify the key ID matches (defense in depth for key rotation)
+      const tokenKid = verified.protectedHeader.kid;
+      if (tokenKid && tokenKid !== getKeyId()) {
+        logger.warn('[v1] token kid mismatch', {
+          requestId: req.apiRequestId,
+          tokenKid,
+          expectedKid: getKeyId(),
+        });
+        // Don't reject yet - the token was signed with a valid key, just maybe
+        // an old one during rotation. Log for observability.
+      }
     } catch (err) {
       if (err instanceof joseErrors.JWTExpired) {
         throw new ApiError('token_expired', 'Access token has expired.');
+      }
+      if (err instanceof ApiError) {
+        throw err;
       }
       throw new ApiError('unauthenticated', 'Access token could not be verified.', { cause: err });
     }

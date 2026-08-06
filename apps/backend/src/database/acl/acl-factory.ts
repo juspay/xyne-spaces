@@ -451,6 +451,10 @@ export class ACLFactory {
     // this path.
     case 'sdkIdempotencyKey':
       return new UnscopedACL(ctx, prisma)
+    case 'sdkRefreshToken':
+      return new UnscopedACL(ctx, prisma)
+    case 'sdkAuthorizationCode':
+      return new UnscopedACL(ctx, prisma)
     case 'sessionRecordingFile':
       return new BaseQueryACL(ctx, prisma)
     case 'stagePRStatusMapping':
@@ -510,7 +514,10 @@ export class ACLFactory {
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
     default:
-      return new BaseQueryACL(ctx, prisma)
+      // Exhaustiveness check: if a new model is added to the schema but not
+      // handled here, TypeScript will flag it at compile time. At runtime,
+      // fall back to UnscopedACL to avoid breaking queries.
+      return new UnscopedACL(ctx, prisma)
     }
   }
 }

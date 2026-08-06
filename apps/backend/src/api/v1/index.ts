@@ -1,10 +1,9 @@
 /**
  * The Xyne Spaces public API (v1).
  *
- * Resource server for SDK clients: it verifies RS256 access tokens minted by
- * xyne-claw-auth, then serves the operation catalog directly out of Postgres.
- * No Zero sync process, cache, or replica is involved — `@rocicorp/zero` is used
- * here purely as a query compiler and typed operation registry.
+ * Both authorization server and resource server for SDK clients: OAuth endpoints
+ * mint RS256 access tokens which the same process verifies on resource requests.
+ * No external auth service dependency.
  *
  * Route definitions live in `domains/*` as manifest data; this file assembles
  * them into a router and owns the middleware chain shared by every endpoint.
@@ -21,7 +20,8 @@ import { platformRoutes } from './domains/platform';
 import { searchRoutes } from './domains/search';
 import { userRoutes } from './domains/users';
 import type { RouteDefinition } from './manifest/types';
-import { v1Config } from './config';
+import { oauthRouter } from './oauth';
+import { oauthConfig } from './oauth/config';
 
 /** Every domain's manifest, in one place for the router and the tooling. */
 export const allRoutes: readonly RouteDefinition[] = [
@@ -44,6 +44,7 @@ export function createV1Router(): Router {
 
   router.get('/health', (_req: Request, res: Response) => {
     const reads = readsAvailable();
+    const authConfigured = oauthConfig.isConfigured;
     res.status(reads ? 200 : 503).json({
       status: reads ? 'ok' : 'degraded',
       reads: reads
@@ -53,9 +54,17 @@ export function createV1Router(): Router {
             reason:
               'No read replica configured (DATABASE_READ_REPLICA_POOL_URL) and SDK_QUERIES_ALLOW_PRIMARY is off.',
           },
-      auth: v1Config.jwksUrl ? { configured: true } : { configured: false, reason: 'SDK_JWKS_URL is unset.' },
+      auth: authConfigured
+        ? { configured: true }
+        : { configured: false, reason: 'SDK_JWT_PRIVATE_KEY or SDK_JWT_KEY_ID is unset.' },
     });
   });
+
+  // OAuth endpoints (authorization server). Mounted before authn because they
+  // use Spaces session authentication, not SDK access tokens.
+  if (oauthConfig.enabled) {
+    router.use('/oauth', oauthRouter);
+  }
 
   router.use(authn);
   router.use(registerRoutes(allRoutes));
