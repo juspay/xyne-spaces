@@ -180,7 +180,7 @@ export const LiveRecordingControlBar = ({
       <span
         className={[
           'shrink-0 font-mono text-xs font-medium uppercase tracking-wide w-12',
-          isPaused ? 'text-muted-foreground' : 'text-destructive',
+          isPaused ? 'text-muted-foreground' : 'text-primary',
         ].join(' ')}
       >
         {isPaused ? 'Paused' : 'Live'}
@@ -326,10 +326,8 @@ const LiveRecordingTimeline = ({
           className='absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2'
           style={{ left: `${progressPercent}%` }}
         >
-          {!isPaused && (
-            <span className='absolute inset-0 animate-ping rounded-full bg-destructive opacity-40' />
-          )}
-          <span className='absolute inset-0 rounded-full border-2 border-background bg-destructive shadow-sm' />
+          {!isPaused && <span className='absolute inset-0 animate-ping rounded-full bg-primary' />}
+          <span className='absolute inset-0 rounded-full border-2 border-background bg-primary shadow-sm' />
         </div>
       </div>
     </div>
@@ -560,7 +558,10 @@ const RecordingVisualizer = ({ isPaused }: { isPaused: boolean }): ReactElement 
       };
       return (
         <div key={i} className='flex h-4 items-center'>
-          <div className='rec-overlay-waveform-bar w-1 rounded-full bg-destructive' style={style} />
+          <div
+            className='rec-overlay-waveform-bar w-1 rounded-full bg-primary !opacity-100'
+            style={style}
+          />
         </div>
       );
     })}

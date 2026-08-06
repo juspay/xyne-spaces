@@ -1,5 +1,5 @@
 /**
-  The Xyne Oats Details Screen 
+  The Xyne Scribe Details Screen 
  */
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -48,6 +48,7 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
+import { RecordingDetailV2Skeleton } from './components/RecordingDetailV2Skeleton';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { LiveTranscriptSection } from './components/LiveTranscriptSection';
 import { ResumeRecordingButton } from './components/ResumeRecordingButton';
@@ -96,8 +97,19 @@ const AUDIO_POLL_MAX_ATTEMPTS = 30;
 const POST_SPLIT_BUTTON_CLASS =
   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
+const CANVAS_POPOVER_LAYER_CLASS = '[&_[style*="--bn-ui-base-z-index"]]:!z-[15]';
+
 function isRecordingLive(recording: RecordingDetail): boolean {
   return recording.status === 'ACTIVE' || recording.status === 'IN_PROGRESS';
+}
+
+function isSameRecordingSnapshot(a: RecordingDetail, b: RecordingDetail): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 export default function RecordingDetailV2Screen(): ReactElement {
@@ -365,7 +377,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       if (recordingRow.status) {
         next.status = recordingRow.status as NonNullable<RecordingDetail['status']>;
       }
-      return next;
+      return isSameRecordingSnapshot(prev, next) ? prev : next;
     });
   }, [recordingRow]);
 
@@ -474,6 +486,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
     summaryTemplateId: BuiltinRecordingSummaryTemplateId,
   ): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
+
+    // Picking the template the existing summary was already written with is a no-op
+    if (recording.detailedSummaryCanvasId && summaryTemplateId === recording.summaryTemplateId) {
+      handleTabSelect('summary');
+      return;
+    }
 
     setPendingSummaryTemplateId(summaryTemplateId);
     handleTabSelect('summary');
@@ -630,16 +648,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recordingId, transcriptText]);
 
   if (loading) {
-    return (
-      <div className='flex h-full w-full items-center justify-center'>
-        <Spinner size={28} className='animate-spin text-muted-foreground' />
-      </div>
-    );
+    return <RecordingDetailV2Skeleton />;
   }
 
   if (error || !recording) {
     return (
-      <div className='flex h-full w-full items-center justify-center'>
+      <div
+        data-testid='recording-detail-v2-page'
+        className='relative flex h-full w-full flex-col items-center justify-center overflow-hidden bg-background shadow-md md:rounded-2xl'
+      >
         <div className='flex max-w-md flex-col items-center gap-3 text-center'>
           <AlertCircle className='size-12 text-destructive' />
           <p className='text-sm text-muted-foreground'>{error ?? 'Recording not found'}</p>
@@ -707,7 +724,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           .join(' ')}
       >
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
-          <div className='sticky top-0 z-10 -mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
+          <div className='sticky top-0 z-20 -mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
             <RecordingDetailV2Header
               recording={recording}
               isLive={isLive}
@@ -830,7 +847,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                         data-track-name='open_post_to_email_modal'
                       >
                         <EnvelopeDefault className='size-4 text-muted-foreground' />
-                        Post to email
+                        Draft follow-up email
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() => setShowGoogleDocPreviewModal(true)}
@@ -1001,7 +1018,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       title={canvas.title}
       editable={true}
       placeholder='Start typing your notes…'
-      className='min-h-0 w-full flex-1
+      className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-2
         [&_.bn-editor]:!px-0
@@ -1011,7 +1028,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
         [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
         [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
         [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
-        '
+        `}
       autoFocus={true}
     />
   );
@@ -1038,7 +1055,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       editable={true}
       placeholder='Detailed summary'
       autoFocus={false}
-      className='min-h-0 w-full flex-1
+      className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         detailed-summary-canvas-editor
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-0
@@ -1047,9 +1064,9 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
         [&_.bn-suggestion-menu]:!w-auto [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:!max-h-60 [&_.bn-suggestion-menu]:!max-w-[calc(100vw-2rem)]
         [&_.bn-suggestion-menu-item]:!h-8 [&_.bn-suggestion-menu-item]:!px-2 [&_.bn-suggestion-menu-item]:!py-1
         [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
-        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
+        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
         [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
-        '
+        `}
     />
   );
 }

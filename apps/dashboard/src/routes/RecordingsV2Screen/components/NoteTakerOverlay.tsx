@@ -49,6 +49,7 @@ interface RecordingPanelHeaderProps {
 interface RecordingControlBarProps {
   elapsed: number;
   isPaused: boolean;
+  markedCount: number;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
@@ -66,6 +67,8 @@ interface NotesTabProps {
 const TRACK_CATEGORY = 'NoteTakerOverlay';
 /** Matches the `h-8` inner row; needed as a number so the bar can animate open. */
 const OFFLINE_BAR_HEIGHT_PX = 32;
+
+const MARK_FEEDBACK_MS = 1400;
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
@@ -140,9 +143,84 @@ const OfflineStatusBar = (): ReactElement => {
   );
 };
 
+const MarkMomentButton = ({
+  markedCount,
+  onMarkMoment,
+}: {
+  markedCount: number;
+  onMarkMoment: () => void;
+}): ReactElement => {
+  const shouldReduceMotion = useReducedMotion();
+  const [justMarked, setJustMarked] = useState(false);
+  const previousCount = useRef(markedCount);
+
+  useEffect(() => {
+    const grew = markedCount > previousCount.current;
+    previousCount.current = markedCount;
+    if (!grew) return;
+
+    setJustMarked(true);
+    const timer = window.setTimeout(() => setJustMarked(false), MARK_FEEDBACK_MS);
+    return (): void => window.clearTimeout(timer);
+  }, [markedCount]);
+
+  return (
+    <>
+      <Button
+        type='button'
+        variant='ghost'
+        size='iconSm'
+        onClick={onMarkMoment}
+        className={cn(
+          'relative rounded-xl border transition-colors',
+          justMarked
+            ? 'border-status-success text-status-success hover:bg-transparent hover:text-status-success'
+            : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+        )}
+        aria-label='Mark moment'
+        title={justMarked ? 'Moment marked' : 'Mark moment'}
+        data-track-category={TRACK_CATEGORY}
+        data-track-name='mark_moment'
+      >
+        {justMarked && (
+          <span
+            className='pointer-events-none absolute inset-0 rounded-xl bg-status-success opacity-10'
+            aria-hidden='true'
+          />
+        )}
+        <AnimatePresence>
+          {justMarked && !shouldReduceMotion && (
+            <motion.span
+              className='pointer-events-none absolute inset-0 rounded-xl ring-2 ring-status-success'
+              initial={{ opacity: 0.8, scale: 0.92 }}
+              animate={{ opacity: 0, scale: 1.5 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+              aria-hidden='true'
+            />
+          )}
+        </AnimatePresence>
+
+        <motion.span
+          className='flex items-center justify-center'
+          animate={shouldReduceMotion || !justMarked ? { scale: 1 } : { scale: [1, 1.28, 1] }}
+          transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1], times: [0, 0.4, 1] }}
+        >
+          <Flag size={17} strokeWidth={2} {...(justMarked ? { variant: 'Solid' as const } : {})} />
+        </motion.span>
+      </Button>
+
+      <span className='sr-only' role='status'>
+        {justMarked ? 'Moment marked' : ''}
+      </span>
+    </>
+  );
+};
+
 const RecordingControlBar = ({
   elapsed,
   isPaused,
+  markedCount,
   onPause,
   onResume,
   onStop,
@@ -161,19 +239,7 @@ const RecordingControlBar = ({
       {formatElapsedTime(elapsed)}
     </span>
     <div className='flex flex-1 shrink-0 items-center justify-end gap-1.5'>
-      <Button
-        type='button'
-        variant='ghost'
-        size='iconSm'
-        onClick={onMarkMoment}
-        className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
-        aria-label='Mark moment'
-        title='Mark moment'
-        data-track-category={TRACK_CATEGORY}
-        data-track-name='mark_moment'
-      >
-        <Flag size={17} strokeWidth={2} />
-      </Button>
+      <MarkMomentButton markedCount={markedCount} onMarkMoment={onMarkMoment} />
       {onMinimize && (
         <Button
           type='button'
@@ -441,6 +507,7 @@ export function NoteTakerOverlay({
           <RecordingControlBar
             elapsed={elapsed}
             isPaused={isPaused}
+            markedCount={markedMoments.length}
             onPause={onPause}
             onResume={onResume}
             onStop={onStop}
