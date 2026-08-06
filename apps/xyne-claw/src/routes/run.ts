@@ -1669,12 +1669,18 @@ async function processTask(
     mcpGetPendingActions = getPendingActions;
     mcpCleanup = cleanup;
 
+    // Task commands are parsed before custom-tool loading so command-owned
+    // tools can be force-mounted for this run without mutating Agent.config.
+    const taskCommand = parseTaskCommand(task);
+    const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
+
     const meta: Record<string, string> = { userId };
     if (userName) meta["userName"] = userName;
     if (userEmail) meta["userEmail"] = userEmail;
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    if (taskCommand) meta["taskCommand"] = taskCommand.command;
     if (experiment) {
       meta["experimentId"] = experiment.id;
       meta["experimentEpoch"] = String(experiment.epoch);
@@ -1781,6 +1787,7 @@ async function processTask(
       undefined,
       runtimeProviderConfig,
       emitPlanForCustom,
+      taskCommand?.autoTools ?? [],
     );
     const {
       tools: customToolDefs,
@@ -2470,6 +2477,9 @@ async function processTask(
           return isDirectPick || isGatewayPick || isCustomPick;
         }
         if (customToolDefs.some((c) => c.name === t.name)) {
+          // Slash-command contracts own their minimum palette. Keep these
+          // per-run tools even when the stored Agent.config did not select them.
+          if (forcedTaskCommandTools.has(t.name)) return true;
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
           const isAllowedCustom = allowedCustom.has(t.name) || (toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false);
           if (isAllowedCustom) return true;
@@ -2855,7 +2865,6 @@ async function processTask(
 
     // Task commands (/explainer …): a leading command binds the run to a
     // required tool — instruction injected here, exit gated in runTask.
-    const taskCommand = parseTaskCommand(task);
     const taskCommandToolAvailable =
       taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
     if (taskCommand) {
@@ -3777,7 +3786,14 @@ async function processTask(
     // claw-auth posts only the reaction / stays silent. The full structured
     // delivery (action, emoji, destination) rides on the `twinDelivery` field.
     const twinDelivery = isTwinMentionFlow ? result.twinDelivery : undefined;
-    const callbackResultText = isTwinMentionFlow ? (twinDelivery?.message ?? "") : rawCallbackText;
+    const defaultCallbackResultText = isTwinMentionFlow ? (twinDelivery?.message ?? "") : rawCallbackText;
+    // `/explainer` is an artifact-only command: once the MP4 exists, send the
+    // attachment without the model's storyboard/process narration or a generic
+    // "rendered" caption. If rendering failed, retain the text error/fallback.
+    const explainerVideoAttached =
+      taskCommand?.command === "/explainer" &&
+      resultAttachments.some((attachment) => attachment.mimeType === "video/mp4");
+    const callbackResultText = explainerVideoAttached ? "" : defaultCallbackResultText;
 
     // Honor an explicit user stop even when generation FINISHED before the abort
     // could interrupt it. Non-copilot agents (codex/spaces) deliver their final

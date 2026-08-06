@@ -143,9 +143,15 @@ describe("composeVideo renderer orchestration", () => {
     const first = mockSession();
     const second = mockSession();
 
-    const firstResult = await composeVideo(first.session, context, storyboard);
+    const firstResult = await composeVideo(first.session, context, storyboard, {
+      burnCaptions: false,
+    });
     const secondResult = await composeVideo(second.session, context, storyboard);
     expect(firstResult.outputPath).not.toBe(secondResult.outputPath);
+    expect(first.writes.some((path) => path.endsWith(".ass"))).toBe(false);
+    expect(first.commands.some((command) => command.includes("subtitles="))).toBe(false);
+    expect(second.writes.some((path) => path.endsWith(".ass"))).toBe(true);
+    expect(second.commands.some((command) => command.includes("subtitles="))).toBe(true);
 
     const failing = mockSession(/manim --renderer=cairo/);
     const manimStoryboard = validateStoryboard({

@@ -53,6 +53,11 @@ export interface CompositionResult {
   scenes: SceneTiming[];
 }
 
+export interface CompositionOptions {
+  /** Burn narration text into the video. Defaults to true for direct tool use. */
+  burnCaptions?: boolean;
+}
+
 function authUrl(context: ToolExecutionContext): string {
   return (
     context.config["XYNE_CLAW_AUTH_URL"] ??
@@ -398,10 +403,12 @@ export async function composeVideo(
   session: Session,
   context: ToolExecutionContext,
   storyboard: Storyboard,
+  options: CompositionOptions = {},
 ): Promise<CompositionResult> {
   const renderId = randomUUID();
   const workDir = `${WORK_ROOT}/${renderId}`;
   const outputPath = `${RESULTS_DIR}/explainer-${renderId}.mp4`;
+  const burnCaptions = options.burnCaptions !== false;
 
   try {
     await run(
@@ -444,10 +451,12 @@ export async function composeVideo(
       // Narration-first: the longer of narration/animation plus a fixed tail.
       const segmentSeconds = computeSegmentSeconds(narrationSeconds, animationSeconds);
       const captionPath = `${workDir}/scene-${index}.ass`;
-      await session.files.write(
-        captionPath,
-        Buffer.from(captionFile(scene.narration, segmentSeconds)),
-      );
+      if (burnCaptions) {
+        await session.files.write(
+          captionPath,
+          Buffer.from(captionFile(scene.narration, segmentSeconds)),
+        );
+      }
 
       if (clipPath) {
         // Animated: freeze the last frame to fill the segment (video never
@@ -457,7 +466,7 @@ export async function composeVideo(
           session,
           `ffmpeg -y -i '${clipPath}' -i '${audioPath}' ` +
             `-filter_complex "[0:v]tpad=stop_mode=clone:stop_duration=${stopDuration.toFixed(3)},` +
-            `subtitles='${captionPath}',fps=${FPS}[v];[1:a]apad[a]" ` +
+            `${burnCaptions ? `subtitles='${captionPath}',` : ""}fps=${FPS}[v];[1:a]apad[a]" ` +
             `-map "[v]" -map "[a]" -t ${segmentSeconds.toFixed(3)} ` +
             `-c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -b:a 192k '${workDir}/segment-${index}.mp4'`,
           180_000,
@@ -466,7 +475,7 @@ export async function composeVideo(
         await run(
           session,
           `ffmpeg -y -loop 1 -i '${workDir}/scene-${index}.png' -i '${audioPath}' ` +
-            `-vf "subtitles='${captionPath}'" ` +
+            `${burnCaptions ? `-vf "subtitles='${captionPath}'" ` : ""}` +
             `-af apad -t ${segmentSeconds.toFixed(3)} -r ${FPS} -c:v libx264 -preset medium -pix_fmt yuv420p ` +
             `-c:a aac -b:a 192k '${workDir}/segment-${index}.mp4'`,
           120_000,

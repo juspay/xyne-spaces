@@ -141,6 +141,7 @@ export function loadCustomTools(
   parentToolCallId?: string,
   providerConfig?: ToolExecutionContext["providerConfig"],
   emitPlan?: ToolExecutionContext["emitPlan"],
+  forcedCustomSlugs: readonly string[] = [],
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
@@ -153,7 +154,10 @@ export function loadCustomTools(
   // tool sets that aren't tied to a specific agent slug — primarily Google
   // and Microsoft, which only need their OAuth token to be available.
   const toolsConfig = parseToolsConfig(agentConfig ?? undefined);
-  const selectedCustom = new Set(toolsConfig?.custom ?? []);
+  const selectedCustom = new Set([
+    ...(toolsConfig?.custom ?? []),
+    ...forcedCustomSlugs,
+  ]);
   // Google + Microsoft are no longer loaded as in-process custom tools — they
   // run as claw-auth-hosted stdio MCP connectors (type "google"/"microsoft"),
   // resolved through the normal MCP credential path. See mcp/servers/google-server.ts

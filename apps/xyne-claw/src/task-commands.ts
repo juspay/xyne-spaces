@@ -14,6 +14,8 @@ export interface TaskCommand {
   command: string;
   /** Tool that must appear in toolsUsed before the run may finish. */
   requiredTool: string;
+  /** Custom tools force-mounted for this run, regardless of the agent's saved palette. */
+  autoTools: string[];
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
@@ -26,21 +28,22 @@ const TASK_COMMANDS: TaskCommand[] = [
   {
     command: "/explainer",
     requiredTool: "create-video-explainer",
+    autoTools: ["sandbox-create", "create-video-explainer"],
     instruction:
       "The user's message begins with the /explainer command: an explicit order to produce a narrated " +
-      "explainer video with the create-video-explainer tool. Write the storyboard for the request, show " +
-      "it in a brief message, then render — invoking the command IS the user's approval to render, so do " +
-      "not stop to ask for confirmation. The run is not complete until create-video-explainer has " +
-      "produced the MP4 and it has been delivered.",
+      "explainer video with the create-video-explainer tool. Create a writable sandbox first if this " +
+      "conversation does not already have one, write the storyboard, then render — invoking the command " +
+      "IS the user's approval, so do not ask for confirmation. Command-mode rendering automatically " +
+      "attaches the MP4 without burned-in captions. Do not call sandbox-deliver-files and do not add a " +
+      "textual final response; the video attachment is the response.",
     nudge:
       "This run was started with the /explainer command: it MUST produce a narrated explainer video via " +
       "the create-video-explainer tool before finishing. You have not called create-video-explainer yet. " +
-      "Do it now — write the storyboard for the user's request and call create-video-explainer to render " +
-      "and deliver the MP4. DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+      "Create a writable sandbox if needed, then call create-video-explainer; it attaches the caption-free " +
+      "MP4 automatically. DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
     missingToolInstruction:
-      "The user's message begins with the /explainer command, but the create-video-explainer tool is not " +
-      "enabled for this agent. Tell the user plainly that this agent cannot create explainer videos until " +
-      "an admin enables the Create Video Explainer tool for it, and do not attempt any workaround.",
+      "The /explainer runtime could not mount create-video-explainer. Tell the user plainly that video " +
+      "rendering is temporarily unavailable and do not attempt a workaround.",
   },
 ];
 

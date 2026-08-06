@@ -17,7 +17,7 @@ export const createVideoExplainer: ToolDefinition = {
     "snapshots faded into a progressive reveal). Every engine renders in this same sandbox — " +
     "no separate box — and needs no internet: narration TTS is fetched by the runtime and " +
     "injected as a file. Always show the storyboard to the user and obtain approval before " +
-    "calling this tool. After it succeeds, deliver the returned filePath with sandbox-deliver-files.",
+    "calling this tool. It attaches the rendered MP4 directly; do not call sandbox-deliver-files afterward.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -144,16 +144,13 @@ export const createVideoExplainer: ToolDefinition = {
       });
     }
     try {
-      const composition = await composeVideo(session, context, storyboard);
-      return JSON.stringify({
-        filePath: composition.outputPath,
-        mimeType: "video/mp4",
-        totalSeconds: Number(
-          composition.scenes.reduce((total, scene) => total + scene.segmentSeconds, 0).toFixed(2),
-        ),
-        scenes: composition.scenes,
-        next: `Call sandbox-deliver-files with path ${composition.outputPath}.`,
+      const commandMode = context.meta?.["taskCommand"] === "/explainer";
+      const composition = await composeVideo(session, context, storyboard, {
+        burnCaptions: !commandMode,
       });
+      const video = await session.files.read(composition.outputPath);
+      const fileName = composition.outputPath.split("/").pop() ?? "explainer.mp4";
+      return `[ATTACHMENT:${fileName}:video/mp4]\n${video.toString("base64")}`;
     } catch (error) {
       return JSON.stringify({
         error: error instanceof Error ? error.message : "Video composition failed",
