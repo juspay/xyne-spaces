@@ -20,6 +20,15 @@ const mprocsConfigFile = join(stateDirectory, "mprocs.yaml");
 
 export const APPS = [
   {
+    id: "dashboard",
+    filter: "xyne-spaces-dashboard",
+    script: "dev",
+    hint: "web UI · http://localhost:5173",
+    color: "green",
+    core: true,
+    port: 5173,
+  },
+  {
     id: "backend",
     filter: "xyne-spaces-backend",
     script: "dev",
@@ -35,15 +44,6 @@ export const APPS = [
     hint: "background jobs",
     color: "cyan",
     core: true,
-  },
-  {
-    id: "dashboard",
-    filter: "xyne-spaces-dashboard",
-    script: "dev",
-    hint: "web UI · http://localhost:5173",
-    color: "green",
-    core: true,
-    port: 5173,
   },
   {
     id: "claw",

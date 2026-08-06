@@ -171,11 +171,15 @@ and local secrets are generated. You will be asked:
 
 1. **AI features** — paste an OpenAI-compatible endpoint now, or press Enter to
    skip (everything except AI works without it; see [AI Providers](ai-providers.md)).
-2. **Which infrastructure features do you need?** — a checkbox picker. *Chat &
+2. **Reuse or fresh start?** — reuse keeps your containers, volumes, and data;
+   fresh start wipes this checkout's containers, volumes, and databases
+   (`pnpm run reset`) before starting over. Fresh asks for confirmation — it
+   deletes every local database and bucket.
+3. **Which infrastructure features do you need?** — a checkbox picker. *Chat &
    Tickets* (Postgres, Redis, Zero, MinIO) is always on; toggle Calls, Canvas,
    Search, and the rest only if you need them. Choose **Everything**, **Core**, or
    pick individually. Fewer features = fewer containers = faster start.
-3. **Local login** — a default admin (`admin@xyne.ai` / `xynelocal@123`) is always
+4. **Local login** — a default admin (`admin@xyne.ai` / `xynelocal@123`) is always
    created; optionally add a login of your own.
 
 If a port a container needs is already taken (a local Postgres on 5433, another
