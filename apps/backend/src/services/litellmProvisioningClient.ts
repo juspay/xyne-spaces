@@ -1,6 +1,5 @@
 import { config } from '@/config/env';
 
-const TEAM_MODELS = ['kimi-latest', 'private-large'];
 const USER_MODELS = ['no-default-models'];
 const KEY_MODELS = ['all-team-models'];
 const KEY_TYPE = 'llm_api';
@@ -108,7 +107,7 @@ class LiteLLMProvisioningClient {
   async createTeam(params: CreateTeamParams): Promise<CreateTeamResult> {
     const body = {
       team_alias: truncate(params.teamAlias, 180),
-      models: TEAM_MODELS,
+      models: config.aiProvisioning.orgDefaultModels,
       max_budget: TEAM_MAX_BUDGET,
       budget_duration: DURATION,
       rpm_limit: TEAM_RPM_LIMIT,
