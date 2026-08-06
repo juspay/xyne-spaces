@@ -58,7 +58,7 @@ const envSchema = Joi.object({
       'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
     ),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(1800), // 30 minutes in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
@@ -242,6 +242,10 @@ const envSchema = Joi.object({
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
   TEAM_INTELLIGENCE_SYNC_API_KEY: Joi.string().allow('').default(''),
+  // Telepresence monitoring sync API Key (for S2S authentication)
+  TELEPRESENCE_MONITORING_API_KEY: Joi.string().allow('').default(''),
+  // Max allowed range (in days) for telepresence health time-series queries
+  TELEPRESENCE_MONITORING_LIFESPAN: Joi.number().integer().positive().default(7),
   // API-support CSAT sync API Key (for S2S authentication) — shared by any external system posting CSAT results
   API_SUPPORT_CSAT_API_KEY: Joi.string().allow('').default(''),
   // Mettle API Configuration (for fetching employee details)
@@ -721,6 +725,8 @@ export const config = {
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
+  telepresenceMonitoringApiKey: envVars.TELEPRESENCE_MONITORING_API_KEY,
+  telepresenceMonitoringLifespanDays: envVars.TELEPRESENCE_MONITORING_LIFESPAN,
   apiSupportCsatApiKey: envVars.API_SUPPORT_CSAT_API_KEY,
   mettleApiBaseUrl: envVars.METTLE_API_BASE_URL,
   mettleToken: envVars.METTLE_TOKEN,

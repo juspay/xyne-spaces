@@ -337,7 +337,7 @@ services:
       - VAPID_PUBLIC_KEY=BNjTYZx-16c9N4G-i19jChp1entqMf8mBZyqla0pn-TgxjdHbrX-2yhSWA8JFkXJAkqTHpTV2MkuslELIVfHW3w
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=mailto:admin@xyne.ai
-      - JWT_EXPIRATION_SECONDS=86400
+      - JWT_EXPIRATION_SECONDS=1800
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${name}-backend.rule=Host(\`${name}.localhost\`) && PathPrefix(\`/api\`)"

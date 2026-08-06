@@ -178,7 +178,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
     if (!editor) return;
 
     const updateActiveStates = (): void => {
-      setIsActive({
+      const next = {
         bold: editor.isActive('bold'),
         italic: editor.isActive('italic'),
         underline: editor.isActive('underline'),
@@ -187,7 +187,10 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
         orderedList: editor.isActive('orderedList'),
         blockquote: editor.isActive('blockquote'),
         link: editor.isActive('link'),
-      });
+      };
+      setIsActive(prev =>
+        (Object.keys(next) as (keyof typeof next)[]).every(k => prev[k] === next[k]) ? prev : next,
+      );
     };
 
     updateActiveStates();
