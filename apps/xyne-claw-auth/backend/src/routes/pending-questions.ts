@@ -2,7 +2,6 @@
  * Pending questions — Redis-backed ephemeral store.
  *
  * POST /pending-questions  — store a question (called by ask-user-question tool)
- * GET  /pending-questions/:id — retrieve a question (called by flow-action / app-callback)
  *
  * Auth: strict S2S only (also enforced at the mount in main.ts). Questions
  * carry another user's prompt context, and the question ID is the only lookup
@@ -29,18 +28,6 @@ export interface StoredQuestion {
   conversationId: string;
   question: string;
   options: string[];
-}
-
-export async function getQuestion(questionId: string): Promise<StoredQuestion | null> {
-  const redis = redisService.getConnection();
-  const raw = await redis.get(`${PREFIX}${questionId}`);
-  if (!raw) return null;
-  return JSON.parse(raw) as StoredQuestion;
-}
-
-export async function deleteQuestion(questionId: string): Promise<void> {
-  const redis = redisService.getConnection();
-  await redis.del(`${PREFIX}${questionId}`);
 }
 
 /**
@@ -94,21 +81,6 @@ router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
   } catch (err) {
     log.error("[pending-questions] Store error:", err);
     res.status(500).json({ success: false, error: "Failed to store question" });
-  }
-});
-
-// GET /:id — retrieve a pending question
-router.get("/:id", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const data = await getQuestion(req.params.id);
-    if (!data) {
-      res.status(404).json({ success: false, error: "Question not found or expired" });
-      return;
-    }
-    res.json({ success: true, data });
-  } catch (err) {
-    log.error("[pending-questions] Get error:", err);
-    res.status(500).json({ success: false, error: "Failed to retrieve question" });
   }
 });
 

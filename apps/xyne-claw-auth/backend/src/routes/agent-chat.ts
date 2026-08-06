@@ -2555,7 +2555,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     }
 
     // Only the intended user can approve an action (XYNE-12145 — same rule as
-    // the Spaces Flow UI flow in flow-action.ts / legacy frontmatter in app-callback.ts).
+    // the Spaces Flow UI flow in flow-action.ts).
     if (callerUserId !== action.userId) {
       res.status(403).json({ success: false, error: "Only the intended user can approve this action" });
       return;

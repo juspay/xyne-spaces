@@ -3840,8 +3840,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
     // one-click button below the agent's reply so the user can promote the
-    // remaining work to a /goal autonomous loop. See start-goal handler in
-    // app-callback.ts. Only present when the agent's config has
+    // remaining work to a /goal autonomous loop. See start-goal handling in
+    // flow-action.ts. Only present when the agent's config has
     // suggestGoal=true AND the tool was actually called this turn.
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;

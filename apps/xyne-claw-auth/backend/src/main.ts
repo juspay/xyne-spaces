@@ -18,7 +18,6 @@ import { webhookRouter } from "./routes/webhook.js";
 import { flowActionRouter } from "./routes/flow-action.js";
 import { twinDraftInternalRouter } from "./routes/twin-draft.js";
 import { attachmentsInternalRouter } from "./routes/attachments.js";
-import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { chainWorkflowsRouter } from "./routes/chain-workflows.js";
 import { spacesRouter } from "./routes/spaces.js";
@@ -270,16 +269,9 @@ app.use(`${BASE}/webhook`, webhookRouter);
 // (see flow-action.ts) so the body-supplied userId is bound to a payload
 // Spaces signed — an S2S key alone is no longer enough to forge identity.
 app.use(`${BASE}/flow`, requireStrictS2S, flowActionRouter);
-// Legacy frontmatter button callbacks — clicked directly from the browser, so
-// require a real user session (requireAuth derives x-user-id from the Spaces
-// cookie). The handler treats that authenticated id as the caller identity
-// instead of the spoofable body field.
-app.use(`${BASE}/app`, requireAuth, requireNoAccessToken, appCallbackRouter);
 app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJobsRouter);
-// Strict S2S: the only callers are services (ask-question tool POSTs with the
-// S2S key; flow-action/app-callback import the helpers directly, not HTTP).
-// The previous per-route requireS2S cookie fallback let any logged-in user
-// read other users' pending questions by ID.
+// Strict S2S: the ask-question tool stores questions here with the S2S key;
+// flow-action consumes them through the module's atomic Redis helper.
 app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
 app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
 app.use(`${BASE}/runs`, requireAuth, requireNoAccessToken, runsRouter);

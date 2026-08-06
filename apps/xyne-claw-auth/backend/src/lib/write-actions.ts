@@ -7,7 +7,7 @@
  * it through one of two surfaces:
  *
  *  1. Spaces webhook flow — buttons posted into a Spaces thread, clicked
- *     context POSTs to /app/callback
+ *     context POSTs to /flow/action
  *  2. /chat UI flow — buttons rendered inline in the assistant bubble, clicks
  *     POST to the chat-approve endpoint
  *

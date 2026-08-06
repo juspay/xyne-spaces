@@ -4,7 +4,7 @@
  * Spaces' FlowController calls this endpoint (POST /claw/api/v1/flow/action)
  * when a user interacts with a Flow UI widget embedded in a chat message.
  *
- * Replaces the legacy YAML frontmatter + app-callback.ts pattern entirely.
+ * Replaces the legacy YAML-frontmatter callback pattern entirely.
  *
  * Three patterns handled:
  *   1. approve-write / decline-write  — HITL write tool approval
@@ -93,9 +93,9 @@ function formatGatewayApprovalExecutionError(
 
 /**
  * Flag a conversation's most-recent run as having touched a user-scoped
- * credential (see app-callback.ts for the full rationale). Called from every
- * FlowUI approved-write branch that executes a user's personal credential.
- * Fire-and-forget — never block the write on bookkeeping.
+ * credential so the admin "All Runs" ACL hides it from other admins. Called
+ * from every FlowUI approved-write branch that executes a user's personal
+ * credential. Fire-and-forget — never block the write on bookkeeping.
  */
 function flagUserTokenRun(conversationId: string | undefined, agentSlug: string | undefined): void {
   if (!conversationId) return;
