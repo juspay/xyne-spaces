@@ -6,6 +6,7 @@ import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
+import { ChartBlock } from '../components/Markdown/ChartBlock';
 import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
@@ -63,6 +64,13 @@ const CodeBlock = ({
         jsonSource={codeString}
         messageId={(props as { messageId: string }).messageId}
       />
+    );
+  }
+
+  // ── Chart (visualize tool output) ──
+  if (language === 'chart') {
+    return (
+      <ChartBlock jsonSource={codeString} messageId={(props as { messageId: string }).messageId} />
     );
   }
 
