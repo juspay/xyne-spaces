@@ -427,9 +427,10 @@ export class CanvasController {
         return;
       }
 
-      // Check read permission
+      // Read endpoint: require VIEW access (creator / OWNER-EDITOR-VIEWER role / PUBLIC-visibility
+      // channel or project access). Do NOT require edit here — a read must not demand editor rights.
       try {
-        await canvasAuthService.requireEditAccess(canvas.id, userId);
+        await canvasAuthService.requireViewAccess(canvas.id, userId);
       } catch (error) {
         logger.warn(`[CANVAS-READ] Permission denied for user ${userId} on canvas ${canvas.id}`);
         res.status(403).json({ error: 'Permission denied' });
