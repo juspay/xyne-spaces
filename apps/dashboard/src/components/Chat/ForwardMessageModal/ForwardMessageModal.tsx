@@ -46,6 +46,8 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { logger, Event } from '../../../utils/logger';
+import { RecordingSharePill } from '../../ui/MessageBubble/RecordingSharePill';
+import { useRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -285,6 +287,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     }
     return message.content;
   }, [useOptionalText, forwardedMessageData, message.content, sourceConversation]);
+  const recordingShare = useRecordingShareMessage(previewContent);
 
   const allVisibleChannels = useAllVisibleChannels();
   const allChannels = useAllChannels().map(
@@ -811,13 +814,28 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                     {formatRelativeTimestamp(message.createdAt)}
                   </span>
                 </div>
-                {previewContent && (
+                {recordingShare ? (
+                  <div className='flex min-w-0 flex-col gap-1'>
+                    {recordingShare.noteHtml && (
+                      <div
+                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(recordingShare.noteHtml)}`}
+                      >
+                        <RenderMessageWithHTML message={recordingShare.noteHtml} />
+                      </div>
+                    )}
+                    <RecordingSharePill
+                      title={recordingShare.displayTitle}
+                      durationMs={recordingShare.durationMs}
+                      onOpen={recordingShare.openRecording}
+                    />
+                  </div>
+                ) : previewContent ? (
                   <div
                     className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
                   >
                     <RenderMessageWithHTML message={previewContent} />
                   </div>
-                )}
+                ) : null}
                 {/* Attachments - hide when using optionalText (it's either optionalText OR content with attachments) */}
                 {!useOptionalText && message.attachments && message.attachments.length > 0 && (
                   <div className='mt-2'>

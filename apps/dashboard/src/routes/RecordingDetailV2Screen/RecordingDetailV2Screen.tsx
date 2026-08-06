@@ -13,7 +13,7 @@ import {
   type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
-import { AlertCircle, StickyNote } from 'lucide-react';
+import { StickyNote } from 'lucide-react';
 import { toast } from 'sonner';
 import { logRecordingError } from '../../utils/recordingUtils';
 import {
@@ -49,6 +49,12 @@ import {
 } from '../../components/ui/dropdown-menu';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { RecordingDetailV2Skeleton } from './components/RecordingDetailV2Skeleton';
+import { RecordingLoadError } from './components/RecordingLoadError/RecordingLoadError';
+import {
+  classifyRecordingLoadFailure,
+  describeRecordingLoadFailure,
+  type RecordingLoadFailure,
+} from './components/RecordingLoadError/recordingLoadError.util';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { LiveTranscriptSection } from './components/LiveTranscriptSection';
 import { ResumeRecordingButton } from './components/ResumeRecordingButton';
@@ -121,7 +127,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  /** Why the recording couldn't be opened — classified, so the screen can say why. */
+  const [failure, setFailure] = useState<RecordingLoadFailure | null>(null);
   // Which of the two panes to show. The concrete second tab (transcript while live,
   // summary once ended) is derived below, so only the notes/not-notes choice is held.
   const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(getRecordingV2Tab);
@@ -230,6 +237,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // decides whether there is a floating overlay to minimize back to.
   const { markMoment, canMark: ownsLiveSession } = useMarkMoment(recordingId);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const loadedRecordingIdRef = useRef<string | null>(null);
 
   // Stopping clears the local session at once, but the API keeps reporting the
   // recording live until the LiveKit webhook lands. Trusting the local stop makes the
@@ -429,18 +437,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   const loadRecording = async (id: string): Promise<void> => {
     try {
-      if (!recording) setLoading(true);
-      setError(null);
+      if (loadedRecordingIdRef.current !== id) setLoading(true);
+      setFailure(null);
       const data = await recordingService.getRecordingDetail(id);
+      loadedRecordingIdRef.current = id;
       setRecording(data);
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.loadRecording', err);
-      if (axios.isAxiosError(err) && err.response?.status === 403) {
-        setError('You no longer have access to this recording.');
-      } else if (axios.isAxiosError(err) && err.response?.status === 404) {
-        setError('Recording not found.');
+      const loadFailure = classifyRecordingLoadFailure(err);
+      if (loadedRecordingIdRef.current === id) {
+        toast.error('Couldn’t refresh this recording', {
+          description: describeRecordingLoadFailure(loadFailure).title,
+        });
       } else {
-        setError('Failed to load recording. Please try again.');
+        setFailure(loadFailure);
       }
     } finally {
       setLoading(false);
@@ -658,20 +668,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
     return <RecordingDetailV2Skeleton />;
   }
 
-  if (error || !recording) {
+  if (failure || !recording) {
+    // Nothing loaded and nothing thrown can only mean the recording came back empty.
+    const resolvedFailure: RecordingLoadFailure = failure ?? { kind: 'unknown' };
     return (
-      <div
-        data-testid='recording-detail-v2-page'
-        className='relative flex h-full w-full flex-col items-center justify-center overflow-hidden bg-background shadow-md md:rounded-2xl'
-      >
-        <div className='flex max-w-md flex-col items-center gap-3 text-center'>
-          <AlertCircle className='size-12 text-destructive' />
-          <p className='text-sm text-muted-foreground'>{error ?? 'Recording not found'}</p>
-          <Button variant='outline' onClick={() => void navigate('/recordings')}>
-            Back to Recordings
-          </Button>
-        </div>
-      </div>
+      <RecordingLoadError
+        failure={resolvedFailure}
+        viewerEmail={currentUser?.email}
+        onBack={() => void navigate('/recordings')}
+      />
     );
   }
 

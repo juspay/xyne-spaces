@@ -94,6 +94,8 @@ import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { loadEmojiData } from '../../../utils/emojiLookup';
+import { RecordingSharePill } from './RecordingSharePill';
+import { useRecordingShareMessage } from './recordingShareMessage';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -575,6 +577,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return forwardedMessageData.content;
   }, [forwardedMessageData, forwardedOriginalConversation]);
+  const recordingShare = useRecordingShareMessage(
+    isForwardedMessage ? resolvedForwardedContent : message.content,
+  );
 
   const systemMessageStyles: React.CSSProperties = {
     color: 'hsl(var(--muted-foreground))',
@@ -764,6 +769,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
         workflowNumber={workflowNumber}
+        {...(recordingShare && {
+          recordingShare,
+        })}
         {...(onClick && { onClick })}
       />
     );
@@ -1210,6 +1218,28 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   emailId={message.messageId}
                   attachments={attachments}
                 />
+              ) : recordingShare && !isForwardedMessage ? (
+                <>
+                  {recordingShare.noteHtml && (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(recordingShare.noteHtml)}`}
+                    >
+                      <RenderMessageWithHTML
+                        message={recordingShare.noteHtml}
+                        showEdited={message.edited}
+                        messageId={message.messageId}
+                        conversationId={message.conversationId}
+                        preserveThreadRoute={context === 'thread'}
+                      />
+                    </div>
+                  )}
+                  <RecordingSharePill
+                    title={recordingShare.displayTitle}
+                    durationMs={recordingShare.durationMs}
+                    onOpen={recordingShare.openRecording}
+                  />
+                  {afterTextContent}
+                </>
               ) : isMarkdownContent ? (
                 <>
                   <MarkdownMessageRenderer
@@ -1327,7 +1357,34 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         </span>
                       )}
                     </div>
-                    {metadata?.isCallMessage && metadata?.callId ? (
+                    {recordingShare ? (
+                      <>
+                        {recordingShare.noteHtml && (
+                          <div
+                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(recordingShare.noteHtml)}`}
+                          >
+                            {isMobile ? (
+                              <ExpandableMessage
+                                message={recordingShare.noteHtml}
+                                showEdited={false}
+                                maxHeight={500}
+                              />
+                            ) : (
+                              <RenderMessageWithHTML
+                                message={recordingShare.noteHtml}
+                                showEdited={false}
+                                preserveThreadRoute={context === 'thread'}
+                              />
+                            )}
+                          </div>
+                        )}
+                        <RecordingSharePill
+                          title={recordingShare.displayTitle}
+                          durationMs={recordingShare.durationMs}
+                          onOpen={recordingShare.openRecording}
+                        />
+                      </>
+                    ) : metadata?.isCallMessage && metadata?.callId ? (
                       <>
                         <CallBubble
                           message={{
@@ -1481,7 +1538,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {shouldRenderLinkPreview && showLinkPreview && previewResult && (
+              {shouldRenderLinkPreview && showLinkPreview && previewResult && !recordingShare && (
                 <div className='mt-2 max-w-full'>
                   {previewResult.type === 'message_preview' ? (
                     <InternalMessagePreview
