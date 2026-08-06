@@ -39,7 +39,7 @@ import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
 import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
-import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
+import { handleSlashCommandBeforeRun, normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
 import {
   QUEUE_ENABLED,
   QUEUE_CAP,
@@ -1175,16 +1175,33 @@ async function postWriteApprovalAction(args: {
   const params = action["params"] as Record<string, unknown>;
   const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
 
-  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+  // The pending-action signature is minted before the Spaces delivery target is
+  // known. Verify it, then bind the trusted session agent to the card signature
+  // so flow-action cannot be replayed with another org's app credentials.
+  const { signAction, verifyActionSignature } = await import("./mcp.js");
+  const pendingActionPayload = {
     serverType: action["serverType"] as string,
     tool: action["tool"] as string,
     params,
     userId: action["userId"] as string,
-    signature: action["signature"] as string,
-    agentSlug: ctx.agentSlug ?? "",
+  };
+  if (!verifyActionSignature(pendingActionPayload, action["signature"] as string)) {
+    throw new Error("Invalid pending write-action signature");
+  }
+  const agentSlug = ctx.agentSlug ?? "";
+  const spacesAppId = ctx.spacesAppId ?? "";
+  const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
+
+  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+    serverType: pendingActionPayload.serverType,
+    tool: pendingActionPayload.tool,
+    params,
+    userId: pendingActionPayload.userId,
+    signature: cardSignature,
+    agentSlug,
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-  }), ctx.spacesAppId);
+  }), spacesAppId);
 
   // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field
@@ -5467,12 +5484,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
                 return;
               }
             }
+            const refireUserId = refire["userId"];
+            if (typeof refireUserId !== "string" || !refireUserId) {
+              log.warn("[goal] refire missing userId; refusing to dispatch");
+              return;
+            }
             const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
             void fetch(runUrl, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                "x-user-id": refireUserId,
               },
               body: JSON.stringify(refire),
             }).catch((err) => {
@@ -5612,28 +5635,53 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // collapses to a confirmation line after tap via replaceFlowCardWithText.
     const goalSuggestion = payload.pendingGoalSuggestion;
     if (goalSuggestion && goalSuggestion.condition?.trim() && goalSuggestion.rationale?.trim()) {
-      // Newline-strip + length-cap defensively: matches parseSlashCommand's
-      // cap so manually-typed and button-fired goals behave identically.
-      const safeCondition = goalSuggestion.condition.replace(/\r?\n/g, " ").slice(0, 2_000);
+      const safeCondition = normalizeGoalCondition(goalSuggestion.condition);
       const safeRationale = goalSuggestion.rationale.replace(/\r?\n/g, " ").slice(0, 400);
-      const goalFlow = withSpacesAppId(buildGoalSuggestionFlow(safeRationale, {
-        condition: safeCondition,
-        agentSlug: ctx.agentSlug ?? "",
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        userId: ctx.senderId,
-      }), ctx.spacesAppId);
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        flow: goalFlow,
-        userId: ctx.spacesAppUserId,
-      }, token).catch((err) => {
-        log.warn("Failed to post /goal suggestion FlowUI card", {
-          error: err instanceof Error ? err.message : String(err),
+      if (!safeCondition) {
+        log.warn("Skipped /goal suggestion with invalid condition");
+      } else {
+        const goalAgentSlug = ctx.agentSlug ?? "";
+        const goalSpacesAppId = ctx.spacesAppId ?? "";
+        const actionNonce = crypto.randomUUID();
+        const issuedAt = Date.now();
+        const { signAction } = await import("./mcp.js");
+        const goalActionPayload = {
+          actionType: "start-goal",
+          actionId: "start-goal",
+          condition: safeCondition,
+          agentSlug: goalAgentSlug,
+          spacesAppId: goalSpacesAppId,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+          actionNonce,
+          issuedAt,
+        };
+        const goalFlow = withSpacesAppId(buildGoalSuggestionFlow(safeRationale, {
+          condition: safeCondition,
+          agentSlug: goalAgentSlug,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), goalSpacesAppId);
+        goalFlow.data = {
+          ...(goalFlow.data ?? {}),
+          actionNonce,
+          issuedAt,
+          signature: signAction(goalActionPayload),
+        };
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow: goalFlow,
+          userId: ctx.spacesAppUserId,
+        }, token).catch((err) => {
+          log.warn("Failed to post /goal suggestion FlowUI card", {
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
-      log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
+        log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
+      }
     }
 
     // ── Send approval DMs for pending write actions (HITL) ──
