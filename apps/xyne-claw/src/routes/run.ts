@@ -127,7 +127,7 @@ import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { parseTaskCommand } from "../task-commands.js";
+import { parseTaskCommand, resolveTaskCommandMode } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 
 const clog = createLogger("run");
@@ -582,6 +582,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     return;
   }
 
+  // A task command is already an explicit execution contract. Do not route it
+  // through the generic plan-mode approval turn, which would replace the
+  // original `/command ...` task with an "Execute this approved plan" prompt.
+  const effectiveMode = resolveTaskCommandMode(task, mode);
+
   if (
     !providedSessionId ||
     typeof providedSessionId !== "string" ||
@@ -803,7 +808,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       twinDestinations,
       senderName,
       channelName,
-      mode,
+      effectiveMode,
       experiment,
       planContinuation,
       shouldGenerateFollowUpSuggestions,
@@ -927,7 +932,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         twinDestinations,
         senderName,
         channelName,
-        mode,
+        effectiveMode,
         experiment,
         planContinuation,
         shouldGenerateFollowUpSuggestions,
@@ -1028,7 +1033,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     twinDestinations,
     senderName,
     channelName,
-    mode,
+    effectiveMode,
     experiment,
     planContinuation,
     shouldGenerateFollowUpSuggestions,

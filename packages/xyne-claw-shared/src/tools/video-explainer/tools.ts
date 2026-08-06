@@ -16,8 +16,9 @@ export const createVideoExplainer: ToolDefinition = {
     "manim (a Manim/Cairo Python scene) and d2 (an ordered list of D2 architecture board " +
     "snapshots faded into a progressive reveal). Every engine renders in this same sandbox — " +
     "no separate box — and needs no internet: narration TTS is fetched by the runtime and " +
-    "injected as a file. Always show the storyboard to the user and obtain approval before " +
-    "calling this tool. It attaches the rendered MP4 directly; do not call sandbox-deliver-files afterward.",
+    "injected as a file. Outside /explainer command mode, show the storyboard and obtain approval " +
+    "before calling this tool. A leading /explainer command already grants approval: render immediately, " +
+    "without asking again. The tool attaches the MP4 directly; do not call sandbox-deliver-files afterward.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {

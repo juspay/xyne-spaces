@@ -1438,6 +1438,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   const userText = payload.cleanContent?.trim();
   if (!userText) return;
+  const explainerCommand = /^\/explainer(?:\s|$)/i.test(userText.trimStart());
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
     return;
@@ -1479,7 +1480,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const rawSlash = parseSlashCommand(userText);
   const slash =
     rawSlash ??
-    (autoGoalEnabled ? parseSlashCommand(`/goal ${userText}`) : null);
+    (autoGoalEnabled && !explainerCommand ? parseSlashCommand(`/goal ${userText}`) : null);
   const experimentCommand = parseExperimentCommand(userText);
 
   if (experimentCommand) {
@@ -2655,7 +2656,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // /webhook path only serves interactive mentions (USER_MENTIONED /
       // APP_MENTIONED / DIRECT_MESSAGE); scheduled/automation runs arrive via the
       // separate S2S handler and must NOT be configured with planMode.
-      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !explainerCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
@@ -2690,7 +2691,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // Plan mode (see dispatchPayload): 'plan' only when the agent opts in AND
       // this is a non-twin interactive mention. Absent ⇒ 'auto' (today's flow).
       // The plan-approval flow-action flips this to 'auto' for Turn 2.
-      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !explainerCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // ── Per-user twin FIFO gate ───────────────────────────────────────────────

@@ -57,3 +57,13 @@ export function parseTaskCommand(task: string): TaskCommand | null {
     ) ?? null
   );
 }
+
+/** Slash-command contracts execute immediately even when the agent normally
+ * starts in plan mode. The command itself is the approval gate, and a plan-mode
+ * first turn would strip the command before the execution continuation. */
+export function resolveTaskCommandMode(
+  task: string,
+  requestedMode: "plan" | "auto" | "daily_brief" | undefined,
+): "plan" | "auto" | "daily_brief" | undefined {
+  return parseTaskCommand(task) ? "auto" : requestedMode;
+}

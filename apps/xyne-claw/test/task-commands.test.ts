@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadCustomTools } from "../src/custom-tools.js";
-import { parseTaskCommand } from "../src/task-commands.js";
+import { parseTaskCommand, resolveTaskCommandMode } from "../src/task-commands.js";
 
 describe("/explainer task command", () => {
   it("matches only the leading command token", () => {
@@ -15,6 +15,12 @@ describe("/explainer task command", () => {
       "sandbox-create",
       "create-video-explainer",
     ]);
+  });
+
+  it("runs command contracts immediately instead of entering generic plan mode", () => {
+    expect(resolveTaskCommandMode("/explainer Redis", "plan")).toBe("auto");
+    expect(resolveTaskCommandMode("Explain Redis", "plan")).toBe("plan");
+    expect(resolveTaskCommandMode("/explainer Redis", undefined)).toBe("auto");
   });
 
   it("force-loads command tools without changing the saved agent config", () => {
