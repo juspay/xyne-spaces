@@ -1656,18 +1656,18 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   line-height: 1;
 }
 
-.jp-message-html p {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) p {
   @apply my-0;
 }
 
-.jp-message-html p + p {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) p + p {
   @apply mt-2;
 }
 
 /* ----------------------------
    Horizontal rules
    ---------------------------- */
-.jp-message-html hr {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) hr {
   border: none;
   border-top: 1px solid hsl(var(--border));
   margin: 12px 0;
@@ -1675,7 +1675,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 /* The UA/preflight default `bolder` resolves to 700 against the 400 base.
    Pin to 600 so message bold matches the AI answer's `.bot-markdown-content`. */
-.jp-message-html :is(strong, b) {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) :is(strong, b) {
   font-weight: 600;
 }
 
@@ -1689,7 +1689,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* ----------------------------
    Inline code
    ---------------------------- */
-.jp-message-html code:not(pre code) {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  code:not(pre code) {
   @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-primary;
 }
 
@@ -1754,7 +1755,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   word-break: normal;
 }
 
-.jp-message-html pre code {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) pre code {
   @apply bg-transparent p-0 border-0 text-[0.875rem] leading-5 font-mono text-foreground block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
@@ -1810,7 +1811,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   max-width: 100%;
 }
 
-.jp-message-html table {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) table {
   border-collapse: separate;
   border-spacing: 0;
   margin: 8px 0;
@@ -1821,7 +1822,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   min-width: 100%;
 }
 
-.jp-message-html th {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) th {
   text-align: left;
   font-weight: 500;
   letter-spacing: 0.2px;
@@ -1832,17 +1833,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   white-space: nowrap;
 }
 
-.jp-message-html td {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) td {
   padding: 10px 16px;
   border-bottom: 1px solid hsl(var(--border));
   color: hsl(var(--foreground) / 0.8);
 }
 
-.jp-message-html tr:last-child td {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) tr:last-child td {
   border-bottom: none;
 }
 
-.jp-message-html tbody tr:hover td {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) tbody tr:hover td {
   background: hsl(var(--foreground) / 0.04);
 }
 
@@ -1888,67 +1889,68 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* ----------------------------
    Lists
    ---------------------------- */
-.jp-message-html ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul {
   @apply list-disc pl-6 my-2;
 }
 
-.jp-message-html ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul {
   list-style-type: circle;
 }
 
-.jp-message-html ul ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul ul {
   list-style-type: square;
 }
 
-.jp-message-html ul ul ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul ul ul {
   list-style-type: disc;
 }
 
-.jp-message-html ul ul ul ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul ul ul ul {
   list-style-type: circle;
 }
 
-.jp-message-html ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol {
   @apply my-2 pl-6;
   list-style-type: decimal;
 }
 
-.jp-message-html ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol {
   list-style-type: lower-alpha;
 }
 
-.jp-message-html ol ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol ol {
   list-style-type: lower-roman;
 }
 
-.jp-message-html ol ol ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol ol ol {
   list-style-type: decimal;
 }
 
-.jp-message-html ol ol ol ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol ol ol ol {
   list-style-type: lower-alpha;
 }
 
-.jp-message-html li {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) li {
   @apply my-1;
 }
 
 /* Inline the first <p> inside an <li> so the marker shares a line with the text
    instead of sitting alone above it. */
-.jp-message-html ol li > p:first-child,
-.jp-message-html ul li > p:first-child {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  li
+  > p:first-child {
   display: inline;
 }
 
 /* ----------------------------
    Links
    ---------------------------- */
-.jp-message-html a {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) a {
   color: var(--link-color);
   text-decoration: underline;
 }
 
-.jp-message-html a:hover {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) a:hover {
   color: var(--link-hover-color);
 }
 
@@ -2760,84 +2762,6 @@ img.inline-emoji,
   margin-top: 0;
 }
 
-.bot-markdown-content p,
-.bot-markdown-content-call-summary p {
-  margin: 0;
-  color: hsl(var(--foreground));
-}
-
-.bot-markdown-content p + p,
-.bot-markdown-content-call-summary p + p {
-  margin-top: 8px;
-}
-
-.bot-markdown-content ul,
-.bot-markdown-content-call-summary ul {
-  padding-left: 24px;
-  margin: 8px 0;
-  list-style-type: disc;
-  color: hsl(var(--foreground));
-}
-
-.bot-markdown-content ul ul,
-.bot-markdown-content-call-summary ul ul {
-  list-style-type: circle;
-}
-
-.bot-markdown-content ul ul ul,
-.bot-markdown-content-call-summary ul ul ul {
-  list-style-type: square;
-}
-
-.bot-markdown-content ul ul ul ul,
-.bot-markdown-content-call-summary ul ul ul ul {
-  list-style-type: disc;
-}
-
-.bot-markdown-content ul ul ul ul ul,
-.bot-markdown-content-call-summary ul ul ul ul ul {
-  list-style-type: circle;
-}
-
-.bot-markdown-content ol,
-.bot-markdown-content-call-summary ol {
-  padding-left: 24px;
-  margin: 8px 0;
-  list-style-type: decimal;
-  color: hsl(var(--foreground));
-}
-
-.bot-markdown-content ol ol,
-.bot-markdown-content-call-summary ol ol {
-  list-style-type: lower-alpha;
-}
-
-.bot-markdown-content ol ol ol,
-.bot-markdown-content-call-summary ol ol ol {
-  list-style-type: lower-roman;
-}
-
-.bot-markdown-content ol ol ol ol,
-.bot-markdown-content-call-summary ol ol ol ol {
-  list-style-type: decimal;
-}
-
-.bot-markdown-content ol ol ol ol ol,
-.bot-markdown-content-call-summary ol ol ol ol ol {
-  list-style-type: lower-alpha;
-}
-
-.bot-markdown-content li,
-.bot-markdown-content-call-summary li {
-  margin: 4px 0;
-  color: hsl(var(--foreground));
-}
-
-.bot-markdown-content li > p:first-child,
-.bot-markdown-content-call-summary li > p:first-child {
-  display: inline;
-}
-
 .bot-markdown-content blockquote,
 .bot-markdown-content-call-summary blockquote {
   border-left: 2px solid hsl(var(--border));
@@ -2855,34 +2779,6 @@ img.inline-emoji,
   }
 }
 
-.bot-markdown-content a,
-.bot-markdown-content-call-summary a {
-  color: var(--link-color);
-  text-decoration: underline;
-}
-
-.bot-markdown-content a:hover,
-.bot-markdown-content-call-summary a:hover {
-  color: var(--link-hover-color);
-}
-
-.bot-markdown-content :is(strong, b),
-.bot-markdown-content-call-summary :is(strong, b) {
-  font-weight: 600;
-}
-
-.bot-markdown-content hr,
-.bot-markdown-content-call-summary hr {
-  border: none;
-  border-top: 1px solid hsl(var(--border));
-  margin: 12px 0;
-}
-
-.bot-markdown-content code:not(pre code),
-.bot-markdown-content-call-summary code:not(pre code) {
-  @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-primary;
-}
-
 .bot-markdown-content pre,
 .bot-markdown-content-call-summary pre {
   background: hsl(var(--muted));
@@ -2890,14 +2786,6 @@ img.inline-emoji,
   overflow-x: auto;
   white-space: pre-wrap;
   overflow-wrap: break-word;
-}
-
-.bot-markdown-content pre code,
-.bot-markdown-content-call-summary pre code {
-  @apply bg-transparent p-0 border-0 text-[0.875rem] leading-5 font-mono text-foreground block;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: normal;
 }
 
 .bot-markdown-content-call-summary :is(p, h1, h2, h3, h4, h5, h6) {
@@ -2939,47 +2827,6 @@ img.inline-emoji,
 .xyne-ai-markdown a.claw-citation-chip:hover,
 .bot-markdown-content a.claw-citation-chip:hover {
   color: inherit !important;
-}
-
-.bot-markdown-content table,
-.bot-markdown-content-call-summary table {
-  border-collapse: separate;
-  border-spacing: 0;
-  margin: 8px 0;
-  font-size: 13px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 12px;
-  overflow: hidden;
-  min-width: 100%;
-}
-
-.bot-markdown-content th,
-.bot-markdown-content-call-summary th {
-  text-align: left;
-  font-weight: 500;
-  letter-spacing: 0.2px;
-  color: hsl(var(--foreground) / 0.6);
-  padding: 10px 16px;
-  border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--muted));
-  white-space: nowrap;
-}
-
-.bot-markdown-content td,
-.bot-markdown-content-call-summary td {
-  padding: 10px 16px;
-  border-bottom: 1px solid hsl(var(--border));
-  color: hsl(var(--foreground) / 0.8);
-}
-
-.bot-markdown-content tr:last-child td,
-.bot-markdown-content-call-summary tr:last-child td {
-  border-bottom: none;
-}
-
-.bot-markdown-content tbody tr:hover td,
-.bot-markdown-content-call-summary tbody tr:hover td {
-  background: hsl(var(--foreground) / 0.04);
 }
 
 /* Memory table summary cell: force <p> inline so line-clamp works */
