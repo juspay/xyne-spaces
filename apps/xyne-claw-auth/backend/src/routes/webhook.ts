@@ -5566,6 +5566,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // ── Post question buttons in thread ──
     const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
+      const { signAction: signUserAnswer } = await import("./mcp.js");
       for (const q of pendingQuestions) {
         const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
           questionId: q.questionId,
@@ -5574,6 +5575,23 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           conversationId: ctx.conversationId,
           userId: ctx.senderId,
         }), ctx.spacesAppId);
+        // XYNE-55135: bind the card's identity + routing fields with an HMAC at
+        // creation time. The transport signature only proves Spaces forwarded
+        // the body unmodified; it cannot prove these fields equal what the agent
+        // posted, because Spaces forwards client-controlled flowJSON.data.
+        // flow-action re-derives and verifies this exact payload on click.
+        questionFlow.data = {
+          ...(questionFlow.data ?? {}),
+          signature: signUserAnswer({
+            actionType: "user-answer",
+            questionId: q.questionId,
+            userId: ctx.senderId,
+            agentSlug: ctx.agentSlug ?? "",
+            spacesAppId: ctx.spacesAppId ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+          }),
+        };
         await spacesAppFetch("/chat/postMessage", {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,

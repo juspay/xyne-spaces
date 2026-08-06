@@ -43,6 +43,21 @@ export async function deleteQuestion(questionId: string): Promise<void> {
   await redis.del(`${PREFIX}${questionId}`);
 }
 
+/**
+ * Atomically fetch-and-delete a pending question (GETDEL). Serves three roles
+ * for the user-answer flow-action (XYNE-55135): idempotency guard (a second
+ * click on the same card gets null and is dropped), existence/ownership source
+ * (compare question.userId to the answerer), and option source (validate the
+ * chosen answer). Because fetch and delete are one atomic op, a double click
+ * cannot dispatch two runs.
+ */
+export async function consumeQuestion(questionId: string): Promise<StoredQuestion | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.getdel(`${PREFIX}${questionId}`);
+  if (!raw) return null;
+  return JSON.parse(raw) as StoredQuestion;
+}
+
 // POST / — store a pending question
 router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
   try {

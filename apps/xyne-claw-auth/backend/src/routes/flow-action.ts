@@ -972,8 +972,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const answerConversationId = data["conversationId"] as string;
       const answerUserId = data["userId"] as string;
       const answer = values["answer"] as string | undefined;
+      const signature = data["signature"] as string | undefined;
 
-      if (!questionId || !answer || !answerUserId) {
+      if (!questionId || !answer || !answerUserId || !signature) {
         res.status(400).json({ type: "error", message: "Missing user-answer fields" } satisfies AppActionResponse);
         return;
       }
@@ -985,19 +986,57 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // Acknowledge immediately so the widget closes
+      // XYNE-55135: the card's identity + routing fields are HMAC-bound at
+      // creation (buildUserQuestionFlow sign site in webhook.ts). Verify here so
+      // a tampered flowJSON.data (agent/app/org, channel, conversation, or
+      // answerer swap) cannot dispatch a run.
+      const { verifyActionSignature } = await import("./mcp.js");
+      const answerActionPayload = {
+        actionType: "user-answer",
+        questionId,
+        userId: answerUserId,
+        agentSlug: answerAgentSlug,
+        spacesAppId: answerSpacesAppId ?? "",
+        channelId: answerChannelId,
+        conversationId: answerConversationId,
+      };
+      if (!verifyActionSignature(answerActionPayload, signature)) {
+        log.error("[flow-action] user-answer HMAC verification failed");
+        res.status(422).json({ type: "error", message: "Answer card verification failed" } satisfies AppActionResponse);
+        return;
+      }
+
+      // Atomically consume the stored question BEFORE acknowledging: idempotency
+      // (a second click gets null), existence (an unknown/expired id never
+      // dispatches a run), and the trusted source for ownership + option checks.
+      const { consumeQuestion } = await import("./pending-questions.js");
+      const question = await consumeQuestion(questionId);
+      if (!question) {
+        res.json({ type: "close_screen", finalMessage: "This question was already answered or has expired." } satisfies AppActionResponse);
+        return;
+      }
+      if (question.userId !== answerUserId) {
+        log.error(`[flow-action] user-answer ownership mismatch: stored ${question.userId} != answerer ${answerUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+      if (!question.options.includes(answer)) {
+        log.error(`[flow-action] user-answer invalid option for question ${questionId}`);
+        res.status(400).json({ type: "error", message: "Invalid answer option" } satisfies AppActionResponse);
+        return;
+      }
+
+      // Acknowledge now that the answer is validated so the widget closes.
       resp = { type: "close_screen", finalMessage: `✅ You answered: "${answer}"` };
       res.json(resp);
       void replaceFlowCardWithText(messageId, answerAgentSlug, `✅ You answered: **"${answer}"**`, answerConversationId);
 
       // Fire-and-forget: start new /run with the answer as context
       try {
-        const { getQuestion, deleteQuestion } = await import("./pending-questions.js");
         const { setSession } = await import("./webhook.js");
 
-        const question = await getQuestion(questionId);
-        const questionText = question?.question ?? "a question";
-        const optionsList = question?.options?.join(", ") ?? "";
+        const questionText = question.question;
+        const optionsList = question.options.join(", ");
 
         const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
         const appToken = agent?.spacesAppToken
@@ -1049,7 +1088,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
 
         log.info(`[flow-action] User answered "${answer}" → new /run (session=${runBody.sessionId})`);
-        await deleteQuestion(questionId).catch(() => {});
       } catch (err) {
         log.error("[flow-action] Failed to start new run with answer:", err);
       }
