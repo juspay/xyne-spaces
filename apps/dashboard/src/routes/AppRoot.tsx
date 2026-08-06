@@ -188,6 +188,7 @@ import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
@@ -1169,7 +1170,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'knowledge-base',
-                element: <KnowledgeBaseV2Layout />,
+                element: (
+                  <GuestBlockedRoute>
+                    <KnowledgeBaseV2Layout />
+                  </GuestBlockedRoute>
+                ),
                 children: [
                   {
                     index: true,
@@ -1198,7 +1203,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'memory',
-                element: <MemoryScreen />,
+                element: (
+                  <GuestBlockedRoute>
+                    <MemoryScreen />
+                  </GuestBlockedRoute>
+                ),
               },
               {
                 path: 'analytics',
