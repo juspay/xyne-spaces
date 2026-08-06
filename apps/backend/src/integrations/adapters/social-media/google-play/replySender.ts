@@ -5,7 +5,7 @@ import {
 } from '@/integrations/core/baseInteractionReplySender';
 import type { InteractionReplyContext } from '@/integrations/core/baseInteractionReplySender';
 import type { NormalizedData } from '@/integrations/core/types';
-import { EmailType } from '@prisma/client';
+import { EmailType } from '@xyne/shared';
 import { googlePlayClient } from './client';
 import { GOOGLE_PLAY_MAX_REPLY_LENGTH } from './constants';
 import { GOOGLE_PLAY_DEVELOPER_REPLY_SUFFIX } from './transformer';

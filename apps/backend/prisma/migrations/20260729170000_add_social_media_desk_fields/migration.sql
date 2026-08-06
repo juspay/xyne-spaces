@@ -1,6 +1,3 @@
-ALTER TYPE "public"."DeskType" ADD VALUE IF NOT EXISTS 'SOCIAL_MEDIA';
-ALTER TYPE "public"."ChannelType" ADD VALUE IF NOT EXISTS 'SOCIAL_MEDIA';
-
 ALTER TABLE "public"."emails"
 ADD COLUMN "rating" INTEGER,
 ADD COLUMN "clientVersionName" TEXT,

@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { ChannelType } from '@prisma/client';
+import { ChannelType } from '@xyne/shared';
 import { db } from '@/database/client';
 
 export async function canAccessSocialMediaChannel(

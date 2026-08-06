@@ -15,7 +15,7 @@ import {
   MessageSquareMore,
   Smartphone,
   Phone,
-  Star,
+  Share2,
   Plus,
   Trash2,
 } from 'lucide-react';
@@ -92,10 +92,10 @@ const DESK_SOURCES: ReadonlyArray<{
     icon: Phone,
   },
   {
-    value: 'SOCIAL_MEDIA',
+    value: DeskType.SOCIAL_MEDIA,
     label: 'Social media',
     description: 'Create support tickets from Google Play reviews',
-    icon: Star,
+    icon: Share2,
   },
 ];
 
@@ -273,6 +273,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return;
         if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
+        if (
+          deskType === DeskType.SOCIAL_MEDIA &&
+          (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
+        )
+          return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -302,6 +307,18 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             channelType: 'APP',
             deskType: DeskType.APP,
             installedAppId: selectedInstalledAppId,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          onSubmit?.({
+            ...value,
+            connector: null,
+            channelType: 'SOCIAL_MEDIA',
+            deskType: DeskType.SOCIAL_MEDIA,
+            applications: googlePlayApplications.map(application => ({
+              displayName: application.displayName.trim(),
+              packageName: application.packageName,
+            })),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -367,6 +384,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === DeskType.SLACK && !selectedSlackChannelId) ||
     (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
+    (requireConnector &&
+      deskType === DeskType.SOCIAL_MEDIA &&
+      (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
     (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
@@ -385,6 +405,22 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
+      if (deskType === DeskType.SOCIAL_MEDIA) {
+        if (googlePlayApplications.some(application => !application.displayName.trim()))
+          return 'Please enter a display name for every application';
+        if (
+          googlePlayApplications.some(
+            application => !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName),
+          )
+        )
+          return 'Enter a valid Android package name for every application';
+        if (
+          new Set(googlePlayApplications.map(application => application.packageName)).size !==
+          googlePlayApplications.length
+        )
+          return 'Android package names must be unique';
+        if (!boardIdValue) return 'Please select a board';
+      }
       if (deskType === DeskType.CALL && !ozonetelConfig?.configured)
         return 'Ozonetel is not configured. Set it up in Desk Integrations first.';
     }
@@ -724,7 +760,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {requireConnector && deskType === 'SOCIAL_MEDIA' && (
+      {requireConnector && deskType === DeskType.SOCIAL_MEDIA && (
         <div className='space-y-4'>
           <div className='space-y-2'>
             <label htmlFor='social-provider' className='text-sm font-medium text-foreground'>
@@ -818,7 +854,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                           ),
                         )
                       }
-                      placeholder='Juspay Portal'
+                      placeholder='Xyne'
                       autoComplete='off'
                     />
                   </div>

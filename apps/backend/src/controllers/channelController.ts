@@ -18,8 +18,6 @@ import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import {
   createForwardedMessageXml,
-  GOOGLE_PLAY_REVIEWS_SOURCE_TYPE,
- 
   parseForwardedMessageXml,
   ChannelScopeType,
   ChannelVisibility,
@@ -1434,21 +1432,6 @@ export class ChannelController {
       const { channelId } = req.params;
       if (!channelId) {
         res.status(400).json({ error: 'channelId is required' });
-        return;
-      }
-
-      const userId = req.user!.id;
-      const workspaceId = req.user!.workspaceId!;
-      const accessibleChannel = await db.channel.findFirst({
-        where: {
-          id: channelId,
-          workspaceId,
-          participants: { some: { userId } },
-        },
-        select: { id: true },
-      });
-      if (!accessibleChannel) {
-        res.status(404).json({ error: 'Channel not found' });
         return;
       }
 

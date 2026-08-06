@@ -1,15 +1,15 @@
 import express, { type Request, type Response } from 'express';
+import { Prisma } from '@prisma/client';
 import {
+  ANDROID_PACKAGE_NAME_PATTERN,
   ChannelRole,
   ChannelScopeType,
   ChannelType,
   ChannelVisibility,
   DeskType,
   EmailMergeMode,
-  Prisma,
-} from '@prisma/client';
+} from '@xyne/shared';
 import { z } from 'zod';
-import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { decrypt, encrypt } from '@/services/encryptionService';

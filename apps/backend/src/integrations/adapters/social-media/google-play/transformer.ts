@@ -1,8 +1,8 @@
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { BaseTransformer } from '@/integrations/core/baseTransformer';
 import type { NormalizedData, ParseResult } from '@/integrations/core/types';
-import { EmailType, type ExternalSource } from '@prisma/client';
-import { FormFieldType } from '@xyne/shared';
+import type { ExternalSource } from '@prisma/client';
+import { EmailType, FormFieldType } from '@xyne/shared';
 import type { NormalizedGooglePlayReview } from './client';
 import {
   GOOGLE_PLAY_APP_FIELD,

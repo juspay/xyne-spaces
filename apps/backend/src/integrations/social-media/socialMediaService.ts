@@ -1,11 +1,9 @@
 import {
-  ActivityType,
-  EmailType,
-  ExternalEntityType,
   type ExternalSource,
   Prisma,
   type Email,
 } from '@prisma/client';
+import { ActivityType, EmailType, ExternalEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { externalSourceCore } from '@/integrations/core/core';

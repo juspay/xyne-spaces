@@ -3,8 +3,8 @@
  * Platform-agnostic interfaces
  */
 
-import { EmailType, ExternalSource } from '@prisma/client';
-import type { FormFieldType } from '@xyne/shared';
+import type { ExternalSource } from '@prisma/client';
+import type { EmailType, FormFieldType } from '@xyne/shared';
 import { RefetchOptions, RefetchResult } from './baseRefetch';
 import type { DownloadedAttachment } from '@/services/externalAttachmentService';
 export type { RefetchOptions, RefetchResult };

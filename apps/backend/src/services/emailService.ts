@@ -532,7 +532,7 @@ export class EmailService {
           });
         });
       void emitTicketUpdated({
-        ticket: result.ticket,
+        ticket: result.ticket as TicketLike,
         changes: {
           ...(currentTicket.title !== result.ticket.title && {
             title: {

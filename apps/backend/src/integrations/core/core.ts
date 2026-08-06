@@ -276,7 +276,7 @@ export class ExternalSourceCore {
             externalMessageId: normalizedData.externalId,
             sentByUserId:
               normalizedData.emailData.sentByUserId ?? existingEmail.sentByUserId,
-            type: normalizedData.emailData.type ?? existingEmail.type,
+            type: (normalizedData.emailData.type ?? existingEmail.type) as EmailType,
             rating: normalizedData.emailData.rating ?? existingEmail.rating,
             clientVersionName:
               normalizedData.emailData.clientVersionName ?? existingEmail.clientVersionName,

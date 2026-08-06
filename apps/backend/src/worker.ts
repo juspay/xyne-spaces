@@ -36,6 +36,7 @@ import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
@@ -162,6 +163,8 @@ class WorkerService {
       }
 
       if (socialMediaSyncEnabled) {
+        logger.info('Initializing email classification queue (producer)...');
+        await emailClassificationQueue.initialize();
         logger.info('Starting social media review sync worker...');
         socialMediaSyncWorker.start();
       }
@@ -409,6 +412,9 @@ class WorkerService {
 
       if (socialMediaSyncEnabled) {
         socialMediaSyncWorker.stop();
+        if (!appConfig.enableEmailClassificationWorker) {
+          await emailClassificationQueue.close();
+        }
       }
 
       if (messageClassificationEnabled) {
