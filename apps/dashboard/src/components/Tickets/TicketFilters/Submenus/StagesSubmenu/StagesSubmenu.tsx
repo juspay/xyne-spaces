@@ -82,7 +82,7 @@ export const StagesSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search stages...'
+            placeholder='Search status...'
             className='pl-9 h-9'
           />
         </div>
@@ -90,10 +90,10 @@ export const StagesSubmenu = ({
       <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
         {isLoading ? (
           <div className='p-8 text-center text-sm text-muted-foreground' aria-live='polite'>
-            Loading stages…
+            Loading status…
           </div>
         ) : !availableStages || availableStages.length === 0 ? (
-          <div className='p-8 text-center text-sm text-muted-foreground'>No stages available</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No status available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
             {finalResults.map(stage => {
@@ -127,13 +127,13 @@ export const StagesSubmenu = ({
             })}
           </div>
         ) : (
-          <div className='p-8 text-center text-sm text-muted-foreground'>No stages found</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No status found</div>
         )}
       </div>
       {selectedStages.length > 0 && (
         <div className='p-3 border-t bg-muted'>
           <div className='text-xs text-muted-foreground'>
-            {selectedStages.length} stage{selectedStages.length !== 1 ? 's' : ''} selected
+            {selectedStages.length} status selected
           </div>
         </div>
       )}
