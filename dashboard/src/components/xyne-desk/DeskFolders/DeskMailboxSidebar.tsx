@@ -2,7 +2,7 @@ import { ReactElement } from 'react';
 import { Inbox, Mails, Star, Ban, LucideIcon } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 
-export type MailboxFolder = 'inbox' | 'all' | 'starred' | 'spam';
+export type MailboxFolder = 'inbox' | 'all' | 'starred' | 'spam' | 'sent' | 'drafts';
 
 const FOLDERS: { key: MailboxFolder; label: string; icon: LucideIcon }[] = [
   { key: 'inbox', label: 'Inbox', icon: Inbox },

@@ -1188,10 +1188,11 @@ export const queries = defineQueries({
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -1222,6 +1223,11 @@ export const queries = defineQueries({
 
       if (userGroups && userGroups.length > 0) {
         query = query.where('userGroupId', 'IN', userGroups);
+      }
+      if (conversationLabelId) {
+        query = query.where(({ exists }) =>
+          exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
+        );
       }
 
       if (lastEmailAtStart !== undefined) {
@@ -1508,16 +1514,17 @@ export const queries = defineQueries({
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
-      mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam']).optional(),
+      mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1562,10 +1569,35 @@ export const queries = defineQueries({
               ),
           ),
         );
+      } else if (mailboxFolder === 'sent') {
+        // "Sent" = tickets the current user has sent an outbound email on (REPLY /
+        // REPLY_ALL / COMPOSE). A positive exists() runs client-side too, so pagination
+        // stays meaningful and the list is one-row-per-ticket (no email-level collapse).
+        query = query.where(({ exists }) =>
+          exists('emails', (e) =>
+            e
+              .where('type', 'IN', [EmailType.REPLY, EmailType.REPLY_ALL, EmailType.COMPOSE])
+              .where('sentByUserId', ctx.userID),
+          ),
+        );
+      } else if (mailboxFolder === 'drafts') {
+        // "Drafts" = tickets the current user has a saved reply draft on (conversationId
+        // set → tied to a ticket). Compose drafts (no conversationId, no ticket yet) are
+        // surfaced separately via the Drafts chip banner, not in this list.
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', (d) =>
+            d.where('userId', ctx.userID).where('conversationId', 'IS NOT', null),
+          ),
+        );
       }
 
       if (userGroups && userGroups.length > 0) {
         query = query.where('userGroupId', 'IN', userGroups);
+      }
+      if (conversationLabelId) {
+        query = query.where(({ exists }) =>
+          exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
+        );
       }
 
       if (lastEmailAtStart !== undefined) {
@@ -1710,6 +1742,7 @@ export const queries = defineQueries({
         .orderBy('updatedAt', 'desc');
     }
   ),
+  // @deprecated
   userEmailDrafts: defineQuery(
     z.object({
       channelId: z.string(),
@@ -1744,6 +1777,7 @@ export const queries = defineQueries({
   //   scope 'channel' → every user's sends in the channel; gated to channel
   //                     members (public channel, or a participant of a private one)
   //                     so a crafted request can't read another channel's mail.
+  // @deprecated
   userEmailsSent: defineQuery(
     z.object({
       channelId: z.string(),
@@ -1785,6 +1819,7 @@ export const queries = defineQueries({
         .related('ticket');
     }
   ),
+
   // @deprecated
   ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
@@ -3528,6 +3563,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .orderBy('labelName', 'asc');
     },
   ),
+  //@deprecated
   conversationLabelMappingsByLabelId: defineQuery(
     z.object({ labelId: z.string() }),
     ({ args: { labelId } }) => {

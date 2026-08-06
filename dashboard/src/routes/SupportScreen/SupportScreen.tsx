@@ -101,6 +101,7 @@ import {
   UserGroupSubmenu,
   StagesSubmenu,
   DynamicFieldSubmenu,
+  ConversationLabelSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
 import { getIconForFieldType } from '../../components/Tickets/TicketFilters/fieldTypeIcons';
 import {
@@ -186,10 +187,7 @@ import {
 } from '../../hooks/useComposeDraft';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { DeskDraftSubtree } from '../../components/xyne-desk/DeskFolders/DeskDraftSubtree';
-import { UserDraftsView } from '../../components/xyne-desk/DeskFolders/UserDraftsView';
-import { UserSentView } from '../../components/xyne-desk/DeskFolders/UserSentView';
 import { DeskLabelsSidebar } from '../../components/xyne-desk/DeskFolders/DeskLabelsSidebar';
-import { LabelThreadsView } from '../../components/xyne-desk/DeskFolders/LabelThreadsView';
 import {
   DeskMailboxSidebar,
   type MailboxFolder,
@@ -634,9 +632,6 @@ const SupportScreen = (): ReactElement => {
   }, [searchParams, sendFilters, filtersState.value]);
 
   const [expandedDeskIds, setExpandedDeskIds] = useState<Set<string>>(new Set());
-  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts' | 'userSent' | 'labelThreads'>(
-    'tickets',
-  );
   const [selectedLabel, setSelectedLabel] = useState<{ id: string; name: string } | null>(null);
   // Active mailbox folder for the base ticket list (Inbox by default). Inbox / All Mail /
   // Starred / Spam filter the same rich list, rather than opening a separate view.
@@ -733,8 +728,10 @@ const SupportScreen = (): ReactElement => {
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
+      // Sidebar label view (selectedLabel) takes precedence over the More-Filters label pick.
+      conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
-    [filters, userID, dynamicFieldEntries, tagFilterConversationIds],
+    [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
   );
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
@@ -808,7 +805,8 @@ const SupportScreen = (): ReactElement => {
     (filters.userGroups && filters.userGroups.length > 0) ||
     filters.lastEmailAtStart !== undefined ||
     filters.lastEmailAtEnd !== undefined ||
-    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0)
+    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) ||
+    (!selectedLabel && !!filters.conversationLabelId)
   );
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
@@ -880,8 +878,12 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
-  const filterMenuItems = useMemo(
-    () => [
+  // Priority and Stages/Status are their own top-level popover buttons; the More-Filters
+  // menu carries the rest. The "Label" filter is hidden while a sidebar label view is
+  // active (`selectedLabel`): the whole list is already scoped to that label, so a second
+  // label picker is redundant.
+  const filterMenuItems = useMemo(() => {
+    const items = [
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
@@ -892,9 +894,12 @@ const SupportScreen = (): ReactElement => {
         icon: getIconForFieldType(field.fieldType),
         dynamicFieldId: field.id,
       })),
-    ],
-    [deskDynamicFields],
-  );
+    ];
+    if (!selectedLabel) {
+      items.push({ id: 'conversationLabel', label: 'Label', icon: TagIcon });
+    }
+    return items;
+  }, [deskDynamicFields, selectedLabel]);
 
   const renderSubmenu = useCallback((): ReactElement | null => {
     if (!activeSubmenu) return null;
@@ -986,6 +991,14 @@ const SupportScreen = (): ReactElement => {
           </div>
         );
       }
+      case 'conversationLabel':
+        return (
+          <ConversationLabelSubmenu
+            selectedLabelId={filters.conversationLabelId}
+            onChange={(labelId?: string) => handleFilterChange('conversationLabelId', labelId)}
+            channelId={selectedChannelId}
+          />
+        );
       default:
         return null;
     }
@@ -1365,6 +1378,11 @@ const SupportScreen = (): ReactElement => {
   const canRefetch = !!refetchChannelId;
   const selectedChannelPref = useEmailChannelPreference(refetchChannelId ?? null);
   const isDlDesk = selectedChannelPref?.deskType === DeskType.DL;
+  useEffect(() => {
+    if (selectedChannelPref?.boardId) {
+      setChannelBoardId(selectedChannelPref.boardId);
+    }
+  }, [selectedChannelId, selectedChannelPref?.boardId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -1385,12 +1403,12 @@ const SupportScreen = (): ReactElement => {
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
   );
-  // Clear the selection on channel OR folder change — switching folders hides the
+  // Clear the selection on channel, folder OR label change — switching views hides the
   // previously-selected rows, so a stale selection would let bulk actions (mark-read,
-  // merge) operate on tickets that aren't visible in the current folder.
+  // merge) operate on tickets that aren't visible in the current view.
   useEffect(() => {
     setSelectedTickets(new Map());
-  }, [selectedChannelId, selectedFolder.key]);
+  }, [selectedChannelId, selectedFolder.key, selectedLabel?.id]);
   const selectedTicketIds = useMemo(() => new Set(selectedTickets.keys()), [selectedTickets]);
   const toggleTicketSelected = useCallback(
     (row: {
@@ -1799,65 +1817,36 @@ const SupportScreen = (): ReactElement => {
         next.add(id);
         return next;
       });
-      setDeskView('tickets');
+      setSelectedLabel(null);
     },
     [setSelectedChannelId],
   );
 
-  const openUserDrafts = useCallback(
-    (id: string): void => {
-      setSelectedChannelId(id);
-      setDeskView('userDrafts');
-    },
-    [setSelectedChannelId],
-  );
-
-  const openUserSent = useCallback(
-    (id: string): void => {
-      setSelectedChannelId(id);
-      setDeskView('userSent');
-    },
-    [setSelectedChannelId],
-  );
-
+  // A label is just another filter dimension on the same ticket list: selecting one opens
+  // the normal ticket list (list view) scoped to that label, so it gets the full Inbox
+  // experience (rich rows, filters, view toggles, pagination) rather than a bare panel.
   const openLabel = useCallback(
     (channelId: string, labelId: string, labelName: string): void => {
       setSelectedChannelId(channelId);
       setSelectedLabel({ id: labelId, name: labelName });
-      setDeskView('labelThreads');
+      setViewMode('list');
+      if (filters.conversationLabelId) {
+        handleFilterChange('conversationLabelId', undefined);
+      }
     },
-    [setSelectedChannelId],
+    [setSelectedChannelId, filters.conversationLabelId, handleFilterChange],
   );
 
   const openMailbox = useCallback(
     (channelId: string, folder: MailboxFolder, label: string): void => {
       setSelectedChannelId(channelId);
       setSelectedFolder({ key: folder, label });
+      setSelectedLabel(null);
       // Folders filter the base ticket LIST in place. The kanban board doesn't apply the
       // folder, so selecting a folder switches to list view to avoid silently ignoring it.
       setViewMode('list');
-      setDeskView('tickets');
     },
     [setSelectedChannelId],
-  );
-
-  const openDeskTicket = useCallback(
-    (item: {
-      channelId: string;
-      ticketXyneId: string;
-      ticketId: string;
-      conversationId: string;
-    }): void => {
-      void navigate(`${supportBase}/${item.channelId}/${item.ticketXyneId}`, {
-        state: { conversationId: item.conversationId, ticketId: item.ticketId },
-      });
-    },
-    [navigate, supportBase],
-  );
-
-  const composeDraftRefs = useMemo(
-    () => savedDrafts.map(draft => ({ id: draft.id, label: composeDraftLabel(draft) })),
-    [savedDrafts],
   );
 
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
@@ -1887,7 +1876,7 @@ const SupportScreen = (): ReactElement => {
     const isJoined = joinedChannelIds.has(c.id);
     const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
-    const isActive = selectedChannelId === c.id && deskView === 'tickets';
+    const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
     const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
     const shouldShowBold =
@@ -1969,7 +1958,7 @@ const SupportScreen = (): ReactElement => {
           <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
             <DeskMailboxSidebar
               activeFolder={
-                selectedChannelId === c.id && deskView === 'tickets' && viewMode === 'list'
+                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
                   ? selectedFolder.key
                   : null
               }
@@ -1977,20 +1966,23 @@ const SupportScreen = (): ReactElement => {
             />
             <DeskDraftSubtree
               activeFolder={
-                selectedChannelId === c.id && (deskView === 'userDrafts' || deskView === 'userSent')
-                  ? deskView
+                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                  ? selectedFolder.key === 'drafts'
+                    ? 'userDrafts'
+                    : selectedFolder.key === 'sent'
+                      ? 'userSent'
+                      : null
                   : null
               }
-              onOpenUserDrafts={() => openUserDrafts(c.id)}
-              onOpenUserSent={() => openUserSent(c.id)}
+              // Drafts and Sent are both folders on the ticket list (reply drafts / sent
+              // emails roll up to their tickets); route them through openMailbox for the
+              // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
+              onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
+              onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
             />
             <DeskLabelsSidebar
               channelId={c.id}
-              activeLabelId={
-                selectedChannelId === c.id && deskView === 'labelThreads'
-                  ? (selectedLabel?.id ?? null)
-                  : null
-              }
+              activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
             />
           </div>
@@ -2136,34 +2128,6 @@ const SupportScreen = (): ReactElement => {
         {!ticketId && (
           <Panel id='main'>
             <div className='h-full flex flex-col relative bg-background'>
-              {deskView !== 'tickets' && selectedChannelId && (
-                <div className='absolute inset-0 z-30 bg-background'>
-                  {deskView === 'userDrafts' ? (
-                    <UserDraftsView
-                      channelId={selectedChannelId}
-                      composeDrafts={composeDraftRefs}
-                      onReopenCompose={reopenDraft}
-                      onDiscardCompose={discardDraft}
-                      onOpenTicket={openDeskTicket}
-                      onClose={() => setDeskView('tickets')}
-                    />
-                  ) : deskView === 'userSent' && selectedChannelId ? (
-                    <UserSentView
-                      channelId={selectedChannelId}
-                      onOpenTicket={openDeskTicket}
-                      onClose={() => setDeskView('tickets')}
-                    />
-                  ) : deskView === 'labelThreads' && selectedLabel ? (
-                    <LabelThreadsView
-                      labelId={selectedLabel.id}
-                      labelName={selectedLabel.name}
-                      channelId={selectedChannelId}
-                      onOpenTicket={openDeskTicket}
-                      onClose={() => setDeskView('tickets')}
-                    />
-                  ) : null}
-                </div>
-              )}
               <div className='flex-shrink-0 relative border-b border-border'>
                 <div
                   className={cn(
@@ -2199,6 +2163,12 @@ const SupportScreen = (): ReactElement => {
                         </button>
                       ) : (
                         <span className='truncate'>{selectedChannelName}</span>
+                      )}
+                      {selectedLabel && (
+                        <span className='ml-1 flex shrink-0 items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                          <TagIcon size={12} className='shrink-0' />
+                          <span className='max-w-[160px] truncate'>{selectedLabel.name}</span>
+                        </span>
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
@@ -2473,7 +2443,7 @@ const SupportScreen = (): ReactElement => {
                               >
                                 <div className='flex items-center gap-1.5'>
                                   <Circle className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Stages</span>
+                                  <span className='font-medium'>Status</span>
                                   {hasStagesFilter && (
                                     <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
                                   )}
@@ -2588,7 +2558,9 @@ const SupportScreen = (): ReactElement => {
                                     (item.id === 'userGroups' &&
                                       !!(filters.userGroups && filters.userGroups.length > 0)) ||
                                     ('dynamicFieldId' in item &&
-                                      !!filters.dynamicFields?.[item.dynamicFieldId]);
+                                      !!filters.dynamicFields?.[item.dynamicFieldId]) ||
+                                    (item.id === 'conversationLabel' &&
+                                      !!filters.conversationLabelId);
                                   const menuButton = (
                                     <button
                                       ref={el => {
@@ -3041,7 +3013,7 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
-                        mailboxFolder={selectedFolder.key}
+                        mailboxFolder={selectedLabel ? undefined : selectedFolder.key}
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,

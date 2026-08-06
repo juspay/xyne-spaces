@@ -27,6 +27,7 @@ export interface SupportTicketTableProps {
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[];
   visibleColumns?: Set<string>;
@@ -91,6 +92,7 @@ export const SupportTicketTable = ({
         de: ticketFilter.lastEmailAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
         cols: displayFieldIds ?? null,
+        l: ticketFilter.conversationLabelId ?? null,
       }),
     [
       channelId,
@@ -103,6 +105,7 @@ export const SupportTicketTable = ({
       ticketFilter.lastEmailAtEnd,
       dynamicFieldEntries,
       displayFieldIds,
+      ticketFilter.conversationLabelId,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
