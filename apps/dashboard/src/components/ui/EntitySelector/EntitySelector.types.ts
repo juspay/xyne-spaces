@@ -111,6 +111,9 @@ export interface EntitySelectorProps {
   /** Label for the unassign option. Default: 'Unassign' */
   unassignLabel?: string;
 
+  /** Description for the unassign option. Default: 'Remove assignee' */
+  unassignDescription?: string;
+
   /** Optional action rendered at the top of the dropdown (e.g. "Create form") */
   headerAction?: {
     label: string;
