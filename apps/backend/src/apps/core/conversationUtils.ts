@@ -156,6 +156,17 @@ export async function deleteConversationMessage(
     const conversation = await repositories.conversations.findById(message.conversationId);
     if (!conversation) throw new Error(`Conversation not found: ${message.conversationId}`);
 
+    const previousValue = {
+      messageId: message.messageId,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      msgType: message.msgType,
+      content: message.content,
+      isDeleted: message.isDeleted,
+      channelId: conversation.channelId,
+      isThreadReply: conversation.initialMessageId !== message.messageId,
+    };
+
     if (message.isDeleted) {
       return {
         eventType: ChatEventType.MESSAGE_DELETED,
@@ -170,15 +181,30 @@ export async function deleteConversationMessage(
       where: { entityId: messageId, entityType: AttachmentEntityType.CHAT },
       select: { url: true, thumbnailUrl: true },
     });
-    const allMessages = await db.message.findMany({
-      where: { conversationId: message.conversationId },
-      select: { messageId: true, isDeleted: true },
-    });
-    const otherMessages = allMessages.filter(m => m.messageId !== messageId);
-    const isInitialMessage = conversation.initialMessageId === messageId;
-    const shouldSoftDelete = isInitialMessage && otherMessages.length > 0;
 
-    await db.$transaction(async (tx) => {
+    const deleteResult = await db.$transaction(async (tx) => {
+      const currentMessage = await tx.message.findUnique({
+        where: { messageId },
+        select: { messageId: true, isDeleted: true, conversationId: true },
+      });
+      if (!currentMessage || currentMessage.isDeleted) {
+        return { mutated: false, hardDeleted: false, softDeleted: false };
+      }
+
+      const currentConversation = await tx.conversation.findUnique({
+        where: { conversationId: currentMessage.conversationId },
+        select: { conversationId: true, initialMessageId: true, replyCount: true },
+      });
+      if (!currentConversation) throw new Error(`Conversation not found: ${currentMessage.conversationId}`);
+
+      const allMessages = await tx.message.findMany({
+        where: { conversationId: currentMessage.conversationId },
+        select: { messageId: true, isDeleted: true },
+      });
+      const otherMessages = allMessages.filter(m => m.messageId !== messageId);
+      const isInitialMessage = currentConversation.initialMessageId === messageId;
+      const shouldSoftDelete = isInitialMessage && otherMessages.length > 0;
+
       await tx.messageAttachment.deleteMany({
         where: { entityId: messageId, entityType: AttachmentEntityType.CHAT },
       });
@@ -187,57 +213,73 @@ export async function deleteConversationMessage(
       await tx.messageSearch.deleteMany({ where: { messageId } });
 
       if (shouldSoftDelete) {
-        await tx.message.updateMany({
+        const updateResult = await tx.message.updateMany({
           where: { messageId, isDeleted: false },
           data: { isDeleted: true, content: '', hasAttachment: false, edited: false, link_preview_md: '' },
         });
-      } else {
-        await tx.message.delete({ where: { messageId } });
-
-        const isOnlyOtherInitialDeleted =
-          otherMessages.length === 1 &&
-          otherMessages[0]?.messageId === conversation.initialMessageId &&
-          otherMessages[0]?.isDeleted === true;
-
-        if (otherMessages.length === 0 || isOnlyOtherInitialDeleted) {
-          if (isOnlyOtherInitialDeleted && otherMessages[0]) {
-            await tx.message.delete({ where: { messageId: otherMessages[0].messageId } });
-          }
-          await tx.conversationParticipant.deleteMany({ where: { conversationId: conversation.conversationId } });
-          await tx.conversation.delete({ where: { conversationId: conversation.conversationId } });
-        } else {
-          await tx.conversation.update({
-            where: { conversationId: conversation.conversationId },
-            data: { replyCount: Math.max(0, conversation.replyCount - 1) },
-          });
-        }
+        return { mutated: updateResult.count === 1, hardDeleted: false, softDeleted: updateResult.count === 1 };
       }
+
+      const deleteCount = await tx.message.deleteMany({ where: { messageId, isDeleted: false } });
+      if (deleteCount.count !== 1) {
+        return { mutated: false, hardDeleted: false, softDeleted: false };
+      }
+
+      const isOnlyOtherInitialDeleted =
+        otherMessages.length === 1 &&
+        otherMessages[0]?.messageId === currentConversation.initialMessageId &&
+        otherMessages[0]?.isDeleted === true;
+
+      if (otherMessages.length === 0 || isOnlyOtherInitialDeleted) {
+        if (isOnlyOtherInitialDeleted && otherMessages[0]) {
+          await tx.message.deleteMany({ where: { messageId: otherMessages[0].messageId } });
+        }
+        await tx.conversationParticipant.deleteMany({ where: { conversationId: currentConversation.conversationId } });
+        await tx.conversation.deleteMany({ where: { conversationId: currentConversation.conversationId } });
+      } else {
+        await tx.conversation.update({
+          where: { conversationId: currentConversation.conversationId },
+          data: { replyCount: Math.max(0, currentConversation.replyCount - 1) },
+        });
+      }
+
+      const channelCopies = await tx.conversation.findMany({
+        where: { initialMessageId: messageId, NOT: { conversationId: currentConversation.conversationId } },
+        select: { conversationId: true },
+      });
+      for (const channelCopy of channelCopies) {
+        await tx.conversationParticipant.deleteMany({ where: { conversationId: channelCopy.conversationId } });
+        await tx.message.deleteMany({ where: { conversationId: channelCopy.conversationId } });
+        await tx.conversation.deleteMany({ where: { conversationId: channelCopy.conversationId } });
+      }
+
+      return { mutated: true, hardDeleted: true, softDeleted: false };
     });
 
-    for (const attachment of attachments) {
-      for (const url of [attachment.url, attachment.thumbnailUrl].filter(Boolean)) {
-        storageService.deleteFile(url as string).catch((err: unknown) => logger.error('[DELETE-CONVERSATION] Failed to delete attachment blob', err));
+    if (deleteResult.mutated) {
+      for (const attachment of attachments) {
+        for (const url of [attachment.url, attachment.thumbnailUrl].filter(Boolean)) {
+          storageService.deleteFile(url as string).catch((err: unknown) => logger.error('[DELETE-CONVERSATION] Failed to delete attachment blob', err));
+        }
       }
-    }
 
-    if (shouldSoftDelete) {
       const ctx = await buildUserQueryContext(actorUserId);
       const handler = new MessagesSideEffectHandler(ctx);
-      handler.onUpdate({
-        entityId: messageId,
-        entityType: 'messages',
-        operation: 'update',
-        previousValue: {
-          messageId: message.messageId,
-          conversationId: message.conversationId,
-          senderId: message.senderId,
-          msgType: message.msgType,
-          content: message.content,
-          isDeleted: message.isDeleted,
-          channelId: conversation.channelId,
-          isThreadReply: false,
-        },
-      }).catch(err => logger.error('[DELETE-CONVERSATION] Side-effect handler error', err));
+      if (deleteResult.softDeleted) {
+        handler.onUpdate({
+          entityId: messageId,
+          entityType: 'messages',
+          operation: 'update',
+          previousValue,
+        }).catch(err => logger.error('[DELETE-CONVERSATION] Side-effect update handler error', err));
+      } else if (deleteResult.hardDeleted) {
+        handler.onDelete({
+          entityId: messageId,
+          entityType: 'messages',
+          operation: 'delete',
+          previousValue,
+        }).catch(err => logger.error('[DELETE-CONVERSATION] Side-effect delete handler error', err));
+      }
     }
 
     return {

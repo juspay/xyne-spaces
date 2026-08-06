@@ -4,14 +4,8 @@ import { type Prisma, type AvailableAppPermission } from '@prisma/client';
 
 // ─── Prisma transaction client type ──────────────────────────────────────────
 import { PrismaClient } from '@prisma/client';
-import { AppPermissionStatus } from '@xyne/shared';
+import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
-type AppPermissionType = 'READ' | 'WRITE' | 'DELETE';
-const APP_PERMISSION_TYPES: readonly AppPermissionType[] = ['READ', 'WRITE', 'DELETE'];
-type PermissionNameType = NonNullable<Prisma.AvailableAppPermissionWhereUniqueInput['name_type']>;
-const asPermissionDbType = (type: AppPermissionType) => type as unknown as Prisma.AvailableAppPermissionUncheckedCreateInput['type'];
-const asPermissionNameType = (name: string, type: AppPermissionType): PermissionNameType => ({ name, type: asPermissionDbType(type) } as PermissionNameType);
-const asPermissionWhereType = (type: AppPermissionType) => type as unknown as Prisma.AvailableAppPermissionWhereInput['type'];
 
 // ─── Typed row shapes from Prisma includes ────────────────────────────────────
 type AppPermissionWithPerm = Prisma.AppPermissionGetPayload<{
@@ -42,9 +36,9 @@ function parseScope(scope: string): { name: string; type: AppPermissionType } {
   }
   const name = scope.slice(0, colonIdx);
   const typeRaw = scope.slice(colonIdx + 1).toUpperCase();
-  if (!APP_PERMISSION_TYPES.includes(typeRaw as AppPermissionType)) {
+  if (!(typeRaw in AppPermissionType)) {
     throw new Error(
-      `Unknown action "${scope.slice(colonIdx + 1)}" in scope "${scope}". Valid: ${APP_PERMISSION_TYPES.map((v) => v.toLowerCase()).join(', ')}`,
+      `Unknown action "${scope.slice(colonIdx + 1)}" in scope "${scope}". Valid: ${Object.values(AppPermissionType).map((v) => v.toLowerCase()).join(', ')}`,
     );
   }
   return { name, type: typeRaw as AppPermissionType };
@@ -88,7 +82,7 @@ export class AppPermissionRepository extends BaseRepository<
   /** Look up a single registry entry by its scope string (e.g. "chat:write"). */
   async findByScope(scope: string) {
     const { name, type } = parseScope(scope);
-    return this.db.availableAppPermission.findUnique({ where: { name_type: asPermissionNameType(name, type) } });
+    return this.db.availableAppPermission.findUnique({ where: { name_type: { name, type } } });
   }
 
   /** All registry entries, sorted by name then type. */
@@ -102,7 +96,7 @@ export class AppPermissionRepository extends BaseRepository<
   async upsertByScope(scope: string, description?: string) {
     const { name, type } = parseScope(scope);
     return this.db.availableAppPermission.upsert({
-      where: { name_type: asPermissionNameType(name, type) },
+      where: { name_type: { name, type } },
       create: { name, type, description },
       update: {},
     });
@@ -123,7 +117,7 @@ export class AppPermissionRepository extends BaseRepository<
       if (parsed.length === 0) return;
 
       const permissions: AvailablePermissionIdNameType[] = await tx.availableAppPermission.findMany({
-        where: { OR: parsed.map(({ name, type }) => ({ name, type: asPermissionWhereType(type) })) },
+        where: { OR: parsed.map(({ name, type }) => ({ name, type })) },
         select: { id: true, name: true, type: true },
       });
 
@@ -198,7 +192,7 @@ export class AppPermissionRepository extends BaseRepository<
     const parsed = scopes.map(parseScope);
     await this.db.$transaction(async (tx: Tx) => {
       const permissions: AvailablePermissionIdNameType[] = await tx.availableAppPermission.findMany({
-        where: { OR: parsed.map(({ name, type }) => ({ name, type: asPermissionWhereType(type) })) },
+        where: { OR: parsed.map(({ name, type }) => ({ name, type })) },
         select: { id: true, name: true, type: true },
       });
 

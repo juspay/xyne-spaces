@@ -1001,6 +1001,7 @@ export enum AppPermissionStatus {
 export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
+  DELETE = 'DELETE',
 }
 
 // @ts-ignore TS1294
