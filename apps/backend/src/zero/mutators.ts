@@ -92,6 +92,7 @@ import {
   deskTypeForChannelType,
   Platform 
 } from '@xyne/shared';
+import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
   validateFieldBranches,
@@ -11452,6 +11453,65 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    // Thread types — what kind of thread this is, as a stringified JSON array on the
+    // conversation row. The caller sends the FULL desired set: the column is one value, so a
+    // partial update would be a read-modify-write race.
+    //
+    // KEEP IN SYNC with apps/backend/src/zero/mutators.ts threadTag.
+    threadTag: {
+      setTypes: defineMutator(
+        z.object({
+          conversationId: z.string(),
+          // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
+          // add their own. Length-capped so a tag stays a label rather than a paragraph.
+          types: z.array(z.string().trim().min(1).max(40)),
+        }),
+        async ({ tx, ctx, args: { conversationId, types } }) => {
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one(),
+          );
+          if (!conversation) throw new Error('Conversation not found');
+
+          // Built-in types first in vocabulary order, then custom ones alphabetically, so
+          // chips render in a stable order regardless of the order they were picked.
+          const rank = (name: string): number => {
+            const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
+            return i === -1 ? THREAD_TYPE_NAMES.length : i;
+          };
+          const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
+            (a, b) => rank(a) - rank(b) || a.localeCompare(b),
+          );
+
+
+          // '[]' rather than null when cleared: null means "never classified" and the
+          // classifier would re-derive it on its next pass.
+          await tx.mutate.conversations.update({
+            conversationId,
+            threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+          });
+
+          // Backend copy only. Zero collects no side-effect job for conversation updates
+          // (SIDE_EFFECT_OPERATION_CONFIG lists insert/delete), and a thread's tags live on
+          // the ROOT MESSAGE's Vespa doc — so without this a hand-applied tag never reaches
+          // search. Deferred rather than awaited: a Redis round-trip inside the mutation
+          // would hold the transaction open, and an unindexed tag must never fail the write.
+          const { initialMessageId, workspaceId } = conversation;
+          asyncTasks.push(async () => {
+            try {
+              await vespaQueue.addJob({
+                schema: 'chat_message',
+                jobType: 'feed',
+                docId: initialMessageId,
+                userId: ctx.userID,
+                ...(workspaceId ? { workspaceId } : {}),
+              });
+            } catch (error) {
+              logger.error('[threadTag] Failed to queue Vespa refeed', { conversationId, error });
+            }
+          });
+        },
+      ),
+    },
     // KEEP IN SYNC with shared/src/zero/mutators.ts ticketMailbox.
     // Gmail-style per-user mailbox overlay over shared desk tickets. Sparse: a row exists
     // only once the agent acts; absence means { INBOX, not starred }.
@@ -14115,6 +14175,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14150,6 +14211,43 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
+              showThreadTags: false,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setShowThreadTags: defineMutator(
+        z.object({
+          id: z.string(),
+          showThreadTags: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, showThreadTags, timestamp } }) => {
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', ctx.userID).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              showThreadTags,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: ctx.workspaceId,
+              id,
+              userId: ctx.userID,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              showThreadTags,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14185,6 +14283,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14236,6 +14335,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
               channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
               notificationKeywords: '[]',
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14272,6 +14372,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
               notificationKeywords,
+              showThreadTags: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });

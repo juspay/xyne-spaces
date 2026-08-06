@@ -604,6 +604,7 @@ export const userPreferenceTable = table('user_preferences')
     threadReplyNotificationsEnabled: boolean(), // Receive thread reply notifications globally
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
+    showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
     createdAt: number(),
     updatedAt: number(),
   })
@@ -854,6 +855,7 @@ export const conversationTable = table("conversations")
     parent_message_md: string().optional(), // Markdown format parent message data
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
+    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
@@ -892,6 +894,7 @@ export const messageTable = table('messages')
     isSent: boolean(),
     reactions_md: string().optional(), // Markdown format reactions data
     link_preview_md: string().optional(), // Markdown format internal link preview data
+    messageActs: string().optional(),
   })
   .primaryKey('messageId');
 

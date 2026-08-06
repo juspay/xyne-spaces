@@ -446,6 +446,37 @@ export const mapMessage = async (
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
+  // Message acts, denormalized onto the doc so search can filter on them. Stored as a
+  // stringified JSON array; parsed defensively because it is plain TEXT with no DB-level
+  // guarantee of shape.
+  let messageActs: string[] = [];
+  if (args.messageActs) {
+    try {
+      const parsed: unknown = JSON.parse(args.messageActs);
+      if (Array.isArray(parsed)) {
+        messageActs = parsed.filter((v): v is string => typeof v === 'string');
+      }
+    } catch {
+      logger.warn('[VESPA] Ignoring malformed messageActs', { messageId: args.messageId });
+    }
+  }
+
+  // Thread types, same stringified-array shape as messageActs.
+  let threadType: string[] = [];
+  if (conversation.threadType) {
+    try {
+      const parsed: unknown = JSON.parse(conversation.threadType);
+      threadType = Array.isArray(parsed)
+        ? parsed.filter((v): v is string => typeof v === 'string')
+        : typeof parsed === 'string'
+          ? [parsed]
+          : [];
+    } catch {
+      // Rows written before the column held an array stored a bare name.
+      threadType = [conversation.threadType];
+    }
+  }
+
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
 
@@ -478,6 +509,13 @@ export const mapMessage = async (
     channelRef: getRef(channelSchema, conversation.channelId),
     threadId: args.conversationId,
     isRootMessage: args.messageId === conversation.initialMessageId,
+    messageActs,
+    // Only the root message carries the thread's types — one doc to refeed when they
+    // change rather than the whole thread. Free-form tags are indexed alongside the
+    // built-in vocabulary, so both are searchable.
+    ...(args.messageId === conversation.initialMessageId && threadType.length > 0
+      ? { threadType }
+      : {}),
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1
     },
