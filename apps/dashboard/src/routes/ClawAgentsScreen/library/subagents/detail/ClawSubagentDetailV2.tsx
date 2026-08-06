@@ -8,7 +8,10 @@ import { Pill } from '../../shared/primitives/Pill';
 import { LibraryIconTile } from '../../shared/components/LibraryCard';
 import { DetailTabPlaceholder } from '../../shared/primitives/DetailPrimitives';
 import { SubagentDetailHeaderV2 } from './SubagentDetailHeaderV2';
+import { SubagentContributorsTabV2 } from './contributors/SubagentContributorsTabV2';
+import { SubagentKnowledgeTabV2 } from './knowledge/SubagentKnowledgeTabV2';
 import { SubagentPersonaTabV2 } from './persona/SubagentPersonaTabV2';
+import { SubagentToolsTabV2 } from './tools/SubagentToolsTabV2';
 import {
   resolveSubagentTab,
   SUBAGENT_DETAIL_TABS,
@@ -146,6 +149,16 @@ const ClawSubagentDetailV2 = (): ReactElement => {
 
             {tab === 'persona' ? (
               <SubagentPersonaTabV2 subagent={subagent} canEdit={canEdit} isBuiltIn={isBuiltIn} />
+            ) : tab === 'knowledge' ? (
+              <SubagentKnowledgeTabV2 subagent={subagent} canEdit={canEdit} isBuiltIn={isBuiltIn} />
+            ) : tab === 'tools' ? (
+              <SubagentToolsTabV2 subagent={subagent} canEdit={canEdit} isBuiltIn={isBuiltIn} />
+            ) : tab === 'contributors' ? (
+              <SubagentContributorsTabV2
+                subagent={subagent}
+                canShare={actions.permissions?.canShare ?? false}
+                isBuiltIn={isBuiltIn}
+              />
             ) : (
               <DetailTabPlaceholder
                 label={SUBAGENT_DETAIL_TABS.find(entry => entry.id === tab)?.label ?? ''}

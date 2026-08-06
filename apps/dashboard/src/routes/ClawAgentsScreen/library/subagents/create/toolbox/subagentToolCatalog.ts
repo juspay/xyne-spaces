@@ -80,7 +80,7 @@ export function buildSubagentToolSections(
     },
     {
       kind: 'server',
-      title: 'MCP Server Tools',
+      title: 'MCP',
       caption: 'Tools exposed by connected MCP servers.',
       groups: group(server),
       total: server.length,
@@ -129,4 +129,26 @@ export function selectedIn(
 ): SubagentToolEntry[] {
   const chosen = new Set(normalizeSelection(selection)[bucketOf(section.kind)]);
   return section.groups.flatMap(entry => entry.tools.filter(tool => chosen.has(tool.key)));
+}
+
+export function humanizeSource(source: string): string {
+  const bare = source.replace(/^custom:/, '').replace(/^mcp:/, '');
+  return bare.replace(/[-_]/g, ' ').replace(/^[a-z]/, char => char.toUpperCase());
+}
+
+export function selectedInGroup(
+  selection: ToolboxSelection,
+  kind: SubagentToolKind,
+  group: SubagentToolGroup,
+): SubagentToolEntry[] {
+  const chosen = new Set(normalizeSelection(selection)[bucketOf(kind)]);
+  return group.tools.filter(tool => chosen.has(tool.key));
+}
+
+export function isGroupEnabled(
+  selection: ToolboxSelection,
+  kind: SubagentToolKind,
+  group: SubagentToolGroup,
+): boolean {
+  return selectedInGroup(selection, kind, group).length > 0;
 }

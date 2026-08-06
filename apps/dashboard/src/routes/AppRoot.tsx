@@ -212,6 +212,7 @@ import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
 import AIAgentDetailScreen from './AIScreen/AIAgentDetailScreen';
 import AISubagentDetailScreen from './AIScreen/AISubagentDetailScreen';
+import AISubagentEditScreen from './AIScreen/AISubagentEditScreen';
 import AIAgentEditScreen from './AIScreen/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
@@ -846,6 +847,7 @@ export const router = createBrowserRouter([
                   { path: 'library/skill/create', element: <AISkillCreateScreen /> },
                   { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
                   { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+                  { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
                   { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
                   {

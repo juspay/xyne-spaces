@@ -1,10 +1,11 @@
 import { useState, type ReactElement } from 'react';
-import { InformationCircle, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { cn } from '@/utils/classNames';
+import { InformationCircle, PlusDefault } from '@xyne/icons';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
-import { humanizeToolName } from '../../../shared/primitives/ToolRow';
+import { BuiltinChip } from '../../../shared/pickers/builtin/BuiltinChip';
 import { BrowseSubagentToolsDialog } from './BrowseSubagentToolsDialog';
 import {
+  humanizeSource,
+  isGroupEnabled,
   selectedIn,
   setToolsSelected,
   type SubagentSelection,
@@ -26,6 +27,9 @@ export function SubagentToolSectionRow({
 }: SubagentToolSectionRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const chosen = selectedIn(selection, section);
+  const selectedGroups = section.groups.filter(group =>
+    isGroupEnabled(selection, section.kind, group),
+  );
 
   return (
     <div className='flex w-full flex-col gap-1.5'>
@@ -62,31 +66,17 @@ export function SubagentToolSectionRow({
 
       <p className='text-sm leading-5 text-muted-foreground'>{section.caption}</p>
 
-      {chosen.length > 0 && (
+      {selectedGroups.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
-          {chosen.map(tool => (
-            <button
-              key={tool.key}
-              type='button'
-              onClick={() =>
-                onSelectionChange(setToolsSelected(selection, section.kind, [tool], false))
+          {selectedGroups.map(group => (
+            <BuiltinChip
+              key={group.source}
+              label={humanizeSource(group.source)}
+              selected
+              onToggle={() =>
+                onSelectionChange(setToolsSelected(selection, section.kind, group.tools, false))
               }
-              title={`Remove ${tool.name}`}
-              aria-label={`Remove ${tool.name}`}
-              data-track-category='Claw Agents'
-              data-track-name='Create subagent v2: remove tool chip'
-              className={cn(
-                'flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-border bg-muted px-2 transition-colors hover:bg-muted/70',
-              )}
-            >
-              <span className='max-w-[200px] truncate text-sm font-medium leading-5 text-foreground'>
-                {humanizeToolName(tool.name)}
-              </span>
-              <MultipleCrossCancelDefault
-                className='size-3 shrink-0 text-muted-foreground'
-                aria-hidden
-              />
-            </button>
+            />
           ))}
         </div>
       )}

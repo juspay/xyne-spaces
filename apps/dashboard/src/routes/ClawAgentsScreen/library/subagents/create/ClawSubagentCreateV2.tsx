@@ -9,13 +9,15 @@ import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
 import { useClawSubagents, useCreateClawSubagent } from '@/hooks/useClawSubagents';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import { fromToolboxSelection } from '@/services/claw/subagentToolsBridge';
+import type { SubagentDef } from '@/services/claw/clawSubagentsTypes';
 import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
 import { SkillsCapabilityRow } from '../../shared/pickers/skill/SkillsCapabilityRow';
 import { ProgressLabelsField } from './ProgressLabelsField';
-import { SubagentReviewDialog } from './SubagentReviewDialog';
 import { SubagentToolSectionRow } from './toolbox/SubagentToolSectionRow';
 import { buildSubagentToolSections } from './toolbox/subagentToolCatalog';
 import { SubagentSectionLabel } from './SectionHeading';
+import { wizardStateFromSubagent } from './subagentDraft';
+import { useSaveClawSubagent } from './useSaveClawSubagent';
 import {
   DEFAULT_PARAM_NAME,
   INITIAL_SUBAGENT_STATE,
@@ -24,7 +26,13 @@ import {
   type SubagentWizardState,
 } from './subagentWizardState';
 
-const ClawSubagentCreateV2 = (): ReactElement => {
+interface ClawSubagentCreateV2Props {
+  /** Present in edit mode — seeds the form and switches Create to Save. */
+  subagent?: SubagentDef;
+}
+
+const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): ReactElement => {
+  const isEdit = subagent !== undefined;
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
@@ -35,30 +43,29 @@ const ClawSubagentCreateV2 = (): ReactElement => {
   const { data: subagents = [] } = useClawSubagents();
   const { data: catalog, isLoading: toolsLoading } = useClawAvailableTools();
   const create = useCreateClawSubagent();
+  const saveMutation = useSaveClawSubagent(subagent);
 
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [state, setState] = useState<SubagentWizardState>(INITIAL_SUBAGENT_STATE);
+  const [state, setState] = useState<SubagentWizardState>(() =>
+    subagent ? wizardStateFromSubagent(subagent, catalog ?? null) : INITIAL_SUBAGENT_STATE,
+  );
   const update = useCallback(
     (patch: Partial<SubagentWizardState>) => setState(prev => ({ ...prev, ...patch })),
     [],
   );
 
-  const toolCount =
-    state.tools.subagents.length +
-    state.tools.direct.length +
-    state.tools.custom.length +
-    state.tools.gateway.length;
-
   const toolSections = useMemo(() => buildSubagentToolSections(catalog ?? null), [catalog]);
 
-  const takenNames = useMemo(() => new Set(subagents.map(s => s.name)), [subagents]);
+  const takenNames = useMemo(
+    () => new Set(subagents.map(s => s.name).filter(name => name !== subagent?.name)),
+    [subagents, subagent?.name],
+  );
   const trimmedName = state.name.trim();
   const nameError = subagentNameError(state.name, takenNames);
 
-  const canCreate = trimmedName.length > 0 && !nameError && state.systemPrompt.trim().length > 0;
+  const canSubmit = trimmedName.length > 0 && !nameError && state.systemPrompt.trim().length > 0;
 
   const handleCreate = async (): Promise<void> => {
-    if (!canCreate || create.isPending) return;
+    if (!canSubmit || create.isPending) return;
     try {
       const created = await create.mutateAsync({
         name: trimmedName,
@@ -70,9 +77,8 @@ const ClawSubagentCreateV2 = (): ReactElement => {
         tools: fromToolboxSelection(state.tools, catalog ?? null),
         ...(state.skillIds.length ? { skillIds: state.skillIds } : {}),
       });
-      setReviewOpen(false);
       toast.success(`${created.name} created`);
-      void navigate(`/claw-agents/subagents/${encodeURIComponent(created.name)}`);
+      void navigate(`${libraryPath}/subagent/${encodeURIComponent(created.name)}?tab=persona`);
     } catch (error) {
       toast.error(clawErrorText(error, 'Failed to create subagent'));
     }
@@ -82,7 +88,7 @@ const ClawSubagentCreateV2 = (): ReactElement => {
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawSubagentCreateV2'>
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-          Create subagent
+          {isEdit ? 'Edit subagent' : 'Create subagent'}
         </h1>
 
         <div className='flex w-full flex-col gap-4'>
@@ -200,23 +206,16 @@ const ClawSubagentCreateV2 = (): ReactElement => {
           </div>
         </div>
 
-        <SubagentReviewDialog
-          open={reviewOpen}
-          onOpenChange={setReviewOpen}
-          name={trimmedName}
-          description={state.description.trim()}
-          paramName={state.paramName.trim() || DEFAULT_PARAM_NAME}
-          toolCount={toolCount}
-          skillCount={state.skillIds.length}
-          error={create.error ? clawErrorText(create.error, 'Failed to create subagent') : null}
-          isPending={create.isPending}
-          onConfirm={() => void handleCreate()}
-        />
-
         <div className='flex w-full items-center justify-end gap-3'>
           <Button
             variant='ghost'
-            onClick={() => void navigate(libraryPath)}
+            onClick={() =>
+              void navigate(
+                isEdit
+                  ? `${libraryPath}/subagent/${encodeURIComponent(subagent.name)}?tab=persona`
+                  : libraryPath,
+              )
+            }
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Create subagent v2: cancel'
@@ -224,14 +223,16 @@ const ClawSubagentCreateV2 = (): ReactElement => {
             Cancel
           </Button>
           <Button
-            onClick={() => setReviewOpen(true)}
-            loading={create.isPending}
-            disabled={!canCreate}
+            onClick={() =>
+              isEdit ? void saveMutation.save(state, catalog ?? null) : void handleCreate()
+            }
+            loading={isEdit ? saveMutation.saving : create.isPending}
+            disabled={!canSubmit}
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
-            data-track-name='Create subagent v2: create'
+            data-track-name={`Create subagent v2: ${isEdit ? 'save' : 'create'}`}
           >
-            Create
+            {isEdit ? 'Save' : 'Create'}
           </Button>
         </div>
       </div>

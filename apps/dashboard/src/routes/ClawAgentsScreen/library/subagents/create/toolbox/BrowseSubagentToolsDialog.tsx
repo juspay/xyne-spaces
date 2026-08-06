@@ -1,49 +1,89 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { BrowseDialog, type FilterOption } from '../../../shared/primitives/BrowseDialog';
-import { SectionHeading } from '../../../shared/primitives/Section';
+import { Pill } from '../../../shared/primitives/Pill';
 import { humanizeToolName } from '../../../shared/primitives/ToolRow';
-import { CheckTickSquare, Square } from '@xyne/icons';
+import { BuiltinChip } from '../../../shared/pickers/builtin/BuiltinChip';
+import { SubagentToolGroupPanel } from './SubagentToolGroupPanel';
 import {
-  isToolSelected,
-  selectedIn,
+  humanizeSource,
+  isGroupEnabled,
+  selectedInGroup,
   setToolsSelected,
   type SubagentSelection,
-  type SubagentToolEntry,
+  type SubagentToolGroup,
   type SubagentToolSectionData,
 } from './subagentToolCatalog';
 
-function humanizeSource(source: string): string {
-  const bare = source.replace(/^custom:/, '').replace(/^mcp:/, '');
-  return bare.replace(/[-_]/g, ' ').replace(/^[a-z]/, char => char.toUpperCase());
+function matchesSearch(group: SubagentToolGroup, query: string): boolean {
+  if (!query) return true;
+  if (humanizeSource(group.source).toLowerCase().includes(query)) return true;
+  return group.tools.some(tool => humanizeToolName(tool.name).toLowerCase().includes(query));
 }
 
-const ToolRow = ({
-  tool,
-  checked,
+const GroupCard = ({
+  group,
+  enabled,
+  selectedCount,
+  onOpen,
   onToggle,
 }: {
-  tool: SubagentToolEntry;
-  checked: boolean;
+  group: SubagentToolGroup;
+  enabled: boolean;
+  selectedCount: number;
+  onOpen: () => void;
   onToggle: () => void;
 }): ReactElement => (
-  <button
-    type='button'
-    role='checkbox'
-    aria-checked={checked}
-    onClick={onToggle}
-    data-track-category='Claw Agents'
-    data-track-name='Create subagent v2: toggle tool'
-    className='flex w-full items-center gap-2 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-muted/50'
-  >
-    {checked ? (
-      <CheckTickSquare variant='Solid' className='size-5 shrink-0 text-primary' aria-hidden />
-    ) : (
-      <Square className='size-5 shrink-0 text-border' aria-hidden />
-    )}
-    <span className='min-w-0 truncate text-sm font-normal leading-[1.2] text-foreground'>
-      {humanizeToolName(tool.name)}
-    </span>
-  </button>
+  <div className='group relative min-w-0'>
+    <button
+      type='button'
+      onClick={onOpen}
+      data-track-category='Claw Agents'
+      data-track-name='Create subagent v2: open tool group detail'
+      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+    >
+      <span className='flex w-full items-center justify-between gap-2'>
+        <span className='flex min-w-0 items-center gap-2'>
+          <span className='truncate text-sm font-medium leading-5 text-foreground'>
+            {humanizeSource(group.source)}
+          </span>
+          {enabled && (
+            <Pill tone='success' size='sm'>
+              Enabled
+            </Pill>
+          )}
+        </span>
+        <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
+          <ChevronRight className='size-4' aria-hidden />
+        </span>
+      </span>
+      <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
+        {enabled
+          ? `${selectedCount} of ${group.tools.length} tools selected`
+          : `${group.tools.length} tools available`}
+      </span>
+    </button>
+
+    <button
+      type='button'
+      onClick={onToggle}
+      aria-label={`${enabled ? 'Remove' : 'Add'} ${humanizeSource(group.source)}`}
+      title={
+        enabled
+          ? `Remove ${humanizeSource(group.source)}`
+          : `Add all ${humanizeSource(group.source)} tools`
+      }
+      data-track-category='Claw Agents'
+      data-track-name='Create subagent v2: quick toggle tool group'
+      className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+    >
+      {enabled ? (
+        <MultipleCrossCancelDefault className='size-4' aria-hidden />
+      ) : (
+        <PlusDefault className='size-4' aria-hidden />
+      )}
+    </button>
+  </div>
 );
 
 interface BrowseSubagentToolsDialogProps {
@@ -65,11 +105,14 @@ export function BrowseSubagentToolsDialog({
 }: BrowseSubagentToolsDialogProps): ReactElement {
   const [query, setQuery] = useState('');
   const [source, setSource] = useState<string | null>(null);
+  const [openSource, setOpenSource] = useState<string | null>(null);
+
+  const openGroup = section.groups.find(group => group.source === openSource) ?? null;
 
   const filterOptions = useMemo<FilterOption[]>(
     () => [
       { id: null, label: 'All sources' },
-      ...section.groups.map(entry => ({ id: entry.source, label: humanizeSource(entry.source) })),
+      ...section.groups.map(group => ({ id: group.source, label: humanizeSource(group.source) })),
     ],
     [section.groups],
   );
@@ -77,30 +120,62 @@ export function BrowseSubagentToolsDialog({
   const q = query.trim().toLowerCase();
   const visible = useMemo(
     () =>
-      section.groups
-        .filter(entry => source === null || entry.source === source)
-        .map(entry => ({
-          ...entry,
-          tools: entry.tools.filter(tool => humanizeToolName(tool.name).toLowerCase().includes(q)),
-        }))
-        .filter(entry => entry.tools.length > 0),
+      section.groups.filter(
+        group => matchesSearch(group, q) && (source === null || group.source === source),
+      ),
     [section.groups, q, source],
   );
 
-  const chosen = selectedIn(selection, section);
+  const selectedGroups = useMemo(
+    () => section.groups.filter(group => isGroupEnabled(selection, section.kind, group)),
+    [section.groups, section.kind, selection],
+  );
 
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={next => {
+        onOpenChange(next);
+        if (!next) setOpenSource(null);
+      }}
       title={`Browse ${section.title}`}
       description={section.caption}
       testId={`browse-subagent-${section.kind}-tools-dialog`}
+      {...(openGroup && {
+        detail: {
+          label: humanizeSource(openGroup.source),
+          onBack: () => setOpenSource(null),
+          content: (
+            <SubagentToolGroupPanel
+              group={openGroup}
+              kind={section.kind}
+              selection={selection}
+              onSelectionChange={onSelectionChange}
+            />
+          ),
+        },
+      })}
       query={query}
       onQueryChange={setQuery}
       filterOptions={filterOptions}
       activeFilter={source}
       onFilterChange={setSource}
+      chips={
+        selectedGroups.length > 0 ? (
+          <div className='flex flex-wrap gap-2 px-2'>
+            {selectedGroups.map(group => (
+              <BuiltinChip
+                key={`selected-${group.source}`}
+                label={humanizeSource(group.source)}
+                selected
+                onToggle={() =>
+                  onSelectionChange(setToolsSelected(selection, section.kind, group.tools, false))
+                }
+              />
+            ))}
+          </div>
+        ) : null
+      }
       loading={loading}
       isError={false}
       onRetry={() => undefined}
@@ -112,55 +187,27 @@ export function BrowseSubagentToolsDialog({
           : null
       }
     >
-      <div className='flex w-full flex-col gap-6'>
-        {visible.map(entry => {
-          const all = entry.tools.every(tool => isToolSelected(selection, section.kind, tool));
-          const count = entry.tools.filter(tool =>
-            isToolSelected(selection, section.kind, tool),
-          ).length;
-          return (
-            <section key={entry.source} className='flex w-full flex-col gap-2'>
-              <SectionHeading
-                label={humanizeSource(entry.source)}
-                className='px-2'
-                action={
-                  <button
-                    type='button'
-                    onClick={() =>
-                      onSelectionChange(
-                        setToolsSelected(selection, section.kind, entry.tools, !all),
-                      )
-                    }
-                    data-track-category='Claw Agents'
-                    data-track-name='Create subagent v2: toggle all tools in source'
-                    className='shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground'
-                  >
-                    {all ? 'Clear all' : `Select all (${count}/${entry.tools.length})`}
-                  </button>
-                }
-              />
-              <div className='grid w-full grid-cols-1 gap-x-12 gap-y-1 sm:grid-cols-2'>
-                {entry.tools.map(tool => {
-                  const checked = isToolSelected(selection, section.kind, tool);
-                  return (
-                    <ToolRow
-                      key={tool.key}
-                      tool={tool}
-                      checked={checked}
-                      onToggle={() =>
-                        onSelectionChange(
-                          setToolsSelected(selection, section.kind, [tool], !checked),
-                        )
-                      }
-                    />
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+      <div className='grid w-full grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2'>
+        {visible.map(group => (
+          <GroupCard
+            key={group.source}
+            group={group}
+            enabled={isGroupEnabled(selection, section.kind, group)}
+            selectedCount={selectedInGroup(selection, section.kind, group).length}
+            onOpen={() => setOpenSource(group.source)}
+            onToggle={() =>
+              onSelectionChange(
+                setToolsSelected(
+                  selection,
+                  section.kind,
+                  group.tools,
+                  !isGroupEnabled(selection, section.kind, group),
+                ),
+              )
+            }
+          />
+        ))}
       </div>
-      {chosen.length > 0 && <span className='sr-only'>{chosen.length} selected</span>}
     </BrowseDialog>
   );
 }

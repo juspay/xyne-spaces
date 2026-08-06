@@ -1,16 +1,15 @@
-export type SubagentDetailTabId = 'persona' | 'knowledge' | 'tools' | 'people';
+export type SubagentDetailTabId = 'persona' | 'knowledge' | 'tools' | 'contributors';
 
 export interface SubagentDetailTab {
   id: SubagentDetailTabId;
   label: string;
 }
 
-/** Mirrors the reference's subagent tabs (persona / knowledge / tools / contributors). */
 export const SUBAGENT_DETAIL_TABS: readonly SubagentDetailTab[] = [
   { id: 'persona', label: 'Persona' },
   { id: 'knowledge', label: 'Knowledge' },
   { id: 'tools', label: 'Tools' },
-  { id: 'people', label: 'People' },
+  { id: 'contributors', label: 'Contributors' },
 ];
 
 export const DEFAULT_SUBAGENT_DETAIL_TAB: SubagentDetailTabId = 'persona';
