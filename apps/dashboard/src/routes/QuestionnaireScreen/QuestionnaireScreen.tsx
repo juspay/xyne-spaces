@@ -9,7 +9,10 @@ import { useChannelByName } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
 import { mutators } from '../../zero/mutators';
-import { uploadProfilePicture as uploadProfilePictureViaApi } from '../../services/userProfile/userProfileService';
+import {
+  saveQuestionnaireResponse,
+  uploadProfilePicture as uploadProfilePictureViaApi,
+} from '../../services/userProfile/userProfileService';
 import { v4 as uuidv4 } from 'uuid';
 
 const TEAM_SIZE_OPTIONS = ['0-10', '11-100', '100-1000', '1000+'] as const;
@@ -78,21 +81,22 @@ const QuestionnaireScreen = (): ReactElement | null => {
     setIsCompleting(true);
 
     try {
-      const metadata = JSON.stringify({
-        onboarding_quest: {
-          ...(companyName.trim() ? { company_name: companyName.trim() } : {}),
-          ...(companySize ? { company_size: companySize } : {}),
-        },
-      });
       await z.mutate(
         mutators.userProfile.upsert({
           profileId: uuidv4(),
           displayName: displayName.trim() || undefined,
           role: role.trim() || undefined,
-          metadata,
           timestamp: Date.now(),
         }),
       ).server;
+
+      await saveQuestionnaireResponse({
+        questionnaireType: 'onboarding',
+        response: {
+          ...(companyName.trim() ? { company_name: companyName.trim() } : {}),
+          ...(companySize ? { company_size: companySize } : {}),
+        },
+      });
     } catch {
       // Non-blocking: profile upsert failure shouldn't trap the user on the questionnaire
     }
