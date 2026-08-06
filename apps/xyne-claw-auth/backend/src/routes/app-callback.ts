@@ -370,11 +370,27 @@ router.post("/callback", async (req: Request, res: Response) => {
       return;
     }
 
-    const { getQuestion, deleteQuestion } = await import("./pending-questions.js");
+    const { consumeQuestion } = await import("./pending-questions.js");
     const { setSession } = await import("./webhook.js");
-    const question = await getQuestion(questionId);
-    const questionText = question?.question ?? "a question";
-    const optionsList = question?.options?.join(", ") ?? "";
+    // XYNE-55135: atomically consume — idempotency (double click), existence
+    // (never dispatch a bogus/expired question), ownership + option validation.
+    // This is the requireAuth (cookie-trusted callerUserId) path, so the
+    // per-action HMAC is not required here; the guards below still apply.
+    const question = await consumeQuestion(questionId);
+    if (!question) {
+      log.info(`[app-callback] user-answer: question ${questionId} already answered or expired — dropping`);
+      return;
+    }
+    if (question.userId !== answerUserId) {
+      log.error(`[app-callback] user-answer ownership mismatch: stored ${question.userId} != answerer ${answerUserId}`);
+      return;
+    }
+    if (!question.options.includes(answer)) {
+      log.error(`[app-callback] user-answer invalid option for question ${questionId}`);
+      return;
+    }
+    const questionText = question.question;
+    const optionsList = question.options.join(", ");
 
     try {
       const agent = await findAgent(answerAgentSlug, answerSpacesAppId);
@@ -432,7 +448,6 @@ router.post("/callback", async (req: Request, res: Response) => {
       log.error("[app-callback] Failed to start new run with answer:", err);
     }
 
-    await deleteQuestion(questionId).catch(() => {});
     return;
   }
 
