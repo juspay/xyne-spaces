@@ -330,6 +330,13 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             reportWorkspaceReassignment(model, operation, (args as { data?: unknown }).data, ws);
           }
 
+          // Guest reads are narrowed by around thirty table ACLs; guest writes are not narrowed
+          // anywhere. Record which model and operation a guest actually reaches so the set can be
+          // enumerated from real traffic before deciding what to refuse. Reports only.
+          if (ctx?.role === 'GUEST' && ctx.actor === 'user') {
+            notePattern('[acl] guest write not narrowed', model, operation);
+          }
+
           let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
           if (!mutateWhere) {
             // Service actors only — see the read branch.
