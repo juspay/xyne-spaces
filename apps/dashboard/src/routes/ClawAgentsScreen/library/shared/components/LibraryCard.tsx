@@ -94,7 +94,7 @@ export function LibraryCard({
       {icon}
       <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
         <div className='flex min-w-0 items-center gap-2'>
-          <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
+          <span className='truncate text-sm font-medium leading-[22px] text-foreground'>
             {name}
           </span>
           {meta ? (
@@ -104,7 +104,7 @@ export function LibraryCard({
           ) : null}
           {statusDot}
         </div>
-        <p className='line-clamp-2 text-sm leading-5 text-foreground/60'>
+        <p className='truncate text-sm leading-5 text-foreground/60'>
           {description || 'No description added'}
         </p>
       </div>

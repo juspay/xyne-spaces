@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useClawSkills } from '@/hooks/useClawSkills';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
@@ -27,6 +28,8 @@ const getSourceLabel = (source: string): string => {
 };
 
 const SkillsV2 = ({ query }: { query: string }): ReactElement => {
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { data, isLoading, isError, refetch } = useClawSkills();
   const skills = useMemo(() => data ?? [], [data]);
 
@@ -100,7 +103,7 @@ const SkillsV2 = ({ query }: { query: string }): ReactElement => {
           items: section.skills.map(skill => (
             <LibraryCard
               key={skill.id}
-              to={`/claw-agents/skills/${skill.slug}`}
+              to={prefixWs(`/ai/library/skill/${encodeURIComponent(skill.slug)}?tab=overview`)}
               testId='claw-skill-card'
               dimmed={!skill.enabled}
               icon={<LibraryIconTile name={skill.name || skill.slug} />}

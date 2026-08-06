@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { McpServerIcon } from '@/components/ClawAgents/McpServerIcon';
 import { useClawMcp } from '@/hooks/useClawMcp';
@@ -15,6 +16,8 @@ import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useCategoryFilter } from '../shared/hooks/useCategoryFilter';
 
 const McpV2 = ({ query }: { query: string }): ReactElement => {
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { data, isLoading, isError, refetch } = useClawMcp();
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const connections = useMemo(() => data?.connections ?? [], [data]);
@@ -95,7 +98,7 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
             return (
               <LibraryCard
                 key={server.id}
-                to={`/claw-agents/mcp/${server.id}`}
+                to={prefixWs(`/ai/library/mcp/${encodeURIComponent(server.type)}`)}
                 testId='claw-mcp-card'
                 dimmed={server.enabled === false}
                 icon={<McpServerIcon server={server} size='sm' />}
