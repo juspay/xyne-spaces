@@ -508,7 +508,7 @@ export const userGroupTable = table('user_groups')
     autoRotationEnabled: boolean(),
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
-    reassignOnUnavailable: boolean(),
+    reassignOnUnavailable: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),

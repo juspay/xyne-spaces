@@ -682,7 +682,7 @@ model UserGroup {
   autoRotationEnabled  Boolean           @default(false)
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
-  reassignOnUnavailable Boolean          @default(false) // When true, a member going unavailable triggers reassignment of their open tickets in this group
+  reassignOnUnavailable Boolean?         // When true, a member going unavailable triggers reassignment of their open tickets in this group
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
