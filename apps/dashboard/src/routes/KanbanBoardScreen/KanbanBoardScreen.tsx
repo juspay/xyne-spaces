@@ -149,7 +149,21 @@ const WORKSPACE_VIEW_NUMERIC_KEYS = [
   'createdDateEnd',
 ] as const satisfies (keyof TicketFilters)[];
 
-function filtersToValues(filters: TicketFilters, groupBy?: string): SavedConfigValue[] {
+const DERIVED_COLUMNS = ['stage', 'board'];
+
+function mergeSavedColumns(prev: Set<string>, saved: string[]): Set<string> {
+  const next = new Set(saved);
+  for (const key of DERIVED_COLUMNS) {
+    if (prev.has(key)) next.add(key);
+  }
+  return next;
+}
+
+function filtersToValues(
+  filters: TicketFilters,
+  groupBy?: string,
+  columns?: string[],
+): SavedConfigValue[] {
   const values: SavedConfigValue[] = [];
   const addTicket = (fieldName: string, fieldValue: string): void => {
     values.push({ id: uuidv4(), entityName: SavedConfigEntityName.TICKET, fieldName, fieldValue });
@@ -181,6 +195,7 @@ function filtersToValues(filters: TicketFilters, groupBy?: string): SavedConfigV
     });
   }
   if (groupBy && groupBy !== 'none') addTicket('__groupBy', groupBy);
+  if (columns?.length) addTicket('__columns', columns.join(','));
   return values;
 }
 
@@ -201,6 +216,7 @@ interface BoardKanbanScreenProps {
   initialName?: string;
   initialFilters?: TicketFilters;
   initialGroupBy?: string;
+  initialColumns?: string[];
 }
 
 type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
@@ -247,6 +263,17 @@ function uniqueProjectIds(boards: readonly { projectId?: string | null }[]): str
   return Array.from(ids);
 }
 
+const availableColumns = [
+  { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
+  { key: 'dueDate', label: 'Due Date', icon: <Calendar className='h-4 w-4' /> },
+  { key: 'status', label: 'Status Category', icon: <CircleCheckBig className='h-4 w-4' /> },
+  { key: 'priority', label: 'Priority', icon: <Vote className='h-4 w-4' /> },
+  { key: 'tags', label: 'Labels', icon: <Tag className='h-4 w-4' /> },
+  { key: 'stage', label: 'Sub-status', icon: <CircleCheckBig className='h-4 w-4' /> },
+  { key: 'createdAt', label: 'Created At', icon: <Clock className='h-4 w-4' /> },
+  { key: 'createdBy', label: 'Created By', icon: <User className='h-4 w-4' /> },
+];
+
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
   channelId,
@@ -257,6 +284,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialName,
   initialFilters,
   initialGroupBy,
+  initialColumns,
 }) => {
   const { projectId: projectIdParam, boardId } = useParams<{
     projectId?: string;
@@ -321,8 +349,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // click and route desk/support tickets to the Support desk instead of chat.
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
-    new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
+    initialColumns?.length
+      ? new Set(initialColumns)
+      : new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
   );
   // The tickets table always surfaces the Stage column (parity with the Support
   // desk table, which renders TicketTable with its stage-inclusive defaults).
@@ -410,18 +440,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {} as Record<string, Ticket[]>,
     );
   };
-
-  // available columns
-  const availableColumns = [
-    { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
-    { key: 'dueDate', label: 'Due Date', icon: <Calendar className='h-4 w-4' /> },
-    { key: 'status', label: 'Status Category', icon: <CircleCheckBig className='h-4 w-4' /> },
-    { key: 'priority', label: 'Priority', icon: <Vote className='h-4 w-4' /> },
-    { key: 'tags', label: 'Labels', icon: <Tag className='h-4 w-4' /> },
-    { key: 'stage', label: 'Sub-status', icon: <CircleCheckBig className='h-4 w-4' /> },
-    { key: 'createdAt', label: 'Created At', icon: <Clock className='h-4 w-4' /> },
-    { key: 'createdBy', label: 'Created By', icon: <User className='h-4 w-4' /> },
-  ];
 
   const handleColumnVisibilityChange = (columnKey: string, isVisible: boolean) => {
     if (columnKey === 'stage') {
@@ -769,7 +787,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const persistWorkspaceView = useCallback(
     async (name: string): Promise<void> => {
-      const values = filtersToValues(filters, groupByKey);
+      const values = filtersToValues(
+        filters,
+        groupByKey,
+        Array.from(visibleColumns).filter(key => !DERIVED_COLUMNS.includes(key)),
+      );
       setIsSavingWorkspaceView(true);
       try {
         if (viewId) {
@@ -810,7 +832,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         setIsSavingWorkspaceView(false);
       }
     },
-    [filters, groupByKey, viewId, workspaceId, zero, navigate],
+    [filters, groupByKey, visibleColumns, viewId, workspaceId, zero, navigate],
   );
 
   const handleSavePopoverOpenChange = useCallback(
@@ -2200,7 +2222,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return availableColumns.filter(col => !['stage', 'board', 'createdBy'].includes(col.key));
     }
     return availableColumns.filter(col => col.key !== 'status');
-  }, [layoutView, availableColumns]);
+  }, [layoutView]);
 
   return (
     <div
@@ -2574,10 +2596,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 const groupByEntry = allValues.find(
                                   v => v.fieldName === '__groupBy',
                                 );
+                                const columnsEntry = allValues.find(
+                                  v => v.fieldName === '__columns',
+                                );
                                 const filterValues = allValues.filter(
-                                  v => v.fieldName !== '__groupBy',
+                                  v => v.fieldName !== '__groupBy' && v.fieldName !== '__columns',
                                 );
                                 const newFilters = valuesToFilters(filterValues);
+                                if (columnsEntry) {
+                                  const savedColumns = columnsEntry.fieldValue
+                                    .split(',')
+                                    .filter(Boolean);
+                                  setVisibleColumns(prev =>
+                                    mergeSavedColumns(prev, savedColumns),
+                                  );
+                                }
                                 if (filters.boards) newFilters.boards = filters.boards;
                                 setFilters(newFilters);
                                 setSelectedViewId(config.id);
@@ -2639,8 +2672,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       <div className='flex items-center justify-between gap-2 rounded-lg bg-muted p-1 shadow-inner'>
                         <button
                           onClick={() => setIsComfortView(true)}
-                          className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2 
-            transition hover:bg-muted focus:outline-none 
+                          className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2
+            transition hover:bg-muted focus:outline-none
             ${isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
                           data-track-category='TICKETS'
@@ -2655,7 +2688,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
                         <button
                           onClick={() => setIsComfortView(false)}
-                          className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2 
+                          className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2
             transition hover:bg-background hover:text-foreground
             ${!isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
