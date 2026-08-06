@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
-import { requireS2S } from "../middleware/require-auth.js";
+import { requireS2S, s2sKeyMatches } from "../middleware/require-auth.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -1152,17 +1152,47 @@ function buildTriggerInitialMessage(triggerPayload: Record<string, unknown> | un
 
 router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const { userId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
+    const { userId: bodyUserId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
       userId?: string;
       triggerPayload?: Record<string, unknown>;
       conversationId?: string;
       targetChannelId?: string;
     };
 
-    if (!userId) { res.status(400).json({ success: false, error: "userId is required" }); return; }
+    // Resolve the triggering identity by caller type. requireS2S admits two
+    // kinds of caller: a genuine internal S2S caller (the Spaces automation
+    // dispatcher, which presents the S2S key) and — via its cookie fallback —
+    // any logged-in browser user. Only the former is trusted to name an
+    // arbitrary userId; on the cookie path the body userId is caller-controlled,
+    // so we pin identity to the authenticated session and authorize the
+    // workflow. Without this split any logged-in user could trigger any
+    // workflow as any user (XYNE-55128).
+    const isInternalS2SCaller = s2sKeyMatches(req.headers["x-s2s-key"]);
+    const sessionUserId = getRequesterId(req); // set by requireS2S on both paths
+
+    let userId: string;
+    if (isInternalS2SCaller) {
+      if (!bodyUserId) { res.status(400).json({ success: false, error: "userId is required" }); return; }
+      userId = bodyUserId;
+    } else {
+      if (!sessionUserId) { res.status(401).json({ success: false, error: "authentication required" }); return; }
+      if (bodyUserId && bodyUserId !== sessionUserId) {
+        log.warn(`[chain-workflows/trigger] userId pin mismatch: session=${sessionUserId} body=${bodyUserId}`);
+        res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
+        return;
+      }
+      userId = sessionUserId;
+    }
 
     const workflow = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
     if (!workflow) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
+
+    // Authorize non-S2S (browser) callers against the workflow. Internal S2S
+    // callers are already trusted to act on the user's behalf.
+    if (!isInternalS2SCaller && !(await canAccessWorkflow(userId, workflow.createdByUserId))) {
+      res.status(403).json({ success: false, error: "Not allowed to trigger this workflow" });
+      return;
+    }
 
     // Credential-resolution identity. If the owner consented to lend their
     // creds (credentialUserId set), the run resolves tools/MCP as THAT user —
@@ -1287,6 +1317,9 @@ router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        // Pin the run identity so run.ts's body-vs-session guard is live rather
+        // than skipped (authenticatedUserId would otherwise be undefined).
+        "x-user-id": effectiveUserId,
       },
       body: JSON.stringify({
         userId: effectiveUserId, task, agentSlug: entryAgentSlug,
