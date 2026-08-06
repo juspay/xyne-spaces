@@ -22,6 +22,11 @@ export interface ChannelClawAgent {
 
 export interface ClawRunRequest {
   userId: string;
+  /**
+   * Verified Spaces workspace for this raw, workspace-scoped user id. Claw
+   * uses it with x-spaces-user-id to resolve the exact surface identity.
+   */
+  spacesWorkspaceId?: string;
   userName: string;
   userEmail: string;
   query: string;
@@ -297,11 +302,20 @@ function extractCookieHeader(req: { headers?: { cookie?: string } }): Record<str
   return cookie ? { Cookie: cookie } : {};
 }
 
-function extractUserIdHeader(userId: string): Record<string, string> {
+function extractUserIdHeader(
+  userId: string,
+  workspaceId?: string,
+): Record<string, string> {
   // `userId` is the raw, workspace-scoped Spaces user id. Keep the legacy
   // x-user-id header for older Claw deployments, and send the explicit source
   // identity for Claw versions that canonicalize it at the auth boundary.
-  return { 'x-user-id': userId, 'x-spaces-user-id': userId };
+  // The workspace completes the compound Spaces surface identity and prevents
+  // a canonicalizer from guessing a membership for a multi-workspace person.
+  return {
+    'x-user-id': userId,
+    'x-spaces-user-id': userId,
+    ...(workspaceId ? { 'x-spaces-workspace-id': workspaceId } : {}),
+  };
 }
 
 // ============================================================================
@@ -526,6 +540,7 @@ export async function runClawAgentStream(
 
   const payload: Record<string, unknown> = {
     userId: request.userId,
+    ...(request.spacesWorkspaceId && { spacesWorkspaceId: request.spacesWorkspaceId }),
     userName: request.userName,
     userEmail: request.userEmail,
     task: request.query,
@@ -592,6 +607,7 @@ export async function runClawAgentStream(
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
       ...cookieHeader,
+      ...extractUserIdHeader(request.userId, request.spacesWorkspaceId),
     },
     body: JSON.stringify(payload),
     ...(opts.signal ? { signal: opts.signal } : {}),
@@ -775,7 +791,8 @@ export async function runClawAgentStream(
 export async function cancelClawAgentRun(
   req: { headers?: { cookie?: string } },
   userId: string,
-  sessionId: string
+  sessionId: string,
+  workspaceId?: string,
 ): Promise<{ success: boolean; status: string; error?: string }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/run/stream/cancel`;
   try {
@@ -783,7 +800,7 @@ export async function cancelClawAgentRun(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...extractUserIdHeader(userId),
+        ...extractUserIdHeader(userId, workspaceId),
         ...extractCookieHeader(req),
       },
       body: JSON.stringify({ sessionId }),
@@ -1421,14 +1438,19 @@ export async function getConversationInsight(params: {
   agentSlug: string;
   conversationId: string;
   userId: string;
+  spacesWorkspaceId?: string;
 }): Promise<ConversationInsight> {
-  const { agentSlug, conversationId, userId } = params;
+  const { agentSlug, conversationId, userId, spacesWorkspaceId } = params;
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(conversationId)}/messages`;
   let res: globalThis.Response;
   try {
     res = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', ...extractUserIdHeader(userId), ...getS2SHeaders() },
+      headers: {
+        'Content-Type': 'application/json',
+        ...extractUserIdHeader(userId, spacesWorkspaceId),
+        ...getS2SHeaders(),
+      },
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {

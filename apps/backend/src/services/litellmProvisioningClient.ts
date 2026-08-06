@@ -1,6 +1,6 @@
 import { config } from '@/config/env';
 
-const TEAM_MODELS = ['external-kimi', 'external-glm'];
+const TEAM_MODELS = ['kimi-latest', 'private-large'];
 const USER_MODELS = ['no-default-models'];
 const KEY_MODELS = ['all-team-models'];
 const KEY_TYPE = 'llm_api';
