@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 
 export interface TeamBulletsDateRangeFilters {
@@ -400,17 +401,20 @@ class TeamIntelligenceTeamRepository {
     }
 
     const channelIds = grouped.map((item) => item.entityId);
-    const channels = await db.channel.findMany({
-      where: {
-        id: {
-          in: channelIds,
+    // Resolves names for ids already in the result set, so it runs above the caller's own scope.
+    const channels = await withWorkspaceScope(() =>
+      db.channel.findMany({
+        where: {
+          id: {
+            in: channelIds,
+          },
         },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
+        select: {
+          id: true,
+          name: true,
+        },
+      }),
+    );
 
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
 
@@ -498,7 +502,7 @@ class TeamIntelligenceTeamRepository {
           userId: true,
         },
       }),
-      db.channel.findMany({
+      withWorkspaceScope(() => db.channel.findMany({
         where: {
           id: {
             in: channelIds,
@@ -508,7 +512,7 @@ class TeamIntelligenceTeamRepository {
           id: true,
           name: true,
         },
-      }),
+      })),
     ]);
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));

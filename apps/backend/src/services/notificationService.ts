@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { runAsSystem } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import webpush from 'web-push';
 import { websocketService } from './websocketService';
@@ -14,6 +15,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
 import { serializeInitialMessageMd,
@@ -145,6 +147,13 @@ export interface NotificationData {
   actionUrl?: string;
   metadata?: any;
   imageUrl?: string;
+  /**
+   * Workspace the notification belongs to. Optional at the call sites; when
+   * omitted, createSessionNotification derives it from the recipient's
+   * (workspace-scoped) User row. Callers that already know the event's workspace
+   * should pass it to avoid the extra lookup.
+   */
+  workspaceId?: string;
 }
 
 interface NotificationOptions {
@@ -173,7 +182,13 @@ class NotificationService {
     data: NotificationData,
     deliveryMethod: NotificationDeliveryMethod = NotificationDeliveryMethod.BROWSER
   ) {
+    // Prefer a caller-provided workspace (the event's workspace); otherwise derive
+    // it from the recipient's own workspace-scoped User row. resolveWorkspaceIdFromModel
+    // resolves under a system context, so it is safe even for cross-workspace recipients.
+    const workspaceId =
+      data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId }));
     return await repositories.notifications.create({
+      workspaceId,
       userId,
       type: data.type,
       title: data.title,
@@ -870,6 +885,12 @@ class NotificationService {
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
 
+            // Resolve the tenant ONCE — see createFCMNotification.
+            const sessionData: NotificationData = {
+              ...data,
+              workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
+            };
+
             for (const session of sessions) {
               const deliveryMethod = session.platform === 'ios'
                 ? NotificationDeliveryMethod.IOS
@@ -878,7 +899,7 @@ class NotificationService {
               if(!isSilent){
                 const sessionNotification = await this.createSessionNotification(
                   userId,
-                  data,
+                  sessionData,
                   deliveryMethod
                 );
                 const mobilePayload = {
@@ -1728,6 +1749,13 @@ class NotificationService {
 
       const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
 
+      // Resolve the tenant ONCE. userId is fixed for this call, so leaving it to
+      // createSessionNotification would repeat the same lookup for every session.
+      const sessionData: NotificationData = {
+        ...data,
+        workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
+      };
+
       await Promise.allSettled(
         sessions.map(async (session) => {
           // Determine specific delivery method based on platform
@@ -1738,7 +1766,7 @@ class NotificationService {
           // Create individual tracking entry for this session
           const sessionNotification = await this.createSessionNotification(
             userId,
-            data,
+            sessionData,
             deliveryMethod
           );
 
@@ -1837,51 +1865,54 @@ class NotificationService {
       count: number;
     }>
   > {
-    // Step 1: Get all active users for this member across workspaces
-    const users = await prisma.user.findMany({
-      where: {
-        orgMemberId: memberId,
-        leftAt: null,
-        status: 'ACTIVE',
-      },
-      select: {
-        id: true,
-        workspaceId: true,
-      },
+    // Spans the caller's own identities across workspaces.
+    return runAsSystem(async () => {
+      // Step 1: Get all active users for this member across workspaces
+      const users = await prisma.user.findMany({
+        where: {
+          orgMemberId: memberId,
+          leftAt: null,
+          status: 'ACTIVE',
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+        },
+      });
+
+      if (users.length === 0) {
+        return [];
+      }
+
+      const userIds = users.map(u => u.id);
+
+      // Step 2: Count unread+delivered notifications per user
+      const notificationCounts = await prisma.notification.groupBy({
+        by: ['userId'],
+        where: {
+          userId: { in: userIds },
+          status: { in: ['UNREAD', 'DELIVERED'] },
+          readAt: null,
+          dismissedAt: null,
+        },
+        _count: {
+          id: true,
+        },
+      });
+
+      // Build a map: userId -> count
+      const countMap = new Map<string, number>();
+      for (const nc of notificationCounts) {
+        countMap.set(nc.userId, nc._count.id);
+      }
+
+      // Step 3: Merge users with their counts
+      return users.map(u => ({
+        workspaceId: u.workspaceId,
+        userId: u.id,
+        count: countMap.get(u.id) ?? 0,
+      }));
     });
-
-    if (users.length === 0) {
-      return [];
-    }
-
-    const userIds = users.map(u => u.id);
-
-    // Step 2: Count unread+delivered notifications per user
-    const notificationCounts = await prisma.notification.groupBy({
-      by: ['userId'],
-      where: {
-        userId: { in: userIds },
-        status: { in: ['UNREAD', 'DELIVERED'] },
-        readAt: null,
-        dismissedAt: null,
-      },
-      _count: {
-        id: true,
-      },
-    });
-
-    // Build a map: userId -> count
-    const countMap = new Map<string, number>();
-    for (const nc of notificationCounts) {
-      countMap.set(nc.userId, nc._count.id);
-    }
-
-    // Step 3: Merge users with their counts
-    return users.map(u => ({
-      workspaceId: u.workspaceId,
-      userId: u.id,
-      count: countMap.get(u.id) ?? 0,
-    }));
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {

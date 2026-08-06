@@ -15,7 +15,7 @@ import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { meetLinkService } from '@/services/meetLinkService';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 /**
  * Zod schema for validating SAM Meet callback payloads
@@ -161,8 +161,7 @@ export class MeetCallbackController {
       const now = new Date();
       // SAM webhook → no HTTP tenant context. Open one from the resolved workspace so the system
       // message insert gets workspaceId stamped instead of leaking NULL.
-      const message = await runWithContext(
-        { userId: 'meet-callback', workspaceId: targetWorkspaceId },
+      const message = await runAsServiceActor('meet-callback', targetWorkspaceId,
         () => db.$transaction(async (tx) => {
         const createdMessage = await tx.message.create({
           data: {

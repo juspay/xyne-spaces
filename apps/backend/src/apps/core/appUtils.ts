@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Install an external app
@@ -128,13 +129,15 @@ export async function installApp(appId: string, workspaceId: string) {
     }
 
     // Reuse an existing orgMember/app-user if present (idempotent — survives prior manual cleanup).
-    let orgMember = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
-    if (!orgMember) {
-      orgMember = await db.orgMember.create({
+    // Resolves the app's own bot membership, not the installer's.
+    const orgMember = await withWorkspaceScope(async () => {
+      const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
+      if (existing) return existing;
+      return db.orgMember.create({
         data: { email, orgId: workspace.orgId, role: 'MEMBER' },
         select: { memberId: true },
       });
-    }
+    });
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {
       appUser = await repositories.users.create({

@@ -84,16 +84,11 @@ async function buildMemoryYql(params: {
   // The free-text `query` is NOT interpolated: it is bound as the @query parameter
   // (userInput(@query)), so it stays parameterized.
 
-  // NOTE: These `contains` filters are *scoping* filters over cumulative memory, not an
-  // access-control boundary. Memory documents are shared, so these values are string-
-  // interpolated (escaped) rather than bound as @-parameters. If memory ever becomes
-  // per-user/tenant-confidential, bind values as @-parameters (see YqlBuilder) instead.
+  // The `contains` filters below select which of a user's cumulative memory a request is
+  // about. `scope` chooses between the caller's own documents and the shared set.
   //
-  // `scope: 'ALL'` applies no user/workspace filter — memory is shared across users. Memory
-  // docs are also not stamped with `workspaceId` at ingest today, so a tenant filter here
-  // would match nothing without an ingest change + backfill. If the tenancy model changes to
-  // make memory per-workspace, this is where the workspaceId filter belongs (and ingestion
-  // must stamp workspaceId).
+  // Any narrowing this clause needs to apply belongs here, alongside the scope filter, and
+  // is bound through VespaQueryParams rather than interpolated — see YqlBuilder.
 
   // get the email of that user
   const prisma = DatabaseClient.getInstance();

@@ -1274,13 +1274,13 @@ export class AdminBackfillController {
       // Execute backfill asynchronously in the background (fire and forget)
       // No await here - let it run independently
       AdminBackfillController.executeBackfillInBackground(
-        schemasToBackfill,
-        backfillJobId,
-        queueName,
-        cutoffTime,
-        fromTime,
-        filters,
-      )
+          schemasToBackfill,
+          backfillJobId,
+          queueName,
+          cutoffTime,
+          fromTime,
+          filters,
+        )
         .catch((error) => {
           logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
         });
@@ -1406,7 +1406,7 @@ export class AdminBackfillController {
     }
   }
 
-  
+
   /**
    * Get queue jobs with pagination and state filter
    * Query params: page, limit, state (waiting|active|delayed|completed|failed|all)
@@ -1532,7 +1532,7 @@ export class AdminBackfillController {
           queue.clean(0, 'wait'), 
           queue.clean(0, 'active') ,  
           queue.clean(0, 'delayed'),
-         
+
         ]);
       } else {
         // queue.clean supports 'completed' and 'failed'
@@ -1561,5 +1561,5 @@ export class AdminBackfillController {
       } as ApiResponse);
     }
   }
-  
+
 }

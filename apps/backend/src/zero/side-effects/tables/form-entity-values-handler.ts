@@ -62,6 +62,20 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
     if (entityType !== 'TICKET' || !ticketId || !fieldId) return;
 
+    // Confirm the target ticket belongs to the mutation's workspace before
+    // enqueueing Vespa feeds / broadcasting.
+    const targetTicket = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { workspaceId: true },
+    });
+    if (!targetTicket || targetTicket.workspaceId !== this.ctx.workspaceId) {
+      logger.warn('[FormEntityValuesSideEffectHandler] Skipping counts update for cross-workspace or missing ticket', {
+        ticketId,
+        ctxWorkspaceId: this.ctx.workspaceId,
+      });
+      return;
+    }
+
     await this.queueTicketAndMailVespaFeeds(ticketId);
 
     const currentSnapshot = await buildKanbanCountsSnapshot(ticketId);
@@ -189,6 +203,16 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       if (!ticket) {
         logger.warn('[FormEntityValuesSideEffectHandler] Ticket not found:', ticketId);
+        return;
+      }
+
+      // Confirm the target ticket belongs to the acting workspace before
+      // emitting app / automation events.
+      if (ticket.workspaceId !== this.ctx.workspaceId) {
+        logger.warn('[FormEntityValuesSideEffectHandler] Skipping event for cross-workspace ticket', {
+          ticketId,
+          ctxWorkspaceId: this.ctx.workspaceId,
+        });
         return;
       }
 

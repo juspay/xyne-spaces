@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
@@ -1234,11 +1233,11 @@ export class TicketController {
       let conversationIdsBySender: string[] | undefined;
       const emailWhere: Prisma.EmailWhereInput = {
         type: EmailType.DEFAULT,
-         // Narrow the sender lookup by channel, else by workspace (the ticket query is the
-        // real isolation boundary). Include null-workspace emails — legacy rows aren't backfilled.
+        // Narrow the sender lookup by channel, else by workspace (the ticket query is the
+        // real isolation boundary). workspaceId is now non-nullable, so scope directly to it.
         ...(channelIds.length > 0
           ? { channelId: { in: channelIds } }
-          : { OR: [{ workspaceId }, { workspaceId: null }] }),
+          : { workspaceId }),
       };
 
       if (senderEmail) {
@@ -1701,6 +1700,13 @@ export class TicketController {
     try {
       const { ticketId, fieldName, fieldValue, channelId, channelName, conversationId, sessionId: _sessionId } = req.body;
 
+      const workspaceId = req.user?.workspaceId;
+      const userId = req.user?.id;
+      if (!workspaceId || !userId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
       // Validate required fields
       if (!ticketId || typeof ticketId !== 'string') {
         res.status(400).json({ error: 'ticketId is required', code: 'VALIDATION_ERROR' });
@@ -1721,15 +1727,39 @@ export class TicketController {
 
       logger.info(`[TicketController] Updating form field: ${fieldName} on ticket ${ticketId}`);
 
-      // Fetch ticket to get board context and conversation
-      const ticket = await prismaClient.ticket.findUnique({
-        where: { id: ticketId },
+      // Fetch ticket to get board context and conversation.
+      // Scope the lookup to the caller's workspace.
+      const ticket = await prismaClient.ticket.findFirst({
+        where: { id: ticketId, workspaceId },
         select: { id: true, boardId: true, conversationId: true, workspaceId: true, channelId: true, projectId: true, createdBy: true },
       });
 
       if (!ticket) {
         res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
         return;
+      }
+
+      // Authorize against the TARGET ticket's own channel, not the channel supplied in the
+      // request body, so the authorized object equals the mutated object. PUBLIC channel = any
+      // workspace member; PRIVATE = participant only.
+      const ticketChannelId =
+        ticket.channelId ??
+        (ticket.conversationId
+          ? (await repositories.conversations.findById(ticket.conversationId))?.channelId ?? null
+          : null);
+      if (ticketChannelId) {
+        const ticketChannel = await repositories.channels.findById(ticketChannelId);
+        if (!ticketChannel || ticketChannel.workspaceId !== workspaceId) {
+          res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
+          return;
+        }
+        if (ticketChannel.visibility === 'PRIVATE') {
+          const isParticipant = await repositories.channelParticipants.isParticipant(ticketChannelId, userId);
+          if (!isParticipant) {
+            res.status(403).json({ error: 'Access denied - not a channel participant', code: 'FORBIDDEN' });
+            return;
+          }
+        }
       }
 
       // Get form mapping for this board
@@ -1859,7 +1889,7 @@ export class TicketController {
             fieldValue: stringValue,
             previousValue: existing?.fieldValue || undefined,
             updatedBy: req.user!.id,
-            workspaceId: ticket.workspaceId,
+            workspaceId,
           };
 
           const event: BaseAppEvent = {
@@ -1868,8 +1898,8 @@ export class TicketController {
             timestamp: new Date().toISOString(),
           };
 
-          // Fire and forget - don't block the response
-          void emitEventToWorkspaceApps(ticket.workspaceId, event);
+          // Fire and forget - don't block the response.
+          void emitEventToWorkspaceApps(workspaceId, event);
           
           logger.info(`[TicketController] Emitted ADDITIONAL_FORM_FIELD_UPDATED for field "${fieldName}" on ticket ${ticketId}`);
         }
@@ -2520,7 +2550,7 @@ export class TicketController {
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
           receivedAt: new Date(),
         });
-        await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, email.id);
+        await this.recordIncomingAppMessage(externalSource.id, workspaceId, externalMessageId, externalThreadId, email.id);
         const existingTicket = await prismaClient.ticket.findFirst({
           where: { conversationId: threadEmail.conversationId },
           select: { id: true, xyneId: true, boardId: true },
@@ -2620,7 +2650,7 @@ export class TicketController {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
       }
 
-      await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);
+      await this.recordIncomingAppMessage(externalSource.id, workspaceId, externalMessageId, externalThreadId, initialEmail.id);
 
       logger.info('[AppDeskInbound] created new ticket', {
         threadId: externalThreadId,
@@ -2650,12 +2680,12 @@ export class TicketController {
 
   private async recordIncomingAppMessage(
     externalSourceId: string,
+    workspaceId: string,
     externalMessageId: string,
     externalThreadId: string,
     emailId: string,
   ): Promise<void> {
     try {
-      const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'externalSource', { id: externalSourceId });
       await prismaClient.externalMessage.create({
         data: {
           externalSourceId,

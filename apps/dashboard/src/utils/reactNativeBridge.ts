@@ -434,13 +434,9 @@ class ReactNativeBridge {
       'NATIVE_REQUEST_CALLBACK',
       'START_CALL_FROM_RECENTS', // Queued for cold start safety (Recents tap before NotificationHandler ready)
     ]);
-  // ACCEPTED RISK (secops #358, MED): this handler intentionally does not check event.origin.
-  // Inbound messages arrive from the React Native host via WebView injectedJavaScript /
-  // window.postMessage, which carry no meaningful web origin (the source is the native shell, not
-  // a web frame), so an origin allowlist is not enforceable here. The trust boundary is the native
-  // host — a compromised RN app already fully controls this WebView. parseInboundMessage validates
-  // the message shape/type before dispatch. Revisit if this bridge is ever reachable from arbitrary
-  // web frames (e.g. remote iframes).
+  // Messages arrive from the React Native host via WebView injection, which carries no web
+  // origin, so same-origin is the strongest check available here. parseInboundMessage validates
+  // the shape and type of every message before it is dispatched.
   private readonly messageHandler = (event: MessageEvent): void => {
     // React-Native-injected messages arrive with an empty origin or the app's own origin;
     // reject cross-origin postMessages.
