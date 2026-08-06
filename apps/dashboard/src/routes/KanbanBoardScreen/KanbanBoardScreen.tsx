@@ -121,6 +121,7 @@ import { useZero } from '../../hooks/useZero';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 type SavedConfigValue = {
   id: string;
@@ -1901,7 +1902,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       if (isDeskChannelType(ticketChannel?.type) && ticket.xyneId) {
         const supportUrl = `/support/${ticket.channelId}/${ticket.xyneId}`;
         if (!isMobile && isCmdClick) {
-          window.open(`${ws ? `/${ws}` : ''}${supportUrl}`, '_blank');
+          openSafeWindow(`${ws ? `/${ws}` : ''}${supportUrl}`);
           return;
         }
         void navigate(supportUrl, {
@@ -1927,7 +1928,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         const relativeUrl = isDeskTicket
           ? supportRoute
           : `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
-        window.open(`${ws ? `/${ws}` : ''}${relativeUrl}`, '_blank');
+        openSafeWindow(`${ws ? `/${ws}` : ''}${relativeUrl}`);
         return;
       }
 

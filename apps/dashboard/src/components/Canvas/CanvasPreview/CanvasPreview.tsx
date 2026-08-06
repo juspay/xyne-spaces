@@ -16,6 +16,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useTheme } from '../../../hooks/useTheme';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 
 interface CanvasPreviewProps {
   canvasId?: string;
@@ -81,7 +82,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
     const isCmdClick = event?.metaKey || event?.ctrlKey;
     if (!isMobile && isCmdClick && canvasId) {
       const canvasUrl = `${shareableOrigin}/chat/canvas/${canvasId}`;
-      window.open(canvasUrl, '_blank');
+      openSafeWindow(canvasUrl);
       return;
     }
 

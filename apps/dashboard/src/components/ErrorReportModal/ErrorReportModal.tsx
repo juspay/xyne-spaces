@@ -35,6 +35,7 @@ import {
 import type { ErrorReportModalProps } from './ErrorReportModal.types';
 import { MACOS_PRIVACY_URLS } from '../../constants/permissions';
 import type { ScreenSource } from '../../types/electron';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 type ErrorReportCacConfig = {
   channelId: string;
@@ -579,7 +580,7 @@ export const ErrorReportModal = ({
                           onRemove={() => handleRemoveAttachment(index)}
                           onPreview={() => {
                             const url = URL.createObjectURL(file);
-                            window.open(url, '_blank');
+                            openSafeWindow(url);
                             setTimeout(() => URL.revokeObjectURL(url), 30_000);
                           }}
                         />

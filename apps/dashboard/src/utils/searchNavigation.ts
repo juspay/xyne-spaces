@@ -13,6 +13,7 @@ import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
 import { isXyneOrigin } from './browserPanelPartition';
 import { toStandalonePath } from './electronApp';
+import { openSafeWindow } from './safeWindowOpen';
 
 /**
  * Channel data interface for navigation
@@ -255,7 +256,7 @@ export const navigateToAttachment = (
 ): void => {
   const attachmentId = result.searchContext?.attachmentId || result.id;
   if (result.searchContext?.originalUrl) {
-    window.open(result.searchContext.originalUrl, '_blank', 'noopener,noreferrer');
+    openSafeWindow(result.searchContext.originalUrl);
   } else if (result.searchContext?.channelId) {
     void navigate(`/chat/dir/${result.searchContext.channelId}`, {
       state: {
@@ -558,7 +559,7 @@ export const openSearchResult = async (
       // Use target.path (no workspace prefix) so it matches /newWindow/chat/dir/:id routes.
       const basePath = target.kind === 'external' ? target.url : target.path;
       const standalonePath = toStandalonePath(basePath);
-      const newWin = window.open(standalonePath, '_blank');
+      const newWin = openSafeWindow(standalonePath);
       newWin?.focus();
     } else {
       // External URLs go to the browser panel.
@@ -575,7 +576,7 @@ export const openSearchResult = async (
 
   // Web: open the regular route in a new browser tab (full app chrome).
   // No theme param needed — same origin = same localStorage = same theme.
-  window.open(url, '_blank', 'noopener,noreferrer');
+  openSafeWindow(url);
 };
 
 /**

@@ -81,6 +81,7 @@ import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { useCanvasExitTitleGuard } from '../../../hooks/useCanvasExitTitleGuard';
 import { CanvasExitTitleDialog } from '../CanvasExitTitleDialog';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -1540,7 +1541,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                 // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
                 if (!isMobile && isCmdClick) {
-                  window.open(canvasRoute, '_blank');
+                  openSafeWindow(canvasRoute);
                 } else {
                   void navigate(canvasRoute);
                 }

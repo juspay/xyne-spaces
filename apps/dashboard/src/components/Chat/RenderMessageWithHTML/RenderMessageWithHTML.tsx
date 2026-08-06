@@ -47,6 +47,7 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -245,7 +246,7 @@ const CanvasLink = ({
     const isCmdClick = event.metaKey || event.ctrlKey;
     if (!isMobile && isCmdClick) {
       event.preventDefault();
-      window.open(resolvedHref, '_blank');
+      openSafeWindow(resolvedHref);
       return;
     }
 
@@ -1304,7 +1305,7 @@ const parseNode = (
             } else if (e.metaKey || e.ctrlKey) {
               e.preventDefault();
               const newWindowPath = `/newWindow${urlObj.pathname}${urlObj.search}${urlObj.hash}`;
-              const newWindow = window.open(newWindowPath, '_blank');
+              const newWindow = openSafeWindow(newWindowPath);
               if (newWindow) {
                 newWindow.focus();
               }

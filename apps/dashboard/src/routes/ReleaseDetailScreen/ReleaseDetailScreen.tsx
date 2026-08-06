@@ -33,6 +33,7 @@ import {
   downloadCsvFile,
 } from './releaseReport.utils';
 import { usePublishReleaseReport } from './usePublishReleaseReport';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 type TabValue = 'testing' | 'envs' | 'migrations';
 
@@ -324,7 +325,7 @@ const ReleaseDetailScreen = (): ReactElement => {
               <button
                 type='button'
                 onClick={() => {
-                  const w = window.open(window.location.href, '_blank');
+                  const w = openSafeWindow(window.location.href);
                   w?.focus();
                 }}
                 className='shrink-0 p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'

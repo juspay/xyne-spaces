@@ -49,6 +49,7 @@ import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -141,7 +142,7 @@ const CanvasPanel = (): ReactElement => {
       const canvasUrl = `/chat/canvas/${canvas.id}`;
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
-        window.open(canvasUrl, '_blank');
+        openSafeWindow(canvasUrl);
       } else {
         void navigate(canvasUrl);
       }
