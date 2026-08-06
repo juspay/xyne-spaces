@@ -95,7 +95,6 @@ import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
-import { useEmailChannelPreference } from '../../hooks/useEmailChannelPreference';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -152,7 +151,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
-import type { Ticket, FormFields } from '@xyne/shared';
+import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { getDraft } from '../../hooks/useDraft';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -184,7 +183,7 @@ import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThr
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
-import { useEmailDraft } from '../../hooks/useEmailDraft';
+import { useEmailDrafts } from '../../hooks/useEmailDraft';
 import {
   useComposeDrafts,
   useComposeDraftOperations,
@@ -211,7 +210,6 @@ import {
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import {
-  useChannelConnectedEmail,
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
 } from '../../hooks/useChannelConnectedEmail';
@@ -654,7 +652,13 @@ const SupportScreen = (): ReactElement => {
     label: string;
   }>({ key: 'inbox', label: 'Inbox' });
 
-  const channelPreference = useEmailChannelPreference(selectedChannelId);
+  const preferenceChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : null;
+  const [channelPreferenceList, channelPreferenceDetails] = useCachedQuery(
+    queries.getEmailChannelPreference({ channelId: preferenceChannelId || '' }),
+    { enabled: !!preferenceChannelId },
+  );
+  const channelPreference = channelPreferenceList?.[0];
   const deskBoardId = channelPreference?.boardId || channelBoardId;
   const [channelBoardDetail] = useCachedQuery(
     queries.boardDetailById({ boardId: deskBoardId || '' }),
@@ -1048,7 +1052,8 @@ const SupportScreen = (): ReactElement => {
   // Server-backed compose drafts for the selected channel (synced across devices).
   // The composer itself autosaves each window's content; here we only read the list
   // and delete rows on discard.
-  const composeDraftRows = useComposeDrafts(selectedChannelId);
+  const { drafts: composeDraftRows, isLoaded: composeDraftRowsLoaded } =
+    useComposeDrafts(selectedChannelId);
   const { deleteComposeDraft: deleteComposeDraftRow } =
     useComposeDraftOperations(selectedChannelId);
 
@@ -1397,13 +1402,12 @@ const SupportScreen = (): ReactElement => {
   const { refetch: handleRefetch, isPending: isRefetching } =
     useRefetchExternalSource(refetchChannelId);
   const canRefetch = !!refetchChannelId;
-  const selectedChannelPref = useEmailChannelPreference(refetchChannelId ?? null);
-  const isDlDesk = selectedChannelPref?.deskType === DeskType.DL;
+  const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
-    if (selectedChannelPref?.boardId) {
-      setChannelBoardId(selectedChannelPref.boardId);
+    if (channelPreference?.boardId) {
+      setChannelBoardId(channelPreference.boardId);
     }
-  }, [selectedChannelId, selectedChannelPref?.boardId]);
+  }, [selectedChannelId, channelPreference?.boardId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -2396,7 +2400,7 @@ const SupportScreen = (): ReactElement => {
                         ))}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
-                        selectedChannelPref?.metricsEnabled && (
+                        channelPreference?.metricsEnabled && (
                           <Tooltip content='Desk metrics' side='bottom'>
                             <button
                               onClick={() => {
@@ -3163,6 +3167,8 @@ const SupportScreen = (): ReactElement => {
                 isMember={isSelectedChannelJoined}
                 onMailtoClick={handleMailtoClick}
                 navTickets={kanbanTickets}
+                channelPreference={channelPreference}
+                channelPreferenceLoaded={channelPreferenceDetails?.type === 'complete'}
               />
             </div>
           </Panel>
@@ -3302,6 +3308,10 @@ const SupportScreen = (): ReactElement => {
                   open
                   channelId={inst.channelId}
                   channelName={selectedChannelName}
+                  channelPreference={channelPreference}
+                  channelPreferenceLoaded={channelPreferenceDetails?.type === 'complete'}
+                  composeDrafts={composeDraftRows}
+                  composeDraftsLoaded={composeDraftRowsLoaded}
                   draftId={inst.id}
                   resetKey={inst.key}
                   minimized={inst.minimized}
@@ -3385,6 +3395,8 @@ type SupportTicketDetailProps = {
   };
   isMember: boolean;
   onMailtoClick: (email: string) => void;
+  channelPreference: EmailChannelPreference | undefined;
+  channelPreferenceLoaded: boolean;
   /**
    * Base path used to build in-detail ticket navigation (e.g. next/prev ticket).
    * Defaults to the Support inbox base (`/{workspaceId}/support`). Embedded
@@ -3411,6 +3423,8 @@ export const SupportTicketDetail = ({
   ticketFilter,
   isMember,
   onMailtoClick,
+  channelPreference,
+  channelPreferenceLoaded,
   navBasePath,
   onBack,
   navTickets,
@@ -3477,10 +3491,8 @@ export const SupportTicketDetail = ({
     ticketId?: string | null;
     returnToUrl?: string | null;
   };
-  // Router state is a perf hint from list navigation (instant paint); direct
-  // URL loads and new-tab openings fall back to the supportTicketByXyneId fetch
-  // below using the :ticketId path param. Title is NOT carried in state so that
-  // it always reflects the current ticket row (and disappears when ACL hides it).
+  // List navigation supplies stable IDs in router state; direct URL loads and
+  // new-tab openings fall back to the :ticketId path parameter below.
   const stateConversationId = routerState?.conversationId ?? null;
   const ticketId = routerState?.ticketId ?? null;
 
@@ -3492,12 +3504,11 @@ export const SupportTicketDetail = ({
   // matching EmailThreadItem after emails load.
   const targetMailId = searchParams.get('mail');
 
-  // Single consolidated fetch: the ticket row with `.related('emails')` gives us emails,
-  // channelId (scalar on ticket), conversationId, and everything else we need — replaces
-  // getEmailsForTicket + getConversationById. supportTicketDetail looks up by `id` when
-  // list navigation supplied it (router state), else by `xyneId` from the URL path param.
+  // Fetch the ticket metadata needed to resolve the detail view. Emails and drafts use
+  // their dedicated conversation-scoped queries below. supportTicketDetailV2 looks up by
+  // `id` when list navigation supplied it, else by `xyneId` from the URL path param.
   const [ticket] = useCachedQuery(
-    queries.supportTicketDetail({
+    queries.supportTicketDetailV2({
       id: ticketId || undefined,
       xyneId: ticketIdParam || undefined,
       workspaceId,
@@ -3506,18 +3517,9 @@ export const SupportTicketDetail = ({
     }),
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
-  const ticketEmailDrafts = (
-    ticket as
-      | {
-          emailDrafts?: ReadonlyArray<{
-            draftContent?: string | null;
-            userId?: string | null;
-          }>;
-        }
-      | null
-      | undefined
-  )?.emailDrafts;
-  const ticketEmailDraftCount = ticketEmailDrafts?.length ?? 0;
+  const detailConversationId = ticket?.conversationId ?? stateConversationId;
+  const ticketEmailDrafts = useEmailDrafts(detailConversationId);
+  const ticketEmailDraftCount = ticketEmailDrafts.length;
   const draftBodyHtml = useMemo<string | null>(() => {
     if (!ticketEmailDrafts || ticketEmailDrafts.length === 0) return null;
 
@@ -3549,18 +3551,18 @@ export const SupportTicketDetail = ({
     (visibleAutoDraftCitations.length > 0 || visibleInlineCitations.length > 0);
   const hasUserDraftAgentSession = !!userDraftSession?.answered;
 
-  // Gather conversation IDs for this ticket AND any tickets merged into it, so
-  // the email thread shows emails from the merged-away tickets too.
+  // Start the primary email query from router state while ticket metadata loads,
+  // then include any merged-ticket conversations once the detail query resolves.
   const allConversationIds = useMemo(() => {
     const ids = new Set<string>();
-    if (ticket?.conversationId) ids.add(ticket.conversationId);
+    if (detailConversationId) ids.add(detailConversationId);
     (ticket?.referencesIn ?? [])
       .filter(ref => ref.relationType === TicketReferenceRelation.MERGED_INTO)
       .forEach(ref => {
         if (ref.sourceTicket?.conversationId) ids.add(ref.sourceTicket.conversationId);
       });
     return Array.from(ids);
-  }, [ticket?.conversationId, ticket?.referencesIn]);
+  }, [detailConversationId, ticket?.referencesIn]);
 
   // conversationId -> the manually-merged-in ticket that owns it (needed so its
   // thread-root email uses the ticket-level unmerge action; see mergedRootEmailSource).
@@ -3650,16 +3652,25 @@ export const SupportTicketDetail = ({
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
+  const [threadConversation] = useCachedQuery(
+    queries.threadConversationV2({
+      conversationId: conversationId || '',
+      channelId: channelId || undefined,
+      isMember,
+    }),
+    { enabled: !!conversationId && !!channelId },
+  );
+  const conversation = threadConversation ?? undefined;
+  const messages = useMemo(
+    () => [...(threadConversation?.messages ?? [])],
+    [threadConversation?.messages],
+  );
   // DB ticket id (not the xyneId) for per-user mailbox actions; router state carries it
   // on list navigation, else it comes from the fetched ticket row.
   const mailboxTicketId = ticket?.id ?? ticketId ?? null;
   const boardId = ticket?.boardId ?? null;
 
-  const [channelPreferenceList] = useCachedQuery(
-    queries.getEmailChannelPreference({ channelId: channelId || '' }),
-    { enabled: !!channelId },
-  );
-  const draftAgentSlug = channelPreferenceList?.[0]?.autoDraftAgentSlug || 'draft-agent';
+  const draftAgentSlug = channelPreference?.autoDraftAgentSlug || 'draft-agent';
   const { setSelectedAgentSlug } = useSelectedAgent();
 
   const openDraftAgentSession = useCallback(
@@ -3772,19 +3783,16 @@ export const SupportTicketDetail = ({
     [conversationId],
   );
 
-  // Desk's connected mailbox — used as the "me" reference in thread headers
-  // and recipient summaries. Sourced from the existing `/channels/:id/connected-email`
-  // API via `useChannelConnectedEmail`. Empty string until loaded.
-  const deskEmail = useChannelConnectedEmail(channelId || null);
-  const { outboundConfigured } = useChannelIntegrationInfo(channelId || null);
+  const channelIntegrationInfo = useChannelIntegrationInfo(channelId || null);
+  const deskEmail = channelIntegrationInfo.email ?? '';
+  const { outboundConfigured } = channelIntegrationInfo;
 
   useAskAiTicketContext({
     channelId: channelId || null,
     conversationId: conversationId ?? null,
     previewText: title || 'Ticket conversation',
   });
-  const conversation = ticket?.conversation;
-  const ticketDraft = useEmailDraft(conversationId ?? null);
+  const ticketDraft = ticketEmailDrafts[0];
   const draftAutoOpenedConversationRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId) return;
@@ -4094,16 +4102,6 @@ export const SupportTicketDetail = ({
     [conversationId],
   );
 
-  // Fetch messages for the conversation
-  const [messages] = useCachedQuery(
-    queries.conversationMessagesV2({
-      conversationId: conversationId || '',
-    }),
-    {
-      enabled: !!conversationId && !!channelId,
-    },
-  );
-
   const targetMessageId = searchParams.get('messageId');
   useEffect(() => {
     if (!targetMessageId || !conversationId) return;
@@ -4125,6 +4123,15 @@ export const SupportTicketDetail = ({
 
   // Get channel info and user status
   const channel = useChannel(channelId);
+  const [mailboxRows] = useCachedQuery(
+    queries.myTicketMailbox({ ticketId: mailboxTicketId ?? '' }),
+    { enabled: channel?.type === ChannelType.EMAIL && !!mailboxTicketId },
+  );
+  const mailboxOverlay = mailboxRows?.[0];
+  const [conversationLabelMappings] = useCachedQuery(
+    queries.conversationLabelMappingsByConversationId({ conversationId: conversationId || '' }),
+    { enabled: !!conversationId },
+  );
   const channelParticipation = useGetChannelUserStatus(channelId);
   const isUserMember = !!channelParticipation;
 
@@ -4232,7 +4239,12 @@ export const SupportTicketDetail = ({
                   {ticketIdParam}
                 </span>
                 {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
-                  <MailboxActions ticketId={mailboxTicketId} channelId={channelId} slot='star' />
+                  <MailboxActions
+                    ticketId={mailboxTicketId}
+                    channelId={channelId}
+                    slot='star'
+                    mailboxOverlay={mailboxOverlay}
+                  />
                 )}
                 {/* `min-w-[8rem]` (rem, so it tracks font scaling) is what makes the
                     row break its flex line instead of crushing the title to nothing. */}
@@ -4257,6 +4269,7 @@ export const SupportTicketDetail = ({
                         conversationId={conversationId}
                         channelId={channelId}
                         slot='picker'
+                        appliedMappings={conversationLabelMappings ?? []}
                       />
                     )}
                     {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
@@ -4264,6 +4277,7 @@ export const SupportTicketDetail = ({
                         ticketId={mailboxTicketId}
                         channelId={channelId}
                         slot='actions'
+                        mailboxOverlay={mailboxOverlay}
                       />
                     )}
                   </div>
@@ -4501,6 +4515,7 @@ export const SupportTicketDetail = ({
                           ticketId={mailboxTicketId}
                           channelId={channelId}
                           slot='chip'
+                          mailboxOverlay={mailboxOverlay}
                         />
                       )}
                       {conversationId && (
@@ -4508,6 +4523,7 @@ export const SupportTicketDetail = ({
                           conversationId={conversationId}
                           channelId={channelId}
                           slot='chips'
+                          appliedMappings={conversationLabelMappings ?? []}
                         />
                       )}
                     </div>
@@ -4715,37 +4731,13 @@ export const SupportTicketDetail = ({
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
-                    <SlackThread
-                      emails={emails}
-                      ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
-                    />
+                    <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
-                    <CallThread
-                      emails={emails}
-                      ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
-                    />
+                    <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (
                     <EmailThread
                       collapseState={emailCollapseState}
                       ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
                       onReplyToEmail={(emailId, mode) => {
                         clearStoredRecipients(conversationId);
                         setReplyToEmailId(emailId);
@@ -4770,6 +4762,7 @@ export const SupportTicketDetail = ({
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
                     recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
                   />
@@ -4786,6 +4779,8 @@ export const SupportTicketDetail = ({
                     >
                       <EmailComposer
                         conversationId={conversationId}
+                        drafts={ticketEmailDrafts}
+                        channelConnectedEmail={deskEmail}
                         emails={emails}
                         onClose={() => {
                           setComposerOpen(false);
@@ -4809,6 +4804,8 @@ export const SupportTicketDetail = ({
                         showSeeSources={hasUserDraftAgentSession}
                         onDraftInlineCitationsChange={setDraftInlineCitations}
                         channelId={channelId}
+                        channelPreference={channelPreference}
+                        channelPreferenceLoaded={channelPreferenceLoaded}
                         ticketId={ticketId}
                         replyToEmailId={replyToEmailId}
                         replyMode={replyMode}
@@ -5270,8 +5267,6 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
 const EmailThread = ({
   collapseState,
   ticketId,
-  lastEmailAt,
-  emailReads,
   onReplyToEmail,
   deskEmail,
   onMailtoClick,
@@ -5280,8 +5275,6 @@ const EmailThread = ({
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
-  lastEmailAt?: number | null | undefined;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> | undefined;
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
   onMailtoClick: (email: string) => void;
@@ -5295,16 +5288,7 @@ const EmailThread = ({
   ) => void | Promise<void>;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
-  // Thread-level: upsert the current user's email_reads row. `isRead` compares
-  // the stored lastReadEmailAt snapshot against the ticket's lastEmailAt, so
-  // every email header in the thread flips read/unread together.
-  const { isRead } = useMarkEmailRead(
-    ticketId,
-    lastEmailId ?? null,
-    lastEmailAt ?? null,
-    emailReads,
-    true,
-  );
+  useMarkEmailRead(ticketId, lastEmailId ?? null, true);
   const threadAttachments = useMemo(
     () => sortedEmails.flatMap(e => e.attachments ?? []),
     [sortedEmails],
@@ -5342,7 +5326,6 @@ const EmailThread = ({
             isCollapsed={collapsedIds.has(email.id)}
             canCollapse={email.id !== lastEmailId}
             onToggleCollapse={() => toggleOne(email.id)}
-            isRead={isRead}
             threadAttachments={threadAttachments}
             {...(onReplyToEmail &&
               email.id !== lastEmailId && {
@@ -5368,7 +5351,6 @@ const EmailThreadItem = ({
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
-  isRead = true,
   onReply,
   deskEmail,
   isConversationRoot,
@@ -5381,7 +5363,6 @@ const EmailThreadItem = ({
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
-  isRead?: boolean;
   onReply?: (mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
   /** True when this email is the earliest email in its own conversationId —
@@ -5486,10 +5467,14 @@ const EmailThreadItem = ({
   ) : null;
 
   const headerClickable = canCollapse && !!onToggleCollapse;
-  const preview = stripHtml(email.body || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 140);
+  const preview = useMemo(
+    () =>
+      stripHtml(email.body || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 140),
+    [email.body],
+  );
 
   return (
     <div
@@ -5529,7 +5514,6 @@ const EmailThreadItem = ({
           createdAt={email.createdAt}
           isCollapsed={isCollapsed}
           previewText={preview}
-          isRead={isRead}
           deskEmail={deskEmail}
           extras={demergeButton}
           emailId={email.id}

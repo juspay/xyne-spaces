@@ -13,8 +13,6 @@ interface CallThreadEmail {
 interface CallThreadProps {
   emails: CallThreadEmail[];
   ticketId?: string | null | undefined;
-  lastEmailAt?: number | null | undefined;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> | undefined;
 }
 
 interface OzonetelSharedFields {
@@ -237,13 +235,11 @@ const CallThreadItem = ({
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
-  isRead = true,
 }: {
   email: CallThreadEmail;
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
-  isRead?: boolean;
 }): ReactElement => {
   const headerClickable = canCollapse && !!onToggleCollapse;
   return (
@@ -257,7 +253,7 @@ const CallThreadItem = ({
       )}
     >
       <div
-        className={cn('px-4 py-3', headerClickable && 'cursor-pointer', !isRead && 'bg-primary/5')}
+        className={cn('px-4 py-3', headerClickable && 'cursor-pointer')}
         data-track-category='Support'
         data-track-name={isCollapsed ? 'ExpandCallEntry' : 'CollapseCallEntry'}
         onClick={headerClickable ? onToggleCollapse : undefined}
@@ -288,12 +284,7 @@ const CallThreadItem = ({
   );
 };
 
-const CallThread = ({
-  emails,
-  ticketId,
-  lastEmailAt,
-  emailReads,
-}: CallThreadProps): ReactElement => {
+const CallThread = ({ emails, ticketId }: CallThreadProps): ReactElement => {
   const sortedEmails = useMemo(() => {
     return [...emails].sort((a, b) => {
       const aTime = a.createdAt || 0;
@@ -328,13 +319,7 @@ const CallThread = ({
     });
   }, [emailIdsKey, lastEmailId, sortedEmails]);
 
-  const { isRead } = useMarkEmailRead(
-    ticketId,
-    lastEmailId ?? null,
-    lastEmailAt ?? null,
-    emailReads,
-    true,
-  );
+  useMarkEmailRead(ticketId, lastEmailId ?? null, true);
 
   const toggleOne = (id: string): void => {
     if (id === lastEmailId) return;
@@ -355,7 +340,6 @@ const CallThread = ({
           isCollapsed={collapsedIds.has(email.id)}
           canCollapse={email.id !== lastEmailId}
           onToggleCollapse={() => toggleOne(email.id)}
-          isRead={isRead}
         />
       ))}
     </div>
