@@ -643,11 +643,7 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        // Set pending-auth cookie. This must be a pending-auth JWT (not the
-        // session customToken): loginWorkspace/createOrg read it via
-        // parsePendingAuthCookie, which needs providerUserId AND provider — the
-        // session token has neither, so it would mislabel the user as GOOGLE and
-        // drop the refresh token. Mirrors Google's web callback + MS electron.
+        
         res.cookie('google_access_token', jwt.sign({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,

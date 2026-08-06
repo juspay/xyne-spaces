@@ -1149,7 +1149,7 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      // Store all Google auth data in one cookie (until workspace selection)
+      
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,

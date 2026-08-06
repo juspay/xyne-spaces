@@ -131,25 +131,23 @@ export class InvitationController {
       const invitationLink =
         await buildInvitationLink({ req, workspaceId, invitationId: invitation.invitationId || invitation.id });
 
-      if (config.env === 'development') {
-        logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
-      } else {
-        // Send invitation email
-        const emailResult = await invitationService.sendInvitationEmail({
-          to: email,
-          inviterName: req.user?.name || 'A team member',
-          workspaceName: invitation.workspace?.name || 'the workspace',
-          invitationLink,
-          invitationId: publicInvitationId,
-          tempPassword: tempPassword ?? undefined,
-        });
+      logger.info(`[InvitationController] Invitation link for ${email}: ${invitationLink}`);
 
-        // If email failed, delete the invitation to maintain consistency
-        if (!emailResult.success) {
-          await invitationService.deleteInvitation(invitation.id);
-          invitation = null; // Prevent double-delete in catch block
-          throw new Error(`Failed to send invitation email: ${emailResult.error}`);
-        }
+      // Send invitation email
+      const emailResult = await invitationService.sendInvitationEmail({
+        to: email,
+        inviterName: req.user?.name || 'A team member',
+        workspaceName: invitation.workspace?.name || 'the workspace',
+        invitationLink,
+        invitationId: publicInvitationId,
+        tempPassword: tempPassword ?? undefined,
+      });
+
+      // If email failed, delete the invitation to maintain consistency
+      if (!emailResult.success) {
+        await invitationService.deleteInvitation(invitation.id);
+        invitation = null; // Prevent double-delete in catch block
+        throw new Error(`Failed to send invitation email: ${emailResult.error}`);
       }
 
       res.status(201).json({
