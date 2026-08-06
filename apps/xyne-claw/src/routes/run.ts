@@ -106,6 +106,8 @@ import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
+import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
+import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -1453,6 +1455,14 @@ async function processTask(
   // — never the success path — and the plan is read from ref.value there and
   // shipped as `pendingPlan` on the callback.
   const proposePlanRef: ProposePlanRef = {};
+  // Hoisted for the same reason: propose-agent (agent-authoring's terminal tool)
+  // fires abortRun, so the drafted agent is recovered from ref.value in the catch
+  // block and shipped as `pendingAgentCard` on the callback.
+  const proposeAgentRef: ProposeAgentRef = {};
+  // describe-agent is NOT terminal, so this is read on the success path; hoisted
+  // alongside the others so the catch handler can still ship a queued card when
+  // the turn ends some other way.
+  const describeAgentRef: DescribeAgentRef = {};
   // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
   // fires abortRun, so the brief is recovered from ref.value in the catch block
   // and shipped as `dailyBrief` on the callback.
@@ -2492,6 +2502,42 @@ async function processTask(
     if (isDailyBrief) {
       allTools.push(buildEmitBriefTool(emitBriefRef, abortRun));
       log("Daily brief mode — injected terminal emit_brief tool");
+    }
+
+    // Agent authoring (agent.config.agentAuthoring): inject the terminal
+    // propose-agent tool so this agent can DRAFT another agent. Gated on the same
+    // interactive-surface conditions as the plan tools — a draft is worthless
+    // without a human to approve its card, so a scheduled/automation run (no one
+    // watching) must never get the tool. Never alongside the other terminal tools
+    // (plan / daily brief own turn termination in their modes).
+    const agentAuthoringEnabled =
+      agentConfig?.["agentAuthoring"] === true &&
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isPlanMode &&
+      !isDailyBrief;
+    if (agentAuthoringEnabled) {
+      allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
+      log("Agent authoring enabled — injected terminal propose-agent tool");
+    }
+
+    // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
+    // question any agent should answer from its real configuration rather than
+    // from prose the model invents. Gated only on there being somewhere to post
+    // the card — a scheduled/automation run has no one to show it to.
+    //
+    // Deliberately NOT excluded in plan mode: the tool writes nothing (plan
+    // mode's read-only filter passes it through untouched), and an agent
+    // configured to plan first should still be able to say what it is. Twin is
+    // excluded because that flow delivers through its own approval surface.
+    const describeAgentAvailable =
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isDailyBrief;
+    if (describeAgentAvailable) {
+      allTools.push(buildDescribeAgentTool(describeAgentRef));
     }
 
     // Inject copilot respond-to-user tool if provider is copilot.
@@ -3765,6 +3811,11 @@ async function processTask(
         `[daily-brief] emit_brief was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the brief anyway; investigate abort wiring. session=${sessionId}`,
       );
     }
+    if (proposeAgentRef.value) {
+      logErr(
+        `[agent-authoring] propose-agent was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the draft anyway; investigate abort wiring. session=${sessionId}`,
+      );
+    }
 
     clog.info(
       `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
@@ -3812,6 +3863,15 @@ async function processTask(
       // claw-auth's /webhook/result posts the plan card and (if trivial)
       // auto-continues into the auto-mode execution turn.
       ...(proposePlanRef.value ? { pendingPlan: proposePlanRef.value } : {}),
+      // Agent authoring: propose-agent normally aborts (→ catch branch below),
+      // but if the run finished cleanly with a draft proposed, carry it here too.
+      // claw-auth validates it, persists the AgentRequest and posts the agent card.
+      // A draft (terminal, normally recovered in the catch) wins over a profile
+      // card if a turn somehow produced both — the decision surface matters more
+      // than the description.
+      ...(proposeAgentRef.value || describeAgentRef.value
+        ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
+        : {}),
       // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
       // run finished cleanly with a brief emitted, carry it here too. claw-auth
       // persists it to GeneratedContent and (on the SSE regenerate path) forwards
@@ -3970,6 +4030,9 @@ async function processTask(
           ? { automationResult: automationResultAtError }
           : {}),
         pendingResponses: pendingResponsesAtError,
+        // A queued capability card must survive the copilot terminal path too,
+        // or "what can you do?" silently loses its card on those agents.
+        ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
@@ -4004,6 +4067,36 @@ async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      proposeAgentRef.value &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      // Agent authoring: propose-agent fired abortRun to end the turn, so the run
+      // lands HERE (RunCancelledError), not the success path — the SAME pattern as
+      // propose-plan above. This is a normal, successful draft, NOT a cancellation:
+      // emit status="completed" carrying it. claw-auth validates the requested
+      // tools, persists the draft as an AgentRequest and posts the agent card. The
+      // card is the deliverable, so there is no chat text on this turn — and the
+      // agent must not narrate a creation that has not been approved yet.
+      log(
+        `Session terminated by propose-agent (slug=${proposeAgentRef.value.agent.slug}, ${proposeAgentRef.value.agent.tools.length} tool(s)): ${sessionId}`,
+      );
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: "",
+        pendingAgentCard: proposeAgentRef.value,
         ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),

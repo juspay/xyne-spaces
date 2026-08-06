@@ -26,7 +26,8 @@ export type FlowComponentType =
   | 'plan'
   | 'pr'
   | 'pr_approval'
-  | 'call_schedule';
+  | 'call_schedule'
+  | 'agent';
 
 export interface FlowComponent {
   id: string;
