@@ -6,7 +6,7 @@ import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
 import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
-import type { WizardState } from '../../../create/wizardState';
+import type { WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 
 export interface SaveClawAgent {
   save: (state: WizardState) => Promise<void>;

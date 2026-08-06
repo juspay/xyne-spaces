@@ -1,15 +1,15 @@
 import { type ReactElement } from 'react';
 import { useParams } from 'react-router-dom';
-import { AIShell } from '../../components/AIScreen/AIShell';
-import { Skeleton } from '../../components/ui/Skeleton';
-import { useClawAgentDetail } from '../../hooks/useClawAgentDetail';
-import ClawAgentCreateV2 from '../ClawAgentsScreen/library/agents/create/ClawAgentCreateV2';
-import { useAIChatHandoff } from './useAIChatHandoff';
+import { AIShell } from '../../../components/AIScreen/AIShell';
+import { Skeleton } from '../../../components/ui/Skeleton';
+import { useClawSubagentDetail } from '../../../hooks/useClawSubagents';
+import ClawSubagentCreateV2 from '../library/subagents/create/ClawSubagentCreateV2';
+import { useAIChatHandoff } from '../useAIChatHandoff';
 
-const AIAgentEditScreen = (): ReactElement => {
+const AISubagentEditScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
-  const { slug } = useParams<{ slug?: string }>();
-  const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
+  const { name } = useParams<{ name?: string }>();
+  const { data: subagent, isLoading, isError } = useClawSubagentDetail(name);
 
   return (
     <AIShell
@@ -18,7 +18,7 @@ const AIAgentEditScreen = (): ReactElement => {
       mainClassName='ai-page-bg'
     >
       <main
-        data-id='ai-agent-edit-view'
+        data-id='ai-subagent-edit-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden border border-border bg-background'
       >
         {isLoading ? (
@@ -28,16 +28,16 @@ const AIAgentEditScreen = (): ReactElement => {
             <Skeleton className='h-[86px] w-full rounded-2xl' />
             <Skeleton className='h-[250px] w-full rounded-2xl' />
           </div>
-        ) : isError || !agent ? (
+        ) : isError || !subagent ? (
           <p className='py-16 text-center text-sm text-muted-foreground'>
-            Couldn&apos;t load this agent.
+            Couldn&apos;t load this subagent.
           </p>
         ) : (
-          <ClawAgentCreateV2 agent={agent} />
+          <ClawSubagentCreateV2 subagent={subagent} />
         )}
       </main>
     </AIShell>
   );
 };
 
-export default AIAgentEditScreen;
+export default AISubagentEditScreen;

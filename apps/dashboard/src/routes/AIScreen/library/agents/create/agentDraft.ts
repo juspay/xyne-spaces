@@ -1,7 +1,10 @@
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
 import type { ToolboxSelection } from '@/services/claw/clawToolsTypes';
-import { INITIAL_WIZARD_STATE, type WizardState } from '../../../create/wizardState';
+import {
+  INITIAL_WIZARD_STATE,
+  type WizardState,
+} from '../../../../ClawAgentsScreen/create/wizardState';
 
 interface ConfigShape {
   tools?: {

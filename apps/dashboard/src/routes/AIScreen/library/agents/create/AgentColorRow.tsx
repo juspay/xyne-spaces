@@ -1,7 +1,7 @@
 import { type ReactElement } from 'react';
 import { CheckTickSingle } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
-import { COLORS } from '../../../create/wizardState';
+import { COLORS } from '../../../../ClawAgentsScreen/create/wizardState';
 
 interface AgentColorRowProps {
   color: string;

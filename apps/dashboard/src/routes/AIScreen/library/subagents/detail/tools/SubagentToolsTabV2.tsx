@@ -67,7 +67,6 @@ export function SubagentToolsTabV2({
     [direct, custom],
   );
 
- 
   const sections = useMemo(() => buildSubagentToolSections(tools.data ?? null), [tools.data]);
 
   const selectedIn = (section: SubagentToolSectionData): SubagentToolEntry[] =>

@@ -23,7 +23,7 @@ import {
   effectiveSlug,
   slugify,
   type WizardState,
-} from '../../../create/wizardState';
+} from '../../../../ClawAgentsScreen/create/wizardState';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { wizardStateFromAgent } from './agentDraft';
 import { useSaveClawAgent } from './useSaveClawAgent';

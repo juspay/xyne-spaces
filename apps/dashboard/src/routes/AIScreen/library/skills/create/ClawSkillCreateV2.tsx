@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCreateClawSkill } from '@/hooks/useCreateClawSkill';
 import type { PendingSkillFile } from '@/services/claw/clawSkillFileUtils';
 import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
-import { slugify } from '../../../create/wizardState';
+import { slugify } from '../../../../ClawAgentsScreen/create/wizardState';
 import { SkillFilesField } from './SkillFilesField';
 import { readSkillPick } from './skillFilePick';
 

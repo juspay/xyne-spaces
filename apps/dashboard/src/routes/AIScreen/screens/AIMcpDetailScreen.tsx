@@ -1,7 +1,7 @@
 import { type ReactElement } from 'react';
-import { AIShell } from '../../components/AIScreen/AIShell';
-import ClawMcpDetailV2 from '../ClawAgentsScreen/library/mcp/detail/ClawMcpDetailV2';
-import { useAIChatHandoff } from './useAIChatHandoff';
+import { AIShell } from '../../../components/AIScreen/AIShell';
+import ClawMcpDetailV2 from '../library/mcp/detail/ClawMcpDetailV2';
+import { useAIChatHandoff } from '../useAIChatHandoff';
 
 const AIMcpDetailScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();

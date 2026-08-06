@@ -1,9 +1,9 @@
 import { type ReactElement } from 'react';
-import { AIShell } from '../../components/AIScreen/AIShell';
-import LibraryV2 from '../ClawAgentsScreen/library/LibraryV2';
-import { useAIChatHandoff } from './useAIChatHandoff';
+import { AIShell } from '../../../components/AIScreen/AIShell';
+import ClawSubagentCreateV2 from '../library/subagents/create/ClawSubagentCreateV2';
+import { useAIChatHandoff } from '../useAIChatHandoff';
 
-const AILibraryScreen = (): ReactElement => {
+const AISubagentCreateScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
@@ -13,15 +13,13 @@ const AILibraryScreen = (): ReactElement => {
       mainClassName='ai-page-bg'
     >
       <main
-        data-id='ai-library-view'
+        data-id='ai-subagent-create-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden border border-border bg-background'
       >
-        <div className='relative flex-1 overflow-auto no-scrollbar'>
-          <LibraryV2 />
-        </div>
+        <ClawSubagentCreateV2 />
       </main>
     </AIShell>
   );
 };
 
-export default AILibraryScreen;
+export default AISubagentCreateScreen;

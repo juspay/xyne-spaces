@@ -1,9 +1,9 @@
 import { type ReactElement } from 'react';
-import { AIShell } from '../../components/AIScreen/AIShell';
-import KnowledgeBaseV2Screen from '../../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
-import { GlobalCollectionsProvider } from '../../components/knowledgeBaseV2/hooks/useGlobalCollections';
-import { CollectionTreeDataSync } from '../../components/knowledgeBase/hooks/CollectionTreeDataSync';
-import { useAIChatHandoff } from './useAIChatHandoff';
+import { AIShell } from '../../../components/AIScreen/AIShell';
+import KnowledgeBaseV2Screen from '../../../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
+import { GlobalCollectionsProvider } from '../../../components/knowledgeBaseV2/hooks/useGlobalCollections';
+import { CollectionTreeDataSync } from '../../../components/knowledgeBase/hooks/CollectionTreeDataSync';
+import { useAIChatHandoff } from '../useAIChatHandoff';
 
 const AIKnowledgeScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();

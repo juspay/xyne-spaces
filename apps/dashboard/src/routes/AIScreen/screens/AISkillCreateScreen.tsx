@@ -1,7 +1,7 @@
 import { type ReactElement } from 'react';
-import { AIShell } from '../../components/AIScreen/AIShell';
-import ClawSkillCreateV2 from '../ClawAgentsScreen/library/skills/create/ClawSkillCreateV2';
-import { useAIChatHandoff } from './useAIChatHandoff';
+import { AIShell } from '../../../components/AIScreen/AIShell';
+import ClawSkillCreateV2 from '../library/skills/create/ClawSkillCreateV2';
+import { useAIChatHandoff } from '../useAIChatHandoff';
 
 const AISkillCreateScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();

@@ -1,6 +1,6 @@
 import { readSkillFilesFromFileList } from '@/services/claw/clawSkillFileUtils';
 import type { PendingSkillFile } from '@/services/claw/clawSkillFileUtils';
-import { slugify } from '../../../create/wizardState';
+import { slugify } from '../../../../ClawAgentsScreen/create/wizardState';
 
 export interface SkillPick {
   files: PendingSkillFile[];
