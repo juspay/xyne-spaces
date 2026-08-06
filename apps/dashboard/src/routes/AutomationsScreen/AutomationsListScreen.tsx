@@ -7,9 +7,9 @@ export default function AutomationsListScreen(): ReactElement {
   return (
     <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
       <AutomationsList
-        onCreate={() => void navigate('/automations/new')}
-        onOpen={automation => void navigate(`/automations/${automation.id}`)}
-        onShowRuns={automation => void navigate(`/automations/${automation.id}/runs`)}
+        onCreate={() => void navigate('new', { relative: 'path' })}
+        onOpen={automation => void navigate(`${automation.id}`, { relative: 'path' })}
+        onShowRuns={automation => void navigate(`${automation.id}/runs`, { relative: 'path' })}
       />
     </div>
   );
