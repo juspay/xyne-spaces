@@ -110,7 +110,11 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
       open={open}
       onOpenChange={handleOpenChange}
       title='Desk Settings'
-      className='left-auto right-0 top-0 bottom-0 translate-x-0 translate-y-0 h-screen w-[80vw] max-w-none max-h-none rounded-l-[16px] rounded-r-none bg-transparent shadow-none'
+      className={cn(
+        'left-auto right-0 top-0 bottom-0 translate-x-0 translate-y-0 h-screen w-[80vw] max-w-none max-h-none rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
+        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
+        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+      )}
     >
       {!channelId ? null : (
         <div className='relative h-full w-full'>
