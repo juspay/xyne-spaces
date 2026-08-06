@@ -1227,12 +1227,18 @@ export const EmailComposer = ({
           //       to     = [us, others]  → us filtered, others appended to nextTo
           //       cc     = [ccs]         → become nextCc
           //
-          // Either way: never include ourselves, never duplicate.
+          // Either way: never include ourselves in To, never duplicate.
+          // CC is left un-self-filtered — a CC'd address is a deliberate
+          // recipient, not an artifact of who's sending.
           const source = targetEmail;
           const seen = new Set<string>();
-          const addUnique = (target: string[], list: ReadonlyArray<string>): void => {
+          const addUnique = (
+            target: string[],
+            list: ReadonlyArray<string>,
+            opts: { filterSelf: boolean },
+          ): void => {
             for (const addr of list) {
-              if (isSelf(addr)) continue;
+              if (opts.filterSelf && isSelf(addr)) continue;
               const key = keyOf(addr);
               if (seen.has(key)) continue;
               seen.add(key);
@@ -1241,12 +1247,11 @@ export const EmailComposer = ({
           };
 
           // Sender first (prefer all Reply-To addresses over From for list-relayed emails).
-          if (source.replyTo?.length) addUnique(nextTo, source.replyTo);
-          else if (source.from) addUnique(nextTo, [source.from]);
+          if (source.replyTo?.length) addUnique(nextTo, source.replyTo, { filterSelf: true });
+          else if (source.from) addUnique(nextTo, [source.from], { filterSelf: true });
           // All original To recipients of the latest message.
-          addUnique(nextTo, source.to || []);
-          // Carry over CCs unchanged (minus self, minus dup).
-          addUnique(nextCc, source.cc || []);
+          addUnique(nextTo, source.to || [], { filterSelf: true });
+          addUnique(nextCc, source.cc || [], { filterSelf: false });
         } else {
           // Plain reply: target the sender of the message the user clicked
           // (or the latest if none was clicked). Same two cases:
