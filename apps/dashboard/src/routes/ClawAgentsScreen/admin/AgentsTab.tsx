@@ -10,6 +10,7 @@ import {
   UserArrowDown,
   UserArrowUp,
 } from '@xyne/icons';
+import { cn } from '@/utils/classNames';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -217,11 +218,12 @@ export function AgentsTab({
         aria-label={label}
         data-track-category='Claw Admin'
         data-track-name={options.trackName ?? label}
-        className={
+        className={cn(
+          'focus-visible:bg-muted focus-visible:ring-0',
           options.danger
             ? 'text-muted-foreground hover:text-destructive'
-            : 'text-muted-foreground hover:text-foreground'
-        }
+            : 'text-muted-foreground hover:text-foreground',
+        )}
       >
         {icon}
         {options.showLabel && <span>{label}</span>}
@@ -249,7 +251,7 @@ export function AgentsTab({
             disabled={busy}
             data-track-category='Claw Admin'
             data-track-name='Register agent'
-            className='text-muted-foreground hover:text-foreground'
+            className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
           >
             <PluginAddonDefault className='size-4 text-current' />
             <span className='text-current'>

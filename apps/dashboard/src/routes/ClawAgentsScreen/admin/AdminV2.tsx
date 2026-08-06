@@ -155,7 +155,10 @@ export default function AdminV2(): ReactElement {
           </p>
         </div>
         <Select value={orgFilter} onValueChange={setOrgFilter}>
-          <SelectTrigger className='w-48 shrink-0' aria-label='Organization filter'>
+          <SelectTrigger
+            className='w-48 shrink-0 focus-visible:border-ring focus-visible:ring-0'
+            aria-label='Organization filter'
+          >
             <SelectValue>{selectedOrgLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>

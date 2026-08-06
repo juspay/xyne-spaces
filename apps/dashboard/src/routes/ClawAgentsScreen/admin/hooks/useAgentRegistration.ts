@@ -119,26 +119,44 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
   const onFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
       const file = event.target.files?.[0];
+      const rowSlug = rowUploadSlug.current;
       event.target.value = '';
-      if (!file || !flow) return;
+      rowUploadSlug.current = null;
+
+      const slug = rowSlug ?? flow?.agentSlug;
+      if (!file || !slug) return;
+
+      const inFlow = !rowSlug;
+
       if (!file.type.startsWith('image/')) {
-        setFlow(current =>
-          current ? { ...current, error: 'Please pick an image file' } : current,
-        );
+        if (inFlow) {
+          setFlow(current =>
+            current ? { ...current, error: 'Please pick an image file' } : current,
+          );
+        } else {
+          toast.error('Please pick an image file');
+        }
         return;
       }
-      setFlow(current => (current ? { ...current, busy: true, error: undefined } : current));
+
+      if (inFlow) {
+        setFlow(current => (current ? { ...current, busy: true, error: undefined } : current));
+      }
+
       try {
-        await uploadAgentPicture(flow.agentSlug, file);
-        setFlow(current => (current ? { ...current, step: 'done', busy: false } : current));
+        await uploadAgentPicture(slug, file);
+        if (inFlow) {
+          setFlow(current => (current ? { ...current, step: 'done', busy: false } : current));
+        }
         toast.success('Photo uploaded');
         onChanged();
       } catch (error) {
-        setFlow(current =>
-          current
-            ? { ...current, busy: false, error: clawErrorText(error, 'Upload failed') }
-            : current,
-        );
+        const message = clawErrorText(error, 'Upload failed');
+        if (inFlow) {
+          setFlow(current => (current ? { ...current, busy: false, error: message } : current));
+        } else {
+          toast.error(message);
+        }
       }
     },
     [flow, onChanged],
