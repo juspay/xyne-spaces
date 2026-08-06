@@ -30,10 +30,13 @@ function storedSecret(plaintext: string): string {
   return `${encrypted.ciphertext}:${encrypted.iv}:${encrypted.authTag}`;
 }
 
-function request(rawBody: Buffer, signature?: string): Request {
+function request(rawBody: Buffer, signature?: string, event?: string): Request {
   return {
     params: { spacesAppId: "app-1" },
-    headers: signature ? { "x-xyne-signature": signature } : {},
+    headers: {
+      ...(signature ? { "x-xyne-signature": signature } : {}),
+      ...(event ? { "x-xyne-event": event } : {}),
+    },
     rawBody,
   } as unknown as Request;
 }
@@ -49,6 +52,7 @@ function response(): { res: Response; status: ReturnType<typeof vi.fn>; json: Re
 describe("verifySpacesSignature", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env["ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS"];
     mocks.agent = { id: "agent-1", signingSecret: storedSecret("signing-secret") };
   });
 
@@ -77,6 +81,58 @@ describe("verifySpacesSignature", () => {
     expect(status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=no_signature_header"));
+  });
+
+  it("temporarily permits unsigned flow actions by default", async () => {
+    const { res, status } = response();
+    const next = vi.fn() as NextFunction;
+
+    await verifySpacesSignature(request(Buffer.from("{}"), undefined, "flow_action"), res, next);
+
+    expect(status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledOnce();
+    expect(mocks.error).toHaveBeenCalledWith(
+      expect.stringContaining("reason=temporary_unsigned_flow_action_bypass"),
+    );
+  });
+
+  it("fails closed for unsigned flow actions when the temporary bridge is disabled", async () => {
+    process.env["ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS"] = "false";
+    const { res, status } = response();
+    const next = vi.fn() as NextFunction;
+
+    await verifySpacesSignature(request(Buffer.from("{}"), undefined, "flow_action"), res, next);
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=no_signature_header"));
+  });
+
+  it("does not let the temporary flow-action flag bypass a bad signature", async () => {
+    process.env["ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS"] = "true";
+    const { res, status } = response();
+    const next = vi.fn() as NextFunction;
+
+    await verifySpacesSignature(
+      request(Buffer.from("{}"), "00".repeat(32), "flow_action"),
+      res,
+      next,
+    );
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=mismatch"));
+  });
+
+  it("does not let the temporary flow-action flag bypass unsigned normal webhooks", async () => {
+    process.env["ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS"] = "true";
+    const { res, status } = response();
+    const next = vi.fn() as NextFunction;
+
+    await verifySpacesSignature(request(Buffer.from("{}"), undefined, "APP_MENTIONED"), res, next);
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it("fails closed on an invalid signature", async () => {

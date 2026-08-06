@@ -13,7 +13,14 @@
  * missing material. The webhook handler treats the event payload's
  * userId/channelId as authoritative and runs agents with that user's
  * credentials, so an unsigned/forged event is full impersonation. There is no
- * environment-controlled bypass.
+ * general environment-controlled bypass.
+ *
+ * Temporary rollout bridge: `ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS` defaults to
+ * `true` and permits only legacy `X-Xyne-Event: flow_action` requests whose
+ * signature header is absent. Set it explicitly to `false` to close the bridge.
+ * This exists solely so claw-auth can be deployed before the matching Spaces
+ * flow-action signer. It does not permit mismatched signatures and must be
+ * removed after the Spaces deployment is verified.
  *
  * Notes / gotchas:
  *   - Requires `req.rawBody` set by the json `verify` callback in main.ts.
@@ -137,6 +144,17 @@ export async function verifySpacesSignature(
   // 4. Compare with the header.
   const received = req.headers["x-xyne-signature"];
   if (typeof received !== "string" || received.length === 0) {
+    const temporaryUnsignedFlowAction =
+      (process.env["ALLOW_UNSIGNED_SPACES_FLOW_ACTIONS"] ?? "true") === "true" &&
+      req.headers["x-xyne-event"] === "flow_action";
+    if (temporaryUnsignedFlowAction) {
+      log.error(
+        tag(lookupTag, "temporary_unsigned_flow_action_bypass") +
+        ` agentId=${agent.id} — REMOVE after the Spaces flow-action signer is deployed`,
+      );
+      next();
+      return;
+    }
     reject("no_signature_header", "missing X-Xyne-Signature");
     return;
   }
