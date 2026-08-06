@@ -125,10 +125,12 @@ pnpm --filter @xyne/shared run watch
 pnpm run services
 ```
 
-This asks which features you need — *Chat & Tickets* (Postgres, Redis, Zero,
-MinIO) is always on; Calls, Canvas, Search, Transcription, Observability, and
-Feature Flags are opt-in, and each unselected feature is a container that never
-starts. Pick **Everything**, **Core**, or select individually; your answer is
+This first asks whether to **reuse existing data or start fresh** — fresh wipes
+this checkout's containers, volumes, and databases via `pnpm run reset` (with a
+confirmation, since it deletes every local database and bucket). Then it asks
+which features you need — *Chat & Tickets* (Postgres, Redis, Zero, MinIO) is
+always on; Calls, Canvas, Search, Transcription, Observability, and Feature
+Flags are opt-in, and each unselected feature is a container that never starts. Pick **Everything**, **Core**, or select individually; your answer is
 remembered for next time. It then checks the required host ports are free (naming
 whatever process holds a busy one), brings the containers up, waits for health
 checks, applies Prisma migrations, and seeds baseline data. Expect a few minutes
