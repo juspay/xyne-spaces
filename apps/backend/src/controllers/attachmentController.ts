@@ -20,6 +20,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 
 const db = DatabaseClient.getInstance();
+const ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES = 10;
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -250,6 +251,63 @@ export class AttachmentController {
     } catch (error) {
       logger.error('Error downloading attachment:', error);
       res.status(500).json({ error: 'Failed to download attachment' });
+    }
+  };
+
+  /**
+   * GET /api/attachments/:attachmentId/signed-url
+   * Return a short-lived direct storage URL after the same ACL checks as download.
+   */
+  getSignedDownloadUrl = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { attachmentId } = req.params;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
+
+      const attachment = await this.messageAttachmentRepository.findById(attachmentId);
+
+      if (!attachment) {
+        res.status(404).json({ error: 'Attachment not found' });
+        return;
+      }
+
+      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
+        return;
+      }
+
+      const filePath = normalizeStoragePath(attachment.url);
+      if (!filePath) {
+        res.status(404).json({ error: 'Attachment not yet uploaded' });
+        return;
+      }
+
+      const meta = attachment.metadata as { type?: string };
+      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript'
+        ? getStorageService(config.gcs.transcriptionBucketName)
+        : storageService;
+
+      const url = await service.generateSignedUrl(
+        filePath,
+        ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES / 60,
+      );
+
+      logger.info(`Generated ${ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES} minute signed URL for attachment ${attachmentId}`);
+      res.json({
+        url,
+        filename: attachment.originalFilename,
+        mimeType: attachment.mimetype,
+        size: attachment.size,
+        expiresInMinutes: ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES,
+      });
+    } catch (error) {
+      logger.error('Error generating signed attachment URL:', error);
+      res.status(500).json({ error: 'Failed to generate signed attachment URL' });
     }
   };
 

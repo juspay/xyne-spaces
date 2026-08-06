@@ -18,6 +18,13 @@ import { createLogger } from "../../logger.js";
 
 const log = createLogger("xyne-spaces-tools");
 
+const RAW_ATTACHMENT_INLINE_LIMIT_BYTES = Number(
+  process.env["SPACES_FETCH_ATTACHMENT_INLINE_LIMIT_BYTES"] ?? 5 * 1024 * 1024,
+);
+const ATTACHMENT_INGEST_TIMEOUT_MS = Number(
+  process.env["SPACES_FETCH_ATTACHMENT_INGEST_TIMEOUT_MS"] ?? 120_000,
+);
+
 /**
  * Vespa-query debug sidecar mirrored from claw-auth's kb-handlers. Same shape
  * as `data.debug` on /api/vespaSearch/claw responses when includeDebugInfo=true.
@@ -136,6 +143,19 @@ function appendText(result: ToolResult, extra: string): void {
 
 function err(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+function formatAttachmentBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
+  const units = ["B", "KB", "MB", "GB"] as const;
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const rounded = unit === 0 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2);
+  return `${rounded} ${units[unit]} (${bytes} bytes)`;
 }
 
 /**
@@ -4222,6 +4242,139 @@ interface MessageAttachmentRow {
   url?: string;
 }
 
+interface AttachmentIngestResponse {
+  success?: boolean;
+  files?: Array<{ path: string; content: string }>;
+  error?: string;
+}
+
+interface SignedAttachmentUrlResponse {
+  url: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  expiresInMinutes: number;
+}
+
+const DOCUMENT_ATTACHMENT_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel.sheet.macroenabled.12",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/html",
+  "application/xhtml+xml",
+  "application/zip",
+]);
+
+const DOCUMENT_ATTACHMENT_EXTENSIONS = [
+  ".pdf",
+  ".docx",
+  ".xlsx",
+  ".xlsm",
+  ".pptx",
+  ".html",
+  ".htm",
+  ".zip",
+];
+
+const TEXT_ATTACHMENT_MIME_TYPES = new Set([
+  "text/plain",
+  "text/markdown",
+  "application/json",
+  "text/csv",
+  "application/yaml",
+  "text/yaml",
+  "application/xml",
+  "text/xml",
+]);
+
+const TEXT_ATTACHMENT_EXTENSIONS = [
+  ".txt",
+  ".md",
+  ".json",
+  ".csv",
+  ".yml",
+  ".yaml",
+  ".xml",
+  ".log",
+];
+
+function isDocumentAttachment(fileName: string, mimeType: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  const lowerMime = mimeType.toLowerCase();
+  return (
+    DOCUMENT_ATTACHMENT_MIME_TYPES.has(lowerMime) ||
+    DOCUMENT_ATTACHMENT_EXTENSIONS.some((ext) => lowerName.endsWith(ext))
+  );
+}
+
+function isTextAttachment(fileName: string, mimeType: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  const lowerMime = mimeType.toLowerCase();
+  return (
+    TEXT_ATTACHMENT_MIME_TYPES.has(lowerMime) ||
+    TEXT_ATTACHMENT_EXTENSIONS.some((ext) => lowerName.endsWith(ext))
+  );
+}
+
+function isReadableAttachment(fileName: string, mimeType: string): boolean {
+  return isDocumentAttachment(fileName, mimeType) || isTextAttachment(fileName, mimeType);
+}
+
+async function ingestAttachmentToMarkdown(
+  fileName: string,
+  mimeType: string,
+  url: string,
+  size: number,
+): Promise<Array<{ path: string; content: string }>> {
+  const response = await fetch(`${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/internal/attachments/ingest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify({
+      attachments: [{
+        fileName,
+        mimeType,
+        url,
+        size,
+      }],
+    }),
+    signal: AbortSignal.timeout(ATTACHMENT_INGEST_TIMEOUT_MS),
+  });
+
+  const data = (await response
+    .json()
+    .catch(() => ({ success: false, error: "invalid JSON from attachment ingest service" }))) as AttachmentIngestResponse;
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.error ?? `attachment ingest service returned HTTP ${response.status}`);
+  }
+  return Array.isArray(data.files) ? data.files : [];
+}
+
+async function downloadSmallAttachmentFromSignedUrl(
+  fileName: string,
+  mimeType: string,
+  size: number,
+  url: string,
+): Promise<Buffer> {
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`signed URL returned HTTP ${response.status}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+    throw new Error(
+      `downloaded size ${formatAttachmentBytes(buffer.length)} exceeds inline fallback limit ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)} for "${fileName}" (${mimeType}, declared ${formatAttachmentBytes(size)})`,
+    );
+  }
+  return buffer;
+}
+
 const spacesThreadAttachments: ToolDef = {
   name: "spaces-thread-attachments",
   description:
@@ -4356,8 +4509,8 @@ const spacesThreadAttachments: ToolDef = {
 const spacesFetchAttachment: ToolDef = {
   name: "spaces-fetch-attachment",
   description:
-    "Download a Spaces attachment by id. The file lands in `.context/<fileName>` inside the agent's workspace; " +
-    "use the standard `read` tool to view it afterwards. " +
+    "Fetch a Spaces attachment by id. Readable documents (PDF/DOCX/XLSX/PPTX/HTML/ZIP/text) are returned as extracted text/markdown; " +
+    "large extracted results may be saved to `.context/tool-results/` by the runtime, and small binary files land in `.context/<fileName>`. " +
     "Use this AFTER spaces-thread-attachments to retrieve specific files the user is asking about.",
   inputSchema: {
     type: "object",
@@ -4383,17 +4536,73 @@ const spacesFetchAttachment: ToolDef = {
       }
       const m = meta[0]!;
 
-      // Download via the user-token route. The MCP child has the user's
-      // bearer in XYNE_SPACES_TOKEN, so this resolves the same as a UI fetch.
-      const { buffer } = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(attachmentId)}/download`);
+      let signed: SignedAttachmentUrlResponse;
+      try {
+        signed = (await spacesFetch(
+          `/api/attachments/${encodeURIComponent(attachmentId)}/signed-url`,
+        )) as SignedAttachmentUrlResponse;
+      } catch (signedErr) {
+        const sizeText = formatAttachmentBytes(m.size);
+        return err(
+          `Could not get a short-lived download link for attachment "${m.originalFilename}" (${m.mimetype}, ${sizeText}). ` +
+          `Spaces denied or failed the signed-url request: ${signedErr instanceof Error ? signedErr.message : String(signedErr)}. ` +
+          "This uses the same attachment permissions as the normal Spaces download; confirm the file is still in the thread and that the requester can access it.",
+        );
+      }
 
       // Sanitise filename to keep it within .context/ — strip path separators
       // and leading dots so the agent can't be tricked into reading outside.
-      const safeName = m.originalFilename.replace(/[/\\]/g, "_").replace(/^\.+/, "");
+      const signedName = signed.filename || m.originalFilename;
+      const signedMimeType = signed.mimeType || m.mimetype || "application/octet-stream";
+      const safeName = signedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+      const declaredSize = Number.isFinite(signed.size) && signed.size > 0 ? signed.size : m.size;
+      const expiryText = `${signed.expiresInMinutes} minute${signed.expiresInMinutes === 1 ? "" : "s"}`;
+
+      if (isReadableAttachment(safeName, signedMimeType)) {
+        try {
+          const files = await ingestAttachmentToMarkdown(safeName, signedMimeType, signed.url, declaredSize);
+          if (files.length === 0) {
+            return ok(
+              `Fetched attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) via a ${expiryText} signed URL, ` +
+              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
+            );
+          }
+          const rendered = files
+            .map((f) => `# ${f.path}\n\n${f.content}`)
+            .join("\n\n---\n\n");
+          return ok(
+            `Fetched attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) via a ${expiryText} signed URL and extracted it to markdown. ` +
+            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
+          );
+        } catch (ingestErr) {
+          return err(
+            `Could not extract attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) from the ${expiryText} signed URL: ` +
+            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
+            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the signed URL expired.`,
+          );
+        }
+      }
+
+      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+        return err(
+          `Attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
+          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
+          `This file type is not supported by the text extraction path, so only a ${expiryText} signed URL was available and the file was not returned as base64 through MCP. ` +
+          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+        );
+      }
+
+      const buffer = await downloadSmallAttachmentFromSignedUrl(safeName, signedMimeType, declaredSize, signed.url)
+        .catch((downloadErr) => {
+          throw new Error(
+            `Could not download unsupported attachment "${safeName}" (${signedMimeType}, ${formatAttachmentBytes(declaredSize)}) from the ${expiryText} signed URL: ` +
+            `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+          );
+        });
 
       // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
       // base64 and writes the buffer to .context/<fileName> in the workspace.
-      return ok(`[SPACES_ATTACHMENT:${safeName}:${m.mimetype}]\n${buffer.toString("base64")}`);
+      return ok(`[SPACES_ATTACHMENT:${safeName}:${signedMimeType}]\n${buffer.toString("base64")}`);
     } catch (e) {
       return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
     }
