@@ -1,6 +1,50 @@
 # Main project configuration for xyne-spaces
-# This file contains all the development environment and service configurations
+#
+# This mirrors docker-compose.dev.yml service-for-service; when a service is
+# added or changed there, change it here too:
+#   postgres (xyne_dev_db + xyne_common + claw_auth_db)  ← docker/init-db.sh
+#   redis · livekit · zero-cache · fake-gcs · minio · ysweet
+#   otel-collector · victoriametrics · grafana
+#   transcription-agent (python)
+#   superposition · livekit-egress (container images only — run via docker/podman
+#   when available, skipped with a warning otherwise)
 { pkgs, lib, flakeInputs, ... }:
+let
+  # Every port the stack binds. Keep in sync with docker-compose.dev.yml.
+  allPorts = [
+    5433 # postgres
+    6379 # redis
+    7880 # livekit
+    4848 # zero-cache
+    4849 # zero-cache (change streamer)
+    8080 # ysweet
+    4443 # fake-gcs
+    9000 # minio api
+    9001 # minio console
+    8001 # transcription-agent health
+    4317 # otel grpc
+    4318 # otel http
+    8888 # otel self-metrics
+    8428 # victoriametrics
+    3333 # grafana
+    9999 # superposition
+  ];
+  portList = lib.concatMapStringsSep " " toString allPorts;
+
+  # Run a docker-image-only service via docker/podman, or skip gracefully.
+  # Used for services with no native package (superposition, livekit-egress).
+  containerFallback = name: runArgs: pkgs.writeShellScript "container-${name}" ''
+    RUNTIME=$(command -v docker || command -v podman || true)
+    if [ -z "$RUNTIME" ]; then
+      echo "⚠ ${name}: docker/podman not found — skipping (container-image-only service)"
+      exec tail -f /dev/null
+    fi
+    "$RUNTIME" rm -f xyne-nix-${name} 2>/dev/null || true
+    exec "$RUNTIME" run --rm --name xyne-nix-${name} \
+      --add-host host.docker.internal:host-gateway \
+      ${runArgs}
+  '';
+in
 {
   imports = [
     ./nix/modules/devshell.nix
@@ -11,40 +55,31 @@
     name = "xyne-spaces-dev";
 
     packages = with pkgs; [
-      nodejs
+      nodejs_22
+      pnpm # repo pins pnpm 10.x via packageManager/corepack; nixpkgs' pnpm 10 works
       just
     ];
 
     banner = ''
       # Xyne Spaces Dev Environment
 
-      Node.js: ${pkgs.nodejs.version}
+      Node.js: ${pkgs.nodejs_22.version} · pnpm: ${pkgs.pnpm.version}
 
       ## Getting Started
 
       ```bash
-      # Start services (automatically cleans up ports first)
-      nix run .#xyne-space-services  # Or, `just services`
-      # Run backend
-      cd apps/backend && pnpm install && pnpm run dev
-      # Run dashboard
-      cd apps/dashboard && pnpm install && pnpm run dev
+      pnpm run env:setup && pnpm run setup && pnpm run secrets  # one-time
+      nix run .#xyne-space-services   # infra (or `just services` for docker)
+      pnpm run dev:all                # backend + dashboard + claw + auth
       ```
 
-      ## Cleanup Commands
+      ## Cleanup
 
       ```bash
-      # Cleanup ports and database volumes (like docker-compose down -v)
-      nix run .#cleanup    # Or, `just cleanup`
-      
-      # Quick port cleanup only (no database wipe)
-      just cleanup-ports
+      nix run .#cleanup   # ports + database volumes (like docker compose down -v)
       ```
 
-      ## More info?
-
-      Edit `project.nix` to modify Nix setup.
-      Run `just` to see all available commands.
+      Edit `project.nix` to modify the Nix setup. Run `just` for all commands.
     '';
   };
 
@@ -59,23 +94,18 @@
 
     # Create data directories and cleanup ports before starting processes
     cli.preHook = ''
-      # Cleanup ports before starting services
       echo "🧹 Cleaning up development services..."
-      
-      # Kill all process-compose instances
       pkill -f process-compose 2>/dev/null || true
-      
-      # Kill processes on specific ports
-      PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
-      for port in "''${PORTS[@]}"; do
+
+      for port in ${portList}; do
         lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
       done
-      
+
       sleep 1
       echo "✓ All development ports are free"
-      
-      # Create necessary directories
-      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs .nix-cache
+
+      mkdir -p data/zero-cache data/ysweet data/fake-gcs data/minio \
+               data/victoriametrics data/grafana .logs .nix-cache
     '';
 
     # Configure log files for all processes
@@ -83,84 +113,125 @@
       log_location = ".logs/${name}.log";
     };
 
-    # Database setup process (runs once after PostgreSQL is ready)
+    # Database setup process (runs once after PostgreSQL is ready).
+    #
+    # Mirrors the pnpm setup (scripts/start-services.sh "Database setup"
+    # section) step for step — same schema pushes, same seed scripts, same
+    # workspace verification. If start-services.sh changes, change this too.
     settings.processes.db-setup = {
       command = toString (pkgs.writeShellScript "db-setup" ''
-        set -e  # Exit on error
-        set -o pipefail  # Catch errors in pipes
-        
+        set -e
+        set -o pipefail
+
         echo "=== Starting database setup process ==="
-        echo "PWD: $PWD"
-        echo "Checking PostgreSQL health..."
-        
-        # Wait for PostgreSQL to be ready
-        if ! ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -c "SELECT 1;" > /dev/null 2>&1; then
+        ROOT="$PWD"
+        rm -f "$ROOT/data/.db-setup-ready"
+        PSQL="${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne"
+        PNPM="${pkgs.pnpm}/bin/pnpm"
+
+        if ! $PSQL -d xyne_dev_db -c "SELECT 1;" > /dev/null 2>&1; then
           echo "ERROR: PostgreSQL is not ready"
           exit 1
         fi
         echo "✓ PostgreSQL is healthy"
-        
-        # Get project root (where we were invoked from)
-        PROJECT_ROOT="$PWD"
-        BACKEND_DIR="$PROJECT_ROOT/backend"
-        
-        echo "Project root: $PROJECT_ROOT"
-        echo "Backend dir: $BACKEND_DIR"
-        
-        # Only run setup if backend has dependencies
+
+        BACKEND_DIR="$PWD/apps/backend"
+
         if [ ! -d "$BACKEND_DIR/node_modules" ]; then
           echo "Backend dependencies not installed. Skipping database setup."
-          echo "Run: cd apps/backend && pnpm install"
+          echo "Run: pnpm install (repo root)"
           exit 0
         fi
-        echo "✓ Backend node_modules found"
-        
+
         cd "$BACKEND_DIR"
-        echo "Changed to backend directory"
-        
-        # Check if users table exists
-        echo "Checking if users table exists..."
-        USER_COUNT=$(${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM users;" 2>&1 || echo "ERROR")
+
+        USER_COUNT=$($PSQL -d xyne_dev_db -t -c "SELECT COUNT(*) FROM users;" 2>&1 || echo "ERROR")
         USER_COUNT=$(echo "$USER_COUNT" | xargs)
-        echo "User count: $USER_COUNT"
-        
+
         if [[ "$USER_COUNT" == *"ERROR"* ]] || [[ "$USER_COUNT" == *"does not exist"* ]] || [ -z "$USER_COUNT" ]; then
           echo "Setting up database from scratch..."
-          
-          # Drop and recreate database
-          ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null || true
-          ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db;" 2>/dev/null || true
-          
-          # Push schema
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
-          
-          # Seed ACL system
-          echo "Seeding ACL system..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
-          echo "✓ ACL system seeded"
-          
-          # Auto-create admin user from DEFAULT_ADMIN_EMAIL
-          echo ""
-          echo "Creating default admin user..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts
-          echo ""
-          echo "✓ Database setup complete"
+
+          # A force-reset invalidates zero-cache's replica; wipe it so zero
+          # resyncs from scratch (start-services.sh removes the volume).
+          rm -rf "$ROOT/data/zero-cache"
+          mkdir -p "$ROOT/data/zero-cache"
+
+          echo "  Flushing Redis (stale queue jobs reference the dropped database)..."
+          ${pkgs.redis}/bin/redis-cli -h 127.0.0.1 -p 6379 FLUSHALL >/dev/null 2>&1 || true
+
+          echo "  Creating database schema..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
+
+          echo "  Creating common database schema..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma --force-reset --accept-data-loss --skip-generate
+
+          echo "  Generating Prisma clients..."
+          $PNPM exec prisma generate
+          $PNPM exec prisma generate --schema prisma-common/schema.prisma
+
+          echo "  Seeding ACL system..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
+
+          echo "  Creating developer user..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts
+
+          echo "  Seeding app permission registry..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-app-permissions.ts
         else
           echo "Syncing database schema..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
-          echo "✓ Database schema is up to date"
+          $PNPM exec dotenv -e .env.local -- pnpm exec prisma db push
+
+          echo "Syncing common database schema..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate
+          $PNPM exec prisma generate --schema prisma-common/schema.prisma
+
+          # Only a bare integer means the query answered; anything else means
+          # "cannot conclude" — seed to be safe (seeding is idempotent).
+          WORKSPACE_EXISTS=$($PSQL -d xyne_dev_db -t -c "SELECT COUNT(*) FROM workspaces WHERE name = 'Default Workspace';" 2>&1 | xargs)
+          if printf '%s' "$WORKSPACE_EXISTS" | grep -qE '^[0-9]+$' && [ "$WORKSPACE_EXISTS" != "0" ]; then
+            echo "✓ Default workspace exists"
+          else
+            echo "  Default workspace missing/unreadable. Seeding to be safe..."
+            $PNPM exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
+            $PNPM exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts 2>/dev/null \
+              || echo "  Developer user already present"
+          fi
         fi
-        
+
+        # Verify the seed actually produced a workspace before anything
+        # downstream depends on it — same gate as start-services.sh.
+        WORKSPACE_CHECK=$($PSQL -d xyne_dev_db -t -c "SELECT COUNT(*) FROM workspaces WHERE name = 'Default Workspace';" 2>&1 | xargs)
+        if ! printf '%s' "$WORKSPACE_CHECK" | grep -qE '^[1-9][0-9]*$'; then
+          echo "ERROR: database setup finished but there is no \"Default Workspace\" (psql said: $WORKSPACE_CHECK)"
+          exit 1
+        fi
+
+        # Sample workspace content — non-fatal, skips itself if already run.
+        if [ "''${SKIP_DEMO_SEED:-0}" != "1" ]; then
+          echo "  Seeding sample workspace data..."
+          $PNPM exec dotenv -e .env.local -- pnpm exec tsx scripts/demo-seed.ts \
+            || echo "  Sample data seeding failed — continuing without it."
+        fi
+
         echo "✓ Database ready"
-        
-        # Keep the process running
+        touch "$ROOT/data/.db-setup-ready"
         tail -f /dev/null
       '');
-      
+
       depends_on = {
         xyne-db = { condition = "process_healthy"; };
+        xyne-redis = { condition = "process_healthy"; };
       };
-      
+
+      readiness_probe = {
+        exec.command = "test -f data/.db-setup-ready";
+        initial_delay_seconds = 2;
+        period_seconds = 3;
+        timeout_seconds = 2;
+        success_threshold = 1;
+        failure_threshold = 200; # schema push + seeds can take minutes on first run
+      };
+
       namespace = "setup.db-setup";
       availability.restart = "on_failure";
     };
@@ -168,7 +239,8 @@
     # Disable TUI for headless operation
     settings.environment.PC_DISABLE_TUI = "true";
 
-    # PostgreSQL service
+    # PostgreSQL service — one cluster, three logical databases, exactly like
+    # docker/init-db.sh (xyne_dev_db, xyne_common, claw_auth_db + claw role).
     services.postgres."xyne-db" = {
       enable = true;
       listen_addresses = "127.0.0.1";
@@ -178,6 +250,8 @@
 
       initialDatabases = [
         { name = "xyne_dev_db"; }
+        { name = "xyne_common"; }
+        { name = "claw_auth_db"; }
       ];
 
       initialScript.after = ''
@@ -187,8 +261,19 @@
         ALTER SYSTEM SET max_wal_senders = 10;
         SELECT pg_reload_conf();
 
-        -- Grant permissions
+        -- claw-auth connects as its own role (parity with docker/init-db.sh)
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'claw') THEN
+            CREATE ROLE claw LOGIN PASSWORD 'claw123';
+          END IF;
+        END
+        $$;
+
         GRANT ALL PRIVILEGES ON DATABASE xyne_dev_db TO xyne;
+        GRANT ALL PRIVILEGES ON DATABASE xyne_common TO xyne;
+        GRANT ALL PRIVILEGES ON DATABASE claw_auth_db TO claw;
+        ALTER DATABASE claw_auth_db OWNER TO claw;
       '';
     };
 
@@ -233,16 +318,17 @@
       };
     };
 
-    # Add dependency: zero-cache depends on postgres
+    # zero-cache starts only after the database is set up — a schema
+    # force-reset with zero attached would leave a stale replica (parity with
+    # start-services.sh, which starts zero-cache after the DB section).
     settings.processes."xyne-zero".depends_on."xyne-db".condition = "process_healthy";
+    settings.processes."xyne-zero".depends_on."db-setup".condition = "process_healthy";
 
     # Fake GCS Server (native Nix package)
     settings.processes.fake-gcs = {
       command = toString (pkgs.writeShellScript "fake-gcs" ''
-        # Create data directory
         mkdir -p "$PWD/data/fake-gcs"
-        
-        # Run fake-gcs-server with absolute path
+
         ${pkgs.fake-gcs-server}/bin/fake-gcs-server \
           -scheme http \
           -host 0.0.0.0 \
@@ -250,7 +336,7 @@
           -external-url http://localhost:4443 \
           -filesystem-root "$PWD/data/fake-gcs"
       '');
-      
+
       readiness_probe = {
         http_get = {
           host = "127.0.0.1";
@@ -263,8 +349,37 @@
         success_threshold = 1;
         failure_threshold = 3;
       };
-      
+
       namespace = "storage.fake-gcs";
+      availability.restart = "on_failure";
+    };
+
+    # MinIO — local S3 emulator for STORAGE_PROVIDER=s3 (@xyne/storage).
+    # Parity with the compose `minio` service (minioadmin/minioadmin, 9000/9001).
+    settings.processes.minio = {
+      command = toString (pkgs.writeShellScript "minio" ''
+        mkdir -p "$PWD/data/minio"
+        export MINIO_ROOT_USER=minioadmin
+        export MINIO_ROOT_PASSWORD=minioadmin
+        exec ${pkgs.minio}/bin/minio server "$PWD/data/minio" \
+          --address :9000 \
+          --console-address :9001
+      '');
+
+      readiness_probe = {
+        http_get = {
+          host = "127.0.0.1";
+          port = 9000;
+          path = "/minio/health/live";
+        };
+        initial_delay_seconds = 2;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 3;
+      };
+
+      namespace = "storage.minio";
       availability.restart = "on_failure";
     };
 
@@ -272,16 +387,15 @@
     settings.processes.ysweet = {
       command = toString (pkgs.writeShellScript "ysweet" ''
         mkdir -p "$PWD/data/ysweet"
-        
+
         # Download y-sweet if not present
         YSWEET_DIR="$PWD/.nix-cache/ysweet"
         YSWEET_BIN="$YSWEET_DIR/y-sweet"
-        
+
         if [ ! -f "$YSWEET_BIN" ]; then
           echo "📦 Downloading y-sweet binary..."
           mkdir -p "$YSWEET_DIR"
-          
-          # Detect platform
+
           if [[ "$OSTYPE" == "darwin"* ]]; then
             if [[ $(uname -m) == "arm64" ]]; then
               PLATFORM="macos-arm64"
@@ -295,25 +409,28 @@
               PLATFORM="linux-x64"
             fi
           fi
-          
-          # Download from GitHub releases (note: .gz not .tar.gz)
+
           ${pkgs.curl}/bin/curl -L \
             "https://github.com/jamsocket/y-sweet/releases/latest/download/y-sweet-$PLATFORM.gz" \
             -o "$YSWEET_DIR/y-sweet.gz"
-          
+
           ${pkgs.gzip}/bin/gunzip "$YSWEET_DIR/y-sweet.gz"
           chmod +x "$YSWEET_BIN"
           echo "✓ y-sweet downloaded"
         fi
-        
-        # Run y-sweet
+
+        # OTEL parity with the compose service
+        export Y_SWEET_OTEL_ENDPOINT="''${Y_SWEET_OTEL_ENDPOINT:-http://127.0.0.1:4318/v1/metrics}"
+        export Y_SWEET_OTEL_SERVICE_NAME="''${Y_SWEET_OTEL_SERVICE_NAME:-y-sweet}"
+        export Y_SWEET_OTEL_PUSH_INTERVAL="''${Y_SWEET_OTEL_PUSH_INTERVAL:-30}"
+
         "$YSWEET_BIN" serve \
           --host 0.0.0.0 \
           --port 8080 \
           --checkpoint-freq-seconds 10 \
           "$PWD/data/ysweet"
       '');
-      
+
       readiness_probe = {
         exec.command = "${pkgs.netcat}/bin/nc -z 127.0.0.1 8080";
         initial_delay_seconds = 2;
@@ -322,8 +439,138 @@
         success_threshold = 1;
         failure_threshold = 3;
       };
-      
+
       namespace = "collab.ysweet";
+      availability.restart = "on_failure";
+    };
+
+    # VictoriaMetrics — metrics store (compose parity: port 8428, 12mo retention)
+    settings.processes.victoriametrics = {
+      command = toString (pkgs.writeShellScript "victoriametrics" ''
+        mkdir -p "$PWD/data/victoriametrics"
+        exec ${pkgs.victoriametrics}/bin/victoria-metrics \
+          --storageDataPath="$PWD/data/victoriametrics" \
+          --httpListenAddr=:8428 \
+          --retentionPeriod=12 \
+          --promscrape.config="$PWD/scrape.yml"
+      '');
+
+      readiness_probe = {
+        http_get = { host = "127.0.0.1"; port = 8428; path = "/health"; };
+        initial_delay_seconds = 2;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 3;
+      };
+
+      namespace = "monitoring.victoriametrics";
+      availability.restart = "on_failure";
+    };
+
+    # OpenTelemetry Collector — same config file as compose, with the docker
+    # hostname rewritten to loopback for the native process.
+    settings.processes.otel-collector = {
+      command = toString (pkgs.writeShellScript "otel-collector" ''
+        mkdir -p "$PWD/data"
+        ${pkgs.gnused}/bin/sed 's/victoriametrics:8428/127.0.0.1:8428/' \
+          "$PWD/otelCollector/otel-collector-config.yaml" > "$PWD/data/otel-collector-config.native.yaml"
+        exec ${pkgs.opentelemetry-collector-contrib}/bin/otelcol-contrib \
+          --config="$PWD/data/otel-collector-config.native.yaml"
+      '');
+
+      depends_on = {
+        victoriametrics = { condition = "process_healthy"; };
+      };
+
+      namespace = "monitoring.otel-collector";
+      availability.restart = "on_failure";
+    };
+
+    # Grafana — dashboards, provisioned from docker/grafana/provisioning
+    settings.processes.grafana = {
+      command = toString (pkgs.writeShellScript "grafana" ''
+        mkdir -p "$PWD/data/grafana/plugins"
+        export GF_SECURITY_ADMIN_USER=admin
+        export GF_SECURITY_ADMIN_PASSWORD=admin
+        export GF_USERS_ALLOW_SIGN_UP=false
+        export GF_SERVER_HTTP_PORT=3333
+        export GF_SERVER_ROOT_URL=http://localhost:3333
+        export GF_PATHS_DATA="$PWD/data/grafana"
+        export GF_PATHS_PLUGINS="$PWD/data/grafana/plugins"
+        export GF_PATHS_PROVISIONING="$PWD/docker/grafana/provisioning"
+        exec ${pkgs.grafana}/bin/grafana server \
+          --homepath ${pkgs.grafana}/share/grafana
+      '');
+
+      depends_on = {
+        victoriametrics = { condition = "process_healthy"; };
+      };
+
+      readiness_probe = {
+        http_get = { host = "127.0.0.1"; port = 3333; path = "/api/health"; };
+        initial_delay_seconds = 5;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 5;
+      };
+
+      namespace = "monitoring.grafana";
+      availability.restart = "on_failure";
+    };
+
+    # Superposition — feature flags. Demo image only (no nixpkgs package), so
+    # this runs via docker/podman when available and skips otherwise.
+    settings.processes.superposition = {
+      command = toString (containerFallback "superposition" ''
+        -p 9999:8080 \
+        -e SUPERPOSITION_TOKEN=123456 \
+        -e SUPERPOSITION_ORG_ID=localorg \
+        -e SUPERPOSITION_WORKSPACE_ID=test \
+        -e REDIS_URL=redis://host.docker.internal:6379 \
+        ghcr.io/juspay/superposition-demo:latest
+      '');
+
+      depends_on = {
+        xyne-redis = { condition = "process_healthy"; };
+      };
+
+      namespace = "flags.superposition";
+      availability.restart = "on_failure";
+    };
+
+    # LiveKit Egress — audio recording. Image-only (GStreamer stack), so same
+    # container fallback; hostnames in egress.yaml are rewritten for host networking.
+    settings.processes.livekit-egress = {
+      command = toString (pkgs.writeShellScript "livekit-egress" ''
+        RUNTIME=$(command -v docker || command -v podman || true)
+        if [ -z "$RUNTIME" ]; then
+          echo "⚠ livekit-egress: docker/podman not found — skipping (container-image-only service)"
+          exec tail -f /dev/null
+        fi
+        mkdir -p "$PWD/data"
+        ${pkgs.gnused}/bin/sed \
+          -e 's/redis:6379/host.docker.internal:6379/' \
+          -e 's/livekit:7880/host.docker.internal:7880/' \
+          -e 's|http://fake-gcs:4443|http://host.docker.internal:4443|' \
+          "$PWD/docker/egress.yaml" > "$PWD/data/egress.native.yaml"
+        "$RUNTIME" rm -f xyne-nix-livekit-egress 2>/dev/null || true
+        exec "$RUNTIME" run --rm --name xyne-nix-livekit-egress \
+          --add-host host.docker.internal:host-gateway \
+          -e EGRESS_CONFIG_FILE=/etc/egress.yaml \
+          -e STORAGE_EMULATOR_HOST=http://host.docker.internal:4443 \
+          -v "$PWD/data/egress.native.yaml":/etc/egress.yaml \
+          mirror.gcr.io/livekit/egress:latest
+      '');
+
+      depends_on = {
+        xyne-livekit = { condition = "process_healthy"; };
+        xyne-redis = { condition = "process_healthy"; };
+        fake-gcs = { condition = "process_healthy"; };
+      };
+
+      namespace = "media.livekit-egress";
       availability.restart = "on_failure";
     };
 
@@ -332,8 +579,7 @@
       command = toString (pkgs.writeShellScript "transcription-agent" ''
         cd apps/backend/python-agent
         mkdir -p transcriptions
-        
-        # Set environment variables
+
         export LIVEKIT_URL="ws://127.0.0.1:7880"
         export LIVEKIT_API_KEY="devkey"
         export LIVEKIT_API_SECRET="devsecret"
@@ -343,28 +589,26 @@
         export REDIS_PORT="6379"
         export STORAGE_EMULATOR_HOST="http://127.0.0.1:4443"
         export HEALTH_PORT="8001"
-        
-        # Create virtual environment if it doesn't exist
+
         if [ ! -d ".venv" ]; then
           echo "📦 Creating Python virtual environment..."
           ${pkgs.python3}/bin/python -m venv .venv
-          
+
           echo "📦 Installing dependencies (this may take a minute)..."
           .venv/bin/pip install --upgrade pip setuptools wheel
           .venv/bin/pip install -r requirements.txt
           echo "✓ Dependencies installed"
         fi
-        
-        # Run the agent using the venv with 'start' command
+
         .venv/bin/python main.py start
       '');
-      
+
       depends_on = {
         xyne-livekit = { condition = "process_healthy"; };
         xyne-redis = { condition = "process_healthy"; };
         fake-gcs = { condition = "process_healthy"; };
       };
-      
+
       readiness_probe = {
         http_get = {
           host = "127.0.0.1";
@@ -377,7 +621,7 @@
         success_threshold = 1;
         failure_threshold = 5;
       };
-      
+
       namespace = "ai.transcription-agent";
       availability.restart = "on_failure";
     };
@@ -393,71 +637,63 @@
       type = "app";
       program = toString (pkgs.writeShellScript "xyne-cleanup" ''
         set -e
-        
+
         GREEN='\033[0;32m'
         BLUE='\033[0;34m'
         YELLOW='\033[1;33m'
         NC='\033[0m'
-        
+
         echo -e "''${BLUE}🧹 Starting cleanup...''${NC}"
         echo ""
-        
+
         # 1. Clean up ports and processes
         echo -e "''${YELLOW}1. Cleaning up ports and processes...''${NC}"
         pkill -f process-compose 2>/dev/null || true
-        
-        PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
-        for port in "''${PORTS[@]}"; do
+
+        for port in ${portList}; do
           lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
         done
+
+        # Stop container-fallback services if a runtime is present
+        RUNTIME=$(command -v docker || command -v podman || true)
+        if [ -n "$RUNTIME" ]; then
+          "$RUNTIME" rm -f xyne-nix-superposition xyne-nix-livekit-egress 2>/dev/null || true
+        fi
         echo -e "''${GREEN}   ✓ Ports and processes cleaned''${NC}"
         echo ""
-        
+
         # 2. Clean up Nix data directories
         echo -e "''${YELLOW}2. Cleaning up database volumes...''${NC}"
         if [ -d "data" ]; then
-          echo "   Removing data/ directory (PostgreSQL, Redis, Zero Cache data)..."
+          echo "   Removing data/ directory (PostgreSQL, Redis, Zero, MinIO, Grafana, VM data)..."
           rm -rf data/
           echo -e "''${GREEN}   ✓ data/ removed (databases wiped)''${NC}"
         fi
-        
+
         if [ -d ".logs" ]; then
-          echo "   Removing .logs/ directory..."
           rm -rf .logs/
           echo -e "''${GREEN}   ✓ .logs/ removed''${NC}"
         fi
-        
+
         if [ -d ".nix-cache" ]; then
-          echo "   Removing .nix-cache/ directory (downloaded binaries)..."
           rm -rf .nix-cache/
-          echo -e "''${GREEN}   ✓ .nix-cache/ removed''${NC}"
+          echo -e "''${GREEN}   ✓ .nix-cache/ removed (downloaded binaries)''${NC}"
         fi
-        
+
         if [ -d "apps/backend/python-agent/.venv" ]; then
-          echo "   Removing Python virtual environment..."
           rm -rf apps/backend/python-agent/.venv
           echo -e "''${GREEN}   ✓ Python .venv/ removed''${NC}"
         fi
         echo ""
-        
+
         echo -e "''${YELLOW}⚠️  This is equivalent to 'docker-compose down -v' (volumes removed)''${NC}"
         echo ""
         echo -e "''${GREEN}✅ Cleanup complete!''${NC}"
         echo ""
-        echo -e "''${BLUE}What was cleaned:''${NC}"
-        echo "  ✓ All service processes and ports"
-        echo "  ✓ All database volumes (PostgreSQL, Redis, Zero Cache)"
-        echo "  ✓ All service data (YSweet, Fake GCS)"
-        echo ""
-        echo -e "''${YELLOW}⚠️  All local database data has been wiped!''${NC}"
-        echo -e "''${BLUE}Note: node_modules and caches were preserved''${NC}"
-        echo ""
         echo -e "''${BLUE}Next steps for fresh start:''${NC}"
         echo "  1. Run: nix run .#xyne-space-services"
-        echo "  2. Wait for services to start (~10 seconds)"
-        echo "  3. Run: cd apps/backend && pnpm run dev (in another terminal)"
-        echo "  4. Run: just assign-admin YOUR_EMAIL"
-        echo "  5. Run: cd apps/dashboard && pnpm run dev (in another terminal)"
+        echo "  2. Run: pnpm run dev:all (in another terminal)"
+        echo "  3. Run: just assign-admin YOUR_EMAIL"
         echo ""
       '');
     };
