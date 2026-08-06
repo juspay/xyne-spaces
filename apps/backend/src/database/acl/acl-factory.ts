@@ -247,6 +247,8 @@ export class ACLFactory {
       return new PullRequestsACL(ctx, prisma)
     case 'query':
       return new QueriesACL(ctx, prisma)
+    case 'questionnaireResponse':
+      return new BaseQueryACL(ctx, prisma)
     case 'rCA':
       return new RcasACL(ctx, prisma)
     case 'reaction':

@@ -21,6 +21,7 @@ import { hashPassword } from '../utils/passwordUtils';
 import { organizationDomainService } from './organizationDomainService';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { aiProvisioningService } from './aiProvisioningService';
+import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -870,7 +871,7 @@ export class InvitationService {
       newWorkspaceUser.id,
       newWorkspaceUser.email,
       invitation.role as WorkspaceRole,
-      invitation.workspaceId ?? undefined,
+      invitation.workspaceId,
     );
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
 
@@ -884,6 +885,15 @@ export class InvitationService {
         workspaceId: invitation.workspaceId,
         error,
       });
+    }
+
+    if (invitation.role !== 'GUEST' && invitation.workspaceId) {
+      await ensureUserInGeneralChannel(
+        this.prisma,
+        invitation.workspaceId,
+        newWorkspaceUser.id,
+        ChannelRole.MEMBER,
+      );
     }
 
     return { user: newWorkspaceUser, redirectPath };

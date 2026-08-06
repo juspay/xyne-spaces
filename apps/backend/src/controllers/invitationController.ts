@@ -16,6 +16,7 @@ import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole,
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
+import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 
 /**
  * Extract the hostname from an Origin header value.
@@ -518,6 +519,14 @@ export class InvitationController {
             workspaceId: workspace.id,
             role: WorkspaceRole.ADMIN,
           },
+        });
+
+        // Seed general channel + default project + board/stages
+        await createCommunityWorkspaceDefaults({
+          db: tx,
+          workspaceId: workspace.id,
+          workspaceName: workspaceName.trim(),
+          createdBy: invitedBy,
         });
 
         // Add owner as org_member (email-only — no User record yet)

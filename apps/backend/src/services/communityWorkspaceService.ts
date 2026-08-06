@@ -1,6 +1,7 @@
 import { User } from '@prisma/client';
 import { CommunityJoinResultStatus,
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
+  ChannelRole,
   OrgRole,
   WorkspaceJoinPolicy,
   WorkspaceJoinRequestAction,
@@ -11,7 +12,7 @@ import { CommunityJoinResultStatus,
   AuthProvider,
   Status,
   UserStatus,
-  WorkspaceRole, ChannelRole } from '@xyne/shared';
+  WorkspaceRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
