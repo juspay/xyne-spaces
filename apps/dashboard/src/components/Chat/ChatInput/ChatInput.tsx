@@ -42,6 +42,7 @@ import {
 import type { FocusPosition } from '@tiptap/react';
 import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import type { MentionResult } from '@xyne/shared';
+import { sendMessage, type ConversationRef } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
@@ -563,11 +564,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           twinEdit.onApprove(edited);
           return;
         }
-        if (isOffline) {
+        // Edits and thread replies still require a live connection. New
+        // top-level channel messages are allowed offline: the pending-message
+        // framework queues them and auto-retries on reconnect.
+        if (isOffline && (messageId || conversationId)) {
           toast.warning("You're offline", {
             description: messageId
               ? "Edits can't be saved until you reconnect."
-              : 'Your message has been saved as a draft. It will be ready to send when you reconnect.',
+              : "Thread replies can't be sent until you reconnect.",
           });
           throw new Error('offline');
         }
@@ -784,28 +788,23 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             // Scope the agent-progress spinner to this new conversation right away,
             // before the `conversationId` prop catches up (see pendingConversationId).
             setPendingConversationId(newConversationId);
-            const result = zero.mutate(
-              mutators.conversations.send({
-                channelId,
-                content: processedHtml,
-                type: MessageType.USER,
-                conversationId: newConversationId,
-                messageId: newMessageId,
-                timestamp: messageCreatedAt,
-              }),
-            );
+            // Route top-level channel sends through the shared pending-message
+            // framework. sendMessage writes a durable pending entry, fires
+            // mutators.conversations.send when Zero is connected (and queues it
+            // for auto-retry when it is not), and clears the entry once the
+            // server confirms the write. Failed sends stay queued and surface a
+            // retry/delete affordance instead of being restored to the composer.
+            const channelRef: ConversationRef = { kind: 'channel', channelId };
+            sendMessage(zero, channelRef, {
+              content: processedHtml,
+              type: MessageType.USER,
+              conversationId: newConversationId,
+              messageId: newMessageId,
+              timestamp: messageCreatedAt,
+            });
 
             saveDraft(lookupId, '', '');
-            handleMutationResult(
-              result,
-              restoreDraft,
-              () => dispatchChatMessageSentEvent(channelId),
-              undefined,
-              {
-                channelId,
-                isNewConversation: true,
-              },
-            );
+            dispatchChatMessageSentEvent(channelId);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
