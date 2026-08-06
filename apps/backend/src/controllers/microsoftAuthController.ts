@@ -643,7 +643,6 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        
         res.cookie('google_access_token', jwt.sign({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,

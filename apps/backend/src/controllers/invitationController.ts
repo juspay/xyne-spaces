@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { ProjectType, Status } from '@prisma/client';
 import { invitationService } from '@/services/invitationService';
+import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -131,23 +132,25 @@ export class InvitationController {
       const invitationLink =
         await buildInvitationLink({ req, workspaceId, invitationId: invitation.invitationId || invitation.id });
 
-      logger.info(`[InvitationController] Invitation link for ${email}: ${invitationLink}`);
+      if (config.env === 'development') {
+        logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
+      } else {
+        // Send invitation email
+        const emailResult = await invitationService.sendInvitationEmail({
+          to: email,
+          inviterName: req.user?.name || 'A team member',
+          workspaceName: invitation.workspace?.name || 'the workspace',
+          invitationLink,
+          invitationId: publicInvitationId,
+          tempPassword: tempPassword ?? undefined,
+        });
 
-      // Send invitation email
-      const emailResult = await invitationService.sendInvitationEmail({
-        to: email,
-        inviterName: req.user?.name || 'A team member',
-        workspaceName: invitation.workspace?.name || 'the workspace',
-        invitationLink,
-        invitationId: publicInvitationId,
-        tempPassword: tempPassword ?? undefined,
-      });
-
-      // If email failed, delete the invitation to maintain consistency
-      if (!emailResult.success) {
-        await invitationService.deleteInvitation(invitation.id);
-        invitation = null; // Prevent double-delete in catch block
-        throw new Error(`Failed to send invitation email: ${emailResult.error}`);
+        // If email failed, delete the invitation to maintain consistency
+        if (!emailResult.success) {
+          await invitationService.deleteInvitation(invitation.id);
+          invitation = null; // Prevent double-delete in catch block
+          throw new Error(`Failed to send invitation email: ${emailResult.error}`);
+        }
       }
 
       res.status(201).json({
@@ -315,6 +318,7 @@ export class InvitationController {
 
       let oauthUser: { email: string; googleId?: string; providerUserId?: string; name: string; picture?: string };
       let provider: string;
+      let pendingAuthJwtId: string | undefined;
 
       try {
         const decoded = jwt.verify(pendingAuthRaw, process.env.JWT_SECRET!) as {
@@ -326,8 +330,27 @@ export class InvitationController {
           provider?: string;
           refreshToken?: string | null;
           accessToken?: string | null;
+          jwtId?: string;
         };
         if (!decoded.email) throw new Error('Invalid JWT payload');
+
+        // Email/password pending-auth tokens carry a single-use jwtId, registered in Redis
+        // at mint time by emailAuthController. Google/Microsoft OAuth tokens don't mint one,
+        // so this replay check only applies to the EMAIL provider.
+        if (decoded.provider?.toUpperCase() === 'EMAIL') {
+          if (!decoded.jwtId) {
+            res.status(401).json({ error: 'Authentication session expired. Please login again.' });
+            return;
+          }
+
+          const jwtKey = `pendingauth:jwtid:${decoded.jwtId}`;
+          const jwtValue = await redisService.get(jwtKey);
+          if (!jwtValue) {
+            res.status(401).json({ error: 'Authentication session expired. Please login again.' });
+            return;
+          }
+          pendingAuthJwtId = decoded.jwtId;
+        }
 
         oauthUser = {
           email: decoded.email,
@@ -381,6 +404,11 @@ export class InvitationController {
           authProvider: authProvider,
         },
       });
+
+      // Consume the one-time pending-auth token so it cannot be replayed
+      if (pendingAuthJwtId) {
+        await redisService.del(`pendingauth:jwtid:${pendingAuthJwtId}`);
+      }
 
       res.status(200).json({
         success: true,

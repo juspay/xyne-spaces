@@ -1149,7 +1149,6 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
