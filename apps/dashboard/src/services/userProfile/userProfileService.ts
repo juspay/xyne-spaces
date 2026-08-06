@@ -41,6 +41,21 @@ export const uploadProfilePicture = async (file: File): Promise<string> => {
   }
 };
 
+export interface SaveQuestionnaireResponseInput {
+  questionnaireType: string;
+  response: Record<string, unknown>;
+}
+
+export const saveQuestionnaireResponse = async ({
+  questionnaireType,
+  response,
+}: SaveQuestionnaireResponseInput): Promise<void> => {
+  await apiInstance.post('/users/me/questionnaire', {
+    questionnaireType,
+    response,
+  });
+};
+
 export interface VoiceSignatureStatus {
   hasVoiceSignature: boolean;
 }

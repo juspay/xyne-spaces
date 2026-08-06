@@ -30,7 +30,7 @@ interface GeneralChannelResult {
 export async function ensureGeneralChannelForWorkspace(
   params: EnsureGeneralChannelParams,
 ): Promise<GeneralChannelResult> {
-  const { db, workspaceId, workspaceName, createdBy, userId, role = 'MEMBER' } = params;
+  const { db, workspaceId, workspaceName, createdBy, userId, role = ChannelRole.MEMBER } = params;
 
   const existing = await db.channel.findFirst({
     where: {

@@ -9824,11 +9824,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       upsert: defineMutator(
         z.object({
           displayName: z.string().nullable().optional(),
+          role: z.string().nullable().optional(),
           pronunciation: z.string().nullable().optional(),
           team: z.string().nullable().optional(),
           phoneNumber: z.string().nullable().optional(),
           dob: z.number().nullable().optional(),
           manager: z.string().nullable().optional(),
+          metadata: z.string().nullable().optional(),
           timestamp: z.number(),
           profileId: z.string(),
         }),
@@ -9848,22 +9850,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: string;
             userId: string;
             displayName?: string | null;
+            role?: string | null;
             pronunciation?: string | null;
             team?: string | null;
             phoneNumber?: string | null;
             dob?: number | null;
             manager?: string | null;
+            metadata?: string | null;
             updatedAt: number;
             createdAt: number;
           } = {
             id: profileId,
             userId: authData.sub,
             ...(params.displayName !== undefined && { displayName: params.displayName }),
+            ...(params.role !== undefined && { role: params.role }),
             ...(params.pronunciation !== undefined && { pronunciation: params.pronunciation }),
             ...(params.team !== undefined && { team: params.team }),
             ...(params.phoneNumber !== undefined && { phoneNumber: params.phoneNumber }),
             ...(params.dob !== undefined && { dob: params.dob }),
             ...(params.manager !== undefined && { manager: params.manager }),
+            ...(params.metadata !== undefined && { metadata: params.metadata }),
             updatedAt: now,
             createdAt: existingProfile ? existingProfile.createdAt || now : now,
           };

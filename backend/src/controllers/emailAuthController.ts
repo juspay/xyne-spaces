@@ -1,9 +1,7 @@
 import crypto from 'crypto';
-import { AuthProvider } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { UserSessionService } from '../services/userSessionService';
-import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';
 import {
   verifyPassword,
@@ -18,9 +16,8 @@ import {
   OrganizationDomainConflictError,
   PublicEmailDomainError,
 } from '@/services/organizationDomainService';
+import { UserService } from '@/services/userService';
 import '../types/express';
-import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
-import { logger } from '@/utils/logger';
 
 interface ResetCodePayload {
   code: string;
@@ -40,11 +37,9 @@ const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
 
 const REGISTER_RATE_LIMIT_SECONDS = 60;
-const REGISTER_REQUEST_MESSAGE = 'If this email is not already registered, a verification code has been sent.';
 const REGISTER_CODE_TTL_SECONDS = 15 * 60;
 const REGISTER_MAX_VERIFY_ATTEMPTS = 3;
-const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-const NAME_REGEX = /^[a-zA-Z][a-zA-Z\s]*$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class EmailAuthController {
   private userSessionService: UserSessionService;
@@ -84,8 +79,9 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
-      const loginLockKey = `emaillogin:lock:${normalizedEmail}`;
-      const loginAttemptKey = `emaillogin:attempts:${normalizedEmail}`;
+      const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+      const loginLockKey = `emaillogin:lock:ip:${clientIp}:${normalizedEmail}`;
+      const loginAttemptKey = `emaillogin:attempts:ip:${clientIp}:${normalizedEmail}`;
 
       const existingLock = await redisService.get(loginLockKey);
       if (existingLock) {
@@ -107,18 +103,18 @@ export class EmailAuthController {
       });
 
       if (!orgMember || orgMember.leftAt) {
-        // Keep this response identical to the wrong-password response below.
         res.status(401).json({
           error: 'Invalid credentials',
-          message: 'Email or password is incorrect',
+          message: 'User is not a member of org',
         });
         return;
       }
 
       if (!orgMember.passwordHash) {
-        res.status(401).json({
-          error: 'Invalid credentials',
-          message: 'Email or password is incorrect',
+        // EMAIL user who was invited but password isn't set yet
+        res.status(403).json({
+          error: 'Password not set',
+          message: 'Please use forgot password to set your password.',
         });
         return;
       }
@@ -148,27 +144,6 @@ export class EmailAuthController {
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
-        });
-        return;
-      }
-
-      await migrateLegacyIdentity({
-        email: normalizedEmail,
-        authProvider: AuthProvider.EMAIL,
-        providerUserId: `email-${normalizedEmail}`,
-      });
-
-      // SECURITY: if this email is already registered with an SSO provider
-      // (Google/Microsoft), do not allow email+password login. Account linking is
-      // intentionally unsupported (it enables account takeover) — mirrors the
-      // provider-mismatch guard in the OAuth callbacks. This also blocks an SSO
-      // user who set a password via the reset flow from bypassing SSO.
-      const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
-      if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
-        res.status(403).json({
-          error: 'provider_mismatch',
-          message: 'This account uses a different login method. Please continue with your original sign-in method.',
-          existingProvider: existingIdentity.authProvider,
         });
         return;
       }
@@ -425,7 +400,6 @@ export class EmailAuthController {
         workspaceId: workspaceUser.workspaceId,
         memberId: workspaceUser.orgMemberId,
         providerUserId: `email-${workspaceUser.email}`,
-        provider: AuthProvider.EMAIL,
       });
 
       res.cookie('google_access_token', jwtToken, {
@@ -786,11 +760,6 @@ export class EmailAuthController {
         return;
       }
 
-      if (!NAME_REGEX.test(trimmedName)) {
-        res.status(400).json({ error: 'Name can only contain alphabets and spaces' });
-        return;
-      }
-
       const passwordValidationError = validatePasswordComplexity(password);
       if (passwordValidationError) {
         res.status(400).json({ error: passwordValidationError });
@@ -829,20 +798,10 @@ export class EmailAuthController {
         select: { memberId: true, passwordHash: true, leftAt: true },
       });
 
-      const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
-
-      const isAlreadyRegistered = existingOrgMember && existingOrgMember.passwordHash && !existingOrgMember.leftAt;
-      const isProviderMismatch = existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL;
-
-      if (isAlreadyRegistered || isProviderMismatch) {
-        const reason = isAlreadyRegistered
-          ? 'already registered'
-          : `SSO provider mismatch (${existingIdentity?.authProvider})`;
-        logger.info(`[EmailAuthController] Registration blocked for ${normalizedEmail}: ${reason}`);
-        res.status(200).json({
-          success: true,
-          message: REGISTER_REQUEST_MESSAGE,
-          email: normalizedEmail,
+      if (existingOrgMember && existingOrgMember.passwordHash && !existingOrgMember.leftAt) {
+        res.status(409).json({
+          error: 'Already registered',
+          message: 'An account with this email already exists. Please log in instead.',
         });
         return;
       }
@@ -870,18 +829,14 @@ export class EmailAuthController {
       ]);
 
       // Send verification email
-      const escapedRegWorkspaceName = workspaceName
-        ? workspaceName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
-        : null;
-
       const emailResult = await emailService.sendEmail({
         to: normalizedEmail,
         subject: 'Xyne Spaces — Verify Your Email',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
             <h2>Verify Your Email</h2>
-            ${escapedRegWorkspaceName
-              ? `<p>You're registering for <strong>${escapedRegWorkspaceName}</strong> on Xyne Spaces.</p>`
+            ${workspaceName
+              ? `<p>You're registering for <strong>${workspaceName}</strong> on Xyne Spaces.</p>`
               : '<p>Welcome to Xyne Spaces!</p>'
             }
             <p>Enter the following code to complete your registration:</p>
@@ -905,7 +860,7 @@ export class EmailAuthController {
 
       res.status(200).json({
         success: true,
-        message: REGISTER_REQUEST_MESSAGE,
+        message: 'Verification code sent to your email.',
         email: normalizedEmail,
       });
     } catch (error) {
@@ -977,15 +932,11 @@ export class EmailAuthController {
       // Code verified — retrieve pending data
       const { passwordHash, name, workspaceId } = payload;
 
-      const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
-      if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
-        res.status(403).json({
-          error: 'provider_mismatch',
-          message: 'This account uses a different login method. Please continue with your original sign-in method.',
-          existingProvider: existingIdentity.authProvider,
-        });
-        return;
-      }
+      // Clean up Redis
+      await Promise.all([
+        redisService.del(redisKey),
+        redisService.del(attemptsKey),
+      ]);
 
       // Determine the orgId for the OrgMember:
       // - If workspaceId is provided, use that workspace's org
@@ -1017,22 +968,16 @@ export class EmailAuthController {
       // pick it up when creating the OrgMember.
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: normalizedEmail },
-        select: { memberId: true, orgId: true },
+        select: { memberId: true },
       });
 
       if (existingOrgMember) {
-        if (orgId && existingOrgMember.orgId !== orgId) {
-          res.status(409).json({
-            error: 'Organization conflict',
-            message: 'This email is already associated with a different organization.',
-          });
-          return;
-        }
         await this.prisma.orgMember.update({
           where: { email: normalizedEmail },
           data: {
             passwordHash,
             leftAt: null,
+            ...(orgId ? { orgId } : {}),
           },
         });
       } else if (orgId) {
@@ -1053,11 +998,6 @@ export class EmailAuthController {
           10 * 60, // 10 minutes
         );
       }
-      
-      await Promise.all([
-        redisService.del(`emailreg:code:${normalizedEmail}`),
-        redisService.del(`emailreg:attempts:${normalizedEmail}`),
-      ]);
 
       // Issue pending-auth cookie — same mechanism as OAuth callback.
       const userName = name || normalizedEmail.split('@')[0];
@@ -1219,18 +1159,11 @@ export class EmailAuthController {
         redisService.set(rateLimitKey, '1', REGISTER_RATE_LIMIT_SECONDS),
       ]);
 
-      // Fetch workspace name for the email (only when workspaceId is present)
-      let workspaceName: string | null = null;
-      if (payload.workspaceId) {
-        const workspace = await this.prisma.workspace.findUnique({
-          where: { id: payload.workspaceId },
-          select: { name: true },
-        });
-        workspaceName = workspace?.name ?? null;
-      }
-      const escapedWorkspaceName = workspaceName
-        ? workspaceName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
-        : null;
+      // Fetch workspace name for the email
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: payload.workspaceId },
+        select: { name: true },
+      });
 
       const emailResult = await emailService.sendEmail({
         to: normalizedEmail,
@@ -1238,10 +1171,7 @@ export class EmailAuthController {
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
             <h2>Verify Your Email</h2>
-            ${escapedWorkspaceName
-              ? `<p>You're registering for <strong>${escapedWorkspaceName}</strong> on Xyne Spaces.</p>`
-              : '<p>Welcome to Xyne Spaces!</p>'
-            }
+            <p>You're registering for <strong>${workspace?.name || 'Xyne Spaces'}</strong> on Xyne Spaces.</p>
             <p>Enter the following code to complete your registration:</p>
             <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px; padding: 16px; background: #f5f5f5; border-radius: 8px; text-align: center;">${newCode}</p>
             <p>This code expires in 15 minutes.</p>
