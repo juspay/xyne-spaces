@@ -89,6 +89,8 @@ export type InViewAnchor = {
 export type UseChannelMessagesResult = {
   messages: Conversation[];
   latestConversationsList: Conversation[];
+  initialLoadError: string | null;
+  retryInitialLoad: () => void;
   loadOlder: () => void;
   loadNewer: () => void;
   setInViewAnchor: (anchor: InViewAnchor | null) => void;
@@ -241,6 +243,8 @@ function useChannelMessagesImpl(
   const hasProvisionalWindowRef = useRef(false);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
+  const [initialLoadAttempt, setInitialLoadAttempt] = useState(0);
   const isFetchingRef = useRef(false);
   const isFetchingOlderRef = useRef(false);
   const hasReachedChannelStartRef = useRef(false);
@@ -259,6 +263,11 @@ function useChannelMessagesImpl(
   const [cutoffAnchor, setCutoffAnchor] = useState<Anchor | null>(
     initialCutoffCreatedAt !== null ? { createdAt: initialCutoffCreatedAt } : null,
   );
+  const retryInitialLoad = useCallback((): void => {
+    if (!enabled || !channelId || shouldUseCutoffQuery) return;
+    setInitialLoadError(null);
+    setInitialLoadAttempt(attempt => attempt + 1);
+  }, [channelId, enabled, shouldUseCutoffQuery]);
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
@@ -298,6 +307,8 @@ function useChannelMessagesImpl(
   useEffect(() => {
     if (!enabled || !channelId) return;
     if (shouldUseCutoffQuery) return;
+    let cancelled = false;
+    setInitialLoadError(null);
 
     Promise.all([
       zero.run(
@@ -324,6 +335,7 @@ function useChannelMessagesImpl(
         : Promise.resolve<Conversation[] | null>(null),
     ])
       .then(([older, newerNullable]) => {
+        if (cancelled) return;
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSortConversations(older, newer);
         const cachedWindow = conversationsRef.current;
@@ -350,13 +362,20 @@ function useChannelMessagesImpl(
 
         setConversationsState(merged);
         hasProvisionalWindowRef.current = false;
+        setInitialLoadError(null);
         setIsInitialLoadComplete(true);
       })
       .catch(err => {
-        console.error('[useMessages] initial channel load failed', serializeInitialLoadError(err));
+        if (cancelled) return;
+        const serializedError = serializeInitialLoadError(err);
+        setInitialLoadError(serializedError);
+        console.error('[useMessages] initial channel load failed', serializedError);
       });
+    return (): void => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, initialLoadAttempt]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -522,56 +541,15 @@ function useChannelMessagesImpl(
     if (shouldUseCutoffQuery) return;
     if (updatedConversationsDetails.type !== 'complete' || !isInitialLoadComplete) return;
 
-    const itemsToDelete: Conversation[] = [];
-    let fromMessage = updatedConversations[0];
-    let tillMessage = updatedConversations[updatedConversations.length - 1];
-    if (fromMessage && tillMessage) {
-      const tempMessage = { ...fromMessage };
-      fromMessage =
-        fromMessage.createdAt < tillMessage.createdAt ? fromMessage : tillMessage;
-      tillMessage =
-        tillMessage.createdAt > tempMessage.createdAt ? tillMessage : tempMessage;
-      let flag = 0;
-      for (const conv of conversationsRef.current) {
-        if (fromMessage?.conversationId === conv.conversationId) {
-          flag = 1;
-        }
-        if (
-          flag === 1 &&
-          updatedConversations.find(v => v.conversationId === conv.conversationId) === undefined
-        ) {
-          itemsToDelete.push(conv);
-        }
-        if (tillMessage.conversationId === conv.conversationId) {
-          flag = inViewAnchor === null ? 1 : 0;
-        }
-      }
-    } else if (updatedConversations.length === 0) {
-      itemsToDelete.push(...conversationsRef.current);
-    }
-    const anchorConversation =
-      inViewAnchor?.conversationId &&
-      updatedConversations.find(v => v.conversationId === inViewAnchor.conversationId);
-    if (inViewAnchor?.conversationId && !anchorConversation) {
-      const found = conversationsRef.current.find(
-        v => v.conversationId === inViewAnchor.conversationId,
-      );
-      if (found) itemsToDelete.push(found);
-    }
-    const updated = conversationsRef.current
-      .filter(conv => !itemsToDelete.some(v => v.conversationId === conv.conversationId))
-      .map(conv => {
-        const item = updatedConversations.find(v => v.conversationId === conv.conversationId);
-        if (item) return item;
-        return conv;
-      });
     // Zero re-emits the paginated conversations query on many upstream deltas
     // (e.g. optimistic message inserts elsewhere in the channel) even when the
-    // window itself is unchanged. Comparing before setState keeps `conversations`
-    // reference stable so `messagesWithPending` doesn't churn.
-    setConversationsState(prev =>
-      isSameConversationList(prev, updated) ? prev : updated,
-    );
+    // window itself is unchanged. A complete-but-empty viewport emission is not
+    // authoritative evidence that the channel is empty, so keep the warm window.
+    // Comparing before setState also keeps `messagesWithPending` stable.
+    setConversationsState(prev => {
+      const reconciled = reconcileConversationWindow(prev, updatedConversations);
+      return isSameConversationList(prev, reconciled) ? prev : reconciled;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     channelId,
@@ -642,6 +620,8 @@ function useChannelMessagesImpl(
   return {
     messages: messagesWithPending,
     latestConversationsList,
+    initialLoadError,
+    retryInitialLoad,
     loadOlder,
     loadNewer,
     setInViewAnchor,
