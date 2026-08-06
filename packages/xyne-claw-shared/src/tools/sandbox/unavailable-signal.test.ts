@@ -4,9 +4,10 @@
  * pin the contract so a reworded user-facing message can't silently break the
  * defer-and-auto-resume path.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   SANDBOX_UNAVAILABLE_SENTINEL,
+  isSandboxUnavailableDeferEnabled,
   formatSandboxUnavailable,
   isSandboxUnavailable,
 } from "./unavailable-signal.js";
@@ -39,5 +40,31 @@ describe("sandbox_unavailable wire contract", () => {
 
   it("matches regardless of surrounding wording (message can be reworded freely)", () => {
     expect(isSandboxUnavailable(`Error: ${SANDBOX_UNAVAILABLE_SENTINEL}: totally different copy`)).toBe(true);
+  });
+});
+
+describe("defer flag default", () => {
+  const KEY = "SANDBOX_UNAVAILABLE_DEFER";
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("is ON when unset — the defer path is the default behaviour", () => {
+    delete process.env[KEY];
+    expect(isSandboxUnavailableDeferEnabled()).toBe(true);
+  });
+
+  it("is OFF only for the exact opt-out value \"false\"", () => {
+    process.env[KEY] = "false";
+    expect(isSandboxUnavailableDeferEnabled()).toBe(false);
+  });
+
+  it("stays ON for other truthy-ish values (no accidental disable)", () => {
+    for (const v of ["true", "1", "TRUE", "no", ""]) {
+      process.env[KEY] = v;
+      expect(isSandboxUnavailableDeferEnabled()).toBe(true);
+    }
   });
 });

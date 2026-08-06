@@ -12,8 +12,8 @@
  * `error: "sandbox_unavailable"`, which run-recovery classifies and defers,
  * re-dispatching the same run until a sandbox binds — no re-tag needed.
  *
- * The whole path is gated behind SANDBOX_UNAVAILABLE_DEFER (default off) so the
- * change is a no-op until it has been validated on-cluster and the flag flipped.
+ * The whole path is gated behind SANDBOX_UNAVAILABLE_DEFER, now default ON —
+ * set it to "false" to restore the pre-existing read-only fallback.
  *
  * See apps/xyne-claw/docs/sbx-availability-signal.md for the design rationale.
  */

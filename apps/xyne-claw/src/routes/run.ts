@@ -3987,8 +3987,8 @@ async function processTask(
     // Write sandbox could not be provisioned (no warm capacity + node pool full).
     // End the run with a terminal signal claw-auth run-recovery recognizes, so it
     // defers and re-dispatches this same run until a SandboxClaim binds — the user
-    // does NOT need to re-tag. Gated upstream by SANDBOX_UNAVAILABLE_DEFER, so this
-    // branch only fires when the flag is on.
+    // does NOT need to re-tag. Gated upstream by SANDBOX_UNAVAILABLE_DEFER
+    // (default ON; set =false to restore the old read-only fallback).
     if (err instanceof SandboxUnavailableError) {
       log(`Sandbox unavailable — queuing run for auto-resume (sessionId=${sessionId})`);
       await sendCallback(callbackUrl, sessionToken, {

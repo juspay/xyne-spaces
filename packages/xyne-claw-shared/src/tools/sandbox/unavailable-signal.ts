@@ -21,12 +21,20 @@
 export const SANDBOX_UNAVAILABLE_SENTINEL = "sandbox_unavailable";
 
 /**
- * Master gate for the defer-and-auto-resume path. Default OFF: with the flag
- * unset, `sandbox-repo-setup` keeps today's read-only fallback and nothing on
- * this path is ever emitted or thrown.
+ * Master gate for the defer-and-auto-resume path. Default ON.
+ *
+ * Shipped default-OFF while one link was unvalidated: whether a throw from the
+ * tool actually reaches run.ts's terminal catch. It does — the sandbox subagent
+ * was removed 2026-06-14 and sandbox tools mount parent-direct (routes/run.ts),
+ * so nothing swallows it. With that resolved, defaulting off only preserved the
+ * original defect: a write-needing agent silently handed a READ-ONLY sandbox,
+ * concluding it cannot work and ending with no retry signal, forcing a re-tag.
+ *
+ * Set SANDBOX_UNAVAILABLE_DEFER=false to restore the old read-only fallback.
+ * Any other value (unset, "true", anything else) leaves the defer path on.
  */
 export function isSandboxUnavailableDeferEnabled(): boolean {
-  return process.env["SANDBOX_UNAVAILABLE_DEFER"] === "true";
+  return process.env["SANDBOX_UNAVAILABLE_DEFER"] !== "false";
 }
 
 /**

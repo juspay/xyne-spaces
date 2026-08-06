@@ -2087,7 +2087,8 @@ export const sandboxRepoSetup: ToolDefinition = {
     // — bad-branch / repo-not-found errors pass through unchanged.
     if (isSandboxProvisioningFailure(result)) {
       const firstLine = result.split("\n")[0]?.replace(/^Error:\s*/i, "").slice(0, 160) ?? "provisioning failed";
-      // Flag-gated (SANDBOX_UNAVAILABLE_DEFER, default off): instead of silently
+      // Flag-gated (SANDBOX_UNAVAILABLE_DEFER, default ON; =false restores the
+      // old behaviour): instead of silently
       // substituting a read-only session — which lets a write-needing agent
       // "succeed" with an unusable sandbox, conclude it cannot work, and end the
       // run with NO retry signal (forcing a human to re-tag) — emit a stable
