@@ -3,7 +3,7 @@ import { TagMethod } from '@xyne/shared';
 import { tagsApi } from '../api/tagsApi';
 
 /** Resolved `Tag id -> { tag, method }`, shared across mounts so scrolling never re-fetches. */
-const resolvedLabelCache = new Map<string, { tag: string; method: string }>();
+const resolvedLabelCache = new Map<string, { tag: string; method: TagMethod }>();
 /** Ids currently being fetched, so concurrent hook instances don't request the same id twice. */
 const inFlightLabelRequests = new Map<string, Promise<void>>();
 /** Notified whenever the cache is written outside of a fetch (e.g. confirming a suggestion). */
@@ -17,7 +17,7 @@ function notifyCacheListeners(): void {
  * Optimistically flip a cached label's method (e.g. after confirming an
  * AI-suggested tag), without a re-fetch. Re-renders every mounted consumer.
  */
-export function markResolvedRecordingLabelMethod(id: string, method: string): void {
+export function markResolvedRecordingLabelMethod(id: string, method: TagMethod): void {
   const existing = resolvedLabelCache.get(id);
   if (!existing) return;
   resolvedLabelCache.set(id, { ...existing, method });
@@ -73,7 +73,7 @@ async function resolveMissingLabels(ids: string[]): Promise<void> {
  */
 export function useResolvedRecordingLabels(labelIds: string[]): {
   resolveLabel: (id: string) => string;
-  resolveMethod: (id: string) => string;
+  resolveMethod: (id: string) => TagMethod;
   isResolving: boolean;
 } {
   const [cacheVersion, setCacheVersion] = useState(0);
@@ -121,7 +121,7 @@ export function useResolvedRecordingLabels(labelIds: string[]): {
   }, [cacheVersion]);
 
   const resolveMethod = useMemo(() => {
-    return (id: string): string => resolvedLabelCache.get(id)?.method ?? TagMethod.MANUAL;
+    return (id: string): TagMethod => resolvedLabelCache.get(id)?.method ?? TagMethod.MANUAL;
   }, [cacheVersion]);
 
   return { resolveLabel, resolveMethod, isResolving };

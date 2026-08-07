@@ -67,6 +67,8 @@ function SuggestedLabelChip({
         className='rounded-sm text-muted-foreground hover:text-foreground'
         aria-label={`Confirm suggested label ${label}`}
         onClick={onConfirm}
+        data-track-category='RecordingDetailV2'
+        data-track-name='confirm_suggested_label'
       >
         <Check className='size-3' aria-hidden='true' />
       </button>
@@ -75,6 +77,8 @@ function SuggestedLabelChip({
         className='rounded-sm text-muted-foreground hover:text-foreground'
         aria-label={`Dismiss suggested label ${label}`}
         onClick={onReject}
+        data-track-category='RecordingDetailV2'
+        data-track-name='reject_suggested_label'
       >
         <X className='size-3' aria-hidden='true' />
       </button>
