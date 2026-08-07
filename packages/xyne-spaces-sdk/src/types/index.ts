@@ -532,6 +532,119 @@ export interface FormEntityValue {
   updatedAt: number;
 }
 
+// ----- Call Types -----
+
+export type CallStatus = 'SCHEDULED' | 'ACTIVE' | 'ENDED' | 'CANCELLED' | 'MISSED';
+
+/**
+ * A call. Live media is handled by the realtime server — `externalId` and
+ * `roomLink` point at the provisioned room, and this row is its metadata.
+ */
+export interface Call {
+  id: string;
+  channelId: string;
+  workspaceId: string;
+  callType: string;
+  status: CallStatus;
+  externalId: string;
+  roomLink: string | null;
+  createdBy: string;
+  title: string | null;
+  startsAt: number | null;
+  endsAt: number | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  notesCanvasId: string | null;
+  participantCount: number | null;
+  seriesId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CallParticipant {
+  id: string;
+  callId: string;
+  userId: string | null;
+  workspaceId: string;
+  status: string | null;
+  joinedAt: number | null;
+  leftAt: number | null;
+}
+
+// ----- Email Types -----
+
+/**
+ * An email draft. Two flavours share this shape: a reply draft carries a
+ * `conversationId`, a compose draft does not and carries a `subject` instead.
+ */
+export interface EmailDraft {
+  id: string;
+  channelId: string;
+  workspaceId: string;
+  userId: string;
+  conversationId: string | null;
+  subject: string | null;
+  fromAddress: string | null;
+  draftContent: string | null;
+  toRecipients: unknown;
+  ccRecipients: unknown;
+  bccRecipients: unknown;
+  attachmentIds: unknown;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EmailSignature {
+  id: string;
+  name: string;
+  content: string;
+  userId: string;
+  workspaceId: string;
+  isDefault: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Per-channel desk configuration: routing, auto-draft, and metrics. */
+export interface EmailChannelPreference {
+  channelId: string;
+  workspaceId: string;
+  ownerUserId: string | null;
+  assigneeUserGroupId: string | null;
+  sendAsEmail: boolean | null;
+  defaultCc: unknown;
+  emailMergeMode: string | null;
+  twoStepSendEnabled: boolean | null;
+  autoDraftMode: string | null;
+  autoDraftAgentSlug: string | null;
+  metricsEnabled: boolean | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConversationLabel {
+  id: string;
+  name: string;
+  color: string | null;
+  channelId: string;
+  workspaceId: string;
+  createdBy: string;
+  createdAt: number;
+}
+
+// ----- Recap Types -----
+
+/** A generated summary of a channel's activity for one day. */
+export interface Recap {
+  id: string;
+  channelId: string;
+  workspaceId: string;
+  recapDate: number;
+  content: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ----- Search Types -----
 
 export interface SearchResult {

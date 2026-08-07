@@ -87,6 +87,17 @@ export type {
   Form,
   FormField,
   FormEntityValue,
+  // Calls
+  Call,
+  CallParticipant,
+  CallStatus,
+  // Email
+  EmailDraft,
+  EmailSignature,
+  EmailChannelPreference,
+  ConversationLabel,
+  // Recaps
+  Recap,
   // Search
   SearchResult,
   SearchResponse,
@@ -105,6 +116,8 @@ export type { SupportTicketCursor } from './registry/support-tickets.js';
 export type { StageInput } from './registry/boards.js';
 export type { CanvasCursor, CanvasScope } from './registry/canvases.js';
 export type { FormFieldInput } from './registry/forms.js';
+export type { CallCursor } from './registry/calls.js';
+export type { EmailCursor, EmailDraftCursor } from './registry/email.js';
 
 // ----- Registry Types (for advanced usage) -----
 export type {
