@@ -17,6 +17,7 @@ import { v1ErrorHandler, v1NotFound } from './middleware/errorHandler';
 import { registerRoutes } from './manifest/register';
 import { readsAvailable } from './engine/queries';
 import { searchRoutes } from './domains/search';
+import { catalogGapRoutes } from './domains/catalog-gaps';
 import type { RouteDefinition } from './manifest/types';
 import { oauthRouter } from './oauth';
 import { oauthConfig } from './oauth/config';
@@ -26,9 +27,11 @@ import { oauthConfig } from './oauth/config';
  *
  * Most SDK operations use /zero/query-fallback and /zero/push-fallback to
  * reuse existing Zero queries/mutators. Only operations that need custom
- * logic (like search which delegates to Vespa) are defined here.
+ * logic (Vespa search, server-side allocation, and multipart uploads) are
+ * defined here.
  */
 export const allRoutes: readonly RouteDefinition[] = [
+  ...catalogGapRoutes,
   ...searchRoutes,
 ];
 

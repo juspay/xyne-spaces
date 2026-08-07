@@ -13,6 +13,8 @@ import type {
   ChannelRole,
   ChannelSection,
   ChannelUserStatus,
+  CheckDuplicateChannelResponse,
+  CreateChannelInput,
 } from '../types/index.js';
 
 export class ChannelsResource extends Resource {
@@ -77,6 +79,19 @@ export class ChannelsResource extends Resource {
   /** List links shared in a channel. */
   listLinks(channelId: string): Promise<unknown[]> {
     return this.call(channelsOperations.listLinks, { channelId });
+  }
+
+  /**
+   * Create a channel through the server-side transaction that also provisions
+   * its stats, creator membership, and desk configuration.
+   */
+  create(data: CreateChannelInput): Promise<{ id: string }> {
+    return this.call(channelsOperations.create, data);
+  }
+
+  /** Check whether a channel name is already in use in this workspace. */
+  checkDuplicate(name: string, projectId: string): Promise<CheckDuplicateChannelResponse> {
+    return this.call(channelsOperations.checkDuplicate, { name, projectId });
   }
 
   /**

@@ -7,9 +7,12 @@
  * same table and live in `registry/support-tickets.ts`.
  */
 
-import { query, mutator } from './types.js';
+import { api, query, mutator } from './types.js';
 import { newId, now } from '../core/ids.js';
+import { appendArray, appendFiles, appendOptional } from '../core/form-data.js';
 import type {
+  CreateTicketInput,
+  CreateTicketResponse,
   StageRequestStatus,
   SubTicket,
   Ticket,
@@ -33,6 +36,39 @@ export interface TicketCursor {
 }
 
 export const ticketsOperations = {
+  // ----- Direct API operations -----
+
+  /**
+   * Create a ticket through the server-side sequence allocator and workflow.
+   * Maps to: POST /api/v1/tickets
+   */
+  create: api<CreateTicketInput, CreateTicketResponse>('POST', '/api/v1/tickets', {
+    mapArgs: (args) => {
+      const { files, ...fields } = args;
+      if (!files || files.length === 0) return fields;
+
+      const { tags, excludedChatAttachmentIds, draftAttachmentIds, ...scalarFields } = fields;
+
+      const form = new FormData();
+      for (const [key, value] of Object.entries(scalarFields)) {
+        appendOptional(form, key, value);
+      }
+      appendArray(form, 'tags', tags);
+      appendArray(form, 'excludedChatAttachmentIds', excludedChatAttachmentIds);
+      appendArray(form, 'draftAttachmentIds', draftAttachmentIds);
+      appendFiles(form, files);
+      return form;
+    },
+    mapResult: (raw) => {
+      const result = raw as CreateTicketResponse;
+      return {
+        id: result.id,
+        conversationId: result.conversationId,
+        xyneId: result.xyneId,
+      };
+    },
+  }),
+
   // ----- Reads -----
 
   /**

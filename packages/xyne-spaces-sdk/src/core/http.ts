@@ -86,10 +86,19 @@ export class HttpClient {
     url: string,
     body?: unknown
   ): Promise<T> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
+    const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+
+    // Let fetch add the multipart boundary. Supplying Content-Type ourselves
+    // would omit it and make Express/multer reject an otherwise valid upload.
+    if (!isMultipart) headers['Content-Type'] = 'application/json';
+
+    const requestBody =
+      body === undefined
+        ? undefined
+        : isMultipart
+          ? (body as FormData)
+          : JSON.stringify(body);
 
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
@@ -102,7 +111,7 @@ export class HttpClient {
       const response = await fetch(url, {
         method,
         headers,
-        body: body ? JSON.stringify(body) : undefined,
+        body: requestBody,
         signal: controller.signal,
       });
 
@@ -136,14 +145,24 @@ export class HttpClient {
   }
 
   private async handleError(response: Response): Promise<never> {
-    let body: { error?: string; message?: string; code?: string } = {};
+    let body: {
+      error?: string | { message?: string; code?: string };
+      message?: string;
+      code?: string;
+    } = {};
     try {
       body = (await response.json()) as typeof body;
     } catch {
       // Ignore JSON parse errors for error responses
     }
 
-    const message = body.message || body.error || response.statusText;
+    const nestedError =
+      body.error && typeof body.error === 'object' ? body.error : undefined;
+    const message =
+      body.message ||
+      nestedError?.message ||
+      (typeof body.error === 'string' ? body.error : undefined) ||
+      response.statusText;
 
     switch (response.status) {
       case 401:

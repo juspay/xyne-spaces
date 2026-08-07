@@ -104,6 +104,10 @@ export interface UserPresence {
 export type MessageType = 'USER' | 'BOT' | 'SYSTEM' | 'FORWARDED';
 export type ChannelRole = 'ADMIN' | 'MEMBER';
 export type ChannelSortOrder = 'ALPHABETICAL' | 'RECENT_ACTIVITY' | 'MANUAL';
+export type ChannelScopeType = 'DEFAULT' | 'DM' | 'TICKET' | 'DOCUMENT' | 'GROUP_DM';
+export type ChannelVisibility = 'PUBLIC' | 'PRIVATE';
+export type ChannelType = 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
+export type DeskType = 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
 
 // ----- Channel Types -----
 
@@ -180,6 +184,30 @@ export interface ChannelSection {
   updatedAt: number | null;
 }
 
+/** Input accepted by `sdk.channels.create`. */
+export interface CreateChannelInput {
+  scopeType: ChannelScopeType;
+  projectId: string;
+  scopeId?: string;
+  name?: string;
+  description?: string;
+  visibility?: ChannelVisibility;
+  participants?: string[];
+  type?: ChannelType;
+  assigneeUserGroupId?: string;
+  deskType?: DeskType;
+  dlEmail?: string;
+  slackChannelId?: string;
+  installedAppId?: string;
+  boardId?: string;
+}
+
+export interface CheckDuplicateChannelResponse {
+  isDuplicate: boolean;
+  name: string;
+  projectId: string;
+}
+
 // ----- Message Types -----
 
 /**
@@ -213,6 +241,54 @@ export interface MessageAttachment {
   fileSize: number;
   mimeType: string;
   createdAt: number;
+}
+
+/**
+ * A file passed to a multipart SDK operation.
+ *
+ * Browser `File` objects can be passed directly. Use the object form for a
+ * plain `Blob`, an explicit filename, dimensions, or a generated thumbnail.
+ */
+export type UploadFileInput =
+  | Blob
+  | {
+      file: Blob;
+      filename?: string;
+      thumbnail?: Blob;
+      thumbnailFilename?: string;
+      width?: number;
+      height?: number;
+      duration?: number;
+    };
+
+export interface UploadedAttachment {
+  id: string;
+  originalFilename: string;
+  mimetype: string;
+  size: number;
+  url: string;
+  thumbnailUrl?: string | null;
+}
+
+export interface AttachmentUploadResponse {
+  success: boolean;
+  count: number;
+  attachments: UploadedAttachment[];
+}
+
+export interface DraftAttachmentUploadResult {
+  attachmentId: string;
+  fileUrl?: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface DraftAttachmentUploadResponse {
+  success: boolean;
+  uploadedAttachments: DraftAttachmentUploadResult[];
+  totalCount: number;
+  successCount: number;
+  failureCount: number;
 }
 
 export interface Reaction {
@@ -255,6 +331,14 @@ export interface ConversationParticipant {
   joinedAt: number;
   lastReadAt: number | null;
   lastReplyAt: number | null;
+}
+
+export interface CreateConversationWithAttachmentsInput {
+  channelId: string;
+  files: UploadFileInput[];
+  content?: string;
+  msgType?: 'USER' | 'BOT';
+  visibleTo?: string | null;
 }
 
 // ----- Activity Types -----
@@ -318,6 +402,41 @@ export interface Ticket {
   metadata: unknown;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Input accepted by the server-side ticket creation workflow. */
+export interface CreateTicketInput {
+  title: string;
+  description: string;
+  projectId: string;
+  boardId?: string;
+  channelId?: string;
+  sourceConversationId?: string;
+  assignedTo?: string;
+  userGroupId?: string;
+  statusV2?: TicketStatusV2;
+  priority?: TicketPriority;
+  eta?: Date | string;
+  metadata?: Record<string, unknown>;
+  closedAt?: Date | string;
+  closedBy?: string;
+  excludedChatAttachmentIds?: string[];
+  draftAttachmentIds?: string[];
+  dynamicFields?: Record<string, string | string[]>;
+  workflowType?: string;
+  stageName?: string;
+  tags?: string[];
+  merchantId?: string;
+  parentTicketId?: string;
+  ticketType?: string;
+  fromTicketsTab?: boolean;
+  files?: UploadFileInput[];
+}
+
+export interface CreateTicketResponse {
+  id: string;
+  conversationId: string;
+  xyneId: string;
 }
 
 export interface SubTicket {

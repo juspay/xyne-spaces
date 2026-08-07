@@ -16,6 +16,8 @@ import {
 } from '../registry/tickets.js';
 import { newId } from '../core/ids.js';
 import type {
+  CreateTicketInput,
+  CreateTicketResponse,
   StageRequestStatus,
   SubTicket,
   Ticket,
@@ -25,6 +27,14 @@ import type {
 } from '../types/index.js';
 
 export class TicketsResource extends Resource {
+  /**
+   * Create a ticket using the server-side sequence allocator. Files, when
+   * supplied, are uploaded in the same request.
+   */
+  create(data: CreateTicketInput): Promise<CreateTicketResponse> {
+    return this.call(ticketsOperations.create, data);
+  }
+
   /**
    * List tickets for a view.
    *

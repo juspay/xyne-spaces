@@ -15,6 +15,7 @@ import { newId } from '../core/ids.js';
 import type {
   Conversation,
   ConversationParticipant,
+  CreateConversationWithAttachmentsInput,
   MessageType,
 } from '../types/index.js';
 
@@ -132,6 +133,16 @@ export class ConversationsResource extends Resource {
       ...data,
     });
     return { conversationId, messageId };
+  }
+
+  /**
+   * Start a thread and upload its attachment bytes in one multipart request.
+   * Use `create` when every attachment has already been uploaded.
+   */
+  createWithAttachments(
+    data: CreateConversationWithAttachmentsInput
+  ): Promise<{ conversationId: string; messageId: string }> {
+    return this.call(conversationsOperations.createWithAttachments, data);
   }
 
   /**

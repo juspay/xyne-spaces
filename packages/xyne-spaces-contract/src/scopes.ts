@@ -41,7 +41,6 @@ export type ResourceFamily = (typeof RESOURCE_FAMILIES)[number];
 /** Families that are read-only in v1 (no write scope is minted for them). */
 const READ_ONLY_FAMILIES: ReadonlySet<ResourceFamily> = new Set<ResourceFamily>([
   'search',
-  'attachments',
 ]);
 
 export type ReadScope = `spaces.${ResourceFamily}:read`;

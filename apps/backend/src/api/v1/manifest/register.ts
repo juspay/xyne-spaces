@@ -31,6 +31,7 @@ export function registerRoutes(routes: readonly RouteDefinition[]): Router {
       route.path,
       requireScope(route.scope),
       rateLimit(isWrite ? 'write' : 'read'),
+      ...(route.middleware ?? []),
       asyncHandler(route),
     );
   }
