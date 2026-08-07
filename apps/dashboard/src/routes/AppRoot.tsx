@@ -105,6 +105,7 @@ import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -327,6 +328,17 @@ const AppRoot = (): ReactElement => {
     setPendingRecordingFilePath(filePath);
     setIsErrorReportOpen(true);
   });
+
+  // Do not stop an active recording merely because the document becomes hidden:
+  // that also happens when a user locks their screen or switches apps. Browsers
+  // do not expose a reliable lid-close event, so retain only the actual page
+  // unload safeguard below.
+  useEffect(() => {
+    window.addEventListener('pagehide', stopRecordingForTeardown);
+    return (): void => {
+      window.removeEventListener('pagehide', stopRecordingForTeardown);
+    };
+  }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
   useShortcutById(
     'global.composeMessage',
