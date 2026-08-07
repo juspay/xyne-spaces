@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
+import Tooltip from '@/components/ui/Tooltip';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import { grantAdminRole, listAdminRoles, revokeAdminRole } from '@/services/claw/clawAdminService';
@@ -92,14 +93,25 @@ function RoleAccessSection({
     const value = target.trim();
     if (value) grant.mutate(value);
   };
+  const grantDisabled = !target.trim() || grant.isPending;
+  const grantButton = (
+    <Button
+      type='button'
+      onClick={submitGrant}
+      disabled={grantDisabled}
+      data-track-category='Claw Admin'
+      data-track-name={copy.grantButtonLabel}
+    >
+      <UserPlus className='size-3.5' />
+      {copy.grantButtonLabel}
+    </Button>
+  );
 
   return (
     <section className='flex flex-col gap-4'>
-      <div>
+      <div className='flex flex-col gap-1'>
         <h3 className='text-sm font-medium text-foreground'>{copy.heading}</h3>
-        {copy.description && (
-          <p className='mt-1 text-xs text-muted-foreground'>{copy.description}</p>
-        )}
+        {copy.description && <p className='text-xs text-muted-foreground'>{copy.description}</p>}
       </div>
 
       <div className='flex items-end gap-2'>
@@ -117,16 +129,20 @@ function RoleAccessSection({
             placeholder='User ID or email (e.g. user@example.com)'
           />
         </div>
-        <Button
-          type='button'
-          onClick={submitGrant}
-          disabled={!target.trim() || grant.isPending}
-          data-track-category='Claw Admin'
-          data-track-name={copy.grantButtonLabel}
-        >
-          <UserPlus className='size-3.5' />
-          {copy.grantButtonLabel}
-        </Button>
+        {grantDisabled ? (
+          <Tooltip
+            content={
+              grant.isPending
+                ? `${copy.grantButtonLabel} is in progress`
+                : 'Enter a user ID or email first'
+            }
+            side='top'
+          >
+            <span className='inline-flex'>{grantButton}</span>
+          </Tooltip>
+        ) : (
+          grantButton
+        )}
       </div>
 
       {isPending ? (
@@ -160,19 +176,22 @@ function RoleAccessSection({
                     granted {new Date(holder.createdAt).toLocaleDateString()}
                   </span>
                 </div>
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='icon'
-                  disabled={isSelf || revoke.isPending}
-                  onClick={() => setRevokeTarget(holder)}
-                  aria-label={isSelf ? 'Cannot revoke yourself' : copy.revokeLabel}
-                  title={isSelf ? 'Cannot revoke yourself' : copy.revokeLabel}
-                  data-track-category='Claw Admin'
-                  data-track-name={copy.revokeLabel}
-                >
-                  <DeleteDustbin01 className='size-3.5 text-destructive' />
-                </Button>
+                <Tooltip content={isSelf ? 'Cannot revoke yourself' : copy.revokeLabel} side='top'>
+                  <span className='inline-flex'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      disabled={isSelf || revoke.isPending}
+                      onClick={() => setRevokeTarget(holder)}
+                      aria-label={isSelf ? 'Cannot revoke yourself' : copy.revokeLabel}
+                      data-track-category='Claw Admin'
+                      data-track-name={copy.revokeLabel}
+                    >
+                      <DeleteDustbin01 className='size-3.5 text-destructive' />
+                    </Button>
+                  </span>
+                </Tooltip>
               </li>
             );
           })}
@@ -211,7 +230,7 @@ export function AdminsTab({
   showOrgLabels: boolean;
 }): ReactElement {
   return (
-    <div className='flex flex-col gap-8 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       <RoleAccessSection
         userId={userId}
         roleKey='CLAW_ADMIN'

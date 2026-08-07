@@ -119,25 +119,25 @@ export function UsageTab({
                 key={`${stat.orgId ?? 'org'}:${stat.agentSlug}`}
                 className='border-b border-border hover:bg-muted/40'
               >
-                <td className='px-4 py-3 font-medium text-foreground'>{stat.agentSlug}</td>
+                <td className='whitespace-nowrap px-4 py-3 text-foreground'>{stat.agentSlug}</td>
                 {showOrgLabels && (
-                  <td className='px-4 py-3'>
+                  <td className='whitespace-nowrap px-4 py-3'>
                     <OrgBadge orgName={orgLabel(stat.orgId, stat.orgName, orgNamesById)} />
                   </td>
                 )}
-                <td className='px-4 py-3 text-right font-mono text-muted-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-muted-foreground'>
                   {fmt(stat.runs)}
                 </td>
-                <td className='px-4 py-3 text-right font-mono text-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-foreground'>
                   {fmt(stat.tokensIn)}
                 </td>
-                <td className='px-4 py-3 text-right font-mono text-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-foreground'>
                   {fmt(stat.tokensOut)}
                 </td>
-                <td className='px-4 py-3 text-right font-mono text-muted-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-muted-foreground'>
                   {fmt(stat.tokensCacheRead)}
                 </td>
-                <td className='px-4 py-3 text-right font-mono text-muted-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-muted-foreground'>
                   {fmt(stat.tokensCacheWrite)}
                 </td>
               </tr>

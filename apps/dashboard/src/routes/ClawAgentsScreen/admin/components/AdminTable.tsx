@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import { ArrowLeft, ArrowRight } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -12,13 +13,16 @@ export function AdminTable({
 }): ReactElement {
   return (
     <div className='overflow-x-auto rounded-xl border border-border'>
-      <table className='w-full text-sm'>
+      <table className='w-max min-w-full text-sm'>
         <thead>
           <tr className='border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground'>
             {headers.map(header => (
               <th
                 key={header.label}
-                className={cn('px-4 py-2.5 font-medium', header.align === 'right' && 'text-right')}
+                className={cn(
+                  'whitespace-nowrap px-4 py-2.5',
+                  header.align === 'right' && 'text-right',
+                )}
               >
                 {header.label}
               </th>
@@ -61,6 +65,7 @@ export function AdminPager({
           disabled={offset === 0}
           className='disabled:pointer-events-auto'
         >
+          <ArrowLeft className='size-4' aria-hidden />
           Prev
         </Button>
         <Button
@@ -71,6 +76,7 @@ export function AdminPager({
           className='disabled:pointer-events-auto'
         >
           Next
+          <ArrowRight className='size-4' aria-hidden />
         </Button>
       </div>
     </div>

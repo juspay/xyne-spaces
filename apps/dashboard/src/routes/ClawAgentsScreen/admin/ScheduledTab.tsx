@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { Skeleton } from '@/components/ui/Skeleton';
+import Tooltip from '@/components/ui/Tooltip';
 import { listClawAuthAgents } from '@/services/claw/clawAuthAgentsService';
 import { cancelScheduledJob, listAdminScheduledJobs } from '@/services/claw/clawAdminService';
 import { clawErrorText } from '@/services/claw/clawRequest';
@@ -25,8 +26,8 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
 ] as const;
 
-const statusVariant = (status: string): 'default' | 'secondary' =>
-  status === 'active' ? 'default' : 'secondary';
+const statusVariant = (status: string): 'success' | 'secondary' =>
+  status === 'active' ? 'success' : 'secondary';
 
 const formatDate = (value: string | null): string =>
   value ? new Date(value).toLocaleString() : '—';
@@ -133,7 +134,7 @@ export function ScheduledTab({
 
   if (isPending) {
     return (
-      <div className='flex flex-col gap-3 pt-4'>
+      <div className='flex flex-col gap-6 pt-4'>
         {filterBar}
         <Skeleton className='h-40 w-full' />
       </div>
@@ -142,7 +143,7 @@ export function ScheduledTab({
 
   if (isError) {
     return (
-      <div className='flex flex-col gap-3 pt-4'>
+      <div className='flex flex-col gap-6 pt-4'>
         {filterBar}
         <TabMessage>Couldn’t load scheduled jobs.</TabMessage>
       </div>
@@ -155,7 +156,7 @@ export function ScheduledTab({
 
   if (visible.length === 0) {
     return (
-      <div className='flex flex-col gap-3 pt-4'>
+      <div className='flex flex-col gap-6 pt-4'>
         {filterBar}
         <TabMessage>No scheduled jobs.</TabMessage>
       </div>
@@ -163,7 +164,7 @@ export function ScheduledTab({
   }
 
   return (
-    <div className='flex flex-col gap-3 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       {filterBar}
 
       <AdminTable
@@ -181,56 +182,58 @@ export function ScheduledTab({
       >
         {visible.map((job: AdminScheduledJob) => (
           <tr key={job.id} className='border-b border-border hover:bg-muted/40'>
-            <td className='px-4 py-3 text-muted-foreground'>
-              <div className='max-w-[18ch] truncate' title={job.user?.email ?? job.userId}>
-                {job.user?.email ?? job.userId}
-              </div>
+            <td className='whitespace-nowrap px-4 py-3 text-muted-foreground'>
+              <div title={job.user?.email ?? job.userId}>{job.user?.email ?? job.userId}</div>
               {job.user?.name && (
-                <div className='max-w-[18ch] truncate text-xs text-muted-foreground'>
-                  {job.user.name}
-                </div>
+                <div className='text-xs text-muted-foreground'>{job.user.name}</div>
               )}
             </td>
             {showOrgLabels && (
-              <td className='px-4 py-3'>
+              <td className='whitespace-nowrap px-4 py-3'>
                 <OrgBadge orgName={orgLabel(job.orgId, job.orgName, orgNamesById)} />
               </td>
             )}
-            <td className='px-4 py-3 font-medium text-foreground'>{job.agentSlug}</td>
-            <td className='px-4 py-3'>
+            <td className='whitespace-nowrap px-4 py-3 text-foreground'>{job.agentSlug}</td>
+            <td className='whitespace-nowrap px-4 py-3'>
               <Badge variant='secondary'>{job.type}</Badge>
             </td>
-            <td className='px-4 py-3 font-mono text-xs text-muted-foreground'>
-              {job.type === 'cron' ? (job.cronExpression ?? '—') : '—'}
-              {job.label && (
-                <div className='mt-0.5 font-sans text-xs text-muted-foreground'>{job.label}</div>
-              )}
+            <td className='whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground'>
+              <div className='flex flex-col gap-1'>
+                <span>{job.type === 'cron' ? (job.cronExpression ?? '—') : '—'}</span>
+                {job.label && (
+                  <div className='font-sans text-xs text-muted-foreground'>{job.label}</div>
+                )}
+              </div>
             </td>
-            <td className='px-4 py-3 text-xs text-muted-foreground'>
+            <td className='whitespace-nowrap px-4 py-3 text-xs text-muted-foreground'>
               <div>next: {formatDate(job.nextRunAt)}</div>
               <div>last: {formatDate(job.lastRunAt)}</div>
             </td>
-            <td className='px-4 py-3 font-mono text-xs text-muted-foreground'>
+            <td className='whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground'>
               {job.runCount}
               {job.maxRuns !== null && job.maxRuns !== undefined ? ` / ${job.maxRuns}` : ''}
             </td>
-            <td className='px-4 py-3'>
+            <td className='whitespace-nowrap px-4 py-3'>
               <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
             </td>
-            <td className='px-4 py-3 text-right'>
-              <Button
-                type='button'
-                variant='ghost'
-                size='icon'
-                disabled={job.status !== 'active' || cancelJob.isPending}
-                onClick={() => setCancelTarget(job)}
-                aria-label='Cancel scheduled job'
-                title='Cancel scheduled job'
-                data-track-category='Claw Admin'
-                data-track-name='Cancel scheduled job'
-              >
-                <DeleteDustbin01 className='size-3.5 text-destructive' />
-              </Button>
+            <td className='whitespace-nowrap px-4 py-3 text-right'>
+              <Tooltip content='Cancel scheduled job' side='top'>
+                <span className='inline-flex'>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    disabled={job.status !== 'active' || cancelJob.isPending}
+                    onClick={() => setCancelTarget(job)}
+                    className='text-muted-foreground hover:text-destructive'
+                    aria-label='Cancel scheduled job'
+                    data-track-category='Claw Admin'
+                    data-track-name='Cancel scheduled job'
+                  >
+                    <DeleteDustbin01 className='size-3.5 text-current' />
+                  </Button>
+                </span>
+              </Tooltip>
             </td>
           </tr>
         ))}

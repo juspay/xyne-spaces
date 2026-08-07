@@ -82,7 +82,7 @@ export function WorkflowRequestsTab({
   }
 
   return (
-    <div className='flex flex-col gap-3 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       {visible.map((request: WorkflowGlobalRequest) => {
         const who =
           request.requestedByUser?.name ??
@@ -92,7 +92,7 @@ export function WorkflowRequestsTab({
         return (
           <div key={request.id} className='rounded-xl border border-border px-4 py-3'>
             <div className='flex flex-wrap items-start justify-between gap-3'>
-              <div className='min-w-0 flex-1'>
+              <div className='flex min-w-0 flex-1 flex-col gap-1'>
                 <div className='flex min-w-0 flex-wrap items-center gap-2'>
                   <span className='truncate text-sm font-medium text-foreground'>
                     {request.workflow?.name ?? request.workflowId}
@@ -101,14 +101,12 @@ export function WorkflowRequestsTab({
                   {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}
                 </div>
 
-                <p className='mt-1 text-xs text-muted-foreground'>
+                <p className='text-xs text-muted-foreground'>
                   Requested by {who} · {new Date(request.createdAt).toLocaleString()}
                 </p>
 
                 {request.workflow?.description && (
-                  <p className='mt-1 text-xs text-muted-foreground'>
-                    {request.workflow.description}
-                  </p>
+                  <p className='text-xs text-muted-foreground'>{request.workflow.description}</p>
                 )}
               </div>
 
@@ -125,7 +123,7 @@ export function WorkflowRequestsTab({
                 </Button>
                 <Button
                   type='button'
-                  variant='destructive'
+                  variant='ghost'
                   disabled={busy}
                   onClick={() => {
                     setRejectNote('');

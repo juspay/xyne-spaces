@@ -15,7 +15,8 @@ import {
 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useClawAdminAccess } from '../../hooks/useClawAdminAccess';
+import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
+import { useAuth } from '../../hooks/useAuth';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -315,7 +316,8 @@ export function AISidebar({
 
   const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.to));
 
-  const { isAdmin } = useClawAdminAccess();
+  const { user } = useAuth();
+  const { isAdmin } = useClawAdminAccessQuery(user?.id);
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin);
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 

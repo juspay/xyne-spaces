@@ -168,40 +168,44 @@ export default function AdminV2(): ReactElement {
 
   return (
     <div className='max-w-ai-content mx-auto flex w-full flex-col px-6 pb-16'>
-      <div className='flex items-center gap-5 pt-5'>
-        <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
-          <h1 className='text-2xl font-semibold tracking-tight text-foreground'>Admin Panel</h1>
-          <p className='text-sm text-muted-foreground'>
-            Manage requests, agents, admins, and platform settings
-          </p>
+      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+        <div className='flex items-center gap-5 pt-5'>
+          <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
+            <h1 className='text-2xl font-semibold leading-tight tracking-tight text-foreground'>
+              Admin Panel
+            </h1>
+            <p className='text-sm leading-tight text-muted-foreground'>
+              Manage requests, agents, admins, and platform settings
+            </p>
+          </div>
+          <Select value={orgFilter} onValueChange={setOrgFilter}>
+            <SelectTrigger
+              className='w-48 shrink-0 focus-visible:border-ring focus-visible:ring-0'
+              aria-label='Organization filter'
+            >
+              <SelectValue>{selectedOrgLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={MY_ORG}>My org</SelectItem>
+              <SelectItem value={ALL_ORGS}>All orgs</SelectItem>
+              {orgOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={orgFilter} onValueChange={setOrgFilter}>
-          <SelectTrigger
-            className='w-48 shrink-0 focus-visible:border-ring focus-visible:ring-0'
-            aria-label='Organization filter'
-          >
-            <SelectValue>{selectedOrgLabel}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={MY_ORG}>My org</SelectItem>
-            <SelectItem value={ALL_ORGS}>All orgs</SelectItem>
-            {orgOptions.map(option => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
 
-      <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
-        <Tabs
-          items={tabs}
-          activeId={tab}
-          onSelect={setTab}
-          trackCategory='Claw Admin'
-          trackPrefix='Admin tab'
-        />
+        <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
+          <Tabs
+            items={tabs}
+            activeId={tab}
+            onSelect={setTab}
+            trackCategory='Claw Admin'
+            trackPrefix='Admin tab'
+          />
+        </div>
       </div>
 
       <input

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import {
   ChevronDown,
   DeleteDustbin01,
+  MultipleCrossCancelCircle,
   PhotoImagePlus,
   PluginAddonDefault,
   Slack,
@@ -11,7 +12,7 @@ import {
   UserArrowUp,
 } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
-import { Badge } from '@/components/ui/Badge';
+import { Pill } from '../create-v2/shared/Pill';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import Tooltip from '@/components/ui/Tooltip';
@@ -26,16 +27,34 @@ import { clawErrorText } from '@/services/claw/clawRequest';
 import { listClawAuthAgents } from '@/services/claw/clawAuthAgentsService';
 import { deleteAgent, demoteAgent, promoteAgent } from '@/services/claw/clawAdminService';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import type { SlackAgentStatus } from '@/services/claw/clawSlackTypes';
 import type { AdminOrgScope } from '@/services/claw/clawAdminTypes';
 import { OrgBadge } from './components/AdminTable';
 import { TabMessage } from './components/TabMessage';
 import { RegistrationFlowCard } from './components/RegistrationFlowCard';
 import { adminAgentsKey, adminAgentsPrefix } from './hooks/adminQueryKeys';
+import { useSlackActions } from './hooks/useSlackActions';
+import { useSlackAgentStatuses } from './hooks/useSlackAgentStatuses';
+import { SlackCommandDialog } from './components/SlackCommandDialog';
 import { orgLabel } from './orgLabel';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 const isRegistered = (agent: Agent): boolean =>
   Boolean(agent.spacesAppId) && (agent.spacesAppTokenConfigured ?? Boolean(agent.spacesAppToken));
+
+const slackLabel = (status: SlackAgentStatus | undefined, ready: boolean): string => {
+  if (!ready) return 'Slack (checking…)';
+  if (!status) return 'Slack';
+  if (status.status === 'installed') return 'Slack (add to another workspace)';
+  if (status.status === 'command') return `Slack (${status.commandName ?? 'command'})`;
+  return 'Slack (install to workspace)';
+};
+
+const slackBadgeLabel = (status: SlackAgentStatus): string => {
+  if (status.status !== 'installed') return 'Slack: not installed';
+  const teams = status.installs.map(install => install.teamName).filter(Boolean);
+  return teams.length > 0 ? `Slack: ${teams.join(', ')}` : 'Slack: installed';
+};
 
 function AgentRow({
   agent,
@@ -43,12 +62,14 @@ function AgentRow({
   showRegistration,
   showOrgLabels,
   orgNamesById,
+  slackStatus,
 }: {
   agent: Agent;
   actions: ReactElement;
   showRegistration: boolean;
   showOrgLabels: boolean;
   orgNamesById: Record<string, string>;
+  slackStatus?: SlackAgentStatus | undefined;
 }): ReactElement {
   const visibleOrgName = orgLabel(agent.orgId, agent.orgName, orgNamesById);
   const ownerLabel = agent.owner?.name ?? agent.owner?.email ?? 'Unknown owner';
@@ -64,10 +85,16 @@ function AgentRow({
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
           <span className='truncate text-sm font-medium text-foreground'>{agent.name}</span>
           {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}
+          {slackStatus && (
+            <Pill tone={slackStatus.status === 'installed' ? 'success' : 'neutral'}>
+              {slackBadgeLabel(slackStatus)}
+            </Pill>
+          )}
+          {slackStatus?.manifestStale && <Pill tone='warning'>Slack app update required</Pill>}
           {showRegistration ? (
-            <Badge variant={isRegistered(agent) ? 'default' : 'secondary'}>
+            <Pill tone={isRegistered(agent) ? 'success' : 'neutral'}>
               {isRegistered(agent) ? 'Registered' : 'Not registered'}
-            </Badge>
+            </Pill>
           ) : (
             agent.ownerUserId && (
               <span className='truncate text-xs text-muted-foreground'>owner: {ownerLabel}</span>
@@ -88,6 +115,7 @@ function AgentSection({
   showRegistration,
   showOrgLabels,
   orgNamesById,
+  slackStatuses,
 }: {
   heading: string;
   agents: Agent[];
@@ -96,6 +124,7 @@ function AgentSection({
   showRegistration: boolean;
   showOrgLabels: boolean;
   orgNamesById: Record<string, string>;
+  slackStatuses: Record<string, SlackAgentStatus>;
 }): ReactElement {
   return (
     <section className='flex flex-col gap-3'>
@@ -114,6 +143,7 @@ function AgentSection({
               showRegistration={showRegistration}
               showOrgLabels={showOrgLabels}
               orgNamesById={orgNamesById}
+              slackStatus={slackStatuses[agent.id]}
             />
           ))}
         </ul>
@@ -139,6 +169,7 @@ export function AgentsTab({
 }): ReactElement {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
+  const [slackRemoveTarget, setSlackRemoveTarget] = useState<Agent | null>(null);
 
   const {
     data: agents,
@@ -162,6 +193,18 @@ export function AgentsTab({
 
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: adminAgentsPrefix(userId) });
+  };
+
+  const slack = useSlackAgentStatuses(userId, agents);
+  const slackActions = useSlackActions(userId, slack.refresh);
+
+  const onSlackConnect = (agent: Agent): void => {
+    const status = slack.byAgentId[agent.id];
+    if (status && status.status !== 'command') {
+      slackActions.openInstall(agent);
+      return;
+    }
+    slackActions.setChoice({ agent, commandName: status?.commandName ?? `/${agent.slug}` });
   };
 
   const promote = useMutation({
@@ -248,6 +291,7 @@ export function AgentsTab({
           <Button
             type='button'
             variant='ghost'
+            size='sm'
             disabled={busy}
             data-track-category='Claw Admin'
             data-track-name='Register agent'
@@ -267,11 +311,15 @@ export function AgentsTab({
             className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
           >
             <PluginAddonDefault className='mr-2 size-4' />
-            {registered ? 'Spaces (registered)' : hasApp ? 'Spaces (resume setup)' : 'Spaces'}
+            {hasApp && !registered ? 'Spaces (resume setup)' : 'Spaces'}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled className='hidden'>
+          <DropdownMenuItem
+            disabled={!slack.isReady || slackActions.busySlug === agent.slug}
+            onSelect={() => onSlackConnect(agent)}
+            className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
+          >
             <Slack className='mr-2 size-4' />
-            Add to Slack
+            {slackLabel(slack.byAgentId[agent.id], slack.isReady)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -279,7 +327,7 @@ export function AgentsTab({
   };
 
   return (
-    <div className='flex flex-col gap-8 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       {registration.flow && (
         <RegistrationFlowCard
           flow={registration.flow}
@@ -297,6 +345,7 @@ export function AgentsTab({
         showRegistration
         showOrgLabels={showOrgLabels}
         orgNamesById={orgNamesById}
+        slackStatuses={slack.byAgentId}
         renderActions={agent => (
           <>
             {registerMenu(agent)}
@@ -306,6 +355,20 @@ export function AgentsTab({
               () => demote.mutate(agent.slug),
               { showLabel: true },
             )}
+            {slack.byAgentId[agent.id]?.manifestStale &&
+              iconAction(
+                'Update Slack app',
+                <Slack className='size-4' />,
+                () => slackActions.updateApp(agent),
+                { disabled: slackActions.busySlug === agent.slug },
+              )}
+            {slack.byAgentId[agent.id] &&
+              iconAction(
+                'Remove Slack',
+                <MultipleCrossCancelCircle className='size-4' />,
+                () => setSlackRemoveTarget(agent),
+                { disabled: slackActions.busySlug === agent.slug },
+              )}
             {isRegistered(agent) &&
               iconAction('Upload photo', <PhotoImagePlus className='size-4' />, () =>
                 registration.pickPictureFor(agent.slug),
@@ -327,6 +390,7 @@ export function AgentsTab({
         showRegistration={false}
         showOrgLabels={showOrgLabels}
         orgNamesById={orgNamesById}
+        slackStatuses={slack.byAgentId}
         renderActions={agent => (
           <>
             {registerMenu(agent)}
@@ -336,6 +400,20 @@ export function AgentsTab({
               () => promote.mutate(agent.slug),
               { showLabel: true },
             )}
+            {slack.byAgentId[agent.id]?.manifestStale &&
+              iconAction(
+                'Update Slack app',
+                <Slack className='size-4' />,
+                () => slackActions.updateApp(agent),
+                { disabled: slackActions.busySlug === agent.slug },
+              )}
+            {slack.byAgentId[agent.id] &&
+              iconAction(
+                'Remove Slack',
+                <MultipleCrossCancelCircle className='size-4' />,
+                () => setSlackRemoveTarget(agent),
+                { disabled: slackActions.busySlug === agent.slug },
+              )}
             {isRegistered(agent) &&
               iconAction('Upload photo', <PhotoImagePlus className='size-4' />, () =>
                 registration.pickPictureFor(agent.slug),
@@ -348,6 +426,39 @@ export function AgentsTab({
             )}
           </>
         )}
+      />
+
+      <SlackCommandDialog
+        choice={slackActions.choice}
+        registering={slackActions.registering}
+        busy={slackActions.busySlug !== null}
+        onClose={() => slackActions.setChoice(null)}
+        onRegisterCommand={slackActions.registerCommand}
+        onCreateApp={() => {
+          const agent = slackActions.choice?.agent;
+          slackActions.setChoice(null);
+          if (agent) slackActions.openInstall(agent);
+        }}
+      />
+
+      <ConfirmDialog
+        open={slackRemoveTarget !== null}
+        onOpenChange={open => {
+          if (!open) setSlackRemoveTarget(null);
+        }}
+        title='Remove Slack registration?'
+        description={
+          slackRemoveTarget
+            ? `${slackRemoveTarget.name} will stop responding in Slack. If the Slack app still exists, delete it in the Slack console too.`
+            : undefined
+        }
+        confirmLabel='Remove'
+        danger
+        loading={slackActions.busySlug === slackRemoveTarget?.slug}
+        onConfirm={() => {
+          if (slackRemoveTarget) slackActions.remove(slackRemoveTarget);
+          setSlackRemoveTarget(null);
+        }}
       />
 
       <ConfirmDialog

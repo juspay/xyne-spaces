@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactElement } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CheckTickCircle, Eye02On, MultipleCrossCancelCircle } from '@xyne/icons';
@@ -49,8 +49,10 @@ export function RequestsTab({
   registration: AgentRegistration;
 }): ReactElement {
   const queryClient = useQueryClient();
+  const location = useLocation();
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState('');
 
@@ -116,12 +118,13 @@ export function RequestsTab({
     <ul className='flex flex-col gap-2'>
       {visibleRequests.map((request: AgentRequestItem) => {
         const visibleOrgName = orgLabel(request.orgId, request.orgName, orgNamesById);
+        const agentSlug = request.agentSlug ?? null;
         const requesterLabel =
           request.requesterName ?? request.requesterEmail ?? 'Unknown requester';
         return (
           <li key={request.id} className='rounded-xl border border-border p-4'>
             <div className='flex flex-wrap items-start justify-between gap-3'>
-              <div className='min-w-0'>
+              <div className='flex min-w-0 flex-col gap-1'>
                 <div className='flex min-w-0 flex-wrap items-center gap-2'>
                   <Badge variant='secondary'>
                     {request.targetType === 'skill' ? 'Skill' : 'Agent'}
@@ -133,44 +136,29 @@ export function RequestsTab({
                   {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}
                 </div>
 
-                <p className='mt-1 text-xs text-muted-foreground'>
-                  by {requesterLabel}
-                  {request.requesterName && request.requesterEmail
-                    ? ` (${request.requesterEmail})`
-                    : ''}{' '}
-                  · {new Date(request.createdAt).toLocaleString()}
-                </p>
-
-                {request.agentOwnerName && (
-                  <p className='mt-0.5 text-xs text-muted-foreground'>
-                    Agent created by: {request.agentOwnerName}
-                    {request.agentOwnerEmail ? ` (${request.agentOwnerEmail})` : ''}
+                <div className='flex flex-col gap-1'>
+                  <p className='text-xs text-muted-foreground'>
+                    by {requesterLabel}
+                    {request.requesterName && request.requesterEmail
+                      ? ` (${request.requesterEmail})`
+                      : ''}{' '}
+                    · {new Date(request.createdAt).toLocaleString()}
                   </p>
-                )}
+
+                  {request.agentOwnerName && (
+                    <p className='text-xs text-muted-foreground'>
+                      Agent created by: {request.agentOwnerName}
+                      {request.agentOwnerEmail ? ` (${request.agentOwnerEmail})` : ''}
+                    </p>
+                  )}
+                </div>
               </div>
 
-              <div className='flex shrink-0 items-center gap-2'>
-                {request.targetType === 'agent' && request.agentSlug && (
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    disabled={busy}
-                    onClick={() => {
-                      void navigate(
-                        `${workspaceId ? `/${workspaceId}` : ''}/claw-agents/agents/${request.agentSlug}`,
-                      );
-                    }}
-                    data-track-category='Claw Admin'
-                    data-track-name='View requested agent'
-                  >
-                    <Eye02On className='size-4' />
-                    View
-                  </Button>
-                )}
-
+              <div className='ml-auto flex shrink-0 items-center gap-2'>
                 {request.targetType === 'skill' ? (
                   <Button
                     type='button'
+                    size='sm'
                     disabled={busy}
                     onClick={() => approveSkill.mutate(request.id)}
                     data-track-category='Claw Admin'
@@ -182,6 +170,7 @@ export function RequestsTab({
                 ) : (
                   <Button
                     type='button'
+                    size='sm'
                     disabled={busy || !request.agentSlug}
                     onClick={() =>
                       approveAndSetup.mutate({
@@ -197,9 +186,34 @@ export function RequestsTab({
                   </Button>
                 )}
 
+                {request.targetType === 'agent' && agentSlug && (
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='sm'
+                    disabled={busy}
+                    onClick={() => {
+                      void navigate(
+                        `${libraryPath}/agent/${encodeURIComponent(agentSlug)}?tab=persona`,
+                        {
+                          state: {
+                            returnTo: `${location.pathname}${location.search}${location.hash}`,
+                          },
+                        },
+                      );
+                    }}
+                    data-track-category='Claw Admin'
+                    data-track-name='View requested agent'
+                  >
+                    <Eye02On className='size-4' />
+                    View
+                  </Button>
+                )}
+
                 <Button
                   type='button'
-                  variant='destructive'
+                  variant='ghost'
+                  size='sm'
                   disabled={busy}
                   onClick={() => {
                     setRejectNote('');
@@ -226,6 +240,7 @@ export function RequestsTab({
                 <Button
                   type='button'
                   variant='outline'
+                  size='sm'
                   disabled={reject.isPending}
                   onClick={() =>
                     reject.mutate({
@@ -245,7 +260,7 @@ export function RequestsTab({
   );
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex flex-col gap-6 pt-4'>
       {registration.flow && (
         <RegistrationFlowCard
           flow={registration.flow}

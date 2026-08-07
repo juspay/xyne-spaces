@@ -13,6 +13,7 @@ interface V2DialogProps {
   testId: string;
   width?: keyof typeof WIDTH;
   footer?: ReactNode;
+  className?: string;
   children: ReactNode;
 }
 
@@ -24,6 +25,7 @@ export function V2Dialog({
   testId,
   width = 'form',
   footer,
+  className,
   children,
 }: V2DialogProps): ReactElement {
   return (
@@ -36,6 +38,7 @@ export function V2Dialog({
       className={cn(
         'flex max-h-[min(85vh,720px)] w-full flex-col gap-4 overflow-hidden rounded-2xl border-[0.8px] border-border bg-card p-1',
         WIDTH[width],
+        className,
       )}
     >
       <div className='flex h-9 shrink-0 items-center justify-between gap-2 pl-[18px] pr-2'>

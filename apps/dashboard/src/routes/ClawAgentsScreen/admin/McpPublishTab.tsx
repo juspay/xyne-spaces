@@ -92,11 +92,11 @@ export function McpPublishTab({ userId }: { userId: string }): ReactElement {
   }
 
   return (
-    <div className='flex flex-col gap-3 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       {requests.map((server: McpPublishRequest) => (
         <div key={server.id} className='rounded-xl border border-border px-4 py-3'>
           <div className='flex flex-wrap items-start justify-between gap-3'>
-            <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-1 flex-col gap-1'>
               <div className='flex min-w-0 flex-wrap items-center gap-2'>
                 <span className='truncate text-sm font-medium text-foreground'>{server.name}</span>
                 <Badge variant='secondary'>{server.type}</Badge>
@@ -104,10 +104,10 @@ export function McpPublishTab({ userId }: { userId: string }): ReactElement {
               </div>
 
               {server.description && (
-                <p className='mt-1 text-xs text-muted-foreground'>{server.description}</p>
+                <p className='text-xs text-muted-foreground'>{server.description}</p>
               )}
 
-              <p className='mt-1 text-xs text-muted-foreground'>
+              <p className='text-xs text-muted-foreground'>
                 Owner: {ownerOf(server)}
                 {requestedAt(server)
                   ? ` · Requested ${new Date(requestedAt(server) as string).toLocaleString()}`
@@ -128,7 +128,7 @@ export function McpPublishTab({ userId }: { userId: string }): ReactElement {
               </Button>
               <Button
                 type='button'
-                variant='destructive'
+                variant='ghost'
                 disabled={busy}
                 onClick={() => {
                   setRejectNote('');

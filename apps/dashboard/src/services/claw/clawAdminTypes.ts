@@ -132,22 +132,6 @@ export const auditEventLabel = (value: string): string =>
 export const auditDescription = (value: string): string =>
   value.replace(/("[^"]*")\s*\([^)]*\)/g, '$1');
 
-export type AuditEventTone = 'success' | 'warning' | 'error' | 'neutral';
-
-export const auditEventTone = (eventType: string): AuditEventTone => {
-  if (eventType.includes('PROMOTED') || eventType.includes('GRANTED')) return 'success';
-  if (eventType.includes('DEMOTED') || eventType.includes('REVOKED')) return 'warning';
-  if (eventType.includes('DELETED')) return 'error';
-  return 'neutral';
-};
-
-export const AUDIT_TONE_CLASS: Record<AuditEventTone, string> = {
-  success: 'bg-status-success text-background',
-  warning: 'bg-status-pending text-background',
-  error: 'bg-status-failure text-background',
-  neutral: 'bg-muted text-muted-foreground',
-};
-
 export interface WorkflowGlobalRequest {
   id: string;
   workflowId: string;

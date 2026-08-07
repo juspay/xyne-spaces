@@ -48,3 +48,8 @@ export const workflowRequestsKey = (scope: AdminOrgScope): unknown[] => [
 export const globalMcpKey = (): unknown[] => ['claw-admin-global-mcp'];
 
 export const credentialFieldsKey = (): unknown[] => ['claw-admin-credential-fields'];
+
+export const slackStatusesKey = (orgIds: readonly string[]): unknown[] => [
+  'claw-admin-slack-statuses',
+  orgIds,
+];

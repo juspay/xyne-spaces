@@ -1,4 +1,3 @@
-import { createContext, useContext } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { checkAdminAccess } from '@/services/claw/clawAdminService';
 import type { AdminAccessFlags } from '@/services/claw/clawAdminTypes';
@@ -6,14 +5,6 @@ import type { AdminAccessFlags } from '@/services/claw/clawAdminTypes';
 export interface ClawAdminAccess extends AdminAccessFlags {
   isLoading: boolean;
 }
-
-const DEFAULT_ACCESS: ClawAdminAccess = {
-  isAdmin: false,
-  hasSearchEvalAccess: false,
-  isLoading: true,
-};
-
-export const ClawAdminAccessContext = createContext<ClawAdminAccess>(DEFAULT_ACCESS);
 
 export const clawAdminAccessKey = (userId: string | undefined): unknown[] => [
   'claw-admin-access',
@@ -34,8 +25,4 @@ export function useClawAdminAccessQuery(userId: string | undefined): ClawAdminAc
     hasSearchEvalAccess: data?.hasSearchEvalAccess ?? false,
     isLoading: isPending,
   };
-}
-
-export function useClawAdminAccess(): ClawAdminAccess {
-  return useContext(ClawAdminAccessContext);
 }

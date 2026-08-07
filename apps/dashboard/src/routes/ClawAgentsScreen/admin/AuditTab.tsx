@@ -1,16 +1,13 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/Badge';
-import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { listClawAuthAgents } from '@/services/claw/clawAuthAgentsService';
 import { listAuditLogs } from '@/services/claw/clawAdminService';
 import {
   AUDIT_EVENT_TYPES,
-  AUDIT_TONE_CLASS,
   auditDescription,
   auditEventLabel,
-  auditEventTone,
   type AdminOrgScope,
   type AuditLogEntry,
 } from '@/services/claw/clawAdminTypes';
@@ -121,7 +118,7 @@ export function AuditTab({
 
   if (isPending) {
     return (
-      <div className='flex flex-col gap-3 pt-4'>
+      <div className='flex flex-col gap-6 pt-4'>
         {filterBar}
         <Skeleton className='h-40 w-full' />
       </div>
@@ -130,7 +127,7 @@ export function AuditTab({
 
   if (isError) {
     return (
-      <div className='flex flex-col gap-3 pt-4'>
+      <div className='flex flex-col gap-6 pt-4'>
         {filterBar}
         <TabMessage>Couldn’t load audit logs.</TabMessage>
       </div>
@@ -142,7 +139,7 @@ export function AuditTab({
 
   if (visible.length === 0) {
     return (
-      <div className='flex flex-col gap-3 pt-4'>
+      <div className='flex flex-col gap-6 pt-4'>
         {filterBar}
         <TabMessage>No audit logs match these filters.</TabMessage>
       </div>
@@ -150,7 +147,7 @@ export function AuditTab({
   }
 
   return (
-    <div className='flex flex-col gap-3 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       {filterBar}
 
       <AdminTable
@@ -166,19 +163,11 @@ export function AuditTab({
             <td className='whitespace-nowrap px-4 py-3 text-xs text-muted-foreground'>
               {new Date(entry.createdAt).toLocaleString()}
             </td>
-            <td className='px-4 py-3'>
-              <Badge
-                variant='secondary'
-                className={cn(
-                  'border-transparent font-medium',
-                  AUDIT_TONE_CLASS[auditEventTone(entry.eventType)],
-                )}
-              >
-                {entry.eventType}
-              </Badge>
+            <td className='whitespace-nowrap px-4 py-3'>
+              <Badge variant='secondary'>{entry.eventType}</Badge>
             </td>
             {showOrgLabels && (
-              <td className='px-4 py-3'>
+              <td className='whitespace-nowrap px-4 py-3'>
                 <OrgBadge orgName={orgLabel(entry.orgId, entry.orgName, orgNamesById)} />
               </td>
             )}

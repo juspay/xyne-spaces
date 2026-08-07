@@ -2,7 +2,7 @@ import { useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { DeleteDustbin01, KeySlant } from '@xyne/icons';
-import { Badge } from '@/components/ui/Badge';
+import { Pill } from '../create-v2/shared/Pill';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -171,7 +171,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
   if (!servers || servers.length === 0) return <TabMessage>No MCP servers registered.</TabMessage>;
 
   return (
-    <div className='flex flex-col gap-3 pt-4'>
+    <div className='flex flex-col gap-6 pt-4'>
       <p className='text-xs text-muted-foreground'>
         Admin-managed fallback credentials for MCP servers. At call time the user’s personal
         connection is preferred; if absent, these are used. Disable “Allow fallback” for servers
@@ -192,18 +192,9 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                       {server.name}
                     </span>
                     {server.hasGlobalCredentials ? (
-                      <Badge
-                        variant='default'
-                        title={
-                          server.globalCredentialsUpdatedAt
-                            ? `Updated ${new Date(server.globalCredentialsUpdatedAt).toLocaleString()}`
-                            : undefined
-                        }
-                      >
-                        Creds set
-                      </Badge>
+                      <Pill tone='success'>Creds set</Pill>
                     ) : (
-                      <Badge variant='secondary'>No creds</Badge>
+                      <Pill tone='neutral'>No creds</Pill>
                     )}
                   </div>
                 </div>
