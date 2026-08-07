@@ -1,6 +1,16 @@
 import { ReactElement } from 'react';
+import { TicketStatusV2 } from '@xyne/shared';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+
+// The only categories every board is guaranteed to have at least one stage of (enforced by
+// the backend's board.update validation). PAUSED/CANCELLED old stages aren't guaranteed a
+// same-category match on the source board, so they may map to a new stage of any category.
+const COMPULSORY_STATUS_CATEGORIES = new Set<string>([
+  TicketStatusV2.TODO,
+  TicketStatusV2.STARTED,
+  TicketStatusV2.COMPLETED,
+]);
 
 export interface StageRemapRow {
   oldStageId: string;
@@ -31,9 +41,12 @@ export const StageRemapTable = ({
   // A ticket may only land on a new stage of the SAME status category it's already in
   // (e.g. a ticket in a STARTED-category old stage may only be mapped to a STARTED-category
   // new stage) — so each row gets its own filtered option list, not the full new-stage set.
+  // Exception: PAUSED/CANCELLED aren't guaranteed to exist on the source board (unlike
+  // TODO/STARTED/COMPLETED, which every board must have), so those rows offer every new
+  // stage regardless of category rather than potentially having nowhere to go at all.
   const optionsByStatus = (status: string): SelectorOption[] =>
     newStageOptions
-      .filter(stage => stage.defaultStatus === status)
+      .filter(stage => !COMPULSORY_STATUS_CATEGORIES.has(status) || stage.defaultStatus === status)
       .map(stage => ({
         value: stage.id,
         label: stage.name,

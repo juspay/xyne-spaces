@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
-import { BoardType, FormContextType, FormEntityType, ApproverType } from '@xyne/shared';
+import { BoardType, TicketStatusV2, FormContextType, FormEntityType, ApproverType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { calculateETADeadline, recomputeOverallTicketEta } from '@/utils/etaCalculation';
@@ -15,6 +15,15 @@ import {
 } from '@/queues/boardConfigCopyQueue';
 
 const TAG = '[BoardConfigCopy]';
+
+// The only categories every board is guaranteed to have at least one stage of — enforced
+// by mutators.ts's board.update validation ("Board must have at least one TODO, one
+// STARTED, and one COMPLETED stage"). PAUSED/CANCELLED have no such guarantee.
+const COMPULSORY_TICKET_STATUS_CATEGORIES = new Set<string>([
+  TicketStatusV2.TODO,
+  TicketStatusV2.STARTED,
+  TicketStatusV2.COMPLETED,
+]);
 
 export interface CopyCategorySelection {
   customFields: boolean;
@@ -259,8 +268,15 @@ export class BoardConfigCopyService {
    *
    * Invariant: a ticket may only be remapped to a new stage of the SAME defaultTicketStatusV2
    * category it's currently in (e.g. a STARTED-status ticket can only land on a STARTED-status
-   * new stage). This is enforced here — not just in the frontend picker — so a
-   * malformed/bypassed request can't violate it.
+   * new stage) — enforced here, not just in the frontend picker, so a malformed/bypassed
+   * request can't violate it.
+   *
+   * Exception: this only applies to the three categories every board is guaranteed to have
+   * at least one stage of (TODO/STARTED/COMPLETED — enforced on every board save, see
+   * mutators.ts's board.update validation). PAUSED and CANCELLED are optional categories a
+   * source board may have zero stages of, so an old stage in either of those categories may
+   * be remapped to a new stage of ANY category — otherwise a source board without e.g. a
+   * CANCELLED stage could never resolve a target's CANCELLED-category tickets at all.
    */
   private resolveRemapPlan(
     oldStages: OldStageInfo[],
@@ -283,7 +299,12 @@ export class BoardConfigCopyService {
       }
 
       const overrideStage = newStageBySourceId.get(override);
-      if (!overrideStage || overrideStage.defaultTicketStatusV2 !== old.defaultTicketStatusV2) {
+      if (!overrideStage) {
+        invalidCategoryOverrides.push(old.id);
+        continue;
+      }
+      const categoryIsCompulsory = COMPULSORY_TICKET_STATUS_CATEGORIES.has(old.defaultTicketStatusV2);
+      if (categoryIsCompulsory && overrideStage.defaultTicketStatusV2 !== old.defaultTicketStatusV2) {
         invalidCategoryOverrides.push(old.id);
         continue;
       }
