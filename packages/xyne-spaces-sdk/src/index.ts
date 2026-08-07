@@ -37,6 +37,10 @@ export type { SdkErrorCode } from './core/errors.js';
 
 // ----- Model Types -----
 export type {
+  // Enums
+  MessageType,
+  ChannelRole,
+  ChannelSortOrder,
   // Users
   User,
   UserProfile,
@@ -45,12 +49,16 @@ export type {
   Channel,
   ChannelParticipant,
   ChannelUserStatus,
+  ChannelSection,
   // Messages
   Message,
   MessageAttachment,
   Reaction,
   // Conversations
   Conversation,
+  ConversationParticipant,
+  // Activities
+  Activity,
   // Tickets
   Ticket,
   Board,
@@ -63,6 +71,11 @@ export type {
   PaginatedResponse,
   PaginationOptions,
 } from './types/index.js';
+
+// ----- Pagination Cursors -----
+export type { ConversationCursor } from './registry/conversations.js';
+export type { MessageCursor } from './registry/messages.js';
+export type { ActivityCursor } from './registry/activities.js';
 
 // ----- Registry Types (for advanced usage) -----
 export type {

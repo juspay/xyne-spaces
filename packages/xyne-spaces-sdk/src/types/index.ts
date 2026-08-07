@@ -39,17 +39,39 @@ export interface UserPresence {
   updatedAt: number;
 }
 
+// ----- Enums -----
+//
+// String unions rather than TS enums so the SDK stays dependency-free and the
+// values are usable as plain strings by consumers.
+
+export type MessageType = 'USER' | 'BOT' | 'SYSTEM' | 'FORWARDED';
+export type ChannelRole = 'ADMIN' | 'MEMBER';
+export type ChannelSortOrder = 'ALPHABETICAL' | 'RECENT_ACTIVITY' | 'MANUAL';
+
 // ----- Channel Types -----
 
+/**
+ * A channel. Field names match the `channels` table exactly — note `type` and
+ * `visibility` rather than a boolean `isPrivate`, and `createdBy` rather than
+ * `createdByUserId`.
+ */
 export interface Channel {
   id: string;
-  workspaceId: string;
   name: string;
   description: string | null;
-  channelType: 'channel' | 'dm' | 'group_dm' | 'email';
-  isPrivate: boolean;
+  type: string;
+  scopeType: string;
+  visibility: string;
+  createdBy: string;
+  projectId: string;
+  workspaceId: string;
+  participantCount: number;
   isArchived: boolean;
-  createdByUserId: string | null;
+  lastActivityAt: number;
+  addUserPolicy: string | null;
+  showTicketsTabTicketsInChat: boolean | null;
+  callSummaryPrompt: string | null;
+  metadata: unknown;
   createdAt: number;
   updatedAt: number;
 }
@@ -58,40 +80,78 @@ export interface ChannelParticipant {
   id: string;
   channelId: string;
   userId: string;
-  role: 'admin' | 'member';
+  role: ChannelRole;
   joinedAt: number;
 }
 
+/**
+ * Per-user state for a channel: read position, starring, section placement, and
+ * notification overrides. One row per (channel, user).
+ */
 export interface ChannelUserStatus {
+  id: string;
   channelId: string;
   userId: string;
-  lastReadMessageId: string | null;
-  lastReadAt: number | null;
-  isMuted: boolean;
-  isPinned: boolean;
+  workspaceId: string;
+  lastViewedAt: number;
+  lastViewedConversationId: string | null;
+  isStarred: boolean;
+  isClosed: boolean;
+  unreadCount: number;
+  sectionId: string | null;
+  sectionPosition: string | null;
+  selectedBoardId: string | null;
+  conversationSeenCutoffAt: number;
+  isRecapSubscribed: boolean;
+  desktopNotificationLevel: string | null;
+  mobileNotificationLevel: string | null;
+  threadReplyNotificationsEnabled: boolean | null;
+}
+
+/** A user's sidebar grouping of channels. */
+export interface ChannelSection {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  name: string;
+  emoji: string | null;
+  position: string;
+  isCollapsed: boolean;
   isDeleted: boolean;
+  sortOrder: ChannelSortOrder | null;
+  createdAt: number;
+  updatedAt: number | null;
 }
 
 // ----- Message Types -----
 
+/**
+ * A message. The primary key is `messageId`, not `id`, and the type column is
+ * `msgType` — both match the underlying table.
+ */
 export interface Message {
-  id: string;
+  messageId: string;
   conversationId: string;
-  channelId: string;
+  childConversationId: string | null;
   senderId: string;
+  workspaceId: string;
   content: string;
-  contentType: 'text' | 'system' | 'ai';
-  isEdited: boolean;
+  msgType: MessageType;
+  hasAttachment: boolean;
+  edited: boolean;
   isDeleted: boolean;
+  showInChannel: boolean;
+  /** When set, the message is only visible to this user (ephemeral replies). */
+  visibleTo: string | null;
+  isSent: boolean;
+  nudgeCount: number | null;
+  metadata: unknown;
   createdAt: number;
-  updatedAt: number;
-  attachments?: MessageAttachment[];
 }
 
 export interface MessageAttachment {
   id: string;
   messageId: string;
-  resourceId: string;
   fileName: string;
   fileSize: number;
   mimeType: string;
@@ -108,13 +168,58 @@ export interface Reaction {
 
 // ----- Conversation Types -----
 
+/** A thread. Primary key is `conversationId`. */
 export interface Conversation {
-  id: string;
+  conversationId: string;
   channelId: string;
+  workspaceId: string;
+  createdBy: string;
+  initialMessageId: string;
   parentMessageId: string | null;
-  initialMessageId: string | null;
+  lastActivityAt: number;
+  replyCount: number;
+  pinned: boolean;
+  ticketId: string | null;
+  callId: string | null;
+  threadType: string | null;
+  doNotPostToChannel: boolean | null;
+  metadata: unknown;
   createdAt: number;
-  updatedAt: number;
+}
+
+export interface ConversationParticipant {
+  id: string;
+  conversationId: string;
+  userId: string;
+  channelId: string | null;
+  workspaceId: string;
+  participationType: string | null;
+  isSubscribed: boolean;
+  joinedAt: number;
+  lastReadAt: number | null;
+  lastReplyAt: number | null;
+}
+
+// ----- Activity Types -----
+
+/** An entry in a user's activity feed (mentions, replies, reactions, calls). */
+export interface Activity {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  actorId: string;
+  actorAction: string;
+  actionSource: string;
+  actionSourceId: string;
+  messageId: string | null;
+  reactionId: string | null;
+  callId: string | null;
+  ticketId: string | null;
+  conversationId: string | null;
+  channelId: string | null;
+  canvasId: string | null;
+  classification: string;
+  createdAt: number;
 }
 
 // ----- Ticket Types -----
