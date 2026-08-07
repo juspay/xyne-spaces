@@ -8,9 +8,8 @@ import {
   ChannelVisibility,
   IngestionStatus,
   MessageType,
-  Prisma,
   TicketPriority,
-} from '@prisma/client';
+} from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { CollectionRepository } from '@/database/repositories/collectionRepository';
 import { createTicketWithConversation } from '@/apps/core/ticketutils';
