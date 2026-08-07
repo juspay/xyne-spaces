@@ -16,6 +16,9 @@ import { TicketsResource } from './resources/tickets.js';
 import { SupportTicketsResource } from './resources/support-tickets.js';
 import { BoardsResource } from './resources/boards.js';
 import { ProjectsResource } from './resources/projects.js';
+import { CanvasesResource } from './resources/canvases.js';
+import { CollectionsResource } from './resources/collections.js';
+import { FormsResource } from './resources/forms.js';
 
 export interface SpacesClientOptions {
   /**
@@ -91,6 +94,15 @@ export class SpacesClient {
   /** Projects and their tags, fields, and applications */
   readonly projects: ProjectsResource;
 
+  /** Canvases: content, sharing, comments, versions, and folders */
+  readonly canvases: CanvasesResource;
+
+  /** Knowledge-base collections and their permissions */
+  readonly collections: CollectionsResource;
+
+  /** Custom forms, their mappings, and submitted values */
+  readonly forms: FormsResource;
+
   constructor(options: SpacesClientOptions = {}) {
     this.http = new HttpClient({
       baseUrl: options.baseUrl ?? 'https://spaces.xyne.app',
@@ -111,6 +123,9 @@ export class SpacesClient {
     this.supportTickets = new SupportTicketsResource(this.transport);
     this.boards = new BoardsResource(this.transport);
     this.projects = new ProjectsResource(this.transport);
+    this.canvases = new CanvasesResource(this.transport);
+    this.collections = new CollectionsResource(this.transport);
+    this.forms = new FormsResource(this.transport);
   }
 
   /**
