@@ -17,7 +17,7 @@ import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { RecordingSharePill } from '../../ui/MessageBubble/RecordingSharePill';
+import { RecordingShareContent } from '../../ui/MessageBubble/RecordingShareContent';
 import {
   useRecordingShareMessage,
   type ResolvedRecordingShareMessage,
@@ -322,18 +322,15 @@ const TextPreview: React.FC<{
       {isDeleted ? (
         <p className='mb-1 text-[13px] italic text-muted-foreground'>This message was deleted.</p>
       ) : recordingShare ? (
-        <div className='mb-1 flex min-w-0 flex-col gap-1'>
-          {recordingShare.noteHtml && (
+        <RecordingShareContent
+          recordingShare={recordingShare}
+          className='mb-1 flex min-w-0 flex-col gap-1'
+          renderNote={noteHtml => (
             <div className='line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
-              {getInlinePreviewText(recordingShare.noteHtml)}
+              {getInlinePreviewText(noteHtml)}
             </div>
           )}
-          <RecordingSharePill
-            title={recordingShare.displayTitle}
-            durationMs={recordingShare.durationMs}
-            onOpen={recordingShare.openRecording}
-          />
-        </div>
+        />
       ) : (
         <div className='mb-1 line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
           {inlinePreviewText}

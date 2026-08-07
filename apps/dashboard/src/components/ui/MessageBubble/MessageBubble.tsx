@@ -94,7 +94,7 @@ import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { loadEmojiData } from '../../../utils/emojiLookup';
-import { RecordingSharePill } from './RecordingSharePill';
+import { RecordingShareContent } from './RecordingShareContent';
 import { useRecordingShareMessage } from './recordingShareMessage';
 
 // ================== ATTACHMENTS BLOCK ==================
@@ -1219,13 +1219,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   attachments={attachments}
                 />
               ) : recordingShare && !isForwardedMessage ? (
-                <>
-                  {recordingShare.noteHtml && (
+                <RecordingShareContent
+                  recordingShare={recordingShare}
+                  renderNote={noteHtml => (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(recordingShare.noteHtml)}`}
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <RenderMessageWithHTML
-                        message={recordingShare.noteHtml}
+                        message={noteHtml}
                         showEdited={message.edited}
                         messageId={message.messageId}
                         conversationId={message.conversationId}
@@ -1233,13 +1234,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       />
                     </div>
                   )}
-                  <RecordingSharePill
-                    title={recordingShare.displayTitle}
-                    durationMs={recordingShare.durationMs}
-                    onOpen={recordingShare.openRecording}
-                  />
-                  {afterTextContent}
-                </>
+                  afterContent={afterTextContent}
+                />
               ) : isMarkdownContent ? (
                 <>
                   <MarkdownMessageRenderer
@@ -1358,32 +1354,28 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       )}
                     </div>
                     {recordingShare ? (
-                      <>
-                        {recordingShare.noteHtml && (
+                      <RecordingShareContent
+                        recordingShare={recordingShare}
+                        renderNote={noteHtml => (
                           <div
-                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(recordingShare.noteHtml)}`}
+                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
                           >
                             {isMobile ? (
                               <ExpandableMessage
-                                message={recordingShare.noteHtml}
+                                message={noteHtml}
                                 showEdited={false}
                                 maxHeight={500}
                               />
                             ) : (
                               <RenderMessageWithHTML
-                                message={recordingShare.noteHtml}
+                                message={noteHtml}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
                               />
                             )}
                           </div>
                         )}
-                        <RecordingSharePill
-                          title={recordingShare.displayTitle}
-                          durationMs={recordingShare.durationMs}
-                          onOpen={recordingShare.openRecording}
-                        />
-                      </>
+                      />
                     ) : metadata?.isCallMessage && metadata?.callId ? (
                       <>
                         <CallBubble

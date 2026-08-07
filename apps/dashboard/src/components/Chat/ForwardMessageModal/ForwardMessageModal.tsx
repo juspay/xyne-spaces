@@ -46,7 +46,7 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { logger, Event } from '../../../utils/logger';
-import { RecordingSharePill } from '../../ui/MessageBubble/RecordingSharePill';
+import { RecordingShareContent } from '../../ui/MessageBubble/RecordingShareContent';
 import { useRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 /**
@@ -815,20 +815,17 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                   </span>
                 </div>
                 {recordingShare ? (
-                  <div className='flex min-w-0 flex-col gap-1'>
-                    {recordingShare.noteHtml && (
+                  <RecordingShareContent
+                    recordingShare={recordingShare}
+                    className='flex min-w-0 flex-col gap-1'
+                    renderNote={noteHtml => (
                       <div
-                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(recordingShare.noteHtml)}`}
+                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(noteHtml)}`}
                       >
-                        <RenderMessageWithHTML message={recordingShare.noteHtml} />
+                        <RenderMessageWithHTML message={noteHtml} />
                       </div>
                     )}
-                    <RecordingSharePill
-                      title={recordingShare.displayTitle}
-                      durationMs={recordingShare.durationMs}
-                      onOpen={recordingShare.openRecording}
-                    />
-                  </div>
+                  />
                 ) : previewContent ? (
                   <div
                     className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}

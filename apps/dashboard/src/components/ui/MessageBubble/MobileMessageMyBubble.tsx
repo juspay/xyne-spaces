@@ -23,7 +23,7 @@ import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
-import { RecordingSharePill } from './RecordingSharePill';
+import { RecordingShareContent } from './RecordingShareContent';
 import type { ResolvedRecordingShareMessage } from './recordingShareMessage';
 
 export interface MobileMessageMyBubbleProps {
@@ -201,20 +201,24 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               </span>
             </div>
             {recordingShare && !isForwardedMessage ? (
-              recordingShare.noteHtml ? (
-                <div
-                  className={cn(
-                    'jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground',
-                    getEmojiFontSizeClass(recordingShare.noteHtml),
-                  )}
-                >
-                  <ExpandableMessage
-                    message={recordingShare.noteHtml}
-                    showEdited={message.edited}
-                    maxHeight={500}
-                  />
-                </div>
-              ) : null
+              <RecordingShareContent
+                recordingShare={recordingShare}
+                showPill={false}
+                renderNote={noteHtml => (
+                  <div
+                    className={cn(
+                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground',
+                      getEmojiFontSizeClass(noteHtml),
+                    )}
+                  >
+                    <ExpandableMessage
+                      message={noteHtml}
+                      showEdited={message.edited}
+                      maxHeight={500}
+                    />
+                  </div>
+                )}
+              />
             ) : isActiveCall && channelId && metadata?.callId ? (
               <CallMessageOverlay callId={metadata.callId} channelId={channelId} />
             ) : isForwardedMessage && forwardedMessageData ? (
@@ -255,20 +259,24 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                     )}
                   </div>
                   {recordingShare ? (
-                    recordingShare.noteHtml ? (
-                      <div
-                        className={cn(
-                          'jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground',
-                          getEmojiFontSizeClass(recordingShare.noteHtml),
-                        )}
-                      >
-                        <ExpandableMessage
-                          message={recordingShare.noteHtml}
-                          showEdited={false}
-                          maxHeight={500}
-                        />
-                      </div>
-                    ) : null
+                    <RecordingShareContent
+                      recordingShare={recordingShare}
+                      showPill={false}
+                      renderNote={noteHtml => (
+                        <div
+                          className={cn(
+                            'jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground',
+                            getEmojiFontSizeClass(noteHtml),
+                          )}
+                        >
+                          <ExpandableMessage
+                            message={noteHtml}
+                            showEdited={false}
+                            maxHeight={500}
+                          />
+                        </div>
+                      )}
+                    />
                   ) : (
                     <div
                       className={cn(
@@ -328,13 +336,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
           </div>
 
           {recordingShare && (
-            <div className='w-full mt-2'>
-              <RecordingSharePill
-                title={recordingShare.displayTitle}
-                durationMs={recordingShare.durationMs}
-                onOpen={recordingShare.openRecording}
-              />
-            </div>
+            <RecordingShareContent recordingShare={recordingShare} className='w-full mt-2' />
           )}
 
           {isTicketCardMessage && ticketAttachments && ticketAttachments.length > 0 && (

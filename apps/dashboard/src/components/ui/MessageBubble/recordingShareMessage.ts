@@ -16,6 +16,7 @@ export interface ParsedRecordingShareMessage {
  */
 export const parseRecordingShareMessage = (content: string): ParsedRecordingShareMessage | null => {
   if (!content || typeof DOMParser === 'undefined') return null;
+  if (!content.includes('/recordings/')) return null;
 
   const doc = new DOMParser().parseFromString(content, 'text/html');
   const links = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'));
