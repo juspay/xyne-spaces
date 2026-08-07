@@ -10,6 +10,11 @@ import { D2Block } from '../components/Markdown/D2Block';
 import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
+import { InternalXyneLink } from '../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import {
+  getAnchorTargetProps,
+  parseInternalXyneLink,
+} from '../components/Chat/RenderMessageWithHTML/internalLinkUtils';
 import type { ToolInvocation } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 /**
@@ -215,6 +220,23 @@ export const createMarkdownComponents = (
       }
     }
 
+    // Keep Markdown messages consistent with the regular HTML message path.
+    // Automation SEND_MESSAGE stores content as Markdown, so without this
+    // branch internal Xyne links render as unstyled browser anchors even
+    // though they are valid clickable links.
+    if (href && parseInternalXyneLink(href)) {
+      return (
+        <InternalXyneLink
+          href={href}
+          {...props}
+          {...getAnchorTargetProps(href)}
+          className={props.className ?? 'text-primary'}
+        >
+          {children}
+        </InternalXyneLink>
+      );
+    }
+
     const isExternal = ((): boolean => {
       if (!href) return false;
       try {
@@ -243,6 +265,7 @@ export const createMarkdownComponents = (
           data-track-category='MESSAGE'
           data-track-name='OPEN_EXTERNAL_LINK'
           {...props}
+          className={props.className ?? 'text-primary hover:underline'}
         >
           {children}
         </a>

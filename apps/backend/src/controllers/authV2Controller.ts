@@ -1519,7 +1519,7 @@ export class AuthV2Controller {
 
       if (isNewUser) {
         try {
-          await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+          await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
         } catch (error) {
           logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
             userId: workspaceUser.id,

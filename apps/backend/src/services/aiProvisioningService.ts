@@ -5,8 +5,6 @@ import {
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { aiProvisioningQueue } from '@/queues/aiProvisioningQueue';
-import { litellmProvisioningClient } from '@/services/litellmProvisioningClient';
-import { logger } from '@/utils/logger';
 
 class AIProvisioningService {
   private prisma = DatabaseClient.getInstance();
@@ -22,59 +20,32 @@ class AIProvisioningService {
     );
   }
 
-  async enqueueUserSync(spacesUserId: string) {
-    return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.USER, spacesUserId);
+  async enqueueUserSync(spacesOrgMemberId: string) {
+    return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.USER, spacesOrgMemberId);
   }
 
   async upgradeCommunityToEnterpriseBudget(orgMemberId: string): Promise<void> {
     const memberRow = await this.prisma.orgMember.findUnique({
       where: { memberId: orgMemberId },
-      select: {
-        memberId: true,
-        users: {
-          select: { id: true, leftAt: true },
-          where: { leftAt: null },
-        },
-      },
+      select: { memberId: true },
     });
 
     if (!memberRow) return;
 
-    const activeUserIds = memberRow.users.map(u => u.id);
+    await this.prisma.aiProvisioningStatus.updateMany({
+      where: {
+        subjectType: AIProvisioningSubjectType.USER,
+        subjectId: memberRow.memberId,
+        provider: AIProvisioningProvider.CLAW_LITELLM,
+      },
+      data: {
+        status: AIProvisioningStatusValue.PENDING,
+        lastError: null,
+        updatedAt: new Date(),
+      },
+    });
 
-    for (const userId of activeUserIds) {
-      const litellmUserId = `claw-user-${userId}`;
-      try {
-        await litellmProvisioningClient.deleteUser(litellmUserId);
-        logger.info('[AI-PROVISIONING-SERVICE] Deleted LiteLLM user for community→enterprise transition', {
-          orgMemberId,
-          userId,
-          litellmUserId,
-        });
-      } catch (error) {
-        logger.error('[AI-PROVISIONING-SERVICE] Failed to delete LiteLLM user for community→enterprise transition', {
-          orgMemberId,
-          userId,
-          litellmUserId,
-          error,
-        });
-      }
-
-      await this.prisma.aiProvisioningStatus.updateMany({
-        where: {
-          subjectType: AIProvisioningSubjectType.USER,
-          subjectId: userId,
-          provider: AIProvisioningProvider.CLAW_LITELLM,
-        },
-        data: {
-          status: AIProvisioningStatusValue.PENDING,
-          lastError: null,
-          updatedAt: new Date(),
-        },
-      });
-
-      await this.enqueueUserSync(userId);
-    }
+    await this.enqueueUserSync(memberRow.memberId);
   }
 
   private async ensureStatusAndEnqueue(
