@@ -4182,17 +4182,20 @@ function DesignPreviewPanel({
         : "flex min-w-0 flex-1 flex-col bg-xyne-surface-subtle"
       }
     >
-      <header className="flex h-[54px] shrink-0 items-center justify-between gap-3 overflow-x-auto border-b border-xyne-border-subtle bg-xyne-surface px-4">
-        <div className="flex min-w-0 items-center gap-2">
+      {/* min-h + wrap, not a fixed 54px row: the control set outgrew one line,
+          and a fixed-height overflow-x row overlapped adjacent panels at
+          moderate widths (Design system colliding with the status label). */}
+      <header className="flex min-h-[54px] shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-xyne-border-subtle bg-xyne-surface px-4 py-2">
+        <div className="flex min-w-0 max-w-[40%] items-center gap-2">
           <AppWindowIcon size={17} className="shrink-0 text-xyne-brand" />
           <div className="min-w-0">
             <p className="truncate text-[13px] font-semibold text-xyne-fg-primary">{fileName}</p>
-            <p className="text-[10px] uppercase tracking-[0.08em] text-xyne-fg-muted">
+            <p className="truncate text-[10px] uppercase tracking-[0.08em] text-xyne-fg-muted">
               {sending ? "Updating preview" : source ? "Live design" : "Preview"}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={onOpenDesignSystem}
