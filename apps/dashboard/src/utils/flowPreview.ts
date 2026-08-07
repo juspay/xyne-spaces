@@ -29,7 +29,8 @@ function stripFlowMarkup(raw: string): string {
 /**
  * Returns a clean single-line preview string for a FlowJSON message, or null if
  * the content is not a FlowJSON message. Joins the flow title with every text
- * `content` prop in the component tree.
+ * `content` prop in the component tree, plus plan `desc` and each plan todo's
+ * `text`, so plan cards preview their actual steps instead of just the title.
  */
 export function getFlowJsonPreviewText(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
@@ -56,6 +57,23 @@ export function getFlowJsonPreviewText(content: string): string | null {
         const p = c['props'] as Record<string, unknown> | undefined;
         if (p && typeof p['content'] === 'string' && p['content'].trim()) {
           texts.push(p['content'].trim());
+        }
+        // Plan cards store their prose in `desc` and each step in `todos[].text`
+        // (schema: planComponentSchema) rather than a `content` prop, so pull
+        // those out too — otherwise a plan collapses to just the flow title.
+        if (c['type'] === 'plan' && p) {
+          if (typeof p['desc'] === 'string' && p['desc'].trim()) {
+            texts.push(p['desc'].trim());
+          }
+          const todos = p['todos'];
+          if (Array.isArray(todos)) {
+            for (const t of todos) {
+              if (t && typeof t === 'object') {
+                const tt = (t as Record<string, unknown>)['text'];
+                if (typeof tt === 'string' && tt.trim()) texts.push(tt.trim());
+              }
+            }
+          }
         }
         if (Array.isArray(c['children'])) walk(c['children'] as unknown[]);
       }
