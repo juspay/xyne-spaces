@@ -7122,6 +7122,7 @@ export const mutators = defineMutators({
     upsert: defineMutator(
       z.object({
         displayName: z.string().nullable().optional(),
+        role: z.string().nullable().optional(),
         pronunciation: z.string().nullable().optional(),
         team: z.string().nullable().optional(),
         phoneNumber: z.string().nullable().optional(),
@@ -7135,6 +7136,7 @@ export const mutators = defineMutators({
         ctx,
         args: {
           displayName,
+          role,
           pronunciation,
           team,
           phoneNumber,
@@ -7156,6 +7158,7 @@ export const mutators = defineMutators({
           id: string;
           userId: string;
           displayName?: string | null;
+          role?: string | null;
           pronunciation?: string | null;
           team?: string | null;
           phoneNumber?: string | null;
@@ -7167,6 +7170,7 @@ export const mutators = defineMutators({
           id: profileId,
           userId: ctx.userID,
           ...(displayName !== undefined && { displayName }),
+          ...(role !== undefined && { role }),
           ...(pronunciation !== undefined && { pronunciation }),
           ...(team !== undefined && { team }),
           ...(phoneNumber !== undefined && { phoneNumber }),

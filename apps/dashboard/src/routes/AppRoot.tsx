@@ -6,7 +6,7 @@ import HomeScreen from './HomeScreen';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
-import OnboardingScreen from './OnboardingScreen/OnboardingScreen';
+import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
@@ -855,7 +855,7 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'onboarding',
-                element: <OnboardingScreen />,
+                element: <QuestionnaireScreen />,
               },
               {
                 path: 'rca',
