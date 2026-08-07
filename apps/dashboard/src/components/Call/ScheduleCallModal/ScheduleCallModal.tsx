@@ -351,20 +351,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           showActiveStatus={false}
           className='rounded-md size-[18px] flex items-center justify-center bg-background'
         />
-        <div className='flex-1 min-w-0 text-left'>
-          <div className='flex items-center gap-1.5'>
-            <span
-              className={`truncate text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-foreground'}`}
-            >
-              {getUserDisplayName(u)}
+        <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
+          <span
+            className={`flex-1 truncate text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-foreground'}`}
+          >
+            {getUserDisplayName(u)}
+          </span>
+          {isUserDeactivated(u) && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+              Deactivated
             </span>
-            {isUserDeactivated(u) && (
-              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                Deactivated
-              </span>
-            )}
-          </div>
-          {u.email && <div className='truncate text-xs text-muted-foreground'>{u.email}</div>}
+          )}
+          {u.email && (
+            <span className='shrink-0 truncate text-xs text-muted-foreground max-w-[50%]'>
+              {u.email}
+            </span>
+          )}
         </div>
       </div>
     ),
@@ -437,6 +439,19 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       value: `user_group:${group.id}`,
       icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
       subtitle: group.alias || group.description,
+      children: (
+        <div className='flex items-center gap-2 min-w-0'>
+          <Users className='size-3.5 text-muted-foreground mx-0.5 shrink-0' strokeWidth={2.3} />
+          <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
+            <span className='flex-1 truncate text-sm text-foreground'>{group.name}</span>
+            {(group.alias || group.description) && (
+              <span className='shrink-0 truncate text-xs text-muted-foreground max-w-[50%]'>
+                {group.alias || group.description}
+              </span>
+            )}
+          </div>
+        </div>
+      ),
       type: 'user_group' as const,
     }));
 
