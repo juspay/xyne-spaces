@@ -61,8 +61,15 @@ export type {
   Activity,
   // Tickets
   Ticket,
+  SubTicket,
+  TicketPriority,
+  TicketStatusV2,
+  TicketStageRequest,
+  StageRequestStatus,
+  // Boards & projects
   Board,
   Stage,
+  Project,
   // Search
   SearchResult,
   SearchResponse,
@@ -76,6 +83,9 @@ export type {
 export type { ConversationCursor } from './registry/conversations.js';
 export type { MessageCursor } from './registry/messages.js';
 export type { ActivityCursor } from './registry/activities.js';
+export type { TicketCursor, TicketViewMode } from './registry/tickets.js';
+export type { SupportTicketCursor } from './registry/support-tickets.js';
+export type { StageInput } from './registry/boards.js';
 
 // ----- Registry Types (for advanced usage) -----
 export type {

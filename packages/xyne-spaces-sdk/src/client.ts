@@ -12,6 +12,10 @@ import { ChannelsResource } from './resources/channels.js';
 import { ConversationsResource } from './resources/conversations.js';
 import { MessagesResource } from './resources/messages.js';
 import { ActivitiesResource } from './resources/activities.js';
+import { TicketsResource } from './resources/tickets.js';
+import { SupportTicketsResource } from './resources/support-tickets.js';
+import { BoardsResource } from './resources/boards.js';
+import { ProjectsResource } from './resources/projects.js';
 
 export interface SpacesClientOptions {
   /**
@@ -75,6 +79,18 @@ export class SpacesClient {
   /** The current user's activity feed and its read state */
   readonly activities: ActivitiesResource;
 
+  /** Tickets, sub-tickets, tags, references, and stage approvals */
+  readonly tickets: TicketsResource;
+
+  /** The support-desk view of tickets (reads; write via `tickets`) */
+  readonly supportTickets: SupportTicketsResource;
+
+  /** Boards, stages, transitions, and SLA policies */
+  readonly boards: BoardsResource;
+
+  /** Projects and their tags, fields, and applications */
+  readonly projects: ProjectsResource;
+
   constructor(options: SpacesClientOptions = {}) {
     this.http = new HttpClient({
       baseUrl: options.baseUrl ?? 'https://spaces.xyne.app',
@@ -91,6 +107,10 @@ export class SpacesClient {
     this.conversations = new ConversationsResource(this.transport);
     this.messages = new MessagesResource(this.transport);
     this.activities = new ActivitiesResource(this.transport);
+    this.tickets = new TicketsResource(this.transport);
+    this.supportTickets = new SupportTicketsResource(this.transport);
+    this.boards = new BoardsResource(this.transport);
+    this.projects = new ProjectsResource(this.transport);
   }
 
   /**
