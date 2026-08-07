@@ -411,7 +411,7 @@ export class CommunityWorkspaceService {
     }
 
     try {
-      await aiProvisioningService.enqueueUserSync(result.workspaceUser.id);
+      await aiProvisioningService.enqueueUserSync(result.workspaceUser.orgMemberId);
     } catch (error) {
       logger.error('[CommunityWorkspaceService] Failed to enqueue AI provisioning job', {
         workspaceId: params.workspace.id,

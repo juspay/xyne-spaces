@@ -779,6 +779,7 @@ export class DashboardController {
 
     const runReq: ClawRunRequest = {
       userId,
+      spacesWorkspaceId: req.user?.workspaceId,
       userName: user.name ?? user.displayName ?? 'Unknown',
       userEmail: user.email ?? '',
       query: `${errorBlock}${prompt}`,
@@ -838,7 +839,12 @@ export class DashboardController {
       res.status(400).json({ error: 'BadRequest', message: 'runId is required' });
       return;
     }
-    const result = await cancelClawAgentRun(req, ctx.userId, runId);
+    const result = await cancelClawAgentRun(
+      req,
+      ctx.userId,
+      runId,
+      req.user?.workspaceId,
+    );
     if (!result.success) {
       res.status(502).json({ success: false, error: result.error ?? 'Cancel failed' });
       return;

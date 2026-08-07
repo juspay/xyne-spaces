@@ -82,9 +82,21 @@ export interface StoreUserKeyParams {
   userId: string;
   orgId: string;
   spacesOrgId: string;
+  spacesWorkspaceId: string;
+  spacesOrgMemberId: string;
   litellmUserId: string;
   teamId: string;
   key: string;
+  tokenId?: string;
+  keyName?: string;
+  keyAlias?: string;
+  expires?: string;
+}
+
+export interface StoreOrgKeyParams {
+  orgId: string;
+  key: string;
+  teamId?: string;
   tokenId?: string;
   keyName?: string;
   keyAlias?: string;
@@ -195,18 +207,6 @@ class LiteLLMProvisioningClient {
     };
   }
 
-  async storeOrgKey(params: {
-    orgId: string;
-    teamId: string;
-    key: string;
-    tokenId?: string;
-    keyName?: string;
-    keyAlias?: string;
-    expires?: string;
-  }): Promise<unknown> {
-    return this.postClawStore('/org-key', params);
-  }
-
   async deleteUser(litellmUserId: string): Promise<void> {
     await this.postLiteLLM('/user/delete', { user_ids: [litellmUserId] });
   }
@@ -225,9 +225,24 @@ class LiteLLMProvisioningClient {
       userId: params.userId,
       orgId: params.orgId,
       spacesOrgId: params.spacesOrgId,
+      spacesWorkspaceId: params.spacesWorkspaceId,
+      spacesOrgMemberId: params.spacesOrgMemberId,
       litellmUserId: params.litellmUserId,
       teamId: params.teamId,
       key: params.key,
+      tokenId: params.tokenId,
+      keyName: params.keyName,
+      keyAlias: params.keyAlias,
+      expires: params.expires,
+    });
+  }
+
+  /** Store the org's DEFAULT service-account key for headless Claw work. */
+  async storeOrgKey(params: StoreOrgKeyParams): Promise<void> {
+    await this.postClawStore('/org-key', {
+      orgId: params.orgId,
+      key: params.key,
+      teamId: params.teamId,
       tokenId: params.tokenId,
       keyName: params.keyName,
       keyAlias: params.keyAlias,

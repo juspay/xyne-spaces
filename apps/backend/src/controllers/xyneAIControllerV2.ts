@@ -398,6 +398,7 @@ export class XyneAIControllerV2 {
         // Build the ClawRunRequest
         const runReq: ClawRunRequest = {
           userId,
+          spacesWorkspaceId: req.user?.workspaceId,
           userName: user?.name || 'Unknown',
           userEmail: user?.email || '',
           query,
@@ -551,7 +552,12 @@ export class XyneAIControllerV2 {
         res.status(400).json({ error: 'sessionId is required' });
         return;
       }
-      const result = await cancelClawAgentRun(req, userId, sessionId);
+      const result = await cancelClawAgentRun(
+        req,
+        userId,
+        sessionId,
+        req.user?.workspaceId,
+      );
       if (!result.success) {
         res.status(502).json({ success: false, error: result.error ?? 'Cancel failed' });
         return;

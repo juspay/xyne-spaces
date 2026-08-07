@@ -2160,9 +2160,20 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload,
     userIds: string[],
   ): Promise<void> {
+    // App event delivery happens asynchronously and therefore cannot rely on
+    // the sender's browser cookie. Stamp the trusted workspace from the Zero
+    // context; retain every legacy payload field unchanged.
+    const sender = await db.user.findUnique({
+      where: { id: payload.userId },
+      select: { orgMemberId: true },
+    });
     const event: BaseAppEvent = {
       eventType,
-      payload,
+      payload: {
+        ...payload,
+        workspaceId: payload.workspaceId ?? this.ctx.workspaceId,
+        ...(sender?.orgMemberId ? { orgMemberId: sender.orgMemberId } : {}),
+      },
       timestamp: new Date().toISOString(),
     };
 
