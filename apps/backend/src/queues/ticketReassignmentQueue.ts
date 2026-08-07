@@ -15,7 +15,7 @@ export interface TicketReassignmentJobData {
   userGroupId: string;
 }
 
-const OPEN_STATUSES: string[] = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED];
+const OPEN_STATUSES: string[] = [TicketStatusV2.TODO, TicketStatusV2.STARTED];
 const BATCH_SIZE = 50;
 
 class TicketReassignmentQueue {
@@ -112,22 +112,23 @@ class TicketReassignmentQueue {
       // Walk the ticket table forward by id in small pages so a user with a large
       // backlog never loads their full open-ticket set into memory at once, and
       // ticket reassignments run one at a time (not Promise.all) to keep DB load low.
-      let cursor: string | undefined;
+      let lastProcessedId: string | undefined;
+      let hasMoreTickets = true;
       let scanned = 0;
       let reassigned = 0;
 
-      while (true) {
+      while (hasMoreTickets) {
         const tickets = await prisma.ticket.findMany({
           where: {
             assignedTo: userId,
             userGroupId,
             isArchived: false,
             statusV2: { in: OPEN_STATUSES },
+            ...(lastProcessedId ? { id: { gt: lastProcessedId } } : {}),
           },
           select: { id: true, boardId: true, projectId: true, channelId: true, workspaceId: true },
           orderBy: { id: 'asc' },
           take: BATCH_SIZE,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         });
 
         if (tickets.length === 0) {
@@ -170,11 +171,8 @@ class TicketReassignmentQueue {
           }
         }
 
-        cursor = tickets[tickets.length - 1].id;
-
-        if (tickets.length < BATCH_SIZE) {
-          break;
-        }
+        lastProcessedId = tickets[tickets.length - 1].id;
+        hasMoreTickets = tickets.length === BATCH_SIZE;
       }
 
       logger.info(
