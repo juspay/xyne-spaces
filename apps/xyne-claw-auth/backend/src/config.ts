@@ -35,6 +35,16 @@ export const CONFIG = {
     return configured.endsWith("/") ? configured : `${configured}/`;
   })(),
   xyneClawS2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+  /**
+   * How the Spaces webhook signature is treated: `enforce` rejects a request
+   * whose X-Xyne-Signature does not verify, `warn` logs and continues.
+   *
+   * The webhook handler reads the event payload's userId/channelId as
+   * authoritative and runs agents with that user's credentials, so this check is
+   * what stands between an inbound request and acting as any user. Default
+   * closed; `warn` is a staged-rollout escape hatch and should not outlive one.
+   */
+  spacesWebhookVerifyMode: (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "enforce").toLowerCase(),
   azureTtsEndpoint: (process.env["AZURE_TTS_ENDPOINT"] ?? "").replace(/\/+$/, ""),
   azureTtsApiKey: process.env["AZURE_TTS_API_KEY"] ?? "",
   azureTtsApiVersion: process.env["AZURE_TTS_API_VERSION"] ?? "",
