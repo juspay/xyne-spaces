@@ -34,9 +34,9 @@ const ScopeBadge = ({ scope }: { scope: string }): ReactElement => (
     className={cn(
       'shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize',
       scope === 'global'
-        ? 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300'
+        ? 'border-border bg-muted text-status-scheduled'
         : scope === 'built-in'
-          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+          ? 'border-stage-completed-border bg-stage-completed text-status-success'
           : 'border-border bg-muted text-muted-foreground',
     )}
   >
@@ -185,7 +185,9 @@ const McpDetailV2 = (): ReactElement => {
               <span
                 className={cn(
                   'rounded-md px-2 py-0.5 text-[13px] leading-tight',
-                  connected ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-foreground/60',
+                  connected
+                    ? 'bg-stage-completed text-status-success'
+                    : 'bg-muted text-muted-foreground',
                 )}
               >
                 {connected ? 'Active' : 'Inactive'}
