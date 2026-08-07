@@ -1850,11 +1850,21 @@ export class JiraMigrationImportService {
         },
       });
 
-      // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
       if (lastCommentAt) {
         await db.conversationParticipant.updateMany({
-          where: { conversationId },
+          where: {
+            conversationId,
+            OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: lastCommentAt } }],
+          },
           data: { lastReplyAt: lastCommentAt },
+        });
+
+        await db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: lastCommentAt } }],
+          },
+          data: { lastReadAt: lastCommentAt },
         });
       }
     }
