@@ -134,6 +134,7 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
       id: email.id,
       ticketId: ticket?.id ?? '',
       channelName: channel?.name ?? '',
+      ...(channel?.workspaceId ? { workspaceId: channel.workspaceId } : {}),
     };
 
     const event: BaseAppEvent = {

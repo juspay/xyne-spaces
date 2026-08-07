@@ -1058,7 +1058,7 @@ export class UserService {
       try {
         await aiProvisioningService.enqueueOrgSync(organization.orgId);
         await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
-        await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
       } catch (error) {
         logger.error('[UserService] Failed to enqueue AI provisioning jobs for new organization', {
           orgId: organization.orgId,
@@ -1216,7 +1216,7 @@ export class UserService {
 
       try {
         await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
-        await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
       } catch (error) {
         logger.error('[UserService] Failed to enqueue AI provisioning jobs for new workspace', {
           orgId: org.orgId,
