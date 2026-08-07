@@ -34,6 +34,7 @@ import {
   GitCompare,
   History,
   Loader2,
+  MessageSquare,
   Plus,
   RotateCcw,
   Star,
@@ -147,6 +148,10 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
+  const [openCommentCount, setOpenCommentCount] = useState(0);
+  useEffect(() => {
+    setOpenCommentCount(0);
+  }, [canvas?.id]);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
@@ -1072,6 +1077,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 <span className='hidden lg:inline'>History</span>
               </Button>
               <Button
+                variant='secondary'
+                size='sm'
+                onClick={() => editorRef.current?.toggleComments()}
+                title='Comments'
+                aria-label='Open comment activity'
+                data-testid='canvas-comments-button'
+                data-track-category='CANVAS'
+                data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
+              >
+                <span className='relative inline-flex'>
+                  <MessageSquare size={16} />
+                  {openCommentCount > 0 && (
+                    <span className='absolute -right-2 -top-2 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground'>
+                      {openCommentCount > 99 ? '99+' : openCommentCount}
+                    </span>
+                  )}
+                </span>
+              </Button>
+              <Button
                 variant='default'
                 size='sm'
                 onClick={() => setShowShareModal(true)}
@@ -1141,6 +1166,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               placeholder='Start writing your canvas...'
               canvasId={canvas?.id}
               canvasTitle={currentTitle}
+              onOpenCommentCountChange={setOpenCommentCount}
               autoFocus={false}
             />
           ) : canvas?.id && canvas.isCollaborative ? (
@@ -1154,6 +1180,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               placeholder='Start writing your canvas...'
               onFileUpload={handleFileUpload}
               onChange={handleCollaborativeContentChange}
+              onOpenCommentCountChange={setOpenCommentCount}
               autoFocus={true}
             />
           ) : (
@@ -1168,6 +1195,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               placeholder='Start writing your canvas...'
               canvasId={canvas?.id}
               canvasTitle={currentTitle}
+              onOpenCommentCountChange={setOpenCommentCount}
               autoFocus={true}
             />
           )}

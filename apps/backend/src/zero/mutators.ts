@@ -9097,6 +9097,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             blockId,
             anchorText: anchorText || null,
             initialCommentId: commentId,
+            commentCount: 1,
             status: CanvasCommentThreadStatus.OPEN,
             statusUpdatedBy: null,
             statusUpdatedAt: null,
@@ -9151,9 +9152,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
             await tx.mutate.canvas_comment_threads.update({
               id: threadId,
+              commentCount: (thread.commentCount ?? 1) + 1,
               status: CanvasCommentThreadStatus.OPEN,
               statusUpdatedBy: authData.sub,
               statusUpdatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.canvas_comment_threads.update({
+              id: threadId,
+              commentCount: (thread.commentCount ?? 1) + 1,
             });
           }
         },
@@ -9208,6 +9215,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             mentionedUserIds: '[]',
             deletedAt: timestamp,
           });
+
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+          if (thread) {
+            await tx.mutate.canvas_comment_threads.update({
+              id: comment.threadId,
+              commentCount: Math.max((thread.commentCount ?? 1) - 1, 0),
+            });
+          }
         },
       ),
       setThreadStatus: defineMutator(

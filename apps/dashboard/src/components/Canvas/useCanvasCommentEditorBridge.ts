@@ -4,12 +4,15 @@ import type {
   InlineContentSchema,
   StyleSchema,
 } from '@blocknote/core';
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 
 import { scrollToHeading } from '../../utils/canvasUtils';
 import type { CanvasCommentAnchor } from './CanvasCommentsPanel/CanvasCommentsPanel';
-import { useCanvasCommentHighlights } from './useCanvasCommentHighlights';
+import {
+  useCanvasCommentHighlights,
+  type CanvasCommentHighlightThread,
+} from './useCanvasCommentHighlights';
 
 type CanvasEditorLike = BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>;
 
@@ -19,8 +22,23 @@ interface UseCanvasCommentEditorBridgeOptions {
   getEditor: () => CanvasEditorLike | null;
   initialBlockIdToFocus?: string | undefined;
   initialCommentThreadId?: string | undefined;
+  onOpenCommentCountChange?: ((count: number) => void) | undefined;
   ready?: boolean;
 }
+
+export type CanvasInlineCommentThreadState =
+  | {
+      mode: 'thread';
+      thread: CanvasCommentHighlightThread;
+      rect: DOMRect;
+    }
+  | {
+      mode: 'create';
+      blockId: string;
+      rect: DOMRect;
+      anchor: CanvasCommentAnchor;
+    }
+  | null;
 
 interface TiptapEditorLike {
   state: {
@@ -37,30 +55,96 @@ const getTiptapEditor = (editor: CanvasEditorLike): TiptapEditorLike | null =>
     | TiptapEditorLike
     | undefined) ?? null;
 
+const getSelectionRect = (container: HTMLElement | null, blockId: string): DOMRect | null => {
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0) {
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) return rect;
+  }
+
+  const escapedBlockId =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(blockId)
+      : blockId.replace(/["\\]/g, '\\$&');
+  return (
+    container
+      ?.querySelector<HTMLElement>(`[data-id="${escapedBlockId}"]`)
+      ?.getBoundingClientRect() ?? null
+  );
+};
+
+const escapeSelectorValue = (value: string): string =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
+
+const getCommentThreadRect = (
+  container: HTMLElement | null,
+  blockId: string,
+  threadId: string,
+): DOMRect | null => {
+  if (!container) return null;
+  const escapedThreadId = escapeSelectorValue(threadId);
+  const escapedBlockId = escapeSelectorValue(blockId);
+  return (
+    container
+      .querySelector<HTMLElement>(`[data-canvas-comment-thread-id="${escapedThreadId}"]`)
+      ?.getBoundingClientRect() ??
+    container
+      .querySelector<HTMLElement>(`[data-id="${escapedBlockId}"]`)
+      ?.getBoundingClientRect() ??
+    null
+  );
+};
+
+const INLINE_COMMENT_INTERACTIVE_SELECTOR = [
+  '[data-canvas-inline-comment-thread="true"]',
+  '[data-overlay-portal]',
+  '[data-radix-popper-content-wrapper]',
+  '[data-testid="user-search-results"]',
+  '.EmojiPickerReact',
+  '.epr-main',
+].join(',');
+
 export function useCanvasCommentEditorBridge({
   canvasId,
   containerRef,
   getEditor,
   initialBlockIdToFocus,
   initialCommentThreadId,
+  onOpenCommentCountChange,
   ready = true,
 }: UseCanvasCommentEditorBridgeOptions) {
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
   const [activeCommentBlockId, setActiveCommentBlockId] = useState<string | null>(null);
   const [activeCommentThreadId, setActiveCommentThreadId] = useState<string | null>(null);
   const [activeCommentAnchor, setActiveCommentAnchor] = useState<CanvasCommentAnchor | null>(null);
+  const [inlineCommentThread, setInlineCommentThread] =
+    useState<CanvasInlineCommentThreadState>(null);
+  const [commentThreads, setCommentThreads] = useState<CanvasCommentHighlightThread[]>([]);
   const [commentHighlightVersion, setCommentHighlightVersion] = useState(0);
+  const openedInitialThreadKeyRef = useRef<string | null>(null);
 
   const refreshCommentHighlights = useCallback(() => {
     setCommentHighlightVersion(version => version + 1);
   }, []);
 
-  const handleCommentAnchorClick = useCallback((thread: { id: string; blockId: string }): void => {
-    setIsCommentsOpen(true);
-    setActiveCommentBlockId(thread.blockId);
-    setActiveCommentThreadId(thread.id);
-    setActiveCommentAnchor(null);
-  }, []);
+  const handleCommentAnchorClick = useCallback(
+    (thread: CanvasCommentHighlightThread, rect?: DOMRect): void => {
+      setIsCommentsOpen(false);
+      setActiveCommentBlockId(thread.blockId);
+      setActiveCommentThreadId(thread.id);
+      setActiveCommentAnchor(null);
+      if (rect) {
+        setInlineCommentThread({
+          mode: 'thread',
+          thread,
+          rect,
+        });
+      }
+    },
+    [],
+  );
 
   useCanvasCommentHighlights({
     canvasId,
@@ -68,7 +152,45 @@ export function useCanvasCommentEditorBridge({
     enabled: ready && Boolean(canvasId),
     refreshKey: commentHighlightVersion,
     onAnchorClick: handleCommentAnchorClick,
+    onOpenCountChange: onOpenCommentCountChange,
+    onThreadsChange: setCommentThreads,
   });
+
+  useEffect(() => {
+    setInlineCommentThread(current => {
+      if (!current || current.mode !== 'thread') return current;
+      const latestThread = commentThreads.find(thread => thread.id === current.thread.id);
+      if (!latestThread || latestThread === current.thread) return current;
+      return {
+        ...current,
+        thread: latestThread,
+      };
+    });
+  }, [commentThreads]);
+
+  useEffect(() => {
+    if (!inlineCommentThread) return;
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(INLINE_COMMENT_INTERACTIVE_SELECTOR)) return;
+      setInlineCommentThread(null);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setInlineCommentThread(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [inlineCommentThread]);
 
   useEffect(() => {
     const editor = getEditor();
@@ -84,11 +206,35 @@ export function useCanvasCommentEditorBridge({
 
   useEffect(() => {
     if (!ready || !initialBlockIdToFocus || !initialCommentThreadId) return;
-    setIsCommentsOpen(true);
+    const initialThreadKey = `${initialBlockIdToFocus}:${initialCommentThreadId}`;
+    if (openedInitialThreadKeyRef.current === initialThreadKey) return;
+
+    setIsCommentsOpen(false);
     setActiveCommentBlockId(initialBlockIdToFocus);
     setActiveCommentThreadId(initialCommentThreadId);
     setActiveCommentAnchor(null);
-  }, [initialBlockIdToFocus, initialCommentThreadId, ready]);
+
+    const openInlineThread = (): void => {
+      const thread = commentThreads.find(candidate => candidate.id === initialCommentThreadId);
+      if (!thread) return;
+      const rect = getCommentThreadRect(
+        containerRef.current,
+        initialBlockIdToFocus,
+        initialCommentThreadId,
+      );
+      if (!rect) return;
+      openedInitialThreadKeyRef.current = initialThreadKey;
+      setInlineCommentThread({
+        mode: 'thread',
+        thread,
+        rect,
+      });
+    };
+
+    openInlineThread();
+    const timeout = window.setTimeout(openInlineThread, 300);
+    return () => window.clearTimeout(timeout);
+  }, [commentThreads, containerRef, initialBlockIdToFocus, initialCommentThreadId, ready]);
 
   const getCurrentBlockId = useCallback((): string | null => {
     const editor = getEditor();
@@ -181,15 +327,32 @@ export function useCanvasCommentEditorBridge({
   const openCommentsForCurrentBlock = useCallback((): void => {
     const blockId = getCurrentBlockId();
     const anchor = getCurrentCommentAnchor();
-    setIsCommentsOpen(true);
     if (!blockId) {
       toast.error('Place the cursor in a canvas block first');
       return;
     }
+
     setActiveCommentBlockId(blockId);
     setActiveCommentThreadId(null);
-    setActiveCommentAnchor(anchor?.blockId === blockId ? anchor : null);
-  }, [getCurrentBlockId, getCurrentCommentAnchor]);
+    if (anchor?.blockId === blockId) {
+      const rect = getSelectionRect(containerRef.current, blockId);
+      setIsCommentsOpen(false);
+      setActiveCommentAnchor(anchor);
+      if (rect) {
+        setInlineCommentThread({
+          mode: 'create',
+          blockId,
+          rect,
+          anchor,
+        });
+      }
+      return;
+    }
+
+    setInlineCommentThread(null);
+    setActiveCommentAnchor(null);
+    toast.error('Select text to add a comment');
+  }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor]);
 
   const focusCommentBlock = useCallback(
     (blockId: string): void => {
@@ -209,15 +372,27 @@ export function useCanvasCommentEditorBridge({
     [containerRef, getEditor],
   );
 
+  const clearActiveCommentAnchor = useCallback((): void => {
+    setActiveCommentAnchor(null);
+    setActiveCommentThreadId(null);
+  }, []);
+
+  const closeInlineCommentThread = useCallback((): void => {
+    setInlineCommentThread(null);
+  }, []);
+
   return {
     isCommentsOpen,
     setIsCommentsOpen,
+    inlineCommentThread,
     activeCommentBlockId,
     activeCommentThreadId,
     activeCommentAnchor,
     refreshCommentHighlights,
     openCommentsForCurrentBlock,
     focusCommentBlock,
+    clearActiveCommentAnchor,
+    closeInlineCommentThread,
     applyCommentAnchorStyle,
     removeCommentAnchorStyle,
   };
