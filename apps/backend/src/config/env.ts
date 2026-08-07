@@ -149,8 +149,15 @@ const envSchema = Joi.object({
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
-  LIVEKIT_API_KEY: Joi.string().allow('').default(''),
-  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
+  // The development key pair ships in LiveKit's own published sample config, so a
+  // deployment that keeps it signs room tokens anyone can mint. Empty stays valid:
+  // deployments without calls do not configure LiveKit at all.
+  LIVEKIT_API_KEY: Joi.string().allow('').invalid('devkey').default('').messages({
+    'any.invalid': 'LIVEKIT_API_KEY must not be the published development key',
+  }),
+  LIVEKIT_API_SECRET: Joi.string().allow('').invalid('devsecret').default('').messages({
+    'any.invalid': 'LIVEKIT_API_SECRET must not be the published development secret',
+  }),
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
