@@ -43,6 +43,15 @@ function sharePath(rawToken: string): string {
   return `/claw/v3/design/shared#${encodeURIComponent(rawToken)}`;
 }
 
+/** Build a browser URL whether FRONTEND_URL is origin-rooted or already `/claw`-rooted. */
+export function designShareUrl(path: string): string {
+  const frontendBase = CONFIG.frontendUrl.replace(/\/+$/, "");
+  const relativePath = frontendBase.endsWith("/claw") && path.startsWith("/claw/")
+    ? path.slice("/claw".length)
+    : path;
+  return `${frontendBase}${relativePath}`;
+}
+
 function ownerResponse(
   share: {
     id: string;

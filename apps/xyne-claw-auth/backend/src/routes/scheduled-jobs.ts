@@ -29,6 +29,7 @@ import {
 } from "../queue/scheduled-jobs-queue.js";
 import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
+import { designShareUrl } from "./design-shares.js";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -1239,7 +1240,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       if (refreshed.share) {
         const share = refreshed.share;
         if (share.linkChanged) {
-          const link = `${CONFIG.frontendUrl.replace(/\/+$/, "")}${share.sharePath}`;
+          const link = designShareUrl(share.sharePath);
           dashboardShareAnnouncement = `🔗 **Live dashboard:** ${link}\nThe same link updates after each successful refresh.`;
         }
         log.info(`[scheduled-jobs/result] Job ${id}: refreshed dashboard share=${share.id} conversation=${row.conversationId}`);

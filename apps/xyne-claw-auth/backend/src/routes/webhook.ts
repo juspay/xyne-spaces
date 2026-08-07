@@ -81,7 +81,7 @@ import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
-import { upsertDesignShare } from "./design-shares.js";
+import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
   setActivePlanCard,
@@ -3952,7 +3952,7 @@ async function publishThreadArtifactShare(
       title: html.originalFilename.replace(/\.html?$/i, ""),
       expiresAt: null,
     });
-    const link = `${CONFIG.frontendUrl.replace(/\/+$/, "")}${share.sharePath}`;
+    const link = designShareUrl(share.sharePath);
     await spacesAppFetch("/chat/postMessage", {
       channelId: ctx.channelId,
       conversationId: ctx.conversationId,
