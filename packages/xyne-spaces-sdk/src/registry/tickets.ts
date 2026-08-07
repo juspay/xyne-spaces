@@ -450,4 +450,19 @@ export const ticketsOperations = {
   >('ticketMailbox.setStarred', {
     mapArgs: (args) => ({ ...args, timestamp: now() }),
   }),
+  /**
+   * Sub-tickets linked to a mapped ticket.
+   * Maps to: Zero query 'subTicketsByMappedTicketId'
+   */
+  listSubTicketsByMapped: query<{ mappedTicketId: string }, SubTicket[]>(
+    'subTicketsByMappedTicketId'
+  ),
+
+  /**
+   * The single sub-ticket linked to a mapped ticket.
+   * Maps to: Zero query 'subTicketByMappedTicketId'
+   */
+  getSubTicketByMapped: query<{ mappedTicketId: string }, SubTicket | null>(
+    'subTicketByMappedTicketId'
+  ),
 } as const;

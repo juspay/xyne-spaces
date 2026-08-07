@@ -252,6 +252,44 @@ export const conversationsOperations = {
       }),
     }
   ),
+  /**
+   * The thread nearest a point in time — used to jump to a date in a channel.
+   * Maps to: Zero query 'getConversationByTimestamp'
+   */
+  getByTimestamp: query<
+    { channelId: string; timestamp: number; isMember?: boolean },
+    Conversation | null
+  >('getConversationByTimestamp', {
+    mapArgs: (args) => ({
+      channelId: args.channelId,
+      timestamp: args.timestamp,
+      isMember: args.isMember ?? true,
+    }),
+  }),
+
+  /**
+   * Threads a user takes part in across every channel, most recent reply first.
+   * Maps to: Zero query 'userConversationsPaginatedV2'
+   */
+  listForUser: query<
+    { userId: string; limit?: number; start?: { lastReplyAt: number; id: string } },
+    Conversation[]
+  >('userConversationsPaginatedV2', {
+    mapArgs: (args) => ({
+      userId: args.userId,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+    }),
+  }),
+
+  /**
+   * Set the tag types on a thread. Free-form: projects define their own beyond
+   * the built-in vocabulary.
+   * Maps to: Zero mutator 'threadTag.setTypes'
+   */
+  setTagTypes: mutator<{ conversationId: string; types: string[] }, void>(
+    'threadTag.setTypes'
+  ),
 } as const;
 
 export type { Message };

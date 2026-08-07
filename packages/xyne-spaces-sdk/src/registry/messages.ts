@@ -277,4 +277,94 @@ export const messagesOperations = {
   scheduledToDraft: mutator<{ id: string }, void>('delayedMessages.convertToDraft', {
     mapArgs: (args) => ({ id: args.id, timestamp: now() }),
   }),
+  /**
+   * Attachments by id.
+   * Maps to: Zero query 'attachmentsByIds'
+   */
+  getAttachments: query<{ attachmentIds: string[] }, unknown[]>('attachmentsByIds'),
+
+  /**
+   * Attachments on the message that started a thread.
+   * Maps to: Zero query 'attachmentsByInitialMessage'
+   */
+  listAttachmentsForThread: query<{ initialMessageId: string }, unknown[]>(
+    'attachmentsByInitialMessage'
+  ),
+
+  /**
+   * Every attachment shared in a channel, newest first.
+   * Maps to: Zero query 'getConversationAttachements'
+   */
+  listChannelAttachments: query<
+    { channelId: string; limit?: number; start?: { attachementId: string; createdAt: number } },
+    unknown[]
+  >('getConversationAttachements', {
+    mapArgs: (args) => ({
+      channelId: args.channelId,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+    }),
+  }),
+
+  /**
+   * Scheduled messages, a page at a time, optionally filtered by status.
+   * Maps to: Zero query 'userDelayedMessagesPaginated'
+   */
+  listScheduledPaginated: query<
+    { limit?: number; statuses?: string[]; start?: { id: string; scheduledFor: number } },
+    unknown[]
+  >('userDelayedMessagesPaginated', {
+    mapArgs: (args) => ({
+      limit: args.limit ?? 50,
+      ...(args.statuses ? { statuses: args.statuses } : {}),
+      start: args.start ?? null,
+    }),
+  }),
+
+  /**
+   * Attach files to a draft.
+   * Maps to: Zero mutator 'draft.createAttachments'
+   */
+  addDraftAttachments: mutator<
+    {
+      draftMessageId: string;
+      channelId: string;
+      attachments: Array<{
+        attachmentId: string;
+        originalFilename: string;
+        mimetype: string;
+        size: number;
+        width?: number;
+        height?: number;
+      }>;
+      conversationId?: string;
+    },
+    void
+  >('draft.createAttachments'),
+
+  /**
+   * Clear a channel or thread draft's content.
+   * Maps to: Zero mutator 'draft.clearContent'
+   */
+  clearDraft: mutator<{ channelId: string; conversationId?: string }, void>(
+    'draft.clearContent',
+    {
+      mapArgs: (args) => ({ ...args, timestamp: now() }),
+    }
+  ),
+
+  /**
+   * Resolve a mention of someone who is not in the channel: add them, add
+   * everyone mentioned, or ignore.
+   * Maps to: Zero mutator 'messages.handleNonParticipantAction'
+   */
+  handleNonParticipants: mutator<
+    {
+      messageId: string;
+      channelId: string;
+      userIds: string[];
+      action: 'add' | 'add_all' | 'ignore' | 'ignore_all';
+    },
+    void
+  >('messages.handleNonParticipantAction'),
 } as const;

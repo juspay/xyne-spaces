@@ -97,4 +97,23 @@ export const projectsOperations = {
    * Maps to: Zero mutator 'project.delete'
    */
   delete: mutator<{ projectId: string }, void>('project.delete'),
+  /**
+   * Configure release tracking for a project.
+   *
+   * The `applications` array is nested and provider-specific, so it is passed
+   * through rather than modelled.
+   * Maps to: Zero mutator 'project.saveReleaseBoardConfig'
+   */
+  saveReleaseBoardConfig: mutator<
+    {
+      projectId: string;
+      mainBoardId: string;
+      mainBoardName: string;
+      vcsProvider: string;
+      releaseTrackingMode: string;
+      channelId: string;
+      applications: unknown[];
+    },
+    void
+  >('project.saveReleaseBoardConfig'),
 } as const;

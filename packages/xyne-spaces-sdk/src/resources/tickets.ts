@@ -354,4 +354,14 @@ export class TicketsResource extends Resource {
   }): Promise<void> {
     return this.call(ticketsOperations.setMailboxStarred, data);
   }
+
+  /** List sub-tickets linked to a mapped ticket. */
+  listSubTicketsByMapped(mappedTicketId: string): Promise<SubTicket[]> {
+    return this.call(ticketsOperations.listSubTicketsByMapped, { mappedTicketId });
+  }
+
+  /** Get the single sub-ticket linked to a mapped ticket. */
+  getSubTicketByMapped(mappedTicketId: string): Promise<SubTicket | null> {
+    return this.call(ticketsOperations.getSubTicketByMapped, { mappedTicketId });
+  }
 }

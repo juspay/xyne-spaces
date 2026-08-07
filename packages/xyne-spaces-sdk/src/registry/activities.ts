@@ -133,4 +133,15 @@ export const activitiesOperations = {
       timestamp: now(),
     }),
   }),
+  /**
+   * Mark every activity matching a filter as read — for example all reactions,
+   * or everything of one classification.
+   * Maps to: Zero mutator 'activities.markAsReadByFilter'
+   */
+  markAsReadByFilter: mutator<
+    { actorAction?: string; classification?: string },
+    void
+  >('activities.markAsReadByFilter', {
+    mapArgs: (args) => ({ ...args, timestamp: now() }),
+  }),
 } as const;
