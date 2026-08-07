@@ -2701,6 +2701,7 @@ model SummaryTemplate {
   defaultOutlet     String   @default("EMAIL") // EMAIL/MESSAGE (see DefaultOutlet in @xyne/shared; app-validated, no DB enum)
   createdBy         String
   createdAt         DateTime @default(now())
+  visibility        String   @default("PRIVATE") // PRIVATE | WAITING_FOR_APPROVAL | PUBLIC
 
   @@index([workspaceId, name])
   @@unique([workspaceId, name, version])

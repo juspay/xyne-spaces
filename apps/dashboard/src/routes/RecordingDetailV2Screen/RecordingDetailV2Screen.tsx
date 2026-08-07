@@ -8,7 +8,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
   recordingService,
-  type BuiltinRecordingSummaryTemplateId,
   type RecordingDetail,
   type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
@@ -81,21 +80,13 @@ import { parseMarkedItems, type MarkedItem } from './components/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
+import { SummaryTemplatesModal } from './components/SummaryTemplatesModal';
+import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 
 interface RecordingNavState {
   recordingIds?: string[];
 }
-
-const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<RecordingSummaryTemplate> = [
-  { id: 'default', name: 'Default summary', icon: '⚡' },
-  { id: 'product_sync', name: 'Product sync', icon: '🔁' },
-  { id: 'customer_discovery', name: 'Customer: Discovery', icon: '💰' },
-  { id: 'one_on_one', name: '1 to 1', icon: '👥' },
-  { id: 'hiring', name: 'Hiring', icon: '💼' },
-  { id: 'standup', name: 'Stand-Up', icon: '🧍' },
-  { id: 'sprint_review', name: 'Sprint review', icon: '📈' },
-  { id: 'customer_feedback', name: 'Customer feedback', icon: '🔄' },
-];
 
 const AUDIO_POLL_INTERVAL_MS = 10_000;
 const AUDIO_POLL_MAX_ATTEMPTS = 30;
@@ -142,9 +133,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
   const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
   const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
+  const [templatesModalMode, setTemplatesModalMode] = useState<'browse' | 'new' | null>(null);
+  const [shouldLoadSummaryTemplates, setShouldLoadSummaryTemplates] = useState(false);
+  const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } = useSummaryTemplates(
+    shouldLoadSummaryTemplates || templatesModalMode !== null,
+  );
+  const storedSummaryTemplateId = recording?.summaryTemplateId ?? '';
+  const shouldQueryStoredSummaryTemplate =
+    storedSummaryTemplateId.length > 0 && storedSummaryTemplateId !== 'default';
+  const [storedSummaryTemplate] = useCachedQuery(
+    queries.summaryTemplateById({ templateId: storedSummaryTemplateId }),
+    { enabled: shouldQueryStoredSummaryTemplate },
+  );
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
-  const [pendingSummaryTemplateId, setPendingSummaryTemplateId] =
-    useState<BuiltinRecordingSummaryTemplateId | null>(null);
+  const [pendingSummaryTemplateId, setPendingSummaryTemplateId] = useState<string | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
   // Summary Generation panel states
@@ -508,9 +510,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setRecording(current => (current ? { ...current, ...ticketLink } : current));
   };
 
-  const handleSummaryTemplateSelect = async (
-    summaryTemplateId: BuiltinRecordingSummaryTemplateId,
-  ): Promise<void> => {
+  const handleRegenerateSummary = async (summaryTemplateId?: string): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
     // Picking the template the existing summary was already written with is a no-op
@@ -519,7 +519,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
       return;
     }
 
-    setPendingSummaryTemplateId(summaryTemplateId);
     handleTabSelect('summary');
     markSummaryRequested(recordingId);
     setSummaryRunNonce(value => value + 1);
@@ -527,9 +526,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setSummaryFailed(false);
     setIsRegeneratingSummary(true);
     try {
+      // The default template is code-backed and intentionally has no database row.
+      const resolvedTemplateId = summaryTemplateId || 'default';
+
+      setPendingSummaryTemplateId(resolvedTemplateId);
       const result = await recordingService.regenerateSummary(
         recording.externalId,
-        summaryTemplateId,
+        resolvedTemplateId,
       );
       setRecording(current =>
         current
@@ -544,14 +547,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
       setSummaryCanvasNonce(value => value + 1);
       setAwaitingSummary(false);
       clearSummaryRequested(recordingId);
-      const selected = RECORDING_SUMMARY_TEMPLATES.find(
-        template => template.id === result.summaryTemplateId,
-      );
-      toast.success(
-        selected?.id === 'default'
-          ? 'Default summary generated'
-          : `${selected?.name ?? 'Recording'} summary generated`,
-      );
+      const selected = summaryTemplates.find(template => template.id === result.summaryTemplateId);
+      const selectedName =
+        selected?.name ?? (result.summaryTemplateId === 'default' ? 'Default' : 'Recording');
+      toast.success(`${selectedName} summary generated`);
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
@@ -699,10 +698,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const isOwner = recording.createdByUserId === currentUser?.id;
-  const selectedSummaryTemplate =
-    RECORDING_SUMMARY_TEMPLATES.find(
-      template => template.id === (pendingSummaryTemplateId ?? recording.summaryTemplateId),
-    ) ?? RECORDING_SUMMARY_TEMPLATES[0]!;
+  const summaryTemplateOptions: RecordingSummaryTemplate[] = summaryTemplates.map(template => ({
+    id: template.id,
+    name: template.name,
+    icon: template.name === 'Default summary' ? '✨' : '#',
+  }));
+  const activeSummaryTemplateId = pendingSummaryTemplateId ?? storedSummaryTemplateId;
+  const selectedSummaryTemplate: RecordingSummaryTemplate =
+    summaryTemplateOptions.find(template => template.id === activeSummaryTemplateId) ??
+    (storedSummaryTemplate?.id === activeSummaryTemplateId
+      ? {
+          id: storedSummaryTemplate.id,
+          name: storedSummaryTemplate.name,
+          icon: storedSummaryTemplate.name === 'Default summary' ? '✨' : '#',
+        }
+      : { id: 'default', name: 'Default summary', icon: '✨' });
 
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab = tabPreference === 'notes' ? 'notes' : secondTab;
@@ -728,9 +738,18 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setShowTranscriptPanel(true);
   };
 
-  /** The bare "Generate summary" offer runs the currently selected template. */
-  const handleGenerateSummaryClick = (): void => {
-    void handleSummaryTemplateSelect(selectedSummaryTemplate.id);
+  const handleShowSummaryShimmer = (): void => {
+    setAwaitingSummary(true);
+  };
+
+  const handleOpenSummaryTemplates = (): void => {
+    setShouldLoadSummaryTemplates(true);
+    setTemplatesModalMode('browse');
+  };
+
+  const handleNewSummaryTemplate = (): void => {
+    setShouldLoadSummaryTemplates(true);
+    setTemplatesModalMode('new');
   };
 
   return (
@@ -790,10 +809,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   {...(isLive || !isOwner
                     ? {}
                     : {
-                        templates: RECORDING_SUMMARY_TEMPLATES,
                         isRegenerating: isRegeneratingSummary,
-                        onTemplateSelect: (templateId: BuiltinRecordingSummaryTemplateId) =>
-                          void handleSummaryTemplateSelect(templateId),
+                        templates: summaryTemplateOptions,
+                        templatesLoading: summaryTemplatesLoading,
+                        onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
+                        onTemplateSelect: summaryTemplateId =>
+                          void handleRegenerateSummary(summaryTemplateId),
+                        onRegenerate: () =>
+                          void handleRegenerateSummary(selectedSummaryTemplate.id),
+                        onOpenTemplates: handleOpenSummaryTemplates,
+                        onNewTemplate: handleNewSummaryTemplate,
                       })}
                 />
 
@@ -946,7 +971,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 <SummaryGenerationPanel
                   isAwaiting={awaitingSummary}
                   canGenerate={hasTranscript}
-                  onGenerate={handleGenerateSummaryClick}
+                  onGenerate={handleShowSummaryShimmer}
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
@@ -1020,6 +1045,28 @@ export default function RecordingDetailV2Screen(): ReactElement {
             onClose={() => setShowGoogleDocPreviewModal(false)}
             onExport={exportGoogleDoc}
             isExporting={isExportingGoogleDoc}
+          />
+        </Dialog>
+      )}
+
+      {isOwner && currentUser && templatesModalMode && (
+        <Dialog
+          open={templatesModalMode !== null}
+          onOpenChange={open => !open && setTemplatesModalMode(null)}
+          title='Templates'
+          description='Choose, create, edit, and share a recording summary template.'
+          className='h-[calc(100vh-48px)] !max-w-[1180px] overflow-hidden rounded-2xl p-0'
+          testId='summary-templates-dialog'
+        >
+          <SummaryTemplatesModal
+            templates={summaryTemplates}
+            loading={summaryTemplatesLoading}
+            selectedTemplateId={selectedSummaryTemplate.id || null}
+            currentUserId={currentUser.id}
+            currentUserName={getUserDisplayName(currentUser)}
+            startWithNewTemplate={templatesModalMode === 'new'}
+            onClose={() => setTemplatesModalMode(null)}
+            onApply={template => handleRegenerateSummary(template.id)}
           />
         </Dialog>
       )}

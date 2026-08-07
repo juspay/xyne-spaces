@@ -36,7 +36,21 @@ router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
 router.post('/summary-templates', summaryTemplateController.create);
+router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
+router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+router.post(
+  '/summary-templates/ai/generate-system-prompt',
+  summaryTemplateController.generateSystemPrompt
+);
+router.get('/summary-templates/publication/context', summaryTemplateController.publicationContext);
+router.get('/summary-templates/:templateId/shares', summaryTemplateController.listShares);
+router.post('/summary-templates/:templateId/sharing', summaryTemplateController.manageSharing);
+router.post(
+  '/summary-templates/:templateId/publication',
+  summaryTemplateController.managePublication
+);
 router.patch('/summary-templates/:templateId', summaryTemplateController.update);
+router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 

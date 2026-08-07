@@ -1175,6 +1175,7 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey('id');
 
@@ -3561,7 +3562,7 @@ export const entityAccessTableRelationships = relationships(
 
 export const summaryTemplateTableRelationships = relationships(
   summaryTemplateTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     workspace: one({
       sourceField: ['workspaceId'],
       destField: ['id'],
@@ -3571,6 +3572,16 @@ export const summaryTemplateTableRelationships = relationships(
       sourceField: ['createdBy'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    shares: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: entityAccessTable,
+    }),
+    workspaceResourceAccess: many({
+      sourceField: ['workspaceId'],
+      destField: ['workspaceId'],
+      destSchema: resourceAccessTable,
     }),
   }),
 );
