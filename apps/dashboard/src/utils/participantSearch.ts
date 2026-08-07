@@ -31,10 +31,7 @@ export interface RankableOption {
   status?: string | null;
 }
 
-export function rankParticipantOptions<T extends RankableOption>(
-  options: T[],
-  query: string,
-): T[] {
+export function rankParticipantOptions<T extends RankableOption>(options: T[], query: string): T[] {
   // Empty query: preserve the caller's existing ordering (already alphabetised).
   if (!query.trim()) return options;
 

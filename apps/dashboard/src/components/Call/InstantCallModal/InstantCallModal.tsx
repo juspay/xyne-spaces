@@ -73,7 +73,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             />
           ),
           children: (
-            <div className='flex items-center gap-2 min-w-0'>
+            <div className='flex flex-1 items-center gap-2 min-w-0'>
               <Avatar
                 userId={user.id}
                 size={'sm'}
@@ -82,7 +82,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               />
               <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
                 <span
-                  className={`flex-1 truncate text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
+                  className={`shrink-0 truncate max-w-[50%] text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
                 >
                   {getUserDisplayName(user)}
                 </span>
@@ -92,7 +92,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                   </span>
                 )}
                 {user.email && (
-                  <span className='shrink-0 truncate text-xs text-muted-foreground max-w-[50%]'>
+                  <span className='flex-1 min-w-0 truncate text-xs text-muted-foreground'>
                     {user.email}
                   </span>
                 )}
@@ -122,12 +122,14 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
       subtitle: group.alias || group.description,
       children: (
-        <div className='flex items-center gap-2 min-w-0'>
+        <div className='flex flex-1 items-center gap-2 min-w-0'>
           <Users className='size-3.5 text-muted-foreground mx-0.5 shrink-0' strokeWidth={2.3} />
           <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
-            <span className='flex-1 truncate text-sm text-foreground'>{group.name}</span>
+            <span className='shrink-0 truncate max-w-[50%] text-sm text-foreground'>
+              {group.name}
+            </span>
             {(group.alias || group.description) && (
-              <span className='shrink-0 truncate text-xs text-muted-foreground max-w-[50%]'>
+              <span className='flex-1 min-w-0 truncate text-xs text-muted-foreground'>
                 {group.alias || group.description}
               </span>
             )}
