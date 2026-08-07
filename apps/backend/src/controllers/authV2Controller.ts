@@ -15,6 +15,7 @@ import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as 
 import '../types/express';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -1879,77 +1880,85 @@ export class AuthV2Controller {
 
       const currentUser = req.user!;
 
-      // Find the User record scoped to the target workspace
-      const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
-      if (!targetUser) {
-        res.status(403).json({
-          error: 'Forbidden',
-          message: 'You do not have access to this workspace',
-        });
-        return;
-      }
-
-      await this.userService.ensureUserPresence(targetUser.id, workspaceId);
-      const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
-
-      const workspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { landingChannelId: true },
-      });
-
-      // Get existing session from global session cookie
-      // We reuse the same session across workspaces (session belongs to user, not workspace)
-      const sessionId = req.cookies?.user_session_id;
-      
-      // Verify session exists and is valid
-      let validSessionId: string | null = null;
-      if (sessionId) {
-        const currentSession = await this.userSessionService.getSessionById(sessionId);
-        if (currentSession && currentSession.status === 'ACTIVE') {
-          validSessionId = currentSession.id;
-          logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+      // Switching workspaces is inherently cross-tenant: everything below acts on the
+      // TARGET workspace while the ambient session context is still the caller's current
+      // (old) one — the per-model ACLs' "must match your current workspace" rule can never
+      // be satisfied by definition. Safe to bypass because every lookup here is keyed off
+      // `currentUser.email` (the caller's own verified session), never attacker-supplied —
+      // this can only ever act on the caller's own identity in the target workspace.
+      await runAsSystem(async () => {
+        // Find the User record scoped to the target workspace
+        const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
+        if (!targetUser) {
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'You do not have access to this workspace',
+          });
+          return;
         }
-      }
-      
-      if (!validSessionId) {
-        logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
-      }
 
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId ?? undefined,
-        memberId: targetUser.orgMemberId,
-      });
+        await this.userService.ensureUserPresence(targetUser.id, workspaceId);
+        const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
 
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+        const workspace = await this.prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { landingChannelId: true },
+        });
 
-      // Set workspace-specific cookies
-      res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
-      res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      
-      // Set global session cookie (reusing existing session)
-      if (validSessionId) {
-        res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      }
+        // Get existing session from global session cookie
+        // We reuse the same session across workspaces (session belongs to user, not workspace)
+        const sessionId = req.cookies?.user_session_id;
 
-      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+        // Verify session exists and is valid
+        let validSessionId: string | null = null;
+        if (sessionId) {
+          const currentSession = await this.userSessionService.getSessionById(sessionId);
+          if (currentSession && currentSession.status === 'ACTIVE') {
+            validSessionId = currentSession.id;
+            logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+          }
+        }
 
-      res.status(200).json({
-        user: {
-          id: targetUser.id,
+        if (!validSessionId) {
+          logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
+        }
+
+        const token = jwtService.generateToken({
+          sub: targetUser.id,
           email: targetUser.email,
           name: targetUser.name,
-          picture: targetUser.picture,
-          workspaceId: targetUser.workspaceId,
-          role: targetUser.role,
+          picture: targetUser.picture || undefined,
+          workspaceId: targetUser.workspaceId ?? undefined,
           memberId: targetUser.orgMemberId,
-        },
-        selfDmChannelId,
-        landingChannelId: workspace?.landingChannelId ?? null,
+        });
+
+        const isProduction = process.env.NODE_ENV === 'production';
+        const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+
+        // Set workspace-specific cookies
+        res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+
+        // Set global session cookie (reusing existing session)
+        if (validSessionId) {
+          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        }
+
+        logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+
+        res.status(200).json({
+          user: {
+            id: targetUser.id,
+            email: targetUser.email,
+            name: targetUser.name,
+            picture: targetUser.picture,
+            workspaceId: targetUser.workspaceId,
+            role: targetUser.role,
+            memberId: targetUser.orgMemberId,
+          },
+          selfDmChannelId,
+          landingChannelId: workspace?.landingChannelId ?? null,
+        });
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);
