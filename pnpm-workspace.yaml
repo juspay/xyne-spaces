@@ -27,6 +27,7 @@ packages:
   - packages/xyne-claw-pi-plugin
   - packages/xyne-spaces-contract
   - packages/xyne-spaces-sdk
+  - packages/xyne-spaces-browser-plugin
 
   - tools/xyne-automation
   - tools/xyne-automation-old
