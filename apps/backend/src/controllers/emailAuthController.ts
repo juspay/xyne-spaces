@@ -1,7 +1,7 @@
 import crypto from 'crypto';
+import { AuthProvider } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { AuthProvider } from '@prisma/client';
 import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';
@@ -15,6 +15,7 @@ import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
+import { config } from '@/config/env';
 
 interface ResetCodePayload {
   code: string;
@@ -96,10 +97,9 @@ export class EmailAuthController {
       }
 
       if (!orgMember.passwordHash) {
-        // EMAIL user who was invited but password isn't set yet
-        res.status(403).json({
-          error: 'Password not set',
-          message: 'Please use forgot password to set your password.',
+        res.status(401).json({
+          error: 'Invalid credentials',
+          message: 'Email or password is incorrect',
         });
         return;
       }
@@ -279,12 +279,12 @@ export class EmailAuthController {
 
       res.cookie('google_access_token', jwtToken, {
         ...cookieBase,
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
         ...cookieBase,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       res.cookie('user_session_id', session.id, {
@@ -315,7 +315,7 @@ export class EmailAuthController {
           role: workspaceUser.role,
           orgRole: orgMember.role,
           memberId: orgMember.memberId,
-          authProvider: 'EMAIL',
+          authProvider: AuthProvider.EMAIL,
         },
         workspaces,
         pendingUserData: {

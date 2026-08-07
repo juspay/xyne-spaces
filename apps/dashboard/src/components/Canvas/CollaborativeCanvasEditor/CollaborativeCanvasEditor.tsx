@@ -55,7 +55,7 @@ import { filterSuggestionItems } from '@blocknote/core/extensions';
 import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
-import { canvasSchema } from '../canvasSchema';
+import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
 import { createElement } from 'react';
 import { MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { RiGroupLine } from 'react-icons/ri';
@@ -190,6 +190,8 @@ export const CollaborativeCanvasEditor = forwardRef<
       dictionary: canvasDictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
+      tables: canvasTableOptions,
+      _tiptapOptions: canvasTiptapOptions,
       ...(shouldUseCollaboration
         ? {
             collaboration: {
@@ -684,6 +686,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                     editable={editable && !isReadOnly}
                     theme={theme === 'midnight' ? 'dark' : 'light'}
                     formattingToolbar={false}
+                    tableHandles={editable && !isReadOnly}
                     slashMenu={false}
                     onChange={handleCollaborativeChange}
                   >

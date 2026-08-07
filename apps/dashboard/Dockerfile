@@ -38,7 +38,9 @@ COPY apps/dashboard apps/dashboard
 COPY package.json /package.json
 
 # Run validation (TypeScript + ESLint)
-RUN pnpm --filter xyne-spaces-dashboard run validate
+# validate:raw, not validate: the image has no scripts/ directory, and an image
+# build has no use for the interactive agent handoff the wrapper adds.
+RUN pnpm --filter xyne-spaces-dashboard run validate:raw
 
 # Accept build argument for source commit
 ARG SOURCE_COMMIT
@@ -51,6 +53,12 @@ ENV VITE_ZERO_SERVER=https://spaces.xyne.juspay.net/zero
 # Mixpanel token (public client-side analytics; injected at build time)
 ARG VITE_MIXPANEL_TOKEN=""
 ENV VITE_MIXPANEL_TOKEN=${VITE_MIXPANEL_TOKEN}
+
+# PostHog key (public client-side analytics; injected at build time)
+ARG VITE_POSTHOG_KEY=""
+ENV VITE_POSTHOG_KEY=${VITE_POSTHOG_KEY}
+ARG VITE_POSTHOG_HOST=""
+ENV VITE_POSTHOG_HOST=${VITE_POSTHOG_HOST}
 
 # Default workspace ID
 ENV VITE_DEFAULT_WORKSPACE_ID=6642623f-cca7-43ad-9a6b-5e49c33226b4

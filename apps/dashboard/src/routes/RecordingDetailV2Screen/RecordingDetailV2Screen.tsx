@@ -1,5 +1,5 @@
 /**
-  The Xyne Oats Details Screen 
+  The Xyne Scribe Details Screen 
  */
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -34,6 +34,7 @@ import {
   Flag,
   SidebarRightOpen,
   ChevronDown,
+  File02Text,
   EnvelopeDefault,
   Hashtag,
 } from '@xyne/icons';
@@ -47,6 +48,7 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
+import { RecordingDetailV2Skeleton } from './components/RecordingDetailV2Skeleton';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { LiveTranscriptSection } from './components/LiveTranscriptSection';
 import { ResumeRecordingButton } from './components/ResumeRecordingButton';
@@ -57,6 +59,7 @@ import {
 import { SummaryGenerationPanel } from './components/SummaryGenerationPanel';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
+import { GoogleDocPreviewModal } from './components/GoogleDocPreviewModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -94,8 +97,19 @@ const AUDIO_POLL_MAX_ATTEMPTS = 30;
 const POST_SPLIT_BUTTON_CLASS =
   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
+const CANVAS_POPOVER_LAYER_CLASS = '[&_[style*="--bn-ui-base-z-index"]]:!z-[15]';
+
 function isRecordingLive(recording: RecordingDetail): boolean {
   return recording.status === 'ACTIVE' || recording.status === 'IN_PROGRESS';
+}
+
+function isSameRecordingSnapshot(a: RecordingDetail, b: RecordingDetail): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 export default function RecordingDetailV2Screen(): ReactElement {
@@ -114,6 +128,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [showGoogleDocPreviewModal, setShowGoogleDocPreviewModal] = useState(false);
+  const [googleDocPreviewNonce, setGoogleDocPreviewNonce] = useState(0);
+  const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [pendingSummaryTemplateId, setPendingSummaryTemplateId] =
     useState<BuiltinRecordingSummaryTemplateId | null>(null);
@@ -125,6 +142,36 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+
+  const exportGoogleDoc = async (): Promise<void> => {
+    if (!recording || isExportingGoogleDoc) return;
+
+    // Opening synchronously keeps this user-initiated navigation from being blocked by browsers.
+    const documentWindow = window.open('', '_blank');
+    if (documentWindow) documentWindow.opener = null;
+
+    setIsExportingGoogleDoc(true);
+    try {
+      const { documentUrl } = await recordingService.exportGoogleDoc(recording.externalId);
+      if (documentWindow) {
+        documentWindow.location.assign(documentUrl);
+      } else {
+        window.open(documentUrl, '_blank', 'noopener,noreferrer');
+      }
+      toast.success('Google Doc created');
+      setShowGoogleDocPreviewModal(false);
+    } catch (error) {
+      documentWindow?.close();
+      toast.error('Failed to export to Google Docs', {
+        description: axios.isAxiosError<{ error?: string }>(error)
+          ? (error.response?.data?.error ?? error.message)
+          : 'Please try again.',
+      });
+      throw error;
+    } finally {
+      setIsExportingGoogleDoc(false);
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -143,6 +190,30 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     params.delete('recordingEmailConnected');
     params.delete('recordingEmailError');
+    const search = params.toString();
+    void navigate(
+      { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
+      { replace: true, state: location.state as RecordingNavState | null },
+    );
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const connected = params.get('recordingGoogleDocConnected') === 'true';
+    const connectionError = params.get('recordingGoogleDocError');
+    if (!connected && !connectionError) return;
+
+    if (connected) {
+      toast.success('Google Docs connected');
+      setGoogleDocPreviewNonce(nonce => nonce + 1);
+      setShowGoogleDocPreviewModal(true);
+    }
+    if (connectionError) {
+      toast.error('Google Docs connection failed. Please try again.');
+      setShowGoogleDocPreviewModal(true);
+    }
+    params.delete('recordingGoogleDocConnected');
+    params.delete('recordingGoogleDocError');
     const search = params.toString();
     void navigate(
       { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
@@ -306,7 +377,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       if (recordingRow.status) {
         next.status = recordingRow.status as NonNullable<RecordingDetail['status']>;
       }
-      return next;
+      return isSameRecordingSnapshot(prev, next) ? prev : next;
     });
   }, [recordingRow]);
 
@@ -416,6 +487,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
   ): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
+    // Picking the template the existing summary was already written with is a no-op
+    if (recording.detailedSummaryCanvasId && summaryTemplateId === recording.summaryTemplateId) {
+      handleTabSelect('summary');
+      return;
+    }
+
     setPendingSummaryTemplateId(summaryTemplateId);
     handleTabSelect('summary');
     markSummaryRequested(recordingId);
@@ -442,7 +519,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const selected = RECORDING_SUMMARY_TEMPLATES.find(
         template => template.id === result.summaryTemplateId,
       );
-      toast.success(`${selected?.name ?? 'Recording'} summary generated`);
+      toast.success(
+        selected?.id === 'default'
+          ? 'Default summary generated'
+          : `${selected?.name ?? 'Recording'} summary generated`,
+      );
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
@@ -466,6 +547,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
     { enabled: !!recording?.messageId },
   );
 
+  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
+  // reaches this screen through the store until the detail is refetched.
+  const notesCanvasId =
+    (isLive && recording?.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
+    recording?.notesCanvasId ??
+    null;
+
   /**
    * A note-taker recording has no channel, message or conversation — it is created
    * from a LiveKit webhook rather than posted anywhere — so none of those can gate
@@ -474,23 +562,58 @@ export default function RecordingDetailV2Screen(): ReactElement {
    * as the recordings list does.
    */
   const handleAskAI = useCallback((): void => {
+    if (!recording) return;
     const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
-    const hasThreadContext = !!recording?.conversationId || attachmentIds.length > 0;
+    const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
+    const canvasSelections = [
+      ...(recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: recording.detailedSummaryCanvasId,
+              canvasId: recording.detailedSummaryCanvasId,
+              title: `${recording.title || 'Recording'} summary`,
+            },
+          ]
+        : []),
+      ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: notesCanvasId,
+              canvasId: notesCanvasId,
+              title: `${recording.title || 'Recording'} notes`,
+            },
+          ]
+        : []),
+    ];
 
     xyneAIActor.send({
       type: 'OPEN',
       startFreshChat: true,
       contextType: 'general',
-      ...(recording?.channelId ? { channelId: recording.channelId } : {}),
+      initialContextSelections: {
+        recordings: [
+          {
+            // `id` is the canonical Call id. `externalId` is only the public
+            // recording-route id, so using it here would make Claw fail to
+            // resolve the attached call.
+            id: recording.id,
+            title: recording.title || 'Recording',
+            ...(recording.channelId ? { channelId: recording.channelId } : {}),
+            ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
+            externalId: recording.externalId,
+          },
+        ],
+        canvases: canvasSelections,
+      },
       threadInfo: hasThreadContext
         ? {
-            conversationId: recording?.conversationId ?? '',
-            previewText: recording?.title || 'Recording Transcript',
+            conversationId: recording.conversationId ?? '',
+            previewText: recording.title || 'Recording Transcript',
             ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
           }
         : null,
     });
-  }, [recording, message]);
+  }, [recording, message, notesCanvasId]);
 
   const transcriptText =
     speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
@@ -525,16 +648,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
   }, [recordingId, transcriptText]);
 
   if (loading) {
-    return (
-      <div className='flex h-full w-full items-center justify-center'>
-        <Spinner size={28} className='animate-spin text-muted-foreground' />
-      </div>
-    );
+    return <RecordingDetailV2Skeleton />;
   }
 
   if (error || !recording) {
     return (
-      <div className='flex h-full w-full items-center justify-center'>
+      <div
+        data-testid='recording-detail-v2-page'
+        className='relative flex h-full w-full flex-col items-center justify-center overflow-hidden bg-background shadow-md md:rounded-2xl'
+      >
         <div className='flex max-w-md flex-col items-center gap-3 text-center'>
           <AlertCircle className='size-12 text-destructive' />
           <p className='text-sm text-muted-foreground'>{error ?? 'Recording not found'}</p>
@@ -546,11 +668,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
     );
   }
 
-  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
-  // reaches this screen through the store until the detail is refetched.
-  const notesCanvasId =
-    (isLive && recording.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
-    recording.notesCanvasId;
   // The player replaces the read-only timeline once there is audio to scrub.
   const showAudioPlayer = !isLive && !!recording.hasRecording;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
@@ -607,7 +724,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           .join(' ')}
       >
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
-          <div className='sticky top-0 z-10 -mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
+          <div className='sticky top-0 z-20 -mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
             <RecordingDetailV2Header
               recording={recording}
               isLive={isLive}
@@ -730,7 +847,17 @@ export default function RecordingDetailV2Screen(): ReactElement {
                         data-track-name='open_post_to_email_modal'
                       >
                         <EnvelopeDefault className='size-4 text-muted-foreground' />
-                        Post to email
+                        Draft follow-up email
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setShowGoogleDocPreviewModal(true)}
+                        disabled={isExportingGoogleDoc}
+                        className='rounded-lg px-2.5 py-2'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='export_recording_google_doc'
+                      >
+                        <File02Text className='size-4 text-muted-foreground' />
+                        {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -846,6 +973,25 @@ export default function RecordingDetailV2Screen(): ReactElement {
           />
         </Dialog>
       )}
+
+      {isOwner && showGoogleDocPreviewModal && hasDetailedSummary && (
+        <Dialog
+          open={showGoogleDocPreviewModal}
+          onOpenChange={open => !open && setShowGoogleDocPreviewModal(false)}
+          title='Preview Google Doc'
+          description='Review the recording summary before creating a Google Doc.'
+          className='max-w-[760px] overflow-hidden rounded-xl p-0'
+          testId='google-doc-preview-dialog'
+        >
+          <GoogleDocPreviewModal
+            key={googleDocPreviewNonce}
+            recording={recording}
+            onClose={() => setShowGoogleDocPreviewModal(false)}
+            onExport={exportGoogleDoc}
+            isExporting={isExportingGoogleDoc}
+          />
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -872,7 +1018,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       title={canvas.title}
       editable={true}
       placeholder='Start typing your notes…'
-      className='min-h-0 w-full flex-1
+      className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-2
         [&_.bn-editor]:!px-0
@@ -882,7 +1028,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
         [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
         [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
         [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
-        '
+        `}
       autoFocus={true}
     />
   );
@@ -909,7 +1055,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       editable={true}
       placeholder='Detailed summary'
       autoFocus={false}
-      className='min-h-0 w-full flex-1
+      className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         detailed-summary-canvas-editor
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-0
@@ -918,9 +1064,9 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
         [&_.bn-suggestion-menu]:!w-auto [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:!max-h-60 [&_.bn-suggestion-menu]:!max-w-[calc(100vw-2rem)]
         [&_.bn-suggestion-menu-item]:!h-8 [&_.bn-suggestion-menu-item]:!px-2 [&_.bn-suggestion-menu-item]:!py-1
         [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
-        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
+        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
         [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
-        '
+        `}
     />
   );
 }

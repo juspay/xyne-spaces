@@ -158,7 +158,6 @@ import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserG
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
-import CommunityWorkspaceInviteRedirect from './CommunityWorkspaceInvite/CommunityWorkspaceInviteRedirect';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
 import { useShortcutById } from '../shortcuts';
@@ -207,9 +206,18 @@ import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
-import AILibraryScreen from './AIScreen/AILibraryScreen';
-import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
-import AISectionScreen from './AIScreen/AISectionScreen';
+import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
+import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
+import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
+import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
+import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
+import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
+import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
+import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
+import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
+import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
+import AISectionLayout from './AIScreen/AISectionLayout';
 import UserGuideScreen from './UserGuideScreen';
 import DailyBriefScreen from './DailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
@@ -373,6 +381,11 @@ const AppRoot = (): ReactElement => {
   const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
+  const xyneAIInitialContextSelections = useSelector(
+    xyneAIActor,
+    state => state.context.initialContextSelections,
+  );
+  const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
@@ -598,6 +611,8 @@ const AppRoot = (): ReactElement => {
                             threadInfo={xyneAIThreadInfo}
                             startFreshChat={xyneAIStartFreshChat}
                             canvasInfo={xyneAICanvasInfo}
+                            initialContextSelections={xyneAIInitialContextSelections}
+                            contextOpenNonce={xyneAIContextOpenNonce}
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
@@ -743,6 +758,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      initialContextSelections={xyneAIInitialContextSelections}
+                      contextOpenNonce={xyneAIContextOpenNonce}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
@@ -770,6 +787,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      initialContextSelections={xyneAIInitialContextSelections}
+                      contextOpenNonce={xyneAIContextOpenNonce}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
@@ -825,10 +844,36 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
+                  { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                  { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+                  { path: 'library/skill/create', element: <AISkillCreateScreen /> },
+                  { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
+                  { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+                  { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
+                  { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
+                  { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
+                  { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
-                  { path: 'digital-twin', element: <AISectionScreen title='Digital twin' /> },
-                  { path: 'metrics', element: <AISectionScreen title='Metrics' /> },
-                  { path: 'workflow', element: <AISectionScreen title='Workflow' /> },
+                  {
+                    element: <AISectionLayout />,
+                    children: [
+                      {
+                        path: 'digital-twin',
+                        element: <ClawDigitalTwinScreen />,
+                        children: [
+                          { index: true, element: <DigitalTwinMemoriesTab /> },
+                          { path: 'hot', element: <DigitalTwinHotTab /> },
+                          { path: 'proposals', element: <DigitalTwinProposalsTab /> },
+                          { path: 'recall', element: <DigitalTwinRecallTab /> },
+                          { path: 'graph', element: <DigitalTwinGraphTab /> },
+                          { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
+                          { path: 'settings', element: <DigitalTwinSettingsTab /> },
+                        ],
+                      },
+                      { path: 'metrics', element: <ClawMetricsScreen /> },
+                      { path: 'settings', element: <ClawSettingsScreen /> },
+                    ],
+                  },
                 ],
               },
               {
@@ -1510,10 +1555,6 @@ export const router = createBrowserRouter([
       {
         path: '/invite',
         element: <AcceptInvitation />,
-      },
-      {
-        path: '/community/join',
-        element: <CommunityWorkspaceInviteRedirect />,
       },
       {
         path: '/community',

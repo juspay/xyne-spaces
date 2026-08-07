@@ -46,6 +46,9 @@ export default defineConfig({
   build: {
     manifest: true
   },
+  optimizeDeps: {
+    exclude: ['@terrastruct/d2'],
+  },
   server: {
     port: 5173,
     host: true,

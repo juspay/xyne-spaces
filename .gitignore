@@ -68,6 +68,10 @@ target/
 
 learnings/*
 project_output
+.xyne/doctor/runs/
+.xyne/dev-apps.json
+.xyne/features.json
+.xyne/mprocs.yaml
 
 .claude/
 venv/

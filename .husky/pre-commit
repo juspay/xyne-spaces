@@ -35,6 +35,11 @@ else
   echo "   Install it: brew install gitleaks   (https://github.com/gitleaks/gitleaks)"
 fi
 
+# New-table tenant-scoping guard: new Prisma models must have a non-nullable workspaceId/orgId
+# Runs early (before the expensive backend build/typecheck) so it fails fast.
+echo "Running tenant-key (workspaceId/orgId) guard..."
+bash scripts/validate-workspace-id.sh || exit 1
+
 # Get list of changed files
 CHANGED_FILES=$(git diff --cached --name-only)
 
@@ -73,7 +78,7 @@ if [ -n "$DASHBOARD_CHANGED" ]; then
   pnpm run lint:errors-only || exit 1
 
   echo "Running dashboard build..."
-  pnpm run validate || exit 1
+  XYNE_DOCTOR_NO_INTERACTIVE=1 pnpm run validate < /dev/null || exit 1
 else
   echo "⏭️  Skipping dashboard checks (no dashboard files changed)"
 fi
@@ -115,6 +120,10 @@ bash scripts/change-analysis.sh || exit 1
 # Run schema-migration validation for all schema files
 echo "Running schema-migration validation..."
 bash scripts/validate-schema-migrations.sh || exit 1
+
+# Enum guard: block new Postgres enums / CREATE TYPE / ALTER TYPE (XYNE-16525)
+echo "Running enum guard..."
+npm run test:enum || exit 1
 
 echo ""
 echo "✅ All pre-commit checks passed!"

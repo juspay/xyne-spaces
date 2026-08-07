@@ -1,5 +1,3 @@
-import { MessageType } from '@prisma/client';
-import type { SurfaceAreaType } from '@prisma/client';
 import { z } from 'zod';
 import {
   makeLiteLLMProvider,
@@ -12,7 +10,7 @@ import {
 } from '@juspay-jaf/jaf';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, MessageType, SurfaceAreaType, ChannelScopeType } from '@xyne/shared';
 import { parseAgentOutput } from '@/services/agents/utils';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { extractUrls } from '@/utils/urlUtils';
@@ -81,7 +79,7 @@ export async function isEligibleMessage(params: {
   });
 
   if (!channel?.projectId) return false;
-  if (channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM') return false;
+  if (channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM) return false;
 
   const conversation = await db.conversation.findUnique({
     where: { conversationId },
@@ -150,7 +148,7 @@ export async function buildMessageNudgeContext(
     source: {
       sourceId: runtime.messagePayload?.messageId ?? payload.messageId,
       projectId: payload.projectId,
-      sourceType: 'MESSAGE',
+      sourceType: SurfaceAreaType.MESSAGE,
     },
     threadMessages,
     projectTags: existingProjectTags,

@@ -22,11 +22,8 @@ import {
 } from '../repositories/team-intelligence.repository';
 import { teamIntelligenceQueue } from '../queue';
 import { teamIntelligenceContentStorageService } from './team-intelligence-content-storage.service';
-import {
-  Prisma,
-  TeamIntelligenceBatchStatus,
-  TeamIntelligenceUserIngestionStatus,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 
 export class TeamIntelligenceIdempotencyConflictError extends Error {
   constructor() {
@@ -190,7 +187,7 @@ class TeamIntelligenceService {
       summaryText,
       summaryMetadata,
       provenance,
-      status: orgSummary.status,
+      status: orgSummary.status as TeamIntelligenceBatchStatus,
       totalTeams: orgSummary.totalTeams,
       completedTeams: orgSummary.completedTeams,
       failedTeams: orgSummary.failedTeams,

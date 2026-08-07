@@ -4,7 +4,7 @@ import { DatabaseClient } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { logger } from '@/utils/logger';
 import { PullRequestInfo, DiffstatSummary, ChangeEntry } from '@/types/bitbucket';
-import { FormContextType, FormEntityType, BaseTicketType } from '@xyne/shared';
+import { FormContextType, FormEntityType, BaseTicketType, BoardType, ChannelVisibility, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { Application, } from '@prisma/client';
 import { XyneRelease } from './release/xyne/xyneRelease';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
@@ -92,7 +92,6 @@ export class CommitAnalysisService {
   private initialize(): void {
     try {
       if (
-        this.ticketRepository &&
         this.applicationRepository &&
         this.xyneRelease &&
         this.releaseRepository
@@ -104,12 +103,16 @@ export class CommitAnalysisService {
       // TODO: we should have a factory/service to generate the release change requests
       this.xyneRelease = new XyneRelease();
       this.releaseRepository = new ReleaseRepository();
-      this.ticketRepository = new TicketRepository();
       logger.info('[CommitAnalysisService] Successfully initialized all repositories');
     } catch (error) {
       logger.error('[CommitAnalysisService] Failed to initialize repositories:', error);
     }
 
+  }
+
+  private get tickets(): TicketRepository {
+    this.ticketRepository ??= new TicketRepository();
+    return this.ticketRepository;
   }
 
 
@@ -148,7 +151,7 @@ export class CommitAnalysisService {
     prAuthor?: StubAuthor,
   ): Promise<TicketInfo | null> {
     try {
-      const ticket = await this.ticketRepository!.getTicketByXyneId(xyneId, workspaceId);
+      const ticket = await this.tickets.getTicketByXyneId(xyneId, workspaceId);
 
       if (ticket) {
         return {
@@ -213,7 +216,7 @@ export class CommitAnalysisService {
         return null;
       }
       const board = await db.board.findFirst({
-        where: { projectId: project.id, boardType: { not: 'RELEASE' } },
+        where: { projectId: project.id, boardType: { not: BoardType.RELEASE } },
         select: { id: true },
       });
       if (!board) {
@@ -246,7 +249,7 @@ export class CommitAnalysisService {
       // Prefer a PUBLIC channel on the project; fall back to any project channel.
       const channel =
         (await db.channel.findFirst({
-          where: { projectId: project.id, visibility: 'PUBLIC' },
+          where: { projectId: project.id, visibility: ChannelVisibility.PUBLIC },
           select: { id: true },
         })) ??
         (await db.channel.findFirst({
@@ -282,8 +285,8 @@ export class CommitAnalysisService {
           // so the TicketActivitiesACL's ticket→conversation→channel traversal resolves.
           // Re-use an existing conversation in the project channel if available.
           conversationId: conversation?.conversationId ?? channel.id,
-          statusV2: 'TODO',
-          priority: 'LOW',
+          statusV2: TicketStatusV2.TODO,
+          priority: TicketPriority.LOW,
           stageName: 'BACKLOG',
           ticketType: BaseTicketType.Fix,
           lastEmailAt: new Date(),

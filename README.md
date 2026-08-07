@@ -171,7 +171,8 @@ acting as you needs your consent.
 ## Quickstart
 
 **Prerequisites** — Node.js 22.x, pnpm 10.15.0, and Docker (or OrbStack / Podman) with
-Compose. Details in [Prerequisites](docs/setup/prerequisites.md).
+Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
+with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
 
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git
@@ -191,8 +192,17 @@ re-running it on an existing checkout is safe — and you can run any phase on i
 | `pnpm run env:setup` | Copies each app's `.env.example` into place — never overwrites an existing file |
 | `pnpm run setup` | Installs workspace dependencies and builds the shared packages |
 | `pnpm run secrets` | Generates the local secrets that ship as `set-me` placeholders |
-| `pnpm run services` | Starts infrastructure containers, runs migrations, seeds the databases |
-| `pnpm run dev:all` | Starts backend, dashboard, `xyne-claw` and `xyne-claw-auth` in parallel |
+| `pnpm run services` | Asks which features you need, checks ports, starts infrastructure containers, runs migrations, seeds the databases |
+| `pnpm run dev` | Asks which apps to run, then opens them in a multi-pane process TUI (one pane per app, restart any one with `r`) |
+
+The pickers remember previous answers, and both stages check that the ports they
+need are free before starting — naming the process that holds a busy one. Scripted
+runs skip every prompt (`pnpm run bootstrap:raw`, `XYNE_DEV_APPS=all pnpm run dev`).
+
+The bootstrap phases and `validate` use **Xyne Doctor**. In an interactive
+terminal, a nonzero exit can package a redacted local failure report and hand it to Claude Code or
+Codex without leaving the terminal. Plain and automated runs keep normal output without persisting
+a report. See [Xyne Doctor](docs/setup/xyne-doctor.md) for safety behavior and a demo.
 
 </details>
 
@@ -313,6 +323,7 @@ xyne-spaces/
 
 | Guide | |
 | --- | --- |
+| [Local setup](docs/setup/local-setup.md) | From a blank machine to a running environment |
 | [Prerequisites](docs/setup/prerequisites.md) | Versions and tooling you need first |
 | [Local development](docs/setup/local-development.md) | Getting a working environment |
 | [Services](docs/setup/services.md) | What the infrastructure containers do |

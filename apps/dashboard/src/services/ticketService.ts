@@ -1,5 +1,5 @@
 import { apiInstance } from './clients/apiClient';
-import { BaseTicketType, TicketPriority } from '@xyne/shared';
+import { BaseTicketType, TicketPriority, FormFieldType } from '@xyne/shared';
 
 export interface CreateTicketRequest {
   title: string;
@@ -38,7 +38,7 @@ export type KanbanCountsGroupBy =
       type: 'formField';
       fieldId: string;
       fieldName: string;
-      fieldType: string;
+      fieldType: FormFieldType;
     };
 
 export interface KanbanCountsFilters {

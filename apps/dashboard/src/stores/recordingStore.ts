@@ -94,7 +94,7 @@ const initialContext: RecordingState = {
   pauseStartedAt: null,
   accumulatedPausedMs: 0,
   error: null,
-  sttModel: 'azure',
+  sttModel: 'google',
   transcripts: [],
   markedMoments: [],
   pendingAutoStart: false,
@@ -175,11 +175,6 @@ export const recordingStore = createStore({
             notesCanvasId: session.notesCanvasId,
             startTime: session.startTime,
             defaultLayout,
-          });
-
-          toast.success('Recording started', {
-            description: 'Your voice is being recorded and transcribed',
-            duration: 3000,
           });
         })
         .catch(error => {

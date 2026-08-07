@@ -12,8 +12,7 @@ import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { ActivityType } from '@prisma/client';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, ActivityType } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
 
@@ -62,6 +61,20 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     const fieldId = currentFormEntityValue?.fieldId ?? previousValue?.fieldId;
 
     if (entityType !== 'TICKET' || !ticketId || !fieldId) return;
+
+    // Confirm the target ticket belongs to the mutation's workspace before
+    // enqueueing Vespa feeds / broadcasting.
+    const targetTicket = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { workspaceId: true },
+    });
+    if (!targetTicket || targetTicket.workspaceId !== this.ctx.workspaceId) {
+      logger.warn('[FormEntityValuesSideEffectHandler] Skipping counts update for cross-workspace or missing ticket', {
+        ticketId,
+        ctxWorkspaceId: this.ctx.workspaceId,
+      });
+      return;
+    }
 
     await this.queueTicketAndMailVespaFeeds(ticketId);
 
@@ -190,6 +203,16 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       if (!ticket) {
         logger.warn('[FormEntityValuesSideEffectHandler] Ticket not found:', ticketId);
+        return;
+      }
+
+      // Confirm the target ticket belongs to the acting workspace before
+      // emitting app / automation events.
+      if (ticket.workspaceId !== this.ctx.workspaceId) {
+        logger.warn('[FormEntityValuesSideEffectHandler] Skipping event for cross-workspace ticket', {
+          ticketId,
+          ctxWorkspaceId: this.ctx.workspaceId,
+        });
         return;
       }
 

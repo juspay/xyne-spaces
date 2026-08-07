@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 
-import { PrismaClient, AccessType, WorkspaceRole, AuthProvider, UserStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AccessType, WorkspaceRole, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -61,7 +62,7 @@ async function grantAdmin() {
           data: {
             email,
             orgId: defaultOrg.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
           }
         });
         orgMemberId = orgMember.memberId;
@@ -108,7 +109,8 @@ async function grantAdmin() {
       await prisma.userGroupMapping.create({
         data: {
           userId: user.id,
-          userGroupId: adminGroup.id
+          userGroupId: adminGroup.id,
+          workspaceId: defaultWorkspace.id
         }
       });
       console.log('✅ Added to ADMIN group');
@@ -161,7 +163,7 @@ async function grantAdmin() {
           data: {
             email,
             orgId: defaultOrg.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
           }
         });
         console.log('✅ Added to organization as OWNER');

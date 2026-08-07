@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AccessType, AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
 import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -7,7 +8,6 @@ import { UserSessionService } from '@/services/userSessionService';
 import { jwtService } from '@/services/jwtService';
 import { DatabaseClient } from '@/database/client';
 import { TestAuthSeeder } from '@/controllers/testAuthSeeder';
-import { AccessType, AuthProvider } from '@prisma/client';
 
 interface TestUserData {
   googleId: string;
@@ -226,7 +226,7 @@ export class TestAuthController {
             data: {
               orgId: TestAuthController.testOrgId!,
               email: testUserData.email,
-              role: 'MEMBER',
+              role: OrgRole.MEMBER,
             },
             select: { memberId: true },
           });
@@ -247,9 +247,9 @@ export class TestAuthController {
               email: testUserData.email,
               name: testUserData.name,
               picture: testUserData.picture,
-              authProvider: 'GOOGLE' as AuthProvider,
+              authProvider: AuthProvider.GOOGLE,
               workspace: { connect: { id: TestAuthController.testWorkspaceId! } },
-              role: 'MEMBER',
+              role: WorkspaceRole.MEMBER,
               orgMember: { connect: { memberId: orgMember.memberId } },
             },
           });
@@ -385,7 +385,7 @@ export class TestAuthController {
       // Set workspace-scoped JWT token (matches authV2Middleware expectation)
       res.cookie(`xyne_ws_${user.workspaceId}_token`, customToken, {
         ...cookieOptions,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       // Set last workspace pointer so authV2Middleware can find the right token

@@ -57,6 +57,23 @@ export interface CanvasSelectionContext {
   selections: SelectionInfo[];
 }
 
+/**
+ * Context pills to seed when Ask AI is opened from a surface that already knows
+ * exactly which records the question is about. Keeping this in the machine
+ * means the global sidebar, rather than an ad-hoc query string, owns the same
+ * context that it sends to the Claw API.
+ */
+export interface AskAIInitialContextSelections {
+  canvases: Array<{ id: string; title: string; canvasId?: string }>;
+  recordings: Array<{
+    id: string;
+    title: string;
+    channelId?: string;
+    conversationId?: string;
+    externalId?: string;
+  }>;
+}
+
 // Context interface for the XyneAI machine
 export interface XyneAIContext {
   xyneAIState: XyneAIState;
@@ -72,6 +89,10 @@ export interface XyneAIContext {
   canvasInfo: CanvasInfo | null;
   // Canvas selection context - groups canvas with its selections
   canvasContexts: CanvasSelectionContext[];
+  /** Context pills supplied by the surface that opened Ask AI. */
+  initialContextSelections: AskAIInitialContextSelections | null;
+  /** Re-seeds context even when a user clicks Ask AI on the same item twice. */
+  contextOpenNonce: number;
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
   // Knowledge Base context
@@ -104,6 +125,7 @@ export type XyneAIEvent =
       kbChannelId?: string | null;
       kbDocId?: string | null;
       kbDocName?: string | null;
+      initialContextSelections?: AskAIInitialContextSelections | null;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
@@ -426,6 +448,11 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections: event.initialContextSelections ?? null,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -492,6 +519,14 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections:
+            event.initialContextSelections !== undefined
+              ? event.initialContextSelections
+              : context.initialContextSelections,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -544,6 +579,8 @@ export const xyneAIMachine = setup({
         startFreshChat: false,
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
+        initialContextSelections: null,
+        contextOpenNonce: context.contextOpenNonce,
         focusSessionId: null,
         kbCollectionId: null,
         kbChannelId: null,
@@ -686,6 +723,8 @@ export const xyneAIMachine = setup({
     startFreshChat: false,
     canvasInfo: null,
     canvasContexts: [],
+    initialContextSelections: null,
+    contextOpenNonce: 0,
     focusSessionId: null,
     kbCollectionId: null,
     kbChannelId: null,
@@ -783,6 +822,9 @@ const initializeActor = async (): Promise<void> => {
           }),
         ...(persistedContext.threadInfo !== undefined && {
           threadInfo: persistedContext.threadInfo,
+        }),
+        ...(persistedContext.initialContextSelections !== undefined && {
+          initialContextSelections: persistedContext.initialContextSelections,
         }),
       });
     }

@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { toast } from 'sonner';
 import type { Ticket, TicketStatusV2 } from '@xyne/shared';
-import { TicketStageRequestStatus, type TicketStageRequest } from '@xyne/shared';
+import { TicketStageRequestStatus, type TicketStageRequest, ApproverType } from '@xyne/shared';
 import type { Zero } from '@rocicorp/zero';
 import { generateKeyBetween } from 'fractional-indexing';
 import { mutators } from '../zero/mutators';
@@ -20,7 +20,7 @@ export interface StageTransitionInfo {
   toStageId: string;
   formId?: string | null;
   requiresApproval: boolean;
-  approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+  approvers?: Array<{ approverId: string; approverType: ApproverType }>;
 }
 
 interface UseDragAndDropProps {
@@ -219,7 +219,7 @@ export const useDragAndDrop = ({
                   if (matchingTransition.requiresApproval) {
                     const isApprover =
                       matchingTransition.approvers?.some(a => {
-                        if (a.approverType === 'ROLE') {
+                        if (a.approverType === ApproverType.ROLE) {
                           return currentUserRoleIds.includes(a.approverId);
                         }
                         return a.approverId === (currentUser?.id ?? '');

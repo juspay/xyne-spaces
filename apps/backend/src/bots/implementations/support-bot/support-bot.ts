@@ -6,8 +6,8 @@ import type {
   BotEvent,
 } from '@/bots/unified/types/index.js'
 import { logger } from '@/utils/logger'
-import { Channel, MessageType, User } from '@prisma/client'
-import axios from 'axios'
+import { Channel, User } from '@prisma/client';import axios from 'axios'
+import { MessageType } from '@xyne/shared';
 import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
 import { db } from '@/database/client'

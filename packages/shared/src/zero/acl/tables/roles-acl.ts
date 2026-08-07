@@ -8,8 +8,8 @@ export class RolesACL extends BaseQueryACL<'roles'> {
   }
 
   canSelect<TReturn>(query: Query<'roles', Schema, TReturn>): Query<'roles', Schema, TReturn> {
-    return query
-      .where('workspaceId', '=', this.ctx.workspaceId)
-      .where('isActive', '=', true);
+    // Scope to workspace only. Callers that want active-only roles filter that at the
+    // query layer.
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

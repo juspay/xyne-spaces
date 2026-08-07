@@ -85,7 +85,7 @@ export class OnCallSetNumbersBackfillController {
             });
           }
           summary.updated += 1;
-          
+
           logger.info(`[OnCallSetNumbersBackfill] Updated mapping ${mapping.id}: user=${mapping.userId}, group=${mapping.userGroupId}, old=${mapping.onCallSetNumber}, new=[${newSetNumbers.join(',')}]`);
         } catch (error) {
           summary.errors += 1;

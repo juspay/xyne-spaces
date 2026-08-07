@@ -4274,11 +4274,10 @@ const ChannelCommandMenu = ({
             ? new Date(result.metadata.timestamp).getTime()
             : null,
         }))}
-        onMerge={async parentTicketId => {
+        onMerge={async (parentTicketId, ticketIds) => {
           try {
-            const ticketsToMerge = Array.from(selectedMergeTickets.keys()).filter(
-              id => id !== parentTicketId,
-            );
+            // ticketIds comes pre-filtered from the dialog (archived tickets excluded).
+            const ticketsToMerge = ticketIds.filter(id => id !== parentTicketId);
             await Promise.all(
               ticketsToMerge.map(ticketId =>
                 apiInstance.post(`/tickets/${ticketId}/merge`, { targetTicketId: parentTicketId }),

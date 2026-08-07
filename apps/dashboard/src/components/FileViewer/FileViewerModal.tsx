@@ -21,7 +21,6 @@ import {
   attachmentViewerActor,
   AttachmentViewerState,
 } from '../../machines/attachmentViewerMachine';
-import { MessageType } from '@xyne/shared';
 import { ZoomState } from './utils';
 import { FileSearchControls, FileSearchProvider, useFileSearchContext } from './search';
 
@@ -1489,8 +1488,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
     // Convert parent message to the format expected by ChatBubble
     const message = {
       ...parentMessage,
-      // Cast msgType to MessageType enum
-      msgType: parentMessage.msgType as MessageType,
+      msgType: parentMessage.msgType,
       // Ensure required fields are present
       isSent: true,
       showInChannel: false,

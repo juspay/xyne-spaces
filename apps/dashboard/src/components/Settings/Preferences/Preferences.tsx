@@ -706,6 +706,20 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setAllowThreadBroadcastMentions}
       />
     </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Show thread tags</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Display what kind of thread each conversation is — issue, question, request — beside the
+          message
+        </p>
+      </div>
+      <Switch
+        id='show-thread-tags'
+        checked={state.showThreadTags}
+        onCheckedChange={state.setShowThreadTags}
+      />
+    </div>
     {linkOpenPrefIsRelevant() && (
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>

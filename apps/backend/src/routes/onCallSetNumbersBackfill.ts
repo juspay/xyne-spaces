@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { OnCallSetNumbersBackfillController } from '@/controllers/onCallSetNumbersBackfillController';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';

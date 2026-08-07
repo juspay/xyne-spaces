@@ -1,4 +1,5 @@
-import { PrismaClient, Collection, CollectionItem, MessageAttachment, IngestionStatus, CollectionRole, AttachmentEntityType } from '@prisma/client';
+import { PrismaClient, Collection, CollectionItem, MessageAttachment } from '@prisma/client';
+import { IngestionStatus, CollectionRole, AttachmentEntityType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -422,24 +423,24 @@ export class CollectionRepository {
     /**
      * Find all files recursively within a folder (including nested sub-folders)
      */
-    async findAllFilesInFolderRecursively(folderId: string): Promise<Array<{
+    async findAllFilesInFolderRecursively(folderId: string, workspaceId: string): Promise<Array<{
         id: string;
         name: string;
         storageKey: string;
         relativePath: string;
         mimeType: string | null;
     }>> {
-        // Find all folders in the subtree using a recursive CTE
+        // Raw query: the workspace predicates below are written explicitly.
         const allFolders = await this.db.$queryRaw<Array<{ id: string; name: string; parentId: string | null }>>`
             WITH RECURSIVE folder_tree AS (
                 SELECT id, name, "parentId"
                 FROM collections
-                WHERE id = ${folderId} AND "deletedAt" IS NULL
+                WHERE id = ${folderId} AND "workspaceId" = ${workspaceId} AND "deletedAt" IS NULL
                 UNION ALL
                 SELECT c.id, c.name, c."parentId"
                 FROM collections c
                 INNER JOIN folder_tree ft ON c."parentId" = ft.id
-                WHERE c."deletedAt" IS NULL
+                WHERE c."deletedAt" IS NULL AND c."workspaceId" = ${workspaceId}
             )
             SELECT id, name, "parentId" FROM folder_tree
         `;

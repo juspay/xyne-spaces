@@ -1,14 +1,22 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
 import { ArrowRight, Building2, Loader2, LogOut, Plus, Users, X } from 'lucide-react';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import type { Workspace } from '../../machines/authMachine';
+import { WorkspaceType } from '@xyne/shared';
 
 interface WorkspaceWithMeta extends Workspace {
   isApprovedRequest?: boolean;
+}
+
+interface WorkspaceSelectionState {
+  workspaces?: WorkspaceWithMeta[];
+  email?: string;
+  name?: string;
+  picture?: string;
 }
 
 const WORKSPACE_COLORS = [
@@ -40,7 +48,7 @@ const getInitials = (name: string): string => {
 
 export const WorkspaceSelectionScreen = (): ReactElement => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { user, logout } = useAuth();
 
   const [workspaces, setWorkspaces] = useState<WorkspaceWithMeta[]>([]);
@@ -53,22 +61,17 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [createError, setCreateError] = useState('');
 
-  const email = user?.email || searchParams.get('email') || '';
-  const name = user?.name || searchParams.get('name') || '';
-  const picture = user?.picture || searchParams.get('picture') || '';
+  const routeState = location.state as WorkspaceSelectionState | null;
 
-  const urlWorkspacesParam = searchParams.get('workspaces');
+  const email = user?.email || routeState?.email || '';
+  const name = user?.name || routeState?.name || '';
+  const picture = user?.picture || routeState?.picture || '';
 
   useEffect(() => {
-    if (urlWorkspacesParam) {
-      try {
-        const parsed = JSON.parse(urlWorkspacesParam) as WorkspaceWithMeta[];
-        setWorkspaces(parsed);
-        setIsLoading(false);
-        return;
-      } catch {
-        // Fall through to API fetch
-      }
+    if (routeState?.workspaces?.length) {
+      setWorkspaces(routeState.workspaces);
+      setIsLoading(false);
+      return;
     }
 
     const loadWorkspaces = async (): Promise<void> => {
@@ -89,7 +92,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     };
 
     void loadWorkspaces();
-  }, [navigate, urlWorkspacesParam]);
+  }, [navigate, routeState]);
 
   const sortedWorkspaces = useMemo(() => {
     return [...workspaces].sort((a, b) => {
@@ -106,7 +109,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
       const response = await apiInstance.post<{
         user?: { id: string; workspaceId?: string };
         selfDmChannelId?: string | null;
-      }>('/auth/switch-workspace', { workspaceId });
+      }>('/auth/login-workspace', { workspaceId });
 
       const targetWorkspaceId = response.data.user?.workspaceId || workspaceId;
       localStorage.setItem('user_id', response.data.user?.id ?? '');
@@ -130,8 +133,8 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     setCreateError('');
     try {
       const response = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
-        '/auth/create-workspace',
-        { workspaceName: newWorkspaceName.trim(), workspaceType: 'ENTERPRISE' },
+        '/auth/create-workspace-pending',
+        { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
       );
       const newWorkspaceId = response.data.user.workspaceId;
       localStorage.setItem('user_id', response.data.user.id);

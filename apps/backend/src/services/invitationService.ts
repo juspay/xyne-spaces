@@ -3,9 +3,16 @@
  * Handles invitation creation, sending emails, and acceptance
  */
 
-import { PrismaClient, WorkspaceRole, Invitation, AuthProvider, ChannelRole, CanvasRole, User, ChannelScopeType } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { PrismaClient, Invitation, User } from '@prisma/client';
+import {
+  GuestEntity,
+  WorkspaceRole,
+  AuthProvider,
+  ChannelRole,
+  CanvasRole,
+  ChannelScopeType, OrgRole, UserStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
 import { grantPermissionsForRole } from './permissionMatrix';
@@ -86,8 +93,14 @@ export class InvitationService {
 
       // Ensure the invitee exists in the org_members table (any org)
       if (role !== 'GUEST') {
-        const inviteeInOrg = await this.prisma.orgMember.findFirst({
-          where: { email, leftAt: null },
+        // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
+        // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
+        // outside would execute the query after withWorkspaceScope has exited — back in the
+        // request context where OrgMembersACL scopes it to the caller's own membership.
+        const inviteeInOrg = await withWorkspaceScope(async () => {
+          return await this.prisma.orgMember.findFirst({
+            where: { email, leftAt: null },
+          });
         });
 
         if (!inviteeInOrg) {
@@ -99,8 +112,10 @@ export class InvitationService {
     }
 
     if (role === 'GUEST') {
-      const inviteeOrgMember = await this.prisma.orgMember.findUnique({
-        where: { email },
+      const inviteeOrgMember = await withWorkspaceScope(async () => {
+        return await this.prisma.orgMember.findUnique({
+          where: { email },
+        });
       });
       if (inviteeOrgMember && inviteeOrgMember.leftAt) {
         throw new Error(
@@ -111,8 +126,8 @@ export class InvitationService {
 
     // Validate role — provision flow (explicit orgId) allows OWNER; normal flow allows ADMIN/MEMBER
     const validRoles: WorkspaceRole[] = explicitOrgId
-      ? ['OWNER', 'ADMIN', 'MEMBER']
-      : ['ADMIN', 'MEMBER', 'GUEST'];
+      ? [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]
+      : [WorkspaceRole.ADMIN, WorkspaceRole.MEMBER, WorkspaceRole.GUEST];
     const invitationRole = role && validRoles.includes(role) ? role : 'MEMBER';
 
     if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
@@ -178,7 +193,7 @@ export class InvitationService {
         workspaceId,
         ...(invitationRole === 'GUEST'
           ? {
-              role: 'GUEST',
+              role: WorkspaceRole.GUEST,
               entityId: params.entityId,
               entityType: params.entityType,
             }
@@ -281,24 +296,26 @@ export class InvitationService {
    * hash it, store it, and return the plaintext for the invitation email.
    */
   async generateOrgMemberPassword(email: string): Promise<string> {
-    const orgMember = await this.prisma.orgMember.findUnique({
-      where: { email: email.toLowerCase() },
-      select: { memberId: true, passwordHash: true },
+    return withWorkspaceScope(async () => {
+      const orgMember = await this.prisma.orgMember.findUnique({
+        where: { email: email.toLowerCase() },
+        select: { memberId: true, passwordHash: true },
+      });
+
+      if (!orgMember) {
+        throw new Error(`orgMember not found for ${email}`);
+      }
+
+      const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
+      const hashed = await hashPassword(tempPassword);
+
+      await this.prisma.orgMember.update({
+        where: { memberId: orgMember.memberId },
+        data: { passwordHash: hashed },
+      });
+
+      return tempPassword;
     });
-
-    if (!orgMember) {
-      throw new Error(`orgMember not found for ${email}`);
-    }
-
-    const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
-    const hashed = await hashPassword(tempPassword);
-
-    await this.prisma.orgMember.update({
-      where: { memberId: orgMember.memberId },
-      data: { passwordHash: hashed },
-    });
-
-    return tempPassword;
   }
 
   /**
@@ -332,7 +349,7 @@ export class InvitationService {
     return result;
   }
 
-  private async ensureChannelGuestState(channelId: string, userId: string, tx: TxClient): Promise<void> {
+  private async ensureChannelGuestState(channelId: string, userId: string, workspaceId: string, tx: TxClient): Promise<void> {
     await tx.channelParticipant.upsert({
       where: {
         channelId_userId: {
@@ -344,6 +361,7 @@ export class InvitationService {
       create: {
         channelId,
         userId,
+        workspaceId,
         role: ChannelRole.MEMBER,
       },
     });
@@ -533,7 +551,7 @@ export class InvitationService {
         throw new Error('Guest invitation target channel is archived');
       }
 
-      await this.ensureChannelGuestState(entityId, userId, tx);
+      await this.ensureChannelGuestState(entityId, userId, workspaceId, tx);
       return `/${workspaceId}/chat/dir/${entityId}`;
     }
 
@@ -550,6 +568,7 @@ export class InvitationService {
         create: {
           canvasId: entityId,
           userId,
+          workspaceId,
           role: CanvasRole.VIEWER,
         },
       });
@@ -584,7 +603,7 @@ export class InvitationService {
         throw new Error('Guest invitation target channel does not exist in this project');
       }
 
-      await this.ensureChannelGuestState(targetChannelId, userId, tx);
+      await this.ensureChannelGuestState(targetChannelId, userId, workspaceId, tx);
       return `/${workspaceId}/chat/dir/${targetChannelId}`;
     }
 
@@ -619,7 +638,7 @@ export class InvitationService {
         data: {
           orgId: invitation.orgId!,
           email: userData.email.toLowerCase(),
-          role: 'GUEST',
+          role: OrgRole.GUEST,
         },
       });
 
@@ -635,7 +654,7 @@ export class InvitationService {
           authProvider: userData.authProvider as AuthProvider,
           workspaceId: invitation.workspaceId!,
           role: invitation.role,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
           orgMemberId: activeOrgMember.memberId,
         },
       });
@@ -736,7 +755,7 @@ export class InvitationService {
             where: { id: existingWorkspaceUser.id },
             data: {
               leftAt: null,
-              status: 'ACTIVE',
+              status: UserStatus.ACTIVE,
             },
           });
           const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
@@ -752,7 +771,7 @@ export class InvitationService {
           data: {
             leftAt: null,
             role: invitation.role,
-            status: 'ACTIVE',
+            status: UserStatus.ACTIVE,
           },
         });
         logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
@@ -779,7 +798,7 @@ export class InvitationService {
           data: {
             orgId: resolvedOrgId,
             email: userData.email.toLowerCase(),
-            role: this.toEnterpriseOrgRole(invitation.role),
+            role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
           },
           select: { memberId: true },
         });
@@ -790,7 +809,7 @@ export class InvitationService {
           data: {
             leftAt: null,
             orgId: resolvedOrgId,
-            role: this.toEnterpriseOrgRole(invitation.role),
+            role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
           },
           select: { memberId: true },
         });
@@ -811,7 +830,7 @@ export class InvitationService {
           authProvider: userData.authProvider as AuthProvider,
           workspaceId: invitation.workspaceId!,
           role: invitation.role,
-          status: 'ACTIVE',
+          status: UserStatus.ACTIVE,
           orgMemberId: orgMember.memberId,
         },
       });
@@ -825,12 +844,12 @@ export class InvitationService {
         create: {
           orgId: resolvedOrgId,
           email: userData.email.toLowerCase(),
-          role: this.toEnterpriseOrgRole(invitation.role),
+          role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
         },
         update: {
           leftAt: null,
           orgId: resolvedOrgId,
-          role: this.toEnterpriseOrgRole(invitation.role),
+          role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
         }, // reactivate and update orgId/role if needed
       });
       logger.info(`[DEBUG] [acceptInvitation] OrgMember upserted for email=${userData.email} orgId=${resolvedOrgId}`);
@@ -850,12 +869,22 @@ export class InvitationService {
     await grantPermissionsForRole(
       newWorkspaceUser.id,
       newWorkspaceUser.email,
-      invitation.role,
+      invitation.role as WorkspaceRole,
       invitation.workspaceId ?? undefined,
     );
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
+
+    try {
+      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.id);
+    } catch (error) {
+      logger.error('[InvitationService] Failed to enqueue AI user provisioning', {
+        userId: newWorkspaceUser.id,
+        workspaceId: invitation.workspaceId,
+        error,
+      });
+    }
 
     return { user: newWorkspaceUser, redirectPath };
   }

@@ -20,6 +20,7 @@ import { useNavigate, useParams, Outlet } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { conversationService, ThreadListEntry } from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
+import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
 
 const PAGE_SIZE = 10;
 
@@ -64,6 +65,7 @@ const ThreadRow = memo(
             >
               {displayName}
             </button>
+            <TwinDraftIndicator conversationId={conversationId} />
           </div>
         </div>
         <div className='border border-border rounded-xl overflow-hidden bg-card shadow-sm'>

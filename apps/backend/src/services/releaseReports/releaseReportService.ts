@@ -1,9 +1,11 @@
-import { MessageType, UserType, type User } from '@prisma/client';
+import { type User } from '@prisma/client';
 import {
   type PublishReleaseReportResponse,
   type ReleaseReport,
   type ReleaseReportChange,
   type ReleaseReportDevTicket,
+  MessageType,
+  UserType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { config } from '@/config/env';

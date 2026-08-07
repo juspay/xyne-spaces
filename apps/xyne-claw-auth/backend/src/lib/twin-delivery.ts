@@ -65,7 +65,11 @@ export async function executeTwinApprovalDelivery(
 
   const messageContent = ctx.messageContent ?? "";
   const edited = opts.editedContent?.trim();
-  const finalContent = willReply ? (edited && edited.length > 0 ? edited : messageContent) : "";
+  const finalContent = willReply
+    ? edited && edited.length > 0
+      ? edited
+      : messageContent.trim()
+    : "";
   const wasEdited = willReply && !!edited && edited.length > 0 && edited !== messageContent.trim();
 
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";

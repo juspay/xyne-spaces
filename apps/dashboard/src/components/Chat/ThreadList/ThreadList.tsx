@@ -136,6 +136,10 @@ const ThreadList = ({
   const [isNearTop, setIsNearTop] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
+  const isNearBottomRef = useRef(isNearBottom);
+  useEffect(() => {
+    isNearBottomRef.current = isNearBottom;
+  }, [isNearBottom]);
 
   const threadTicketId = useMemo(() => {
     if (!isTicketThread || !conversation) return '';
@@ -338,7 +342,12 @@ const ThreadList = ({
     };
 
     const observer = new ResizeObserver(() => {
+      const wasNearBottom = isNearBottomRef.current;
       recomputeOverflow();
+      if (wasNearBottom) {
+        container.scrollTop = container.scrollHeight - container.clientHeight;
+        setIsNearBottom(true);
+      }
     });
 
     observer.observe(container);

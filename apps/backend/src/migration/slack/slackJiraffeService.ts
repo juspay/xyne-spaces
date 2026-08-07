@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { ExternalEntityType, MessageDirection, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
@@ -12,12 +13,6 @@ import { UserRepository } from '../../database/repositories/users';
 import { conversationService } from '../../services/conversationService';
 import { findOrCreateUser, ingestConversationSlack } from '../scripts/ingestConversationSlack';
 import { generateTitle } from '../../services/agents/title-generator';
-import {
-  type ExternalEntityType,
-  MessageDirection,
-  VespaInsertionStatus,
-  VespaOperationType,
-} from '@prisma/client';
 import {
   fetchThreadReplies,
   transformReply,
@@ -484,7 +479,7 @@ async function ingestTicket(
           messageId: '',
           entityId: newTicket.id,
           direction: MessageDirection.INCOMING,
-          entityType: 'TICKET' as ExternalEntityType,
+          entityType: ExternalEntityType.TICKET,
         },
         {
           externalSourceId: externalSource.id,
@@ -494,7 +489,7 @@ async function ingestTicket(
           messageId: '',
           entityId: conversation.message.messageId,
           direction: MessageDirection.INCOMING,
-          entityType: 'MESSAGE' as ExternalEntityType,
+          entityType: ExternalEntityType.MESSAGE,
         },
       ],
     });

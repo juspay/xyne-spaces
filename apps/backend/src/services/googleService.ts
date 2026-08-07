@@ -5,6 +5,7 @@
  */
 
 import { google, gmail_v1 } from 'googleapis';
+import { DeskType } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
 import { PubSub } from '@google-cloud/pubsub';
 import { decrypt, encrypt } from './encryptionService';
@@ -19,7 +20,6 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
-import { DeskType } from '@prisma/client';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -672,6 +672,73 @@ export class GoogleService {
       suffix = 'prod';
     }
     return `${SHARED_SUBSCRIPTION_BASE}-${suffix}-push`;
+  }
+
+  /**
+   * One-shot: plant a starting `lastSyncCursor` on every active Gmail source.
+   *
+   * Run before the cursor-resuming ingestion path ships. Without a cursor a source
+   * falls back to the push's own historyId, and `history.list` returns records *after*
+   * that — so the first push resolves to nothing and skips the mail that triggered it.
+   *
+   * `overwrite` is safe only while nothing reads the column; afterwards it would move a
+   * desk past un-ingested mail. Hence false by default.
+   */
+  static async seedSyncCursors(opts: { dryRun?: boolean; overwrite?: boolean } = {}): Promise<{
+    dryRun: boolean;
+    overwrite: boolean;
+    seeded: Array<{ name: string; from: string | null; to: string }>;
+    skipped: Array<{ name: string; reason: string }>;
+  }> {
+    const dryRun = !!opts.dryRun;
+    const overwrite = !!opts.overwrite;
+    const repo = new ExternalSourceRepository();
+
+    const sources = await repo.findAll({
+      sourceType: ExternalSourcePlatform.GOOGLE,
+      isActive: true,
+    });
+
+    const seeded: Array<{ name: string; from: string | null; to: string }> = [];
+    const skipped: Array<{ name: string; reason: string }> = [];
+
+    for (const source of sources) {
+      if (source.lastSyncCursor && !overwrite) {
+        skipped.push({ name: source.name, reason: 'already has a cursor' });
+        continue;
+      }
+      if (!source.credentials) {
+        skipped.push({ name: source.name, reason: 'no credentials' });
+        continue;
+      }
+
+      try {
+        const historyId = await GoogleService.fromEncryptedCredentials(
+          source.credentials,
+          source.id,
+        ).getCurrentHistoryId();
+
+        if (!historyId) {
+          skipped.push({ name: source.name, reason: 'Gmail returned no historyId' });
+          continue;
+        }
+
+        if (!dryRun) await repo.update(source.id, { lastSyncCursor: historyId });
+        seeded.push({ name: source.name, from: source.lastSyncCursor, to: historyId });
+      } catch (error) {
+        // Collected, not thrown — one dead mailbox shouldn't stop the rest.
+        skipped.push({ name: source.name, reason: getErrorMessage(error) });
+      }
+    }
+
+    logger.info(`${TAG} seedSyncCursors finished`, {
+      dryRun,
+      overwrite,
+      seededCount: seeded.length,
+      skippedCount: skipped.length,
+    });
+
+    return { dryRun, overwrite, seeded, skipped };
   }
 
   /**

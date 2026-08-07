@@ -20,10 +20,22 @@ import { UserRepository } from '@/database/repositories/users';
 import { BoardRepository } from '@/database/repositories/boardRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
+import { Prisma } from '@prisma/client';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { websocketService } from './websocketService';
+import { redisService } from './redisService';
+import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
+import { PrismaClient } from '@prisma/client';
+import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
+import { syncUserWorkload } from '@/utils/workloadUtils';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import {
+  BaseTicketType,
+  type BoardMetadata,
+  isDeskChannelType,
   EmailType,
   ChannelType,
-  Prisma,
   AttachmentEntityType,
   VespaOperationType,
   VespaInsertionStatus,
@@ -31,17 +43,8 @@ import {
   ExternalEntityType,
   TicketPriority,
   ActivityType,
-} from '@prisma/client';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { adapterRegistry } from '@/integrations/core/adapterRegistry';
-import { websocketService } from './websocketService';
-import { redisService } from './redisService';
-import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
-import { PrismaClient, EmailMergeMode } from '@prisma/client';
-import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
-import { syncUserWorkload } from '@/utils/workloadUtils';
-import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { BaseTicketType, type BoardMetadata, isDeskChannelType } from '@xyne/shared';
+  EmailMergeMode,
+  NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { superpositionClient } from './superpositionClient';
@@ -51,12 +54,11 @@ import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
-import { NotificationType } from '@prisma/client';
 import { TicketIdService } from './ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
@@ -76,6 +78,7 @@ import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 export function stripCitationBlock(text: string): string {
   if (!text) return text;
@@ -339,7 +342,7 @@ export class EmailService {
       try {
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
-          const ws = workspaceId ?? getContextOrNull()?.workspaceId;
+          const ws = workspaceId ?? currentWorkspaceId();
           if (!ws) throw new Error('workspaceId required: no tenant context');
           await vespaLogs.create({
             data: {
@@ -377,7 +380,7 @@ export class EmailService {
       try {
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
-          const ws = workspaceId ?? getContextOrNull()?.workspaceId;
+          const ws = workspaceId ?? currentWorkspaceId();
           if (!ws) throw new Error('workspaceId required: no tenant context');
           await vespaLogs.create({
             data: {
@@ -549,7 +552,7 @@ export class EmailService {
     });
 
     const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
-    if (preference?.autoDraftMode !== 'DRAFT') {
+    if (preference?.autoDraftMode !== AutoDraftMode.DRAFT) {
       logger.info('[AutoDraft] skip: auto-draft not enabled for channel', {
         mode: 'autodraft',
         ticketId,
@@ -694,28 +697,31 @@ export class EmailService {
 
   private async setAutoDraftGenerating(conversationId: string, channelId: string): Promise<void> {
     try {
-      const existingSeed = await this.prisma.emailDraft.findFirst({
-        where: { conversationId, userId: null },
-        select: { id: true },
+      // The seed row has no owner, so it runs above the caller's own scope.
+      await withWorkspaceScope(async () => {
+        const existingSeed = await this.prisma.emailDraft.findFirst({
+          where: { conversationId, userId: null },
+          select: { id: true },
+        });
+        if (existingSeed) {
+          await this.prisma.emailDraft.update({
+            where: { id: existingSeed.id },
+            data: { autoDraftStatus: AutoDraftStatus.GENERATING, updatedAt: new Date() },
+          });
+        } else {
+          const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
+          await this.prisma.emailDraft.create({
+            data: {
+              conversationId,
+              channelId,
+              workspaceId,
+              userId: null,
+              draftContent: '',
+              autoDraftStatus: AutoDraftStatus.GENERATING,
+            },
+          });
+        }
       });
-      if (existingSeed) {
-        await this.prisma.emailDraft.update({
-          where: { id: existingSeed.id },
-          data: { autoDraftStatus: 'GENERATING', updatedAt: new Date() },
-        });
-      } else {
-        const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
-        await this.prisma.emailDraft.create({
-          data: {
-            conversationId,
-            channelId,
-            workspaceId,
-            userId: null,
-            draftContent: '',
-            autoDraftStatus: 'GENERATING',
-          },
-        });
-      }
     } catch (error) {
       logger.warn('[AutoDraft] failed to mark GENERATING', {
         mode: 'autodraft',
@@ -727,19 +733,22 @@ export class EmailService {
 
   async clearAutoDraftGenerating(conversationId: string): Promise<void> {
     try {
-      const seed = await this.prisma.emailDraft.findFirst({
-        where: { conversationId, userId: null, autoDraftStatus: 'GENERATING' },
-        select: { id: true, draftContent: true },
-      });
-      if (!seed) return;
-      if (!seed.draftContent || !seed.draftContent.trim()) {
-        await this.prisma.emailDraft.delete({ where: { id: seed.id } });
-      } else {
-        await this.prisma.emailDraft.update({
-          where: { id: seed.id },
-          data: { autoDraftStatus: 'READY' },
+      // The seed row is ownerless, so it is resolved above the caller's own scope.
+      await withWorkspaceScope(async () => {
+        const seed = await this.prisma.emailDraft.findFirst({
+          where: { conversationId, userId: null, autoDraftStatus: AutoDraftStatus.GENERATING },
+          select: { id: true, draftContent: true },
         });
-      }
+        if (!seed) return;
+        if (!seed.draftContent || !seed.draftContent.trim()) {
+          await this.prisma.emailDraft.delete({ where: { id: seed.id } });
+        } else {
+          await this.prisma.emailDraft.update({
+            where: { id: seed.id },
+            data: { autoDraftStatus: AutoDraftStatus.READY },
+          });
+        }
+      });
     } catch (error) {
       logger.warn('[AutoDraft] failed to clear GENERATING', {
         mode: 'autodraft',
@@ -787,7 +796,7 @@ export class EmailService {
       if (existingSeed) {
         await this.prisma.emailDraft.update({
           where: { id: existingSeed.id },
-          data: { draftContent: html, channelId, autoDraftStatus: 'READY', updatedAt: now },
+          data: { draftContent: html, channelId, autoDraftStatus: AutoDraftStatus.READY, updatedAt: now },
         });
       } else {
         const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
@@ -798,7 +807,7 @@ export class EmailService {
             workspaceId,
             userId: null,
             draftContent: html,
-            autoDraftStatus: 'READY',
+            autoDraftStatus: AutoDraftStatus.READY,
           },
         });
       }
@@ -1376,14 +1385,14 @@ export class EmailService {
             select: { userId: true },
           });
           if (caughtUpUsers.length > 0) {
-            await this.prisma.channelUserStatus.updateMany({
+                  await withWorkspaceScope(() => this.prisma.channelUserStatus.updateMany({
               where: {
                 channelId: conversation.channelId,
                 userId: { in: caughtUpUsers.map(r => r.userId) },
                 isDeleted: false,
               },
               data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
-            });
+            }));
           }
 
           void this.notifyAssigneeOfReply({
@@ -1424,7 +1433,10 @@ export class EmailService {
       }
 
       // Create MessageAttachment entries for email attachments
-      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel not found for email ${email.id} attachments`);
+      }
+      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel.workspaceId, uploadedFiles);
 
       if (ticketRow) {
         void this.triggerAutoDraft({
@@ -1561,7 +1573,7 @@ export class EmailService {
 
     if (ticket.userGroupId) {
       void emitTicketUpdated({
-        ticket,
+        ticket: ticket as TicketLike,
         changes: { userGroupId: { previousValue: null, newValue: ticket.userGroupId } },
         performedById: userId,
       });

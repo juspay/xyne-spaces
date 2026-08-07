@@ -1,3 +1,4 @@
+import { CallType } from '@xyne/shared';
 const BRIDGE_VERSION = 1 as const;
 const BRIDGE_CHANNEL = 'xyne-spaces-bridge';
 const WEB_SOURCE = 'xyne-dashboard';
@@ -220,7 +221,7 @@ export interface SaveFilePayload {
 export interface LiveKitConnectPayload {
   token: string;
   serverUrl: string;
-  callType: 'AUDIO' | 'VIDEO';
+  callType: CallType;
   externalId: string;
   roomLink?: string;
   callerName?: string;
@@ -264,7 +265,7 @@ export interface LiveKitTrackEventPayload {
 // Payload for native-initiated call end events (allows web to perform cleanup)
 export interface LiveKitCallEndedPayload {
   callId: string;
-  callType: 'AUDIO' | 'VIDEO';
+  callType: CallType;
   durationMs: number;
   initiatedBy: 'user' | 'callkit' | 'error';
 }
@@ -273,7 +274,7 @@ export interface LiveKitCallEndedPayload {
 export interface NativeCallJoinedPayload {
   callId: string;
   channelId: string;
-  callType: 'AUDIO' | 'VIDEO';
+  callType: CallType;
 }
 
 // Payload for pending call state (cold start sync)
@@ -286,7 +287,7 @@ export interface NativeRequestCallbackPayload {
   channelId?: string;
   userId?: string;
   roomName?: string;
-  callType?: 'AUDIO' | 'VIDEO';
+  callType?: CallType;
 }
 
 export interface GetClientSessionIdPayload {
@@ -324,7 +325,7 @@ type ReactNativeInboundPayloadMap = {
   // Call from Phone app Recents
   START_CALL_FROM_RECENTS: {
     channelId: string;
-    callType?: 'AUDIO' | 'VIDEO';
+    callType?: CallType;
     source?: string;
   };
   // App lifecycle events
@@ -367,7 +368,7 @@ type ReactNativeOutboundPayloadMap = {
   CALL_INITIATING: {
     channelId?: string;
     scopeType?: string | null; // Channel scope type for CallKit filtering (DM, GROUP_DM, DEFAULT, etc.)
-    callType?: 'AUDIO' | 'VIDEO';
+    callType?: CallType;
   };
   CALL_FAILED: {
     error?: string;
@@ -434,13 +435,9 @@ class ReactNativeBridge {
       'NATIVE_REQUEST_CALLBACK',
       'START_CALL_FROM_RECENTS', // Queued for cold start safety (Recents tap before NotificationHandler ready)
     ]);
-  // ACCEPTED RISK (secops #358, MED): this handler intentionally does not check event.origin.
-  // Inbound messages arrive from the React Native host via WebView injectedJavaScript /
-  // window.postMessage, which carry no meaningful web origin (the source is the native shell, not
-  // a web frame), so an origin allowlist is not enforceable here. The trust boundary is the native
-  // host — a compromised RN app already fully controls this WebView. parseInboundMessage validates
-  // the message shape/type before dispatch. Revisit if this bridge is ever reachable from arbitrary
-  // web frames (e.g. remote iframes).
+  // Messages arrive from the React Native host via WebView injection, which carries no web
+  // origin, so same-origin is the strongest check available here. parseInboundMessage validates
+  // the shape and type of every message before it is dispatched.
   private readonly messageHandler = (event: MessageEvent): void => {
     // React-Native-injected messages arrive with an empty origin or the app's own origin;
     // reject cross-origin postMessages.
