@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   chatAttachmentDownloadUrl,
   pollChatMessages,
@@ -91,10 +91,27 @@ function relativeTime(iso: string): string {
   return formatter.format(Math.round(months / 12), "year");
 }
 
+function staticThumbnailDocument(html: string): string {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  document
+    .querySelectorAll("script, iframe, frame, object, embed, base, meta[http-equiv='refresh']")
+    .forEach((node) => node.remove());
+
+  const policy = document.createElement("meta");
+  policy.httpEquiv = "Content-Security-Policy";
+  policy.content = "default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; img-src data: blob:; font-src data:; style-src 'unsafe-inline'";
+  document.head.prepend(policy);
+  return `<!doctype html>${document.documentElement.outerHTML}`;
+}
+
 function Thumbnail({ conversation, userId }: { conversation: DesignGalleryConversation; userId: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [result, setResult] = useState<ThumbnailResult | null>(null);
+  const thumbnailHtml = useMemo(
+    () => result?.html ? staticThumbnailDocument(result.html) : null,
+    [result?.html],
+  );
 
   useEffect(() => {
     const node = rootRef.current;
@@ -127,11 +144,11 @@ function Thumbnail({ conversation, userId }: { conversation: DesignGalleryConver
 
   return (
     <div ref={rootRef} className="relative aspect-[16/10] overflow-hidden bg-xyne-surface-subtle">
-      {result?.html ? (
+      {thumbnailHtml ? (
         <iframe
           title={`Preview of ${conversation.title || "Untitled design"}`}
-          srcDoc={result.html}
-          sandbox="allow-scripts"
+          srcDoc={thumbnailHtml}
+          sandbox=""
           tabIndex={-1}
           aria-hidden="true"
           className="pointer-events-none absolute left-0 top-0 h-[400%] w-[400%] origin-top-left scale-25 border-0 bg-white"

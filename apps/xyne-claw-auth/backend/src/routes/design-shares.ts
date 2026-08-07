@@ -77,6 +77,89 @@ function parseExpiry(input: unknown): Date | null | "invalid" {
   return new Date(Date.now() + input * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Service-level share upsert — used by the owner POST route below AND by the
+ * webhook result path (auto-publish for /design runs delivered into Spaces
+ * threads). Caller is responsible for having verified attachment ownership;
+ * this function only manages the share row + token lifecycle.
+ */
+export async function upsertDesignShare(params: {
+  ownerUserId: string;
+  orgId: string;
+  conversationId: string;
+  attachmentId: string;
+  title: string;
+  expiresAt: Date | null;
+}): Promise<{ id: string; sharePath: string }> {
+  const { ownerUserId, orgId, conversationId, attachmentId, expiresAt } = params;
+  const title = params.title.slice(0, 160) || "Untitled design";
+  const existing = await prisma.designArtifactShare.findUnique({
+    where: { ownerUserId_conversationId: { ownerUserId, conversationId } },
+  });
+  const expired = !!existing?.expiresAt && existing.expiresAt.getTime() <= Date.now();
+
+  if (existing && !existing.revokedAt && !expired) {
+    let rawToken: string;
+    try {
+      rawToken = decryptToken(existing);
+      const share = await prisma.designArtifactShare.update({
+        where: { id: existing.id },
+        data: { attachmentId, title, expiresAt },
+      });
+      return { id: share.id, sharePath: sharePath(rawToken) };
+    } catch {
+      const token = makeToken();
+      const share = await prisma.designArtifactShare.update({
+        where: { id: existing.id },
+        data: {
+          tokenHash: token.hash,
+          tokenCiphertext: token.ciphertext,
+          tokenIv: token.iv,
+          tokenAuthTag: token.authTag,
+          attachmentId,
+          title,
+          expiresAt,
+          revokedAt: null,
+        },
+      });
+      return { id: share.id, sharePath: sharePath(token.raw) };
+    }
+  }
+
+  const token = makeToken();
+  const share = existing
+    ? await prisma.designArtifactShare.update({
+        where: { id: existing.id },
+        data: {
+          tokenHash: token.hash,
+          tokenCiphertext: token.ciphertext,
+          tokenIv: token.iv,
+          tokenAuthTag: token.authTag,
+          attachmentId,
+          title,
+          expiresAt,
+          revokedAt: null,
+          viewCount: 0,
+          lastViewedAt: null,
+        },
+      })
+    : await prisma.designArtifactShare.create({
+        data: {
+          tokenHash: token.hash,
+          tokenCiphertext: token.ciphertext,
+          tokenIv: token.iv,
+          tokenAuthTag: token.authTag,
+          ownerUserId,
+          orgId,
+          conversationId,
+          attachmentId,
+          title,
+          expiresAt,
+        },
+      });
+  return { id: share.id, sharePath: sharePath(token.raw) };
+}
+
 /** Publish or update the stable share link for one Design Studio conversation. */
 designSharesRouter.post("/", async (req: Request, res: Response): Promise<void> => {
   try {

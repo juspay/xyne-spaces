@@ -4078,9 +4078,26 @@ function DesignPreviewPanel({
 
   const openInNewTab = () => {
     if (!editedHtml) return;
-    const tabUrl = URL.createObjectURL(new Blob([editedHtml], { type: "text/html" }));
-    window.open(tabUrl, "_blank", "noopener,noreferrer");
-    window.setTimeout(() => URL.revokeObjectURL(tabUrl), 60_000);
+    // The generated artifact must never be the top-level blob document: blob
+    // documents inherit this app's origin. Keep the trusted top-level wrapper
+    // code-only and run the artifact in an opaque-origin sandbox instead.
+    const artifactUrl = URL.createObjectURL(new Blob([editedHtml], { type: "text/html" }));
+    const escapedArtifactUrl = artifactUrl
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+    const wrapperHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src blob:; style-src 'unsafe-inline'">
+<style>html,body,iframe{width:100%;height:100%;margin:0;border:0}body{overflow:hidden;background:#fff}</style></head>
+<body><iframe title="Design preview" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" src="${escapedArtifactUrl}"></iframe></body></html>`;
+    const wrapperUrl = URL.createObjectURL(new Blob([wrapperHtml], { type: "text/html" }));
+    window.open(wrapperUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => {
+      URL.revokeObjectURL(wrapperUrl);
+      URL.revokeObjectURL(artifactUrl);
+    }, 60_000);
   };
 
   const copySource = async () => {

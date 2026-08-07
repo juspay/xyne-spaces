@@ -2940,10 +2940,21 @@ async function processTask(
     const taskCommandToolAvailable =
       taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
     if (taskCommand) {
+      // The fenced-```html contract exists for Design Studio's live preview,
+      // where the chat UI hides the block. Webhook-originated runs (Spaces
+      // threads) have no such surface — a 30k-token source dump would land
+      // verbatim in the thread above the delivered file. Same command, per-
+      // surface artifact contract.
+      // Studio dispatches (agent-chat) send NO eventType; every webhook/
+      // automation surface sends one and posts results into a thread.
+      const isStudioSurface = !eventType;
+      const surfaceSuffix = taskCommand.command === "/design" && !isStudioSurface
+        ? "\n\nSURFACE OVERRIDE: this run was invoked from a Spaces thread, not Design Studio. Do NOT include the fenced ```html block in your response — the delivered .html file attachment is the artifact. Keep the final message to a 1-2 sentence summary of the design."
+        : "";
       activeInjections.push({
         id: `__task-command-${taskCommand.command.slice(1)}`,
         label: `Command: ${taskCommand.command}`,
-        content: taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction,
+        content: (taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction) + surfaceSuffix,
       });
       log(
         `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,

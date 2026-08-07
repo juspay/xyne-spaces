@@ -81,6 +81,7 @@ import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import { upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
   setActivePlanCard,
@@ -3914,8 +3915,9 @@ async function persistCallbackAttachments(
   chatMessageId: string,
   uploaderUserId: string,
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
-): Promise<void> {
-  if (!attachments?.length) return;
+): Promise<Array<{ id: string; originalFilename: string; mimeType: string }>> {
+  const created: Array<{ id: string; originalFilename: string; mimeType: string }> = [];
+  if (!attachments?.length) return created;
   const now = new Date();
   const year = String(now.getUTCFullYear());
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -3925,7 +3927,7 @@ async function persistCallbackAttachments(
       const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
       const destPath = `chat-attachments/${uploaderUserId}/${year}/${month}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
       await gcsService.uploadFile(buffer, destPath, att.mimeType);
-      await prisma.chatAttachment.create({
+      const row = await prisma.chatAttachment.create({
         data: {
           chatMessageId,
           uploaderUserId,
@@ -3936,9 +3938,53 @@ async function persistCallbackAttachments(
           size: buffer.length,
         },
       });
+      created.push({ id: row.id, originalFilename: row.originalFilename, mimeType: row.mimeType });
     } catch (err) {
       clog.warn(`[webhook/result] failed to persist attachment ${att.fileName}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+  return created;
+}
+
+/**
+ * Auto-publish for /design runs delivered into Spaces threads: the thread
+ * already holds the artifact file, so mint (or refresh) the conversation's
+ * stable share link and post it — one click to the rendered design instead of
+ * a download. Reuses the Studio share model: per (owner, conversation) row,
+ * revocable from Studio, opaque-origin serving. Best-effort — a share failure
+ * must never disturb the delivered result.
+ */
+async function publishThreadDesignShare(
+  ctx: SessionContext,
+  runOwnerId: string,
+  created: Array<{ id: string; originalFilename: string; mimeType: string }>,
+): Promise<void> {
+  try {
+    if (!ctx.task?.trimStart().toLowerCase().startsWith("/design")) return;
+    if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
+    const html = [...created].reverse().find((a) =>
+      a.mimeType.toLowerCase().includes("html") || a.originalFilename.toLowerCase().endsWith(".html"),
+    );
+    if (!html) return;
+    const share = await upsertDesignShare({
+      ownerUserId: runOwnerId,
+      orgId: ctx.agentOrgId,
+      conversationId: ctx.conversationId,
+      attachmentId: html.id,
+      title: html.originalFilename.replace(/\.html?$/i, ""),
+      expiresAt: null,
+    });
+    const link = `${CONFIG.frontendUrl.replace(/\/+$/, "")}${share.sharePath}`;
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      markdownText: `🔗 **Live design:** ${link}\nOpens the rendered design in the browser — same link updates with future revisions in this thread.`,
+      userId: ctx.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, ctx.appToken);
+    clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
+  } catch (err) {
+    clog.warn(`[webhook/result] design share publish failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -4735,6 +4781,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // silently dropped them, so pipeline/automation runs never showed
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
         .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
+        .then((created) => publishThreadDesignShare(ctx, runOwnerId, created))
         .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
@@ -4823,6 +4870,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // transcript row (Spaces gets them as posted files, but the claw chat
       // UI reads chat_attachments).
       .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
+        .then((created) => publishThreadDesignShare(ctx, runOwnerId, created))
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
   }
 

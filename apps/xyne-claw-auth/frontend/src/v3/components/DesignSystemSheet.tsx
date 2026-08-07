@@ -7,7 +7,7 @@ import {
 import {
   ApiError,
   getAgentDetail,
-  updateAgent,
+  updateAgentDesignSystem,
 } from "../../lib/api";
 import type { Agent } from "../../lib/types";
 
@@ -127,11 +127,8 @@ export function DesignSystemSheet({
     setError(null);
     setSaved(false);
     try {
-      const nextConfig = { ...(agent.config ?? {}) };
       const trimmed = value.trim();
-      if (trimmed) nextConfig["designSystem"] = trimmed;
-      else delete nextConfig["designSystem"];
-      const updated = await updateAgent(agent.slug, { config: nextConfig });
+      const updated = await updateAgentDesignSystem(agent.slug, trimmed || null);
       setAgent(updated);
       setValue(designSystemFromAgent(updated));
       setSaved(true);

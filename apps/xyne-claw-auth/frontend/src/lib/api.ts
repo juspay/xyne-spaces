@@ -694,6 +694,17 @@ export async function updateAgent(
   return data.data;
 }
 
+export async function updateAgentDesignSystem(
+  slug: string,
+  designSystem: string | null,
+): Promise<Agent> {
+  const data = await request<{ success: boolean; data: Agent }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/design-system`,
+    { method: "PATCH", body: JSON.stringify({ designSystem }) },
+  );
+  return data.data;
+}
+
 // ── Prompt versioning ────────────────────────────────────────────────
 // Every system-prompt edit creates an immutable version; the agent's
 // `systemPrompt` is the denormalized active copy. These power the history /
