@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "SdkIdempotencyKey", "SdkRefreshToken", "SdkAuthorizationCode", "ExternalSource"]
 }
 
 datasource db {
@@ -1030,17 +1030,19 @@ model SdkRefreshToken {
 //
 // Codes are single-use and expire within 10 minutes.
 model SdkAuthorizationCode {
-  id          String   @id @default(cuid())
-  codeHash    String   @unique @map("code_hash")
-  userId      String
-  workspaceId String
-  memberId    String
-  clientId    String
-  scopes      String[] @default([])
-  redirectUri String?  @map("redirect_uri")
-  usedAt      DateTime? @map("used_at")
-  expiresAt   DateTime @map("expires_at")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id                  String    @id @default(cuid())
+  codeHash            String    @unique @map("code_hash")
+  userId              String
+  workspaceId         String
+  memberId            String
+  clientId            String
+  scopes              String[]  @default([])
+  redirectUri         String?   @map("redirect_uri")
+  codeChallenge       String    @map("code_challenge")
+  codeChallengeMethod String    @default("S256") @map("code_challenge_method")
+  usedAt              DateTime? @map("used_at")
+  expiresAt           DateTime  @map("expires_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
   @@index([expiresAt])
   @@map("sdk_authorization_codes")

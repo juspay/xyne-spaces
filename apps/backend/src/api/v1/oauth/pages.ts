@@ -197,6 +197,7 @@ interface AuthorizePageParams {
   clientId: string;
   redirectUri: string;
   state?: string;
+  codeChallenge: string;
   scopes: Scope[];
   scopeDescriptions: readonly ScopeDefinition[];
   user: {
@@ -206,7 +207,7 @@ interface AuthorizePageParams {
 }
 
 export function renderAuthorizePage(params: AuthorizePageParams): string {
-  const { clientId, redirectUri, state, scopes, scopeDescriptions, user } = params;
+  const { clientId, redirectUri, state, codeChallenge, scopes, scopeDescriptions, user } = params;
 
   const initials = user.name
     .split(' ')
@@ -259,6 +260,8 @@ export function renderAuthorizePage(params: AuthorizePageParams): string {
       <input type="hidden" name="client_id" value="${escapeHtml(clientId)}">
       <input type="hidden" name="redirect_uri" value="${escapeHtml(redirectUri)}">
       <input type="hidden" name="scope" value="${escapeHtml(scopes.join(' '))}">
+      <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">
+      <input type="hidden" name="code_challenge_method" value="S256">
       ${state ? `<input type="hidden" name="state" value="${escapeHtml(state)}">` : ''}
 
       <div class="buttons">

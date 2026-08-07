@@ -21,6 +21,7 @@ import { catalogGapRoutes } from './domains/catalog-gaps';
 import type { RouteDefinition } from './manifest/types';
 import { oauthRouter } from './oauth';
 import { oauthConfig } from './oauth/config';
+import { catalogRouter } from './domains/catalog';
 
 /**
  * Routes that require custom API handlers (not available via Zero fallback).
@@ -71,6 +72,7 @@ export function createV1Router(): Router {
   }
 
   router.use(authn);
+  router.use('/catalog', catalogRouter);
   router.use(registerRoutes(allRoutes));
 
   router.use(v1NotFound);

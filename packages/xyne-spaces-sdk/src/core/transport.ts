@@ -2,21 +2,16 @@
  * Transport Layer
  *
  * Routes SDK operations to the appropriate backend:
- * - Zero queries via /zero/query-fallback
- * - Zero mutators via /zero/push-fallback
+ * - Zero queries via the OAuth-protected /api/v1/catalog/query adapter
+ * - Zero mutators via the OAuth-protected /api/v1/catalog/mutate adapter
  * - Direct API calls via /api/v1/*
  */
 
 import type { Operation } from '../registry/types.js';
 import type { HttpClient } from './http.js';
-import { ZeroOperationError } from './errors.js';
 
-interface QueryFallbackResponse {
-  results: Array<{
-    name: string;
-    data: unknown;
-    error?: string;
-  }>;
+interface CatalogQueryResponse {
+  data: unknown;
 }
 
 export class Transport {
@@ -67,29 +62,21 @@ export class Transport {
   }
 
   /**
-   * Execute a Zero query via /zero/query-fallback
+   * Execute a catalog query through the public OAuth API.
    */
   private async executeQuery(name: string, args: unknown): Promise<unknown> {
-    const response = await this.http.post<QueryFallbackResponse>(
-      '/zero/query-fallback',
-      {
-        queries: [{ name, args }],
-      }
-    );
-
-    const result = response.results?.[0];
-    if (result?.error) {
-      throw new ZeroOperationError(name, result.error);
-    }
-
-    return result?.data;
+    const response = await this.http.post<CatalogQueryResponse>('/api/v1/catalog/query', {
+      name,
+      args,
+    });
+    return response.data;
   }
 
   /**
-   * Execute a Zero mutator via /zero/push-fallback
+   * Execute a catalog mutator through the public OAuth API.
    */
   private async executeMutator(name: string, args: unknown): Promise<unknown> {
-    return this.http.post('/zero/push-fallback', {
+    return this.http.post('/api/v1/catalog/mutate', {
       name,
       args,
     });

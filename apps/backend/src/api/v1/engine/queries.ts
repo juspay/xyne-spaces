@@ -54,7 +54,7 @@ function readProvider(usePrimary: boolean): typeof dbProvider {
 
 export async function callQuery<T = unknown>(
   name: string,
-  args: Record<string, unknown>,
+  args: unknown,
   ctx: Context,
   options: CallQueryOptions = {},
 ): Promise<T> {
@@ -105,7 +105,7 @@ export async function callQuery<T = unknown>(
  */
 export async function callQueryOne<T = unknown>(
   name: string,
-  args: Record<string, unknown>,
+  args: unknown,
   ctx: Context,
   resourceLabel: string,
   options: CallQueryOptions = {},

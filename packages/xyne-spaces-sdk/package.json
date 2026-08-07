@@ -25,7 +25,8 @@
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "node scripts/coverage.mjs",
+    "generate:catalog-scopes": "node scripts/generate-catalog-scopes.mjs",
+    "coverage": "node scripts/generate-catalog-scopes.mjs --check && node scripts/coverage.mjs",
     "verify": "npm run typecheck && npm run coverage"
   },
   "dependencies": {},

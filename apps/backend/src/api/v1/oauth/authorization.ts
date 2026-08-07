@@ -30,6 +30,7 @@ export async function issueAuthorizationCode(input: {
   clientId: string;
   scopes: readonly string[];
   redirectUri?: string;
+  codeChallenge: string;
 }): Promise<IssuedAuthorizationCode> {
   const raw = `${AUTH_CODE_PREFIX}${randomBytes(32).toString('base64url')}`;
   const expiresAt = new Date(Date.now() + oauthConfig.authCodeTtlSeconds * 1000);
@@ -43,6 +44,8 @@ export async function issueAuthorizationCode(input: {
       clientId: input.clientId,
       scopes: [...input.scopes],
       redirectUri: input.redirectUri,
+      codeChallenge: input.codeChallenge,
+      codeChallengeMethod: 'S256',
       expiresAt,
     },
   });
@@ -67,7 +70,16 @@ export type ConsumeCodeResult =
       scopes: string[];
       redirectUri: string | null;
     }
-  | { ok: false; reason: 'invalid' | 'expired' | 'already_used' | 'client_mismatch' | 'redirect_mismatch' };
+  | {
+      ok: false;
+      reason:
+        | 'invalid'
+        | 'expired'
+        | 'already_used'
+        | 'client_mismatch'
+        | 'redirect_mismatch'
+        | 'pkce_mismatch';
+    };
 
 /**
  * Consume an authorization code (single-use).
@@ -79,6 +91,7 @@ export async function consumeAuthorizationCode(
   code: string,
   clientId: string,
   redirectUri?: string,
+  codeVerifier?: string,
 ): Promise<ConsumeCodeResult> {
   const codeHash = hashCode(code);
   const row = await db.sdkAuthorizationCode.findUnique({ where: { codeHash } });
@@ -109,11 +122,21 @@ export async function consumeAuthorizationCode(
     return { ok: false, reason: 'redirect_mismatch' };
   }
 
-  // Mark as used
-  await db.sdkAuthorizationCode.update({
-    where: { id: row.id },
+  if (
+    row.codeChallengeMethod !== 'S256' ||
+    !codeVerifier ||
+    !isValidCodeVerifier(codeVerifier) ||
+    challengeFor(codeVerifier) !== row.codeChallenge
+  ) {
+    return { ok: false, reason: 'pkce_mismatch' };
+  }
+
+  // Claim the code atomically so concurrent exchanges cannot both succeed.
+  const claimed = await db.sdkAuthorizationCode.updateMany({
+    where: { id: row.id, usedAt: null },
     data: { usedAt: new Date() },
   });
+  if (claimed.count !== 1) return { ok: false, reason: 'already_used' };
 
   return {
     ok: true,
@@ -124,6 +147,14 @@ export async function consumeAuthorizationCode(
     scopes: row.scopes,
     redirectUri: row.redirectUri,
   };
+}
+
+function challengeFor(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url');
+}
+
+function isValidCodeVerifier(verifier: string): boolean {
+  return /^[A-Za-z0-9._~-]{43,128}$/.test(verifier);
 }
 
 /** Clean up expired authorization codes. Call periodically via cron. */

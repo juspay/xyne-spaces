@@ -354,6 +354,20 @@ export class App {
     this.app.use(decryptRequestBodyMiddleware);
     this.app.use(encryptResponseBodyMiddleware);
 
+    // Public SDK API. It owns OAuth and bearer-token authentication, so it
+    // must be mounted before the legacy catch-all `/api` session middleware.
+    if (v1Config.enabled) {
+      this.app.use('/api/v1', createV1Router());
+      logger.info('Public SDK API mounted at /api/v1');
+    } else {
+      this.app.use('/api/v1', (_req, res) => {
+        res.status(404).json({
+          success: false,
+          error: 'The public SDK API is not enabled on this deployment.',
+        });
+      });
+    }
+
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
     // Claw MCP route (user + app auth) — must be before /api/query
@@ -755,20 +769,6 @@ export class App {
 
     this.app.use('/internal', internalRoutes);
 
-    // Public SDK API. Owns its own auth (RS256 tokens from xyne-claw-auth),
-    // rate limiting, and error envelope, so it is mounted without the session
-    // middleware the internal routes above use. Off unless SDK_API_ENABLED=true.
-    if (v1Config.enabled) {
-      this.app.use('/api/v1', createV1Router());
-      logger.info('Public SDK API mounted at /api/v1');
-    } else {
-      this.app.use('/api/v1', (_req, res) => {
-        res.status(404).json({
-          success: false,
-          error: 'The public SDK API is not enabled on this deployment.',
-        });
-      });
-    }
   }
 
   private initializeErrorHandling(): void {

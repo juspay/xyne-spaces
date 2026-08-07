@@ -209,10 +209,11 @@ join(channelId: string): Promise<void> {
 ```
 
 Operations route to one of three backends, chosen per operation and invisible to
-callers: Zero queries for reads, Zero mutators for writes, and direct API calls
-for anything outside the catalog. Search established the direct API pattern;
-server-side channel/ticket creation and multipart uploads now use it too. Moving
-an operation between transports does not change the resource method callers use.
+callers: OAuth-protected catalog queries for reads, OAuth-protected catalog
+mutators for writes, and direct API calls for anything outside the catalog.
+Search established the direct API pattern; server-side channel/ticket creation
+and multipart uploads now use it too. Moving an operation between transports
+does not change the resource method callers use.
 
 ## Development
 

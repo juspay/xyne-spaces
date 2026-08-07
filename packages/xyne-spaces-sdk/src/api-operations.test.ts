@@ -118,6 +118,34 @@ describe('direct API operations', () => {
   });
 });
 
+describe('OAuth catalog operations', () => {
+  it('routes reads through the v1 catalog with the bearer token', async () => {
+    stubFetch({ data: [{ id: 'status-1', channel: { id: 'channel-1', name: 'general' } }] });
+    const sdk = createClient({ baseUrl: 'http://localhost:3001', token: 'sdk-access-token' });
+
+    await expect(sdk.channels.list()).resolves.toHaveLength(1);
+
+    const request = requests[0];
+    expect(request?.url).toBe('http://localhost:3001/api/v1/catalog/query');
+    expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer sdk-access-token' });
+    expect(JSON.parse(String(request?.init.body))).toEqual({ name: 'userVisibleChannelsV3' });
+  });
+
+  it('routes writes through the v1 catalog', async () => {
+    stubFetch({ success: true });
+    const sdk = createClient({ baseUrl: 'http://localhost:3001', token: 'sdk-access-token' });
+
+    await sdk.channels.rename('channel-1', 'General');
+
+    const request = requests[0];
+    expect(request?.url).toBe('http://localhost:3001/api/v1/catalog/mutate');
+    expect(JSON.parse(String(request?.init.body))).toMatchObject({
+      name: 'channel.renameChannel',
+      args: { channelId: 'channel-1', name: 'General' },
+    });
+  });
+});
+
 function stubFetch(body: unknown): void {
   vi.stubGlobal(
     'fetch',
