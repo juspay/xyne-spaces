@@ -58,6 +58,7 @@ import {
   OrgMembersACL,
   ProactiveNudgesACL,
   ProjectsACL,
+  QuestionnaireResponsesACL,
   PullRequestsACL,
   QueriesACL,
   RcasACL,
@@ -248,7 +249,7 @@ export class ACLFactory {
     case 'query':
       return new QueriesACL(ctx, prisma)
     case 'questionnaireResponse':
-      return new BaseQueryACL(ctx, prisma)
+      return new QuestionnaireResponsesACL(ctx, prisma)
     case 'rCA':
       return new RcasACL(ctx, prisma)
     case 'reaction':

@@ -897,13 +897,11 @@ model QuestionnaireResponse {
   id                String   @id @default(cuid())
   userId            String
   questionnaireType String
-  response          Json
+  payload           Json
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  @@unique([workspaceId, userId, questionnaireType])
-  @@index([workspaceId, questionnaireType])
-  @@index([userId])
+  @@unique([workspaceId, questionnaireType, userId])
   @@map("questionnaire_responses")
   @@schema("non_zero")
 }

@@ -43,16 +43,16 @@ export const uploadProfilePicture = async (file: File): Promise<string> => {
 
 export interface SaveQuestionnaireResponseInput {
   questionnaireType: string;
-  response: Record<string, unknown>;
+  payload: Record<string, unknown>;
 }
 
 export const saveQuestionnaireResponse = async ({
   questionnaireType,
-  response,
+  payload,
 }: SaveQuestionnaireResponseInput): Promise<void> => {
   await apiInstance.post('/users/me/questionnaire', {
     questionnaireType,
-    response,
+    payload,
   });
 };
 
