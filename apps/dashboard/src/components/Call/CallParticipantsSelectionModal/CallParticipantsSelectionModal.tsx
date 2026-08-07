@@ -13,7 +13,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
-import { searchUsers } from '@xyne/shared/utils';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -75,20 +75,23 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     );
   }, [allUsers, channelParticipantUserIds, currentUser?.id]);
 
-  // Filter channel users by search query using the SAME matcher that powers
-  // @-mention search (prefix / word-boundary boost, displayName + old-name +
-  // email matching, deactivated demotion). `channelUsers` is already restricted
-  // to channel members, so non-members stay hidden from this thread modal.
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery.trim()) return channelUsers;
-    return searchUsers(channelUsers, searchQuery, channelUsers.length);
+  // Normalize the channel-member payload before passing it to the shared
+  // participant matcher. Some channel members have no email, which the raw
+  // `searchUsers` matcher assumes is always present.
+  const rankedChannelUsers = useMemo(() => {
+    const options = channelUsers.map(user => ({
+      ...user,
+      label: getUserDisplayName(user),
+      value: `user:${user.id}`,
+    }));
+    return rankParticipantOptions(options, searchQuery);
   }, [channelUsers, searchQuery]);
 
   const inviteUserOptions = useMemo(
     () =>
-      filteredUsers.map(user => ({
-        label: getUserDisplayName(user),
-        value: `user:${user.id}`,
+      rankedChannelUsers.map(user => ({
+        label: user.label,
+        value: user.value,
         icon: (
           <Avatar
             userId={user.id}
@@ -100,7 +103,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
         subtitle: user.email,
         isDeactivated: isUserDeactivated(user),
       })),
-    [filteredUsers],
+    [rankedChannelUsers],
   );
 
   // Get selected users for display

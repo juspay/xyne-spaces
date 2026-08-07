@@ -28,6 +28,7 @@ import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
 import { rankParticipantOptions } from '../../../utils/participantSearch';
 import Avatar from '../../ui/Avatar/Avatar';
+import { ParticipantOptionContent } from '../ParticipantOptionContent';
 import { Controller, useForm } from 'react-hook-form';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
@@ -344,29 +345,19 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       />
     ),
     children: (
-      <div className='flex flex-1 items-center gap-2 min-w-0'>
-        <Avatar
-          userId={u.id}
-          size={'sm'}
-          showActiveStatus={false}
-          className='rounded-md size-[18px] flex items-center justify-center bg-background'
-        />
-        <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
-          <span
-            className={`shrink-0 truncate max-w-[50%] text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-foreground'}`}
-          >
-            {getUserDisplayName(u)}
-          </span>
-          {isUserDeactivated(u) && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-              Deactivated
-            </span>
-          )}
-          {u.email && (
-            <span className='flex-1 min-w-0 truncate text-xs text-muted-foreground'>{u.email}</span>
-          )}
-        </div>
-      </div>
+      <ParticipantOptionContent
+        icon={
+          <Avatar
+            userId={u.id}
+            size='sm'
+            showActiveStatus={false}
+            className='rounded-md size-[18px] flex items-center justify-center bg-background'
+          />
+        }
+        label={getUserDisplayName(u)}
+        subtitle={u.email}
+        isDeactivated={isUserDeactivated(u)}
+      />
     ),
     type: 'user' as const,
   });
@@ -438,19 +429,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
       subtitle: group.alias || group.description,
       children: (
-        <div className='flex flex-1 items-center gap-2 min-w-0'>
-          <Users className='size-3.5 text-muted-foreground mx-0.5 shrink-0' strokeWidth={2.3} />
-          <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
-            <span className='shrink-0 truncate max-w-[50%] text-sm text-foreground'>
-              {group.name}
-            </span>
-            {(group.alias || group.description) && (
-              <span className='flex-1 min-w-0 truncate text-xs text-muted-foreground'>
-                {group.alias || group.description}
-              </span>
-            )}
-          </div>
-        </div>
+        <ParticipantOptionContent
+          icon={<Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />}
+          label={group.name}
+          subtitle={group.alias || group.description}
+        />
       ),
       type: 'user_group' as const,
     }));
@@ -520,6 +503,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     userGroups,
     fullUserList,
   ]);
+
+  const rankedParticipantOptions = useMemo(
+    () => rankParticipantOptions(inviteUserOrChannelOptions, searchQuery),
+    [inviteUserOrChannelOptions, searchQuery],
+  );
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -1819,7 +1807,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   control={control}
                   render={({ field }) => (
                     <SearchParticipants
-                      options={rankParticipantOptions(inviteUserOrChannelOptions, searchQuery)}
+                      options={rankedParticipantOptions}
                       disableClientFiltering
                       selectedValues={field.value}
                       onMultiSelect={async (values: string[]) => {

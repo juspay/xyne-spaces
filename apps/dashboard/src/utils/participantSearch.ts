@@ -22,14 +22,35 @@ import { searchUsers, searchChannels } from '@xyne/shared/utils';
  * re-filtered (which would drop valid semantic matches).
  */
 export interface RankableOption {
+  [key: string]: unknown;
   value: string;
   label: string;
   subtitle?: string | null;
-  name?: string;
-  email?: string;
+  name?: unknown;
+  email?: unknown;
+  displayName?: unknown;
+  status?: unknown;
+}
+
+type SearchableUserOption<T extends RankableOption> = T & {
+  name: string;
+  email: string;
   displayName?: string | null;
   status?: string | null;
-}
+};
+
+const toSearchableUserOption = <T extends RankableOption>(option: T): SearchableUserOption<T> => ({
+  ...option,
+  name: typeof option.name === 'string' && option.name ? option.name : option.label,
+  email: typeof option.email === 'string' ? option.email : '',
+  displayName: typeof option.displayName === 'string' ? option.displayName : null,
+  status: typeof option.status === 'string' ? option.status : null,
+});
+
+const toSearchableChannelOption = <T extends RankableOption>(option: T): T & { name: string } => ({
+  ...option,
+  name: typeof option.name === 'string' && option.name ? option.name : option.label,
+});
 
 export function rankParticipantOptions<T extends RankableOption>(options: T[], query: string): T[] {
   // Empty query: preserve the caller's existing ordering (already alphabetised).
@@ -45,33 +66,21 @@ export function rankParticipantOptions<T extends RankableOption>(options: T[], q
     else groups.push(opt); // `user_group:` and any future prefixes
   }
 
-  // Coerce name/email to strings before handing options to the matcher — some
-  // channel-member payloads arrive as `{ id, name }` with no email, and the
-  // rescoring step dereferences `.email`.
-  const rankedUsers =
+  // Some channel-member payloads arrive as `{ id, name }` with no email, while
+  // the shared matcher dereferences both fields. Normalize them at this boundary.
+  const rankedUsers: T[] =
     users.length > 0
-      ? searchUsers(
-          users.map(u => ({
-            ...u,
-            name: typeof u.name === 'string' && u.name ? u.name : u.label,
-            email: typeof u.email === 'string' ? u.email : '',
-          })) as unknown as Parameters<typeof searchUsers>[0],
-          query,
-          users.length,
-        )
+      ? searchUsers<SearchableUserOption<T>>(users.map(toSearchableUserOption), query, users.length)
       : [];
 
-  const rankedChannels =
+  const rankedChannels: T[] =
     channels.length > 0
-      ? searchChannels(
-          channels.map(c => ({
-            ...c,
-            name: typeof c.name === 'string' && c.name ? c.name : c.label,
-          })) as unknown as Parameters<typeof searchChannels>[0],
+      ? searchChannels<T & { name: string }>(
+          channels.map(toSearchableChannelOption),
           query,
           channels.length,
         )
       : [];
 
-  return [...rankedUsers, ...rankedChannels, ...groups] as unknown as T[];
+  return [...rankedUsers, ...rankedChannels, ...groups];
 }

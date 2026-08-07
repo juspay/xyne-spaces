@@ -17,6 +17,7 @@ import { rankParticipantOptions } from '../../../utils/participantSearch';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
+import { ParticipantOptionContent } from '../ParticipantOptionContent';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -73,31 +74,19 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             />
           ),
           children: (
-            <div className='flex flex-1 items-center gap-2 min-w-0'>
-              <Avatar
-                userId={user.id}
-                size={'sm'}
-                showActiveStatus={false}
-                className='rounded-md size-[18px] flex items-center justify-center bg-background'
-              />
-              <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
-                <span
-                  className={`shrink-0 truncate max-w-[50%] text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
-                >
-                  {getUserDisplayName(user)}
-                </span>
-                {isUserDeactivated(user) && (
-                  <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                    Deactivated
-                  </span>
-                )}
-                {user.email && (
-                  <span className='flex-1 min-w-0 truncate text-xs text-muted-foreground'>
-                    {user.email}
-                  </span>
-                )}
-              </div>
-            </div>
+            <ParticipantOptionContent
+              icon={
+                <Avatar
+                  userId={user.id}
+                  size='sm'
+                  showActiveStatus={false}
+                  className='rounded-md size-[18px] flex items-center justify-center bg-background'
+                />
+              }
+              label={getUserDisplayName(user)}
+              subtitle={user.email}
+              isDeactivated={isUserDeactivated(user)}
+            />
           ),
           type: 'user' as const,
         })) || [];
@@ -122,19 +111,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
       subtitle: group.alias || group.description,
       children: (
-        <div className='flex flex-1 items-center gap-2 min-w-0'>
-          <Users className='size-3.5 text-muted-foreground mx-0.5 shrink-0' strokeWidth={2.3} />
-          <div className='flex flex-1 min-w-0 items-center gap-2 text-left'>
-            <span className='shrink-0 truncate max-w-[50%] text-sm text-foreground'>
-              {group.name}
-            </span>
-            {(group.alias || group.description) && (
-              <span className='flex-1 min-w-0 truncate text-xs text-muted-foreground'>
-                {group.alias || group.description}
-              </span>
-            )}
-          </div>
-        </div>
+        <ParticipantOptionContent
+          icon={<Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />}
+          label={group.name}
+          subtitle={group.alias || group.description}
+        />
       ),
       type: 'user_group' as const,
     }));
@@ -143,6 +124,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       a.label.localeCompare(b.label),
     );
   }, [activeUsers, channels, userGroups, allUsers, user?.id]);
+
+  const rankedParticipantOptions = useMemo(
+    () => rankParticipantOptions(inviteUserOrChannelOptions, searchQuery),
+    [inviteUserOrChannelOptions, searchQuery],
+  );
 
   const handleSubmit = () => {
     onSubmit(selectedParticipants);
@@ -260,7 +246,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             <div className='space-y-2'>
               <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
               <SearchParticipants
-                options={rankParticipantOptions(inviteUserOrChannelOptions, searchQuery)}
+                options={rankedParticipantOptions}
                 selectedValues={selectedParticipants}
                 onMultiSelect={handleMultiSelect}
                 searchQuery={searchQuery}
