@@ -91,6 +91,33 @@ export class JwtService {
   }
 
   /**
+   * Verify a JWT's signature, issuer, audience and force-logout watermark while
+   * TOLERATING natural expiry. Returns the decoded payload for a token that is
+   * cryptographically valid but may be past its `exp`.
+   *
+   * Used only by the call-invite routing detector, which needs to know "is this
+   * a genuine session token for workspace X" independently of the short
+   * access-token lifetime (a still-refreshable session is common).
+   *
+   * Throws on a bad signature, wrong iss/aud, or a token issued before the
+   * force-logout watermark — those are NOT tolerated.
+   */
+  verifyIgnoringExpiry(token: string): JwtPayload {
+    const decoded = jwt.verify(token, this.secret, {
+      issuer: this.issuer,
+      audience: this.audience,
+      ignoreExpiration: true,
+    }) as JwtPayload;
+
+    const forceLogoutBefore = config.jwt.forceLogoutBefore;
+    if (forceLogoutBefore && decoded.iat && decoded.iat < forceLogoutBefore) {
+      throw new Error('JWT token has expired');
+    }
+
+    return decoded;
+  }
+
+  /**
    * Decode a JWT token without verification (for debugging)
    */
   decodeToken(token: string): JwtPayload | null {

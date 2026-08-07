@@ -16,6 +16,7 @@ interface ImportMetaEnv {
   readonly VITE_GENIUS_API_KEY: string;
   readonly VITE_GENIUS_URL: string;
   readonly VITE_ENABLE_SUMMARY_ACTION_BUTTONS: string;
+  readonly VITE_ENABLE_UNIFIED_CALL_INVITE_LINK?: string;
   readonly VITE_APPS_PUBLIC_BASE_URL?: string;
   readonly VITE_CLAW_API_BASE_URL?: string;
 }

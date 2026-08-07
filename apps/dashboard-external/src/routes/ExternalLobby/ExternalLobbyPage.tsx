@@ -133,12 +133,47 @@ export function ExternalLobbyPage() {
   const [camDenied, setCamDenied] = useState(false);
 
   // -------------------------------------------------------------------------
-  // 1. Load call info
+  // 0. Unified Smart Call Invite Link — routing probe (runs before lobby load)
+  //
+  // If this browser already has a live internal session in the CALL's workspace,
+  // the backend hands back a redirectUrl into the internal app and we bounce
+  // there. Otherwise (the common case) we fall through to the external lobby.
+  // Fail-open: any error just proceeds to the lobby.
+  // -------------------------------------------------------------------------
+  const [isDetectingRoute, setIsDetectingRoute] = useState(true);
+
+  useEffect(() => {
+    if (!externalId) {
+      setIsDetectingRoute(false);
+      return;
+    }
+    let cancelled = false;
+    callLobbyService
+      .detectInternal(externalId)
+      .then(result => {
+        if (cancelled) return;
+        if (result.internal && result.redirectUrl) {
+          // Keep the loading screen up while the browser navigates away.
+          window.location.replace(result.redirectUrl);
+          return;
+        }
+        setIsDetectingRoute(false);
+      })
+      .catch(() => {
+        if (!cancelled) setIsDetectingRoute(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [externalId]);
+
+  // -------------------------------------------------------------------------
+  // 1. Load call info (gated until the routing probe has cleared)
   // -------------------------------------------------------------------------
   const callInfoQuery = useQuery({
     queryKey: ['call-lobby-info', externalId],
     queryFn: () => callLobbyService.getCallInfo(externalId!),
-    enabled: !!externalId && state.stage === 'LOADING',
+    enabled: !!externalId && state.stage === 'LOADING' && !isDetectingRoute,
     retry: false,
   });
 

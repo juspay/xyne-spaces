@@ -172,4 +172,23 @@ export const callLobbyService = {
     const response = await apiInstance.get<{ url: string }>(`${BASE}/${externalId}/invite-url`);
     return response.data.url;
   },
+
+  /**
+   * Unified Smart Call Invite Link probe. Asks the backend whether this browser
+   * already has a live internal session in the call's workspace. If so, the
+   * external lobby page should redirect to `redirectUrl` instead of rendering.
+   * Always resolves (fail-open to the external lobby); never reveals call state.
+   */
+  async detectInternal(
+    externalId: string,
+  ): Promise<{ internal: boolean; redirectUrl?: string }> {
+    try {
+      const response = await apiInstance.get<{ internal: boolean; redirectUrl?: string }>(
+        `${BASE}/${externalId}/detect-internal`,
+      );
+      return response.data;
+    } catch {
+      return { internal: false };
+    }
+  },
 };

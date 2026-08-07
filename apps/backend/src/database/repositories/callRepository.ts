@@ -1589,6 +1589,40 @@ export class CallRepository {
   }
 
   /**
+   * Minimal projection used by the Unified Smart Call Invite Link router.
+   * Returns ONLY the fields needed to decide internal-vs-external routing —
+   * critically `workspaceId`, which `getPublicCallInfo` deliberately omits.
+   * Isolated here so the routing decision never widens the public resolver's
+   * leak surface.
+   */
+  async getCallInviteRoutingInfo(externalId: string): Promise<{
+    callId: string;
+    externalId: string;
+    callType: CallType;
+    status: CallStatus;
+    workspaceId: string;
+  } | null> {
+    const call = await DatabaseClient.getInstance().call.findUnique({
+      where: { externalId },
+      select: {
+        id: true,
+        externalId: true,
+        callType: true,
+        status: true,
+        workspaceId: true,
+      },
+    });
+    if (!call || !call.externalId || !call.workspaceId) return null;
+    return {
+      callId: call.id,
+      externalId: call.externalId,
+      callType: call.callType as CallType,
+      status: call.status as CallStatus,
+      workspaceId: call.workspaceId,
+    };
+  }
+
+  /**
    * Create a CallParticipant row for an external lobby request.
    * userId is a random UUID (external users have no real account).
    */

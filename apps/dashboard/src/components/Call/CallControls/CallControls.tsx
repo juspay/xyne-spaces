@@ -163,6 +163,10 @@ export function CallControls({
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
+  // Unified Smart Call Invite Link: when enabled, both audiences share ONE
+  // smart link, so the two-option share menu collapses to a single copy action.
+  const unifiedInviteEnabled =
+    import.meta.env.VITE_ENABLE_UNIFIED_CALL_INVITE_LINK === 'true';
   const reactionPickerRef = useRef<HTMLDivElement>(null);
   const shareMenuRef = useRef<HTMLDivElement>(null);
   const { isMobile, isMac } = usePlatform();
@@ -882,7 +886,11 @@ export function CallControls({
         ) : (
           <div className='relative' ref={shareMenuRef}>
             <button
-              onClick={() => setShowShareMenu(prev => !prev)}
+              onClick={() =>
+                unifiedInviteEnabled
+                  ? handleCopyInviteLink()
+                  : setShowShareMenu(prev => !prev)
+              }
               className={cn(
                 buttonClasses,
                 showShareMenu
@@ -908,7 +916,7 @@ export function CallControls({
               )}
             </button>
 
-            {showShareMenu && (
+            {!unifiedInviteEnabled && showShareMenu && (
               <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-max'>
                 <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500'>
                   Share call link
