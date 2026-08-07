@@ -22,6 +22,13 @@ import { FormsResource } from './resources/forms.js';
 import { CallsResource } from './resources/calls.js';
 import { EmailResource } from './resources/email.js';
 import { RecapsResource } from './resources/recaps.js';
+import { AdminResource } from './resources/admin.js';
+import { UserGroupsResource } from './resources/user-groups.js';
+import { DashboardsResource } from './resources/dashboards.js';
+import { AutomationsResource } from './resources/automations.js';
+import { IncidentsResource } from './resources/incidents.js';
+import { PreferencesResource } from './resources/preferences.js';
+import { WorkspaceResource } from './resources/workspace.js';
 
 export interface SpacesClientOptions {
   /**
@@ -115,6 +122,27 @@ export class SpacesClient {
   /** Daily channel and project recaps, and entity nudges */
   readonly recaps: RecapsResource;
 
+  /** Workspace and organization administration */
+  readonly admin: AdminResource;
+
+  /** Teams, membership, and assignment routing */
+  readonly userGroups: UserGroupsResource;
+
+  /** Dashboards, saved queries, and tile layout */
+  readonly dashboards: DashboardsResource;
+
+  /** Automations and their approval lifecycle */
+  readonly automations: AutomationsResource;
+
+  /** RCAs, impacts, corrective actions, and release attribution */
+  readonly incidents: IncidentsResource;
+
+  /** The current user's own settings, bookmarks, and saved views */
+  readonly preferences: PreferencesResource;
+
+  /** Shared links, repositories, emoji, and reference data */
+  readonly workspace: WorkspaceResource;
+
   constructor(options: SpacesClientOptions = {}) {
     this.http = new HttpClient({
       baseUrl: options.baseUrl ?? 'https://spaces.xyne.app',
@@ -141,6 +169,13 @@ export class SpacesClient {
     this.calls = new CallsResource(this.transport);
     this.email = new EmailResource(this.transport);
     this.recaps = new RecapsResource(this.transport);
+    this.admin = new AdminResource(this.transport);
+    this.userGroups = new UserGroupsResource(this.transport);
+    this.dashboards = new DashboardsResource(this.transport);
+    this.automations = new AutomationsResource(this.transport);
+    this.incidents = new IncidentsResource(this.transport);
+    this.preferences = new PreferencesResource(this.transport);
+    this.workspace = new WorkspaceResource(this.transport);
   }
 
   /**

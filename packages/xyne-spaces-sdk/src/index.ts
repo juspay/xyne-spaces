@@ -121,6 +121,9 @@ export type { CanvasCursor, CanvasScope } from './registry/canvases.js';
 export type { FormFieldInput } from './registry/forms.js';
 export type { CallCursor } from './registry/calls.js';
 export type { EmailCursor, EmailDraftCursor } from './registry/email.js';
+export type { AppCursor, RoleCursor } from './registry/admin.js';
+export type { WorkflowCursor } from './registry/automations.js';
+export type { RcaCursor } from './registry/incidents.js';
 
 // ----- Registry Types (for advanced usage) -----
 export type {
