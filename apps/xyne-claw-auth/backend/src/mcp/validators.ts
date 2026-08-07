@@ -1,5 +1,5 @@
 import { createLogger } from "../logger.js";
-import { spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { interact, spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -61,31 +61,60 @@ async function validateTargetConversationId(
     }
   }
 
-  if (!conversationId) return null;
+  const auth: SpacesAuthContext = {};
+  const token = stringField(credentials["token"]);
+  const sessionId = stringField(credentials["sessionId"]);
+  const workspaceId = stringField(credentials["workspaceId"]);
+  const baseUrl = stringField(credentials["url"]);
+  if (token) auth.token = token;
+  if (sessionId) auth.sessionId = sessionId;
+  if (workspaceId) auth.workspaceId = workspaceId;
+  if (baseUrl) auth.baseUrl = baseUrl;
 
+  if (conversationId) {
+    try {
+      await spacesFetch(
+        `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
+        { method: "GET" },
+        auth,
+      );
+      return null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+        return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
+      }
+      log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
+      return null;
+    }
+  }
+
+  if (!channelId) return null;
+
+  // Reject a hallucinated channelId AT QUEUE TIME, while the model can still
+  // self-correct in the same run. Without this, the action queues ("Action
+  // queued for approval: ..."), and the card-time target validation in
+  // webhook.ts then skips the approval card with only a server log — the user
+  // was promised an approval that never arrives, and retrying repeats the
+  // identical dead end (prod 2026-08-07, fe-autocoder spaces-create-ticket).
+  //
+  // This is an EXACT-id findMany, not the paginated workspace list whose
+  // `.includes` false-negatives got pre-checks removed here before (see the
+  // create-ticket note below): only a definitive empty result rejects; any
+  // lookup failure fails open so the authoritative Spaces API stays the
+  // final judge.
   try {
-    const auth: SpacesAuthContext = {};
-    const token = stringField(credentials["token"]);
-    const sessionId = stringField(credentials["sessionId"]);
-    const workspaceId = stringField(credentials["workspaceId"]);
-    const baseUrl = stringField(credentials["url"]);
-    if (token) auth.token = token;
-    if (sessionId) auth.sessionId = sessionId;
-    if (workspaceId) auth.workspaceId = workspaceId;
-    if (baseUrl) auth.baseUrl = baseUrl;
-
-    await spacesFetch(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
-      { method: "GET" },
+    const rows = (await interact(
+      { model: "channel", operation: "findMany", where: { id: { equals: channelId } }, take: 1 },
       auth,
-    );
+    )) as unknown[];
+    if (Array.isArray(rows) && rows.length === 0) {
+      return `channel ${channelId} not found — use a real Spaces channel id (resolve it from the triggering thread or the channel tools first)`;
+    }
     return null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
-      return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
-    }
-    log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
+    log.warn(`[validator] ${serverType}/${tool} channel lookup failed open channelId=${channelId}:`, msg);
     return null;
   }
 }
