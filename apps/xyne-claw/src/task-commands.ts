@@ -97,7 +97,9 @@ const TASK_COMMANDS: TaskCommand[] = [
       "HTML document in the writable sandbox. When revising, preserve the useful parts of the current artifact and " +
       "apply the user's requested changes. Inspect the result in the sandbox browser at desktop and mobile widths, " +
       "fix visible layout, accessibility, console, and network issues, then call sandbox-deliver-files with the final " +
-      ".html file. The command is approval to execute this workflow, so do not pause for a design-plan or storyboard " +
+      ".html file. For app-like designs needing real state or heavy interactivity, follow the react-artifact skill: " +
+      "author in React/JSX and bundle in-sandbox into the same single self-contained HTML. The command is approval to " +
+      "execute this workflow, so do not pause for a design-plan or storyboard " +
       "approval. Keep prose minimal: the delivered artifact is the primary response.",
     nudge:
       "This Design Studio run must finish by delivering the completed self-contained HTML artifact with " +

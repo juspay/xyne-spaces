@@ -79,6 +79,7 @@ import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { DesignSystemSheet } from "./DesignSystemSheet";
+import { DesignGallery } from "./DesignGallery";
 import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
 import { Badge } from "./ui/Badge";
@@ -3514,7 +3515,14 @@ function DesignPreviewPanel({
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareRecord, setShareRecord] = useState<DesignArtifactShare | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [devicePreset, setDevicePreset] = useState<"desktop" | "tablet" | "mobile" | "fit">("desktop");
+  const [canvasBackground, setCanvasBackground] = useState<"light" | "dark" | "checkerboard">("light");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [viewSource, setViewSource] = useState(false);
+  const [sourceCopied, setSourceCopied] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -3570,6 +3578,7 @@ function DesignPreviewPanel({
       if (event.source !== iframeRef.current?.contentWindow) return;
       if (event.data?.type === DESIGN_INSPECTOR_MODE_EVENT && event.data.enabled === false) {
         setInspecting(false);
+        setFullscreen(false);
         return;
       }
       if (event.data?.type !== DESIGN_INSPECTOR_EVENT) return;
@@ -3588,6 +3597,31 @@ function DesignPreviewPanel({
     syncInspectorMode();
   }, [syncInspectorMode, previewUrl, reloadVersion]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const updateSize = () => {
+      const styles = window.getComputedStyle(canvas);
+      setCanvasSize({
+        width: Math.max(0, canvas.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)),
+        height: Math.max(0, canvas.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)),
+      });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", exitOnEscape);
+    return () => window.removeEventListener("keydown", exitOnEscape);
+  }, [fullscreen]);
+
   const fileName = source?.kind === "attachment"
     ? source.attachment.originalFilename
     : source?.fileName ?? "Design preview";
@@ -3597,6 +3631,28 @@ function DesignPreviewPanel({
   const displayedVersion = displayedVersionIndex == null ? null : versions[displayedVersionIndex] ?? null;
   const canGoPrev = displayedVersionIndex != null && displayedVersionIndex > 0;
   const canGoNext = displayedVersionIndex != null && displayedVersionIndex < versions.length - 1;
+  const presetWidth = devicePreset === "tablet" ? 768 : devicePreset === "mobile" ? 390 : null;
+  const previewScale = presetWidth && canvasSize.width > 0
+    ? Math.min(1, canvasSize.width / presetWidth)
+    : 1;
+  const scaledPreviewHeight = canvasSize.height > 0 ? canvasSize.height : 1;
+  const naturalPreviewHeight = Math.max(1, Math.floor(scaledPreviewHeight / previewScale));
+  const canvasStyle: React.CSSProperties = canvasBackground === "dark"
+    ? { backgroundColor: "#111214" }
+    : canvasBackground === "checkerboard"
+      ? {
+          backgroundColor: "#e9eaec",
+          backgroundImage: "linear-gradient(45deg, #d7d9dd 25%, transparent 25%), linear-gradient(-45deg, #d7d9dd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d7d9dd 75%), linear-gradient(-45deg, transparent 75%, #d7d9dd 75%)",
+          backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
+          backgroundSize: "16px 16px",
+        }
+      : { backgroundColor: "#e9eaec" };
+  const devicePresets = [
+    { id: "desktop", label: "Desktop", title: "Desktop — use the full preview width", iconClass: "h-2.5 w-4" },
+    { id: "tablet", label: "Tablet 768", title: "Tablet — render at 768 CSS pixels", iconClass: "h-3.5 w-2.5" },
+    { id: "mobile", label: "Mobile 390", title: "Mobile — render at 390 CSS pixels", iconClass: "h-3.5 w-2" },
+    { id: "fit", label: "Fit", title: "Fit — use all available space", iconClass: "h-2.5 w-3.5 rounded-sm border-dashed" },
+  ] as const;
 
   const download = () => {
     if (!rawHtml) return;
@@ -3606,6 +3662,24 @@ function DesignPreviewPanel({
     anchor.download = fileName;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+  };
+
+  const openInNewTab = () => {
+    if (!rawHtml) return;
+    const tabUrl = URL.createObjectURL(new Blob([rawHtml], { type: "text/html" }));
+    window.open(tabUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(tabUrl), 60_000);
+  };
+
+  const copySource = async () => {
+    if (!rawHtml) return;
+    await navigator.clipboard.writeText(rawHtml);
+    setSourceCopied(true);
+    window.setTimeout(() => setSourceCopied(false), 1800);
+  };
+
+  const cycleCanvasBackground = () => {
+    setCanvasBackground((value) => value === "light" ? "dark" : value === "dark" ? "checkerboard" : "light");
   };
 
   const shareFile = async () => {
@@ -3692,8 +3766,14 @@ function DesignPreviewPanel({
   };
 
   return (
-    <section data-id="design-preview-panel" className="flex min-w-0 flex-1 flex-col bg-xyne-surface-subtle">
-      <header className="flex h-[54px] shrink-0 items-center justify-between border-b border-xyne-border-subtle bg-xyne-surface px-4">
+    <section
+      data-id="design-preview-panel"
+      className={fullscreen
+        ? "fixed inset-0 z-50 flex min-w-0 flex-col bg-xyne-surface-subtle"
+        : "flex min-w-0 flex-1 flex-col bg-xyne-surface-subtle"
+      }
+    >
+      <header className="flex h-[54px] shrink-0 items-center justify-between gap-3 overflow-x-auto border-b border-xyne-border-subtle bg-xyne-surface px-4">
         <div className="flex min-w-0 items-center gap-2">
           <AppWindowIcon size={17} className="shrink-0 text-xyne-brand" />
           <div className="min-w-0">
@@ -3711,6 +3791,26 @@ function DesignPreviewPanel({
           >
             <SparkleIcon size={13} /> Design system
           </button>
+          <div data-id="design-device-presets" className="flex shrink-0 items-center rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle p-0.5">
+            {devicePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                data-id={`design-device-${preset.id}`}
+                title={preset.title}
+                aria-label={preset.title}
+                aria-pressed={devicePreset === preset.id}
+                onClick={() => setDevicePreset(preset.id)}
+                className={devicePreset === preset.id
+                  ? "inline-flex h-7 items-center gap-1.5 rounded bg-xyne-surface px-2 text-[10px] font-medium text-xyne-fg-primary shadow-sm"
+                  : "inline-flex h-7 items-center gap-1.5 rounded px-2 text-[10px] font-medium text-xyne-fg-muted hover:text-xyne-fg-primary"
+                }
+              >
+                <span aria-hidden="true" className={`${preset.iconClass} inline-block rounded-[2px] border border-current`} />
+                {preset.label}
+              </button>
+            ))}
+          </div>
           {versions.length > 0 && displayedVersion && (
             <div data-id="design-version-strip" className="flex items-center gap-1 rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-1 py-1">
               <button
@@ -3791,7 +3891,33 @@ function DesignPreviewPanel({
           )}
           <button
             type="button"
-            disabled={!previewUrl}
+            data-id="design-canvas-background-toggle"
+            title={`Canvas background: ${canvasBackground}. Click to cycle.`}
+            aria-label={`Canvas background: ${canvasBackground}. Click to cycle.`}
+            onClick={cycleCanvasBackground}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            <ChartBarIcon size={13} />
+          </button>
+          <button
+            type="button"
+            data-id="design-view-source-toggle"
+            title={viewSource ? "Show rendered preview" : "View HTML source"}
+            aria-label={viewSource ? "Show rendered preview" : "View HTML source"}
+            aria-pressed={viewSource}
+            disabled={!rawHtml}
+            onClick={() => setViewSource((value) => !value)}
+            className={viewSource
+              ? "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-xyne-brand text-white"
+              : "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+            }
+          >
+            <PencilSimpleIcon size={13} />
+          </button>
+          <button
+            type="button"
+            data-id="design-inspector-toggle"
+            disabled={!previewUrl || viewSource}
             aria-pressed={inspecting}
             onClick={() => setInspecting((value) => !value)}
             className={inspecting
@@ -3803,11 +3929,32 @@ function DesignPreviewPanel({
           </button>
           <button
             type="button"
+            data-id="design-refresh-preview"
             disabled={!source}
             onClick={() => setReloadVersion((value) => value + 1)}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ArrowsClockwiseIcon size={12} /> Refresh
+          </button>
+          <button
+            type="button"
+            data-id="design-open-new-tab"
+            title="Open current HTML in a new tab"
+            disabled={!rawHtml}
+            onClick={openInNewTab}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowSquareOutIcon size={13} />
+          </button>
+          <button
+            type="button"
+            data-id="design-fullscreen-toggle"
+            title={fullscreen ? "Exit fullscreen (Escape)" : "Open fullscreen preview"}
+            aria-label={fullscreen ? "Exit fullscreen preview" : "Open fullscreen preview"}
+            onClick={() => setFullscreen((value) => !value)}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            {fullscreen ? <XIcon size={14} /> : <AppWindowIcon size={14} />}
           </button>
           <button
             type="button"
@@ -3828,20 +3975,73 @@ function DesignPreviewPanel({
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#e9eaec] p-4 dark:bg-[#111214]">
-        {previewUrl ? (
-          <iframe
-            ref={iframeRef}
-            key={`${previewUrl}:${reloadVersion}`}
-            src={previewUrl}
-            onLoad={syncInspectorMode}
-            title="Design preview"
-            // Deliberately omit allow-same-origin: generated scripts execute
-            // in an opaque origin and cannot access Claw's cookies or DOM.
-            sandbox="allow-scripts allow-forms allow-modals"
-            referrerPolicy="no-referrer"
-            className="h-full w-full rounded-lg border border-black/10 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.16)]"
-          />
+      <div
+        ref={canvasRef}
+        data-id="design-preview-canvas"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
+        style={canvasStyle}
+      >
+        {viewSource && rawHtml ? (
+          <div data-id="design-source-view" className="relative h-full w-full overflow-hidden rounded-lg border border-black/10 bg-[#17181a] shadow-[0_18px_55px_rgba(0,0,0,0.16)]">
+            <button
+              type="button"
+              data-id="design-copy-source"
+              onClick={() => { void copySource(); }}
+              className="absolute right-3 top-3 z-10 inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/50 px-2.5 text-[11px] font-medium text-white shadow-sm backdrop-blur hover:bg-black/70"
+            >
+              {sourceCopied ? <CheckIcon size={13} /> : <CopySimpleIcon size={13} />}
+              {sourceCopied ? "Copied" : "Copy"}
+            </button>
+            <pre className="h-full overflow-auto p-5 pr-24 font-mono text-[12px] leading-relaxed text-zinc-200">
+              <code>{rawHtml}</code>
+            </pre>
+          </div>
+        ) : previewUrl ? (
+          presetWidth ? (
+            <div
+              data-id="design-device-frame"
+              className="relative shrink-0"
+              style={{ width: presetWidth * previewScale, height: scaledPreviewHeight }}
+            >
+              <iframe
+                ref={iframeRef}
+                key={`${previewUrl}:${reloadVersion}`}
+                src={previewUrl}
+                onLoad={syncInspectorMode}
+                title="Design preview"
+                // Deliberately omit allow-same-origin: generated scripts execute
+                // in an opaque origin and cannot access Claw's cookies or DOM.
+                sandbox="allow-scripts allow-forms allow-modals"
+                referrerPolicy="no-referrer"
+                className="absolute left-1/2 top-0 rounded-[14px] border-[5px] border-black/20 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.24)]"
+                style={{
+                  width: presetWidth,
+                  height: naturalPreviewHeight,
+                  transform: `translateX(-50%) scale(${previewScale})`,
+                  transformOrigin: "top center",
+                }}
+              />
+              <span
+                data-id="design-effective-zoom"
+                className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow-sm"
+              >
+                {Math.round(previewScale * 100)}%
+              </span>
+            </div>
+          ) : (
+            <iframe
+              ref={iframeRef}
+              key={`${previewUrl}:${reloadVersion}`}
+              src={previewUrl}
+              onLoad={syncInspectorMode}
+              title="Design preview"
+              // Deliberately omit allow-same-origin: generated scripts execute
+              // in an opaque origin and cannot access Claw's cookies or DOM.
+              sandbox="allow-scripts allow-forms allow-modals"
+              referrerPolicy="no-referrer"
+              className="h-full w-full rounded-lg border border-black/10 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.16)]"
+            />
+          )
         ) : error ? (
           <div className="max-w-sm rounded-xl border border-xyne-error/25 bg-xyne-surface p-5 text-center shadow-sm">
             <p className="text-[13px] font-semibold text-xyne-error">Preview unavailable</p>
@@ -4510,6 +4710,11 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     [activeAgentSlug, clear],
   );
 
+  const handleUseDesignTemplate = useCallback((prompt: string) => {
+    setInputValue(prompt);
+    window.setTimeout(() => inputAreaRef.current?.focus(), 0);
+  }, []);
+
   const handleProviderChange = useCallback(async (newProvider: string) => {
     if (!activeAgentSlug) return;
     const prev = selectedProvider;
@@ -4941,7 +5146,14 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                   }}
                 />
 
-                {messages.length === 0 && !sending ? (
+                {messages.length === 0 && !sending && mode === "design" ? (
+                  <DesignGallery
+                    conversations={conversations.filter((conv) => conv.agentSlug === activeAgent.slug)}
+                    userId={userId}
+                    onSelectConversation={handleSelectConv}
+                    onUseTemplate={handleUseDesignTemplate}
+                  />
+                ) : messages.length === 0 && !sending ? (
                   <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
                     <ChatCircleIcon size={48} className="text-xyne-brand" />
                     <p className="text-[15px] font-medium text-xyne-fg-primary">{activeAgent.name}</p>
