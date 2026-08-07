@@ -23,6 +23,7 @@ import { callDocumentService } from '@/services/callDocumentService';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1888,16 +1889,20 @@ Output ONLY the processed transcript, nothing else.`;
 
           // Serialize with first-chunk Canvas URL attachment: both merge the
           // call-message metadata, so neither can discard the other's fields.
-          await db.$transaction(async (tx) => {
+          await runAsServiceActor('transcript-summary', callMessage.workspaceId, () => db.$transaction(async (tx) => {
             const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
-              SELECT "content", "metadata" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
+              SELECT "content", "metadata"
+              FROM "messages"
+              WHERE "messageId" = ${messageId}
+                AND "workspaceId" = ${callMessage.workspaceId}
+              FOR UPDATE
             `;
             if (!message) {
               logger.warn(`Call message ${messageId} not found for title update`);
               return;
             }
             await tx.message.update({
-              where: { messageId },
+              where: { messageId, workspaceId: callMessage.workspaceId },
               data: {
                 content: title,
                 metadata: {
@@ -1907,7 +1912,7 @@ Output ONLY the processed transcript, nothing else.`;
                 },
               },
             });
-          });
+          }));
           logger.info(`[${callId}] call_title_updated`);
         } catch (error) {
           logger.error(`[${callId}] call_title_update_failed`, { error });

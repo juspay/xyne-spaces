@@ -499,8 +499,14 @@ const envSchema = Joi.object({
 
   // Tenant-enforcement switches. Default true (refuse); only an explicit false relaxes,
   // so a permissive deployment says so in its own config. Reported either way.
+  // A write naming a workspace other than the enforced one: refused when on, corrected to
+  // the enforced workspace and reported when off. The boundary holds either way.
   ACL_ENFORCE_WORKSPACE_IMMUTABLE: Joi.boolean().default(true),
-  ACL_ENFORCE_GUEST_WRITES: Joi.boolean().default(true),
+  // A query on a workspace-scoped table with no workspace resolved. Covers INTERACTIVE AND
+  // BATCH TRANSACTIONS ONLY — deliberately not the ordinary query path, because
+  // authentication resolves a session before it knows a workspace and user_sessions carries
+  // one, so enforcing there would make it impossible to log in. Widening this needs those
+  // callers named from the `[acl] query ran with no tenant scope` line first.
   ACL_ENFORCE_NO_CONTEXT: Joi.boolean().default(true),
 }).unknown();
 
@@ -1048,7 +1054,6 @@ export const config = {
   },
   aclEnforcement: {
     workspaceImmutable: envVars.ACL_ENFORCE_WORKSPACE_IMMUTABLE as boolean,
-    guestWrites: envVars.ACL_ENFORCE_GUEST_WRITES as boolean,
     noContext: envVars.ACL_ENFORCE_NO_CONTEXT as boolean,
   },
 };

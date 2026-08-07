@@ -5,6 +5,7 @@ import { config } from '@/config/env';
 import { randomUUID } from 'crypto';
 import { MessageType } from '@xyne/shared';
 import { parseBitbucketPrUrl } from '@/utils/repoUrlParser';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const VARYS_BOT_EMAIL = 'varys@app.xyne.ai';
 const PR_CHECK_MESSAGE_SUBTYPE = 'pr_check_approval';
@@ -150,7 +151,7 @@ async function createButtonMessage(params: {
   const messageId = randomUUID();
   const replyNow = new Date();
 
-  await db.$transaction([
+  await runAsServiceActor('pr-check-approval', params.workspaceId, () => db.$transaction([
     db.message.create({
       data: {
         messageId,
@@ -198,7 +199,7 @@ async function createButtonMessage(params: {
           }),
         ]
       : []),
-  ]);
+  ]));
 
   return messageId;
 }
@@ -239,7 +240,7 @@ async function postNoTicketNotice(params: {
 Make sure the PR title starts with a valid ticket ID (e.g. \`XYNE-1234: your title\`), then post the PR link again.`;
 
   const replyNow = new Date();
-  await db.$transaction([
+  await runAsServiceActor('pr-check-approval', params.workspaceId, () => db.$transaction([
     db.message.create({
       data: {
         messageId: randomUUID(),
@@ -268,7 +269,7 @@ Make sure the PR title starts with a valid ticket ID (e.g. \`XYNE-1234: your tit
       where: { conversationId: params.conversationId },
       data: { lastReplyAt: replyNow },
     }),
-  ]);
+  ]));
 }
 
 /**

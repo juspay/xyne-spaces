@@ -11170,7 +11170,7 @@ export function createMutators(
           if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
               try {
-                await versionReleaseMappingService.syncTicketById(entityId);
+                await versionReleaseMappingService.syncTicketById(entityId, authData.workspaceId);
               } catch (error) {
                 logger.error('release_mapping_sync_failed', { entityId, error });
               }
@@ -11289,7 +11289,7 @@ export function createMutators(
           if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
               try {
-                await versionReleaseMappingService.syncTicketById(entityId);
+                await versionReleaseMappingService.syncTicketById(entityId, authData.workspaceId);
               } catch (error) {
                 logger.error('release_mapping_sync_failed', { entityId, error });
               }
@@ -11401,7 +11401,10 @@ export function createMutators(
           ) {
             asyncTasks.push(async () => {
               try {
-                await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
+                await versionReleaseMappingService.syncTicketById(
+                  formEntityValue.entityId,
+                  authData.workspaceId,
+                );
               } catch (error) {
                 logger.error('release_mapping_sync_failed', { entityId: formEntityValue.entityId, error });
               }

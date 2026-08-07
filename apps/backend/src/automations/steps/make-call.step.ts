@@ -12,6 +12,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const MAX_CALL_INVITEES = 499;
 
@@ -328,7 +329,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       });
       const cancelledAt = new Date();
       const cleanupResults = await Promise.allSettled([
-        db.$transaction([
+        runAsServiceActor('automation-make-call', workspaceId, () => db.$transaction([
           db.callParticipant.deleteMany({ where: { callId } }),
           db.message.updateMany({
             where: { messageId, conversationId },
@@ -364,7 +365,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
               lastActivityAt: cancelledAt,
             },
           }),
-        ]),
+        ])),
         livekitService.deleteRoom(externalId),
       ]);
       cleanupResults.forEach((cleanupResult, index) => {

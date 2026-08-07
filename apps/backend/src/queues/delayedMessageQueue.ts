@@ -4,6 +4,7 @@ import { redisService } from '@/services/redisService';
 
 export interface DelayedMessageJobData {
   delayedMessageId: string;
+  workspaceId: string;
   channelId: string;
   conversationId?: string | null;
   senderId: string;

@@ -257,7 +257,7 @@ export class TicketController {
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
 
       // Generate xyneId using project-scoped format
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId, channelWorkspaceId);
 
       // Create ticket
       const ticket = await this.ticketRepository.createTicket({
@@ -740,7 +740,11 @@ export class TicketController {
       // Wrap all database operations in a transaction for data integrity
       const { ticket } = await prisma.$transaction(async (tx) => {
         // Generate xyneId using project-scoped format
-        const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+        const xyneId = await TicketIdService.generateTicketId(
+          tx,
+          projectId,
+          req.user!.workspaceId,
+        );
 
         let conversationId: string;
         let ticket: Ticket;
@@ -1148,7 +1152,7 @@ export class TicketController {
             });
             logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
             if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
-                versionReleaseMappingService.syncTicketById(ticket.id).catch(error => {
+                versionReleaseMappingService.syncTicketById(ticket.id, req.user!.workspaceId).catch(error => {
                   logger.error(`[Ticket Creation] Version release mapping failed for ticket ${ticket.xyneId}:`, error);
                 });
               }
