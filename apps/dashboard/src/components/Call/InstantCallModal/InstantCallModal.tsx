@@ -13,6 +13,7 @@ import {
   matchParticipants,
   looksLikeBulkEntry,
 } from '../../../utils/participantUtils';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
@@ -247,7 +248,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             <div className='space-y-2'>
               <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
               <SearchParticipants
-                options={inviteUserOrChannelOptions}
+                options={rankParticipantOptions(inviteUserOrChannelOptions, searchQuery)}
                 selectedValues={selectedParticipants}
                 onMultiSelect={handleMultiSelect}
                 searchQuery={searchQuery}
@@ -255,6 +256,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 ref={inputRef}
                 onEnterQuerySubmit={handleBulkUserEntry}
                 helperText={notFoundMessage}
+                disableClientFiltering
               />
             </div>
             <div className='flex items-center justify-between'>

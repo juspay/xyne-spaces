@@ -13,6 +13,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import { searchUsers } from '@xyne/shared/utils';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -74,15 +75,13 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     );
   }, [allUsers, channelParticipantUserIds, currentUser?.id]);
 
-  // Filter channel users by search query
+  // Filter channel users by search query using the SAME matcher that powers
+  // @-mention search (prefix / word-boundary boost, displayName + old-name +
+  // email matching, deactivated demotion). `channelUsers` is already restricted
+  // to channel members, so non-members stay hidden from this thread modal.
   const filteredUsers = useMemo(() => {
     if (!searchQuery.trim()) return channelUsers;
-    const query = searchQuery.toLowerCase();
-    return channelUsers.filter(user => {
-      const name = user.name?.toLowerCase() || '';
-      const email = user.email?.toLowerCase() || '';
-      return name.includes(query) || email.includes(query);
-    });
+    return searchUsers(channelUsers, searchQuery, channelUsers.length);
   }, [channelUsers, searchQuery]);
 
   const inviteUserOptions = useMemo(
@@ -276,6 +275,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 placeholder='Select participants'
                 searchPlaceholder='Select participants'
                 onSearchChange={setSearchQuery}
+                disableClientFiltering
                 variant='inline'
                 width='100%'
               />

@@ -26,6 +26,7 @@ import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Controller, useForm } from 'react-hook-form';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -1806,7 +1807,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   control={control}
                   render={({ field }) => (
                     <SearchParticipants
-                      options={inviteUserOrChannelOptions}
+                      options={rankParticipantOptions(inviteUserOrChannelOptions, searchQuery)}
+                      disableClientFiltering
                       selectedValues={field.value}
                       onMultiSelect={async (values: string[]) => {
                         const expanded = await expandGroupSelections(values);
