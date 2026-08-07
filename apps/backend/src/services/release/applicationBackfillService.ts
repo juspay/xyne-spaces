@@ -1,8 +1,15 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { BoardType, type Channel, type TicketStatusV2 } from '@prisma/client';
+import { type Channel } from '@prisma/client';
 import { formService } from '../formService';
-import { FormContextType, FormEntityType, LookupType, type FieldEnumOption } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  LookupType,
+  type FieldEnumOption,
+  BoardType,
+  TicketStatusV2,
+} from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { XyneChangeType, XyneFormSchemaProvider } from './xyne/xyneReleaseForm';
 import { BaseTicketType } from '@xyne/shared';
@@ -40,9 +47,9 @@ export class ApplicationBackfillService {
 
   private async createDefaultStages(boardId: string, createdBy: string, workspaceId: string): Promise<void> {
     const defaultStages = [
-      { name: 'TODO', eta: 1, defaultTicketStatusV2: 'TODO' as TicketStatusV2 },
-      { name: 'IN-PROGRESS', eta: 2, defaultTicketStatusV2: 'STARTED' as TicketStatusV2 },
-      { name: 'COMPLETED', eta: 3, defaultTicketStatusV2: 'COMPLETED' as TicketStatusV2 },
+      { name: 'TODO', eta: 1, defaultTicketStatusV2: TicketStatusV2.TODO },
+      { name: 'IN-PROGRESS', eta: 2, defaultTicketStatusV2: TicketStatusV2.STARTED },
+      { name: 'COMPLETED', eta: 3, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
     ];
 
     let currentMaxStageSequence = 0;

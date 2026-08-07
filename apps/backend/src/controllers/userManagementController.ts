@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
+import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
@@ -293,10 +293,11 @@ export class UserManagementController {
         try {
           if (action === 'grant') {
             const result = await userManagementService.grantUserResourceAccess(
-              id,
-              resourceName,
-              accessType
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -304,9 +305,9 @@ export class UserManagementController {
             }
           } else {
             const result = await userManagementService.revokeUserResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -942,10 +943,11 @@ export class UserManagementController {
         try {
           if (action === 'grant') {
             const result = await userManagementService.grantGroupResourceAccess(
-              id,
-              resourceName,
-              accessType
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -953,9 +955,9 @@ export class UserManagementController {
             }
           } else {
             const result = await userManagementService.revokeGroupResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -1048,10 +1050,9 @@ export class UserManagementController {
       }
 
       const metadata = await storageService.getFileMetadata(gcsPath);
-      const contentType = metadata.contentType || 'image/png';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
-      res.setHeader('Content-Type', contentType);
+      setSafeInlineImageHeaders(res, metadata.contentType || 'image/png');
       res.setHeader('Content-Length', fileSize);
       // Cache for 1 year - safe because picture path includes timestamp and changes on each upload
       res.setHeader('Cache-Control', 'public, max-age=31536000');

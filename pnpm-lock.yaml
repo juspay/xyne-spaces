@@ -23,6 +23,7 @@ overrides:
   '@opentelemetry/sdk-node': 0.217.0
   '@tanstack/form-core': 1.27.7
   '@tanstack/react-store': 0.8.0
+  '@terrastruct/d2': 0.1.33
   '@xmldom/xmldom': 0.8.13
   adm-zip: 0.6.0
   ajv@6: 6.14.0
@@ -106,6 +107,9 @@ importers:
         specifier: ^9.0.5
         version: 9.0.5
     devDependencies:
+      '@clack/prompts':
+        specifier: ^1.7.0
+        version: 1.7.0
       '@commitlint/cli':
         specifier: ^20.1.0
         version: 20.5.3(@types/node@25.9.5)(conventional-commits-parser@6.4.0)(typescript@5.9.3)
@@ -139,21 +143,15 @@ importers:
       husky:
         specifier: ^9.0.11
         version: 9.1.7
+      mprocs:
+        specifier: ^0.9.6
+        version: 0.9.6
       semantic-release:
         specifier: ^22.0.5
         version: 22.0.12(typescript@5.9.3)
 
   apps/backend:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.1017.0
-        version: 3.1097.0
-      '@aws-sdk/lib-storage':
-        specifier: 3.1017.0
-        version: 3.1017.0(@aws-sdk/client-s3@3.1097.0)
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1017.0
-        version: 3.1097.0
       '@blocknote/core':
         specifier: 0.51.4
         version: 0.51.4(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)
@@ -169,9 +167,6 @@ importers:
       '@google-cloud/pubsub':
         specifier: ^4.11.0
         version: 4.11.0
-      '@google-cloud/storage':
-        specifier: ^7.7.0
-        version: 7.21.0
       '@juspay-jaf/jaf':
         specifier: 0.1.43
         version: 0.1.43(@cfworker/json-schema@4.1.1)(ws@8.21.1)
@@ -256,6 +251,9 @@ importers:
       '@xyne/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@xyne/vespa-ts':
         specifier: 1.6.0
         version: 1.6.0(typescript@5.9.3)
@@ -760,6 +758,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.14.2
         version: 3.14.9(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@terrastruct/d2':
+        specifier: 0.1.33
+        version: 0.1.33
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)
@@ -1009,6 +1010,9 @@ importers:
       pdfjs-dist:
         specifier: 5.4.296
         version: 5.4.296
+      posthog-js:
+        specifier: ^1.413.2
+        version: 1.413.2
       prosemirror-state:
         specifier: 1.4.4
         version: 1.4.4
@@ -1580,9 +1584,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.75.5
         version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6)
-      '@google-cloud/storage':
-        specifier: ^7.21.0
-        version: 7.21.0
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
@@ -1592,6 +1593,12 @@ importers:
       '@upstash/context7-mcp':
         specifier: ^2.1.7
         version: 2.3.0(@cfworker/json-schema@4.1.1)
+      '@xyne/litellm-client':
+        specifier: workspace:*
+        version: link:../../packages/litellm-client
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       deepwiki-mcp:
         specifier: ^0.0.6
         version: 0.0.6(@cfworker/json-schema@4.1.1)
@@ -1653,9 +1660,6 @@ importers:
 
   apps/xyne-claw-auth/backend:
     dependencies:
-      '@google-cloud/storage':
-        specifier: ^7.19.0
-        version: 7.21.0
       '@mariozechner/pi-agent-core':
         specifier: 0.73.0
         version: 0.73.0(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(@opentelemetry/api@1.9.1)(ws@8.21.1)(zod@4.3.6)
@@ -1683,6 +1687,9 @@ importers:
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../../packages/storage
       bullmq:
         specifier: ^5.72.0
         version: 5.81.2(redis@5.12.1(@opentelemetry/api@1.9.1))
@@ -2003,6 +2010,19 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/litellm-client:
+    dependencies:
+      undici:
+        specifier: 6.27.0
+        version: 6.27.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.43
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/shared:
     dependencies:
       '@rocicorp/zero':
@@ -2047,6 +2067,34 @@ importers:
         version: 6.1.0(@types/react@19.2.17)(react@19.2.3)(xstate@5.32.5)
       typescript:
         specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/storage:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1017.0
+        version: 3.1097.0
+      '@aws-sdk/lib-storage':
+        specifier: 3.1017.0
+        version: 3.1017.0(@aws-sdk/client-s3@3.1097.0)
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1017.0
+        version: 3.1097.0
+      '@google-cloud/storage':
+        specifier: ^7.7.0
+        version: 7.21.0
+      uuid:
+        specifier: ^9.0.0
+        version: 9.0.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      '@types/uuid':
+        specifier: ^9.0.0
+        version: 9.0.8
+      typescript:
+        specifier: ^5.3.0
         version: 5.9.3
 
   packages/xyne-claw-mcp:
@@ -6590,6 +6638,15 @@ packages:
     resolution: {integrity: sha512-jh1nIP/nmtlZkj1t0cO2NC2lFHg/fXQhtRFsL70Rh/5ELp5fqxH/calwPVTkS8gPae1k/PTqQYbU23E+Q2q0rg==}
     engines: {node: '>=16', pnpm: '>=8.6.0'}
 
+  '@posthog/browser-common@0.4.0':
+    resolution: {integrity: sha512-W9DCGVks15docUMPvJ2nd8NS16Gn74bsGWuaeg31beEKFSjdW8wvnQ1ETY6WSql5pYxZb3GdJmEUZVVstKSrBQ==}
+
+  '@posthog/core@1.46.8':
+    resolution: {integrity: sha512-WQTSwlFhsWk09xngTimHiTyhFU8QZHFZEGSm+6brY3acwYdvTLcTxpIhgl/qOCgn/XoqlCFTZqU1ldWLxNntfA==}
+
+  '@posthog/types@1.402.1':
+    resolution: {integrity: sha512-4PZ9wMYI8m8AqJuZ9YR1IAHGVtSnYbBVBgTevrKpzZbcSe/OUwhEV2Ks//rJh/L8eMTU8R5DrD4D/hlrOwaAiQ==}
+
   '@preact/signals-core@1.14.4':
     resolution: {integrity: sha512-HNB6HYeYKhQbJ1aKl+YRjrS4+QWHLKX6qKoUsfS/m0vqzsVaEBiZiaKbG/e+NKk2ch5ALQr/ihWaMHxiCuuWHA==}
 
@@ -8429,6 +8486,9 @@ packages:
   '@teppeis/multimaps@3.0.0':
     resolution: {integrity: sha512-ID7fosbc50TbT0MK0EG12O+gAP3W3Aa/Pz4DaTtQtEvlc9Odaqi0de+xuZ7Li2GtK4HzEX7IuRWS/JmZLksR3Q==}
     engines: {node: '>=14'}
+
+  '@terrastruct/d2@0.1.33':
+    resolution: {integrity: sha512-eK5hyfGIJFolC7sUsiKvWdY9xGFctTe3d+PSijo09IYDso8psztC+A4SammizXtlwYZpnnW0AtDjfBYauceSeA==}
 
   '@tiptap/core@3.29.2':
     resolution: {integrity: sha512-oKUkiPUB7noilVYxI9lNzUD4rX17sHub+PYjMfHMWHG9A3nvIy+FdePIVIIhThKWF7ijhr3eIqHY51Bn+GAFtw==}
@@ -10825,10 +10885,6 @@ packages:
   codemirror@6.0.2:
     resolution: {integrity: sha512-VhydHotNW5w1UGK0Qj96BwSk/Zqbp9WbnyK2W/eVMv4QyF41INRGpjUhFJY7/uDNuudSc33a/PKr4iDqRduvHw==}
 
-  codepage@1.15.0:
-    resolution: {integrity: sha512-3g6NUTPd/YtuuGrhMnOMRjFc+LJw/bnMp3+0r/Wcz3IXUuCosKRJvMphm5+Q+bvTVGcJJuRvVLuYba+WojaFaA==}
-    engines: {node: '>=0.8'}
-
   cohere-ai@6.2.2:
     resolution: {integrity: sha512-+Tq+4e8N/YWKJqFpWaULsfbZR/GOvGh8WWYFKR1bpipu8bCok3VcbTPnBmIToQiIqOgFpGk3HsA4b0guVyL3vg==}
 
@@ -11121,6 +11177,9 @@ packages:
   copy-to@2.0.1:
     resolution: {integrity: sha512-3DdaFaU/Zf1AnpLiFDeNCD4TOWe3Zl2RZaTzUvWiIk5ERzcCodOE20Vqq4fzCbNoHURFHT4/us/Lfq+S2zyY4w==}
 
+  core-js@3.50.0:
+    resolution: {integrity: sha512-BRWgOLKkFeCgRudR6zrs8p9XJZcE14grzKMMssoYrk6krtuEZ7MTKPIY5RzOnqsEKIR9kst7wNzphttraT+Yqw==}
+
   core-util-is@1.0.2:
     resolution: {integrity: sha512-3lqz5YjWTYnW6dlDa5TLaTCcShfar1e40rmcJVwCBJC6mWlFuj0eCHIElmG1g5kyuJ/GD+8Wn4FFCcz4gJPfaQ==}
 
@@ -11203,6 +11262,7 @@ packages:
   cron-parser@4.9.0:
     resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
     engines: {node: '>=12.0.0'}
+    deprecated: v4 is no longer maintained, upgrade to v5
 
   croner@9.1.0:
     resolution: {integrity: sha512-p9nwwR4qyT5W996vBZhdvBCnMhicY5ytZkR4D1Xj0wuTDEiMnjwR57Q3RXYY/s0EpX6Ay3vgIcfaR+ewGHsi+g==}
@@ -12660,6 +12720,9 @@ packages:
     resolution: {integrity: sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==}
     engines: {node: ^12.20 || >= 14.13}
 
+  fflate@0.4.9:
+    resolution: {integrity: sha512-zdxgIEddhfsyCaWpJ2SdXEP8ZMrKJ6+5jl4OupODcywU0IhRk6gdXuVGcPICyfx2H97hVK7xmJtRLPjkxAX8Vw==}
+
   fflate@0.6.11:
     resolution: {integrity: sha512-3JyEFWGjFn7zHmoa9+zG1BmW7X2okcmAB+0Cnu9UFbVs/jCBnl2A8o065ZlXiw145K3eBM3uLuzrYXC0RK7eDg==}
 
@@ -12860,10 +12923,6 @@ packages:
   forwarded@0.2.0:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
-
-  frac@1.1.2:
-    resolution: {integrity: sha512-w/XBfkibaTl3YDqASwfDUqkna4Z2p9cFSr1aHDt0WoMTECnRfBOv2WArlZILlqgWlmdIlALXGpM2AOhEk5W3IA==}
-    engines: {node: '>=0.8'}
 
   fraction.js@5.3.4:
     resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
@@ -15564,6 +15623,11 @@ packages:
       react-dom:
         optional: true
 
+  mprocs@0.9.6:
+    resolution: {integrity: sha512-sEwB5XD3/rReB47h0YbN2L5fXOLcMjF8sOEDTMr/daCLyVZfU4CegbanxO0ybiaFx0MQ/nV7yzOHmprmy2Wq9w==}
+    engines: {node: '>=0.10.0'}
+    hasBin: true
+
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
     engines: {node: '>=4'}
@@ -16697,6 +16761,9 @@ packages:
     resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
     engines: {node: '>=12'}
 
+  posthog-js@1.413.2:
+    resolution: {integrity: sha512-LddTVMdYFd0jB+p5h3ZHcho9mWNjgKn9QySCQt74iISKrmC3b7KzW2Q7W7aOF6m/NwK7NubIHqLujCER64gSRw==}
+
   postject@1.0.0-alpha.6:
     resolution: {integrity: sha512-b9Eb8h2eVqNE8edvKdwqkrY6O7kAwmI8kcnBv1NScolYJbo59XUF0noFq+lxbC1yN20bmC0WBEbDC5H/7ASb0A==}
     engines: {node: '>=14.0.0'}
@@ -16711,6 +16778,14 @@ packages:
 
   pptxgenjs@4.0.1:
     resolution: {integrity: sha512-TeJISr8wouAuXw4C1F/mC33xbZs/FuEG6nH9FG1Zj+nuPcGMP5YRHl6X+j3HSUnS1f3at6k75ZZXPMZlA5Lj9A==}
+
+  preact@10.29.8:
+    resolution: {integrity: sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==}
+    peerDependencies:
+      preact-render-to-string: '>=5'
+    peerDependenciesMeta:
+      preact-render-to-string:
+        optional: true
 
   prebuild-install@7.1.3:
     resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
@@ -16957,6 +17032,9 @@ packages:
   qs@6.15.2:
     resolution: {integrity: sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==}
     engines: {node: '>=0.6'}
+
+  query-selector-shadow-dom@1.0.1:
+    resolution: {integrity: sha512-lT5yCqEBgfoMYpf3F2xQRK7zEr1rhIIZuceDK6+xRkJQ4NMbHTwXqk4NkwDwQMNqXgG9r9fyHnzwNVs6zV5KRw==}
 
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
@@ -18123,10 +18201,6 @@ packages:
 
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
-
-  ssf@0.11.2:
-    resolution: {integrity: sha512-+idbmIXoYET47hH+d7dfm2epdOMUDjqcB4648sTZ+t2JwoyBFL/insLfB/racrDmsKB3diwsDA696pZMieAC5g==}
-    engines: {node: '>=0.8'}
 
   sshpk@1.18.0:
     resolution: {integrity: sha512-2p2KJZTSqQ/I3+HX42EpYOa2l3f8Erv8MWKsy2I9uf4wA7yFIkXRffYdsx86y6z4vHtV8u7g+pPlr8/4ouAxsQ==}
@@ -19536,6 +19610,9 @@ packages:
   web-vitals@5.3.0:
     resolution: {integrity: sha512-q6LWsLatGYZp5VGBIOvbTj6JBV2nOmC8KvWztXBmwJcfFAzhwKwbOxhUH306XY3CcaZDUlSmSuNPBsCn0bFu+g==}
 
+  web-vitals@6.0.0:
+    resolution: {integrity: sha512-Guaibvy/+uNtL6Bsu4jmMJGzuSl91oeRH5iO9pPRbYftnFUr3yqT1TUNX/OE4o9HexuEMU3Kb/Wg7iKhlffZUA==}
+
   web-worker@1.5.0:
     resolution: {integrity: sha512-RiMReJrTAiA+mBjGONMnjVDP2u3p9R1vkcGz6gDIrOMT3oGuYwX2WRMYI9ipkphSuE5XKEhydbhNEJh4NY9mlw==}
 
@@ -19658,17 +19735,9 @@ packages:
     resolution: {integrity: sha512-LZNJgPzfKR+/J3cHkxcpHKpKKvGfDZVPS4hfJCc4cCG0CgYzvlD6yE/S3CIL/Yt91ak327YCpiF/0MyeZHEHKA==}
     engines: {node: '>= 12.0.0'}
 
-  wmf@1.0.2:
-    resolution: {integrity: sha512-/p9K7bEh0Dj6WbXg4JG0xvLQmIadrner1bi45VMJTfnbVHsc7yIajZyoSoK60/dtVBs12Fm6WkUI5/3WAVsNMw==}
-    engines: {node: '>=0.8'}
-
   word-wrap@1.2.5:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
-
-  word@0.3.0:
-    resolution: {integrity: sha512-OELeY0Q61OXpdUfTp+oweA/vtLVg5VDOXh+3he3PNzLGG/y0oylSOC1xRVj0+l4vQ3tj/bB1HVHv1ocXkQceFA==}
-    engines: {node: '>=0.8'}
 
   wordwrap@1.0.0:
     resolution: {integrity: sha512-gvVzJFlPycKc5dZN4yPkP8w7Dc37BtP1yczEneOb4uq34pXZcvrtRTmWV8W+Ume+XCxKgbjM+nevkyFPMybd4Q==}
@@ -19715,11 +19784,6 @@ packages:
   wsl-utils@0.3.1:
     resolution: {integrity: sha512-g/eziiSUNBSsdDJtCLB8bdYEUMj4jR7AGeUo96p/3dTafgjHhpF4RiCFPiRILwjQoDXx5MqkBr4fwWtR3Ky4Wg==}
     engines: {node: '>=20'}
-
-  xlsx@0.18.5:
-    resolution: {integrity: sha512-dmg3LCjBPHZnQp5/F/+nnTa+miPJxUXB6vtk42YjBBKayDNagxGEeIdWApkYPOf3Z3pm3k62Knjzp7lMeTEtFQ==}
-    engines: {node: '>=0.8'}
-    hasBin: true
 
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
@@ -22791,7 +22855,7 @@ snapshots:
       pdf-parse: 2.4.5
       tunnel: 0.0.6
       uuid: 9.0.1
-      xlsx: 0.18.5
+      xlsx: '@e965/xlsx@0.20.3'
       yauzl: 3.4.0
       zod: 3.25.76
     optionalDependencies:
@@ -25620,6 +25684,17 @@ snapshots:
 
   '@postgresql-typed/oids@0.2.0': {}
 
+  '@posthog/browser-common@0.4.0':
+    dependencies:
+      '@posthog/core': 1.46.8
+      '@posthog/types': 1.402.1
+
+  '@posthog/core@1.46.8':
+    dependencies:
+      '@posthog/types': 1.402.1
+
+  '@posthog/types@1.402.1': {}
+
   '@preact/signals-core@1.14.4': {}
 
   '@prisma/client@5.22.0(prisma@5.22.0)':
@@ -27623,6 +27698,8 @@ snapshots:
   '@tanstack/virtual-core@3.17.7': {}
 
   '@teppeis/multimaps@3.0.0': {}
+
+  '@terrastruct/d2@0.1.33': {}
 
   '@tiptap/core@3.29.2(@tiptap/pm@3.29.2)':
     dependencies:
@@ -30528,8 +30605,6 @@ snapshots:
       '@codemirror/state': 6.7.1
       '@codemirror/view': 6.43.7
 
-  codepage@1.15.0: {}
-
   cohere-ai@6.2.2: {}
 
   collapse-white-space@2.1.0: {}
@@ -30844,6 +30919,8 @@ snapshots:
 
   copy-to@2.0.1:
     optional: true
+
+  core-js@3.50.0: {}
 
   core-util-is@1.0.2: {}
 
@@ -33026,6 +33103,8 @@ snapshots:
       node-domexception: 1.0.0
       web-streams-polyfill: 3.3.3
 
+  fflate@0.4.9: {}
+
   fflate@0.6.11: {}
 
   fflate@0.7.5: {}
@@ -33286,8 +33365,6 @@ snapshots:
   forwarded-parse@2.1.2: {}
 
   forwarded@0.2.0: {}
-
-  frac@1.1.2: {}
 
   fraction.js@5.3.4: {}
 
@@ -36841,6 +36918,8 @@ snapshots:
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
 
+  mprocs@0.9.6: {}
+
   mri@1.2.0: {}
 
   ms@2.0.0: {}
@@ -38031,6 +38110,21 @@ snapshots:
 
   postgres@3.4.9: {}
 
+  posthog-js@1.413.2:
+    dependencies:
+      '@posthog/browser-common': 0.4.0
+      '@posthog/core': 1.46.8
+      '@posthog/types': 1.402.1
+      core-js: 3.50.0
+      dompurify: 3.4.11
+      fflate: 0.4.9
+      preact: 10.29.8
+      query-selector-shadow-dom: 1.0.1
+      web-vitals: 5.3.0
+      web-vitals-soft-navs: web-vitals@6.0.0
+    transitivePeerDependencies:
+      - preact-render-to-string
+
   postject@1.0.0-alpha.6:
     dependencies:
       commander: 9.5.0
@@ -38046,6 +38140,8 @@ snapshots:
       https: 1.0.0
       image-size: 1.2.1
       jszip: 3.10.1
+
+  preact@10.29.8: {}
 
   prebuild-install@7.1.3:
     dependencies:
@@ -38307,6 +38403,8 @@ snapshots:
   qs@6.15.2:
     dependencies:
       side-channel: 1.1.1
+
+  query-selector-shadow-dom@1.0.1: {}
 
   queue-microtask@1.2.3: {}
 
@@ -39910,10 +40008,6 @@ snapshots:
   sprintf-js@1.1.3:
     optional: true
 
-  ssf@0.11.2:
-    dependencies:
-      frac: 1.1.2
-
   sshpk@1.18.0:
     dependencies:
       asn1: 0.2.6
@@ -41498,6 +41592,8 @@ snapshots:
 
   web-vitals@5.3.0: {}
 
+  web-vitals@6.0.0: {}
+
   web-worker@1.5.0: {}
 
   webcrypto-core@1.9.2:
@@ -41649,11 +41745,7 @@ snapshots:
       triple-beam: 1.4.1
       winston-transport: 4.9.0
 
-  wmf@1.0.2: {}
-
   word-wrap@1.2.5: {}
-
-  word@0.3.0: {}
 
   wordwrap@1.0.0: {}
 
@@ -41696,16 +41788,6 @@ snapshots:
     dependencies:
       is-wsl: 3.1.1
       powershell-utils: 0.1.0
-
-  xlsx@0.18.5:
-    dependencies:
-      adler-32: 1.3.1
-      cfb: 1.2.2
-      codepage: 1.15.0
-      crc-32: 1.2.2
-      ssf: 0.11.2
-      wmf: 1.0.2
-      word: 0.3.0
 
   xml-name-validator@5.0.0: {}
 

@@ -7,6 +7,7 @@ matches what you are doing.
 
 | I want to… | Go to |
 | ---------- | ----- |
+| Set up a machine that has nothing installed | [Local Setup](local-setup.md) |
 | Check I have the right tooling | [Prerequisites](prerequisites.md) |
 | Get a full local environment running | [Local Development](local-development.md) |
 | Make the AI features actually respond | [AI Providers](ai-providers.md) |
@@ -22,20 +23,27 @@ pnpm install
 pnpm run up
 ```
 
-`pnpm run up` is an alias for `pnpm run bootstrap`, which chains every setup step from
-[Local Development](local-development.md) in order. Each is also runnable on its own:
+`pnpm run up` runs the setup steps from [Local Development](local-development.md) in
+order, asks what you actually need along the way, and finishes in a multi-pane
+process TUI. Each step is also runnable on its own:
 
 | Step | Command | What it does |
 | ---- | ------- | ------------ |
 | 1 | `pnpm run env:setup` | Copies each app's `.env.example` to the filename that app reads; never overwrites an existing file |
 | 2 | `pnpm run setup` | Installs the workspace and builds `@xyne/shared`, `@xyne/icons`, `agentic-framework` |
 | 3 | `pnpm run secrets` | Fills the `set-me` placeholders in `apps/backend/.env.local` (JWT, encryption, VAPID) |
-| 4 | `pnpm run services` | Starts infrastructure containers and waits for health checks |
-| 5 | `pnpm run dev:all` | Runs backend, dashboard, xyne-claw, and claw-auth together |
+| 4 | `pnpm run services` | Asks which infrastructure features you need, checks their ports are free, starts the containers, waits for health checks |
+| 5 | `pnpm run dev` | Asks which apps to run, then opens them in a multi-pane TUI — one isolated pane per process, `r` to restart one, `q` to quit all |
 
 Steps run serially and the chain stops at the first failure, so a broken step is never
-masked by a later one. Every step is idempotent — re-running `bootstrap` on an existing
-checkout is safe and will not overwrite env files or real secrets.
+masked by a later one. Every step is idempotent — re-running `up` on an existing
+checkout is safe and will not overwrite env files or real secrets. Both pickers
+remember your previous answers (in the gitignored `.xyne/` directory).
+
+Non-interactive escape hatches: `pnpm run bootstrap:raw` runs the whole chain with
+no prompts and plain interleaved logs (CI-safe), `XYNE_DEV_APPS=all pnpm run dev`
+skips the app picker, and `XYNE_FEATURES=1 pnpm run services` skips the feature
+picker.
 
 Stop the infrastructure with `pnpm run services:stop`.
 

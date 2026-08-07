@@ -10,11 +10,11 @@ import {
 import { Button } from '../ui/Button';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
-import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
+import { useChannel, useChannelParticipation } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
-import { X, FileText, ClipboardCheck, Hash } from 'lucide-react';
+import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight } from 'lucide-react';
 import {
   ArrowLeft,
   ArrowTurnDownRight,
@@ -35,6 +35,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
@@ -49,6 +52,9 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
 import { BotBubble } from './BotBubble';
+import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
+import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
+import { useShowThreadTags } from '../../hooks/useShowThreadTags';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
@@ -73,6 +79,14 @@ import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
+import { ThreadAssistDock, type TwinSourceInfo } from './TwinReplyDraft/ThreadAssistDock';
+import { TwinReasoningDrawer } from './TwinReplyDraft/TwinReasoningDrawer';
+import { useThreadAssist } from './TwinReplyDraft/useThreadAssist';
+import type {
+  PostedTarget,
+  TwinReplyDraftView,
+  TwinEditSession,
+} from './TwinReplyDraft/twinReplyDraftApi';
 import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
@@ -176,7 +190,10 @@ export const ThreadMessages = ({
   const isFocusedThread = searchParams.get('focusThread') === '1';
   const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';
 
-  const participationStatus = useGetChannelUserStatus(derivedChannelId);
+  // The initial visible-channel cache excludes closed DMs. Query the specific
+  // channel as a fallback so a subscribed thread in a closed DM is not treated
+  // as proof that the user is a non-member.
+  const participationStatus = useChannelParticipation(derivedChannelId);
   const isMember = !!participationStatus;
 
   // Single enriched query: replaces getConversationById + ticketById + conversationMessagesV2
@@ -185,7 +202,15 @@ export const ThreadMessages = ({
     () =>
       queries.threadConversationV2({
         conversationId: derivedConversationId || ' ',
-        ...(derivedChannelId ? { channelId: derivedChannelId, isMember } : {}),
+        // While membership is unresolved, omit isMember instead of passing
+        // false. The general ACL can then check channel_participants directly;
+        // passing false would reject a private DM before status hydration.
+        ...(derivedChannelId
+          ? {
+              channelId: derivedChannelId,
+              ...(isMember ? { isMember: true } : {}),
+            }
+          : {}),
       }),
     [derivedConversationId, derivedChannelId, isMember],
   );
@@ -209,6 +234,14 @@ export const ThreadMessages = ({
     }
 
     return source;
+  }, [propConversationParticipant, conversation?.participants]);
+
+  const isThreadParticipant = useMemo(() => {
+    const source =
+      propConversationParticipant !== undefined
+        ? propConversationParticipant
+        : conversation?.participants;
+    return !!source;
   }, [propConversationParticipant, conversation?.participants]);
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
@@ -252,6 +285,14 @@ export const ThreadMessages = ({
     }
     return set;
   }, [messages]);
+  const assist = useThreadAssist(
+    derivedConversationId,
+    currentUser?.id,
+    messages,
+    conversationParticipant.lastReadAt ?? 0,
+    isMessagesLoaded,
+    isThreadParticipant,
+  );
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, currentUser?.id ?? '');
@@ -325,6 +366,137 @@ export const ThreadMessages = ({
   // Navigation for thread summary
   const navigate = useNavigate();
   const location = useLocation();
+
+  const handleTwinPosted = useCallback(
+    (target: PostedTarget | null) => {
+      if (!target?.channelId) return;
+      const sameThread =
+        target.channelId === derivedChannelId &&
+        (target.conversationId ?? '') === (derivedConversationId ?? '');
+      if (sameThread) return;
+      const path = target.conversationId
+        ? `${baseRoute}/${target.channelId}/${target.conversationId}#origin=${target.conversationId}`
+        : `${baseRoute}/${target.channelId}`;
+      void navigate(path);
+    },
+    [navigate, baseRoute, derivedChannelId, derivedConversationId],
+  );
+
+  const [reasoningDraft, setReasoningDraft] = useState<TwinReplyDraftView | undefined>(undefined);
+
+  const [twinEditDraftId, setTwinEditDraftId] = useState<string | null>(null);
+  const editingTwinDraft = useMemo(
+    () => assist.reply.drafts.find(d => d.id === twinEditDraftId) ?? null,
+    [assist.reply.drafts, twinEditDraftId],
+  );
+  useEffect(() => {
+    if (twinEditDraftId && !editingTwinDraft) setTwinEditDraftId(null);
+  }, [twinEditDraftId, editingTwinDraft]);
+
+  const exitTwinEdit = (): void => {
+    setTwinEditDraftId(null);
+  };
+
+  const twinEditSession: TwinEditSession | undefined = editingTwinDraft
+    ? {
+        draftId: editingTwinDraft.id,
+        message: editingTwinDraft.message ?? '',
+        ...(editingTwinDraft.senderName ? { senderName: editingTwinDraft.senderName } : {}),
+        onApprove: (editedText: string) => {
+          void (async () => {
+            try {
+              const posted = await assist.reply.approve(
+                editingTwinDraft.id,
+                editedText || undefined,
+              );
+              exitTwinEdit();
+              handleTwinPosted(posted);
+            } catch {
+              toast.error('Failed to send reply', {
+                description: 'Your edit was kept — please try again.',
+              });
+            }
+          })();
+        },
+      }
+    : undefined;
+
+  const messagesById = useMemo(() => {
+    const map = new Map<string, { content?: unknown }>();
+    for (const m of messages) map.set(m.messageId, m);
+    return map;
+  }, [messages]);
+
+  const resolveTwinSource = useCallback(
+    (draft: TwinReplyDraftView): TwinSourceInfo => {
+      const srcId = draft.sourceMessageId;
+      const srcMsg = srcId ? messagesById.get(srcId) : undefined;
+      const rawContent = srcMsg && typeof srcMsg.content === 'string' ? srcMsg.content : undefined;
+      let text: string | undefined;
+      if (rawContent && typeof DOMParser !== 'undefined') {
+        try {
+          text =
+            (
+              new DOMParser().parseFromString(rawContent, 'text/html').body.textContent || ''
+            ).trim() || undefined;
+        } catch {
+          text = undefined;
+        }
+      }
+      const onJump =
+        srcId && derivedConversationId
+          ? () => {
+              const el = document.getElementById(
+                `thread-message-${derivedConversationId}-${srcId}`,
+              );
+              if (!el) return;
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.animate(
+                [{ backgroundColor: 'rgba(99,102,241,0.14)' }, { backgroundColor: 'transparent' }],
+                { duration: 1400, easing: 'ease-out' },
+              );
+            }
+          : undefined;
+      return {
+        ...(draft.senderName ? { name: draft.senderName } : {}),
+        ...(text ? { text } : {}),
+        ...(onJump ? { onJump } : {}),
+      };
+    },
+    [messagesById, derivedConversationId],
+  );
+
+  const renderTwinDock = (attached: boolean) =>
+    assist.available ? (
+      <ThreadAssistDock
+        key='twin-dock'
+        hasRecap={assist.hasRecap}
+        hasReply={assist.hasReply}
+        tab={assist.tab}
+        onTabChange={assist.setTab}
+        collapsed={assist.collapsed}
+        onToggleCollapse={assist.toggleCollapse}
+        recap={assist.recap}
+        reply={assist.reply}
+        onPosted={handleTwinPosted}
+        onOpenReasoning={setReasoningDraft}
+        resolveSource={resolveTwinSource}
+        attached={attached}
+        {...(attached && { onBeginEdit: (d: TwinReplyDraftView) => setTwinEditDraftId(d.id) })}
+        {...(attached && editingTwinDraft && { onEditBack: exitTwinEdit })}
+      />
+    ) : null;
+  const twinDock = renderTwinDock(true);
+  const twinDockCard = renderTwinDock(false);
+
+  const reasoningDrawer = (
+    <TwinReasoningDrawer
+      open={!!reasoningDraft}
+      draft={reasoningDraft}
+      conversationId={derivedConversationId ?? ''}
+      onClose={() => setReasoningDraft(undefined)}
+    />
+  );
 
   // Check if the route is /threads (with optional workspace prefix)
   const isThreadsRoute = location.pathname.endsWith('/chat/dir/threads');
@@ -508,6 +680,9 @@ export const ThreadMessages = ({
   // Create thread info for XyneAI context
   const initialMessage = conversation?.messages?.[0] ?? null;
   const initialMessageSender = useUser(initialMessage?.senderId || '');
+  const setThreadTypes = useSetThreadTypes(derivedConversationId);
+  const { showThreadTags } = useShowThreadTags();
+
   const threadInfo: ThreadInfo | null = useMemo(() => {
     if (!derivedConversationId || !initialMessage) return null;
 
@@ -776,6 +951,7 @@ export const ThreadMessages = ({
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
+        {reasoningDrawer}
         <Tabs.Root
           value={underTicketActiveTab}
           onValueChange={value => setUnderTicketActiveTab(value as UnderTicketTabType)}
@@ -887,8 +1063,12 @@ export const ThreadMessages = ({
                   placeholder='Reply to this thread...'
                   hasTicket={hasTicketInMessages}
                   threadParticipantIds={threadParticipantIds}
+                  dockSlot={twinDock}
+                  twinEdit={twinEditSession}
                 />
               </div>
+            ) : previewCardMode && assist.hasReply ? (
+              <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
             ) : (
               <JoinChannel
                 channelId={derivedChannelId}
@@ -939,6 +1119,7 @@ export const ThreadMessages = ({
         <DragAndDropOverlay isVisible={isDragging} />
         {/* pt-3 only (not py-3): a second padded header always follows this one, and its
             own pt-3 supplies the 12px below — py-3 here would double it to 24px. */}
+        {reasoningDrawer}
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0'>
@@ -1050,6 +1231,32 @@ export const ThreadMessages = ({
                       <MaximizeTwoArrow size={16} className='shrink-0' />
                       <span className='flex-1'>Expand view</span>
                     </DropdownMenuItem>
+                  )}
+                  {showThreadTags && !channel?.isArchived && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger
+                        className='gap-2'
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='OPEN_THREAD_TAG_MENU'
+                      >
+                        <TagIcon size={16} className='shrink-0' />
+                        <span className='flex-1'>Thread tags</span>
+                        <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className='min-w-[220px]'>
+                        <ThreadTagMenuItems
+                          applied={parseThreadTypes(conversation?.threadType)}
+                          onToggle={name => {
+                            const applied = parseThreadTypes(conversation?.threadType);
+                            void setThreadTypes(
+                              applied.includes(name)
+                                ? applied.filter(value => value !== name)
+                                : [...applied, name],
+                            );
+                          }}
+                        />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   )}
                   {!isMobile && !channel?.isArchived && (
                     <DropdownMenuItem
@@ -1199,8 +1406,12 @@ export const ThreadMessages = ({
                         placeholder='Reply to this thread...'
                         hasTicket={hasTicketInMessages}
                         threadParticipantIds={threadParticipantIds}
+                        dockSlot={twinDock}
+                        twinEdit={twinEditSession}
                       />
                     </div>
+                  ) : previewCardMode && assist.hasReply ? (
+                    <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                   ) : (
                     <JoinChannel
                       channelId={derivedChannelId}
@@ -1291,6 +1502,15 @@ export const ThreadMessages = ({
                         ? ticket.title
                         : 'Thread message'}
                   </h3>
+                  {/* Classifies the whole thread, so it belongs beside the title rather
+                      than against any one message. */}
+                  {!simpleView && (
+                    <ThreadTags
+                      conversationId={derivedConversationId}
+                      threadType={conversation?.threadType}
+                      canEdit
+                    />
+                  )}
                   {!simpleView && focusedChannelBreadcrumb}
                 </div>
 
@@ -1360,6 +1580,32 @@ export const ThreadMessages = ({
                             className='px-2 py-1.5'
                           />
                         </DropdownMenuItem>
+                      )}
+                      {showThreadTags && !channel?.isArchived && (
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger
+                            className='gap-2'
+                            data-track-category='THREAD_PANEL'
+                            data-track-name='OPEN_THREAD_TAG_MENU'
+                          >
+                            <TagIcon size={16} className='shrink-0' />
+                            <span className='flex-1'>Thread tags</span>
+                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className='min-w-[220px]'>
+                            <ThreadTagMenuItems
+                              applied={parseThreadTypes(conversation?.threadType)}
+                              onToggle={name => {
+                                const applied = parseThreadTypes(conversation?.threadType);
+                                void setThreadTypes(
+                                  applied.includes(name)
+                                    ? applied.filter(value => value !== name)
+                                    : [...applied, name],
+                                );
+                              }}
+                            />
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
                       )}
                       {!isMobile && !channel?.isArchived && (
                         <DropdownMenuItem
@@ -1455,8 +1701,12 @@ export const ThreadMessages = ({
                       placeholder='Reply to this thread...'
                       hasTicket={hasTicketInMessages}
                       threadParticipantIds={threadParticipantIds}
+                      dockSlot={twinDock}
+                      twinEdit={twinEditSession}
                     />
                   </div>
+                ) : previewCardMode && assist.hasReply ? (
+                  <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                 ) : (
                   <JoinChannel
                     channelId={derivedChannelId}

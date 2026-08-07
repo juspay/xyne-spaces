@@ -6,7 +6,7 @@ import { decrypt } from "../crypto.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
-import { gcsService } from "../services/gcsService.js";
+import { gcsService } from "../services/storageService.js";
 import {
   normalizeAttachedContext,
   buildAttachedContextPayload,

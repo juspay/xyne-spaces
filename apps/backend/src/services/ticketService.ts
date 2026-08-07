@@ -5,14 +5,14 @@ import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
-import { PRStatusEvent, BoardType, ActivityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType, isReleaseTicket } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2 } from '@xyne/shared';
 import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
 import { dualWriteTicketTags, dualDeleteTicketTag } from '@/services/ticketTagDualWriteService';
 
@@ -229,7 +229,7 @@ export class TicketService {
     if (
       params.status === 'COMPLETED'
       && prevSnapshot
-      && prevSnapshot.statusV2 !== 'COMPLETED'
+      && prevSnapshot.statusV2 !== TicketStatusV2.COMPLETED
       && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
     ) {
       // The ticket update above is already committed; deployed-version

@@ -1,16 +1,12 @@
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import {
-  DashboardRole,
-  DashboardVisibility,
-  Prisma,
-  QueryVisualizationType,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import {
   DashboardAiCreateRequestSchema,
   QueryVisualizationType as SharedVisualizationType,
-} from '@xyne/shared';
+  DashboardRole,
+  DashboardVisibility, QueryType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -262,9 +258,9 @@ export class DashboardController {
           data: {
             workspaceId: ctx.workspaceId,
             title: c.title ?? null,
-            queryType: 'external',
+            queryType: QueryType.external,
             queryJson: c.queryJson,
-            visualType: c.visualType as QueryVisualizationType,
+            visualType: c.visualType as SharedVisualizationType,
             position: c.position,
             config: c.config ?? '{}',
             createdBy: ctx.userId,
@@ -339,7 +335,7 @@ export class DashboardController {
         res.status(404).json({ error: 'NotFound', message: 'Dashboard not found' });
         return;
       }
-      if (!(await userCanReadDashboard(dashboard, ctx.userId))) {
+      if (!(await userCanReadDashboard(dashboard as Parameters<typeof userCanReadDashboard>[0], ctx.userId))) {
         res.status(404).json({ error: 'NotFound', message: 'Dashboard not found' });
         return;
       }
@@ -377,7 +373,7 @@ export class DashboardController {
         res.status(404).json({ error: 'NotFound', message: 'Dashboard not found' });
         return;
       }
-      if (!(await userCanReadDashboard(dashboard, ctx.userId))) {
+      if (!(await userCanReadDashboard(dashboard as Parameters<typeof userCanReadDashboard>[0], ctx.userId))) {
         res.status(404).json({ error: 'NotFound', message: 'Dashboard not found' });
         return;
       }
@@ -882,7 +878,7 @@ export class DashboardController {
       return;
     }
 
-    if (!(await userCanReadDashboard(dashboard, userId))) {
+    if (!(await userCanReadDashboard(dashboard as Parameters<typeof userCanReadDashboard>[0], userId))) {
       res.status(404).json({ error: 'NotFound', message: 'Component not found' });
       return;
     }
@@ -1222,10 +1218,10 @@ export class DashboardController {
           });
           return;
         case 'execution_failed':
+          // Return a generic message; the detail is logged server-side in QueryExecutor.
           res.status(500).json({
             error: 'InternalServerError',
-            message: e.message,
-            details: e.details,
+            message: 'Query execution failed.',
           });
           return;
       }

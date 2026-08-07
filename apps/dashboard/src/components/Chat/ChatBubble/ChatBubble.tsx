@@ -39,6 +39,8 @@ import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUti
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
+import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -903,7 +905,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // bubble only keeps its current per-message capabilities/handlers registered
   // (keyed by a per-instance id stamped on the root node as data-hover-key) so
   // the overlay can derive them at show time. Hover never sets state here.
+
   const hoverToolbarKey = useId();
+  const appliedThreadTypes = useMemo(
+    () => parseThreadTypes(conversation?.threadType),
+    [conversation?.threadType],
+  );
+  const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
+  const { showThreadTags } = useShowThreadTags();
+
   const canShowHoverToolbar =
     !isMobile &&
     !searchItemView &&
@@ -935,6 +945,24 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }),
       reactionsMd: message.reactions_md,
       onCopyLink,
+      // Channel rows only: inside a thread the panel header already carries this, and the
+      // tag is the thread's — one entry point per thread, not one per reply.
+      ...(showThreadTags &&
+        context === 'channel' &&
+        !isSystemMessage &&
+        !isMessageDeleted &&
+        conversation?.conversationId && {
+          threadTags: {
+            applied: appliedThreadTypes,
+            onToggle: (name: string) => {
+              void setThreadTypes(
+                appliedThreadTypes.includes(name)
+                  ? appliedThreadTypes.filter(value => value !== name)
+                  : [...appliedThreadTypes, name],
+              );
+            },
+          },
+        }),
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
@@ -1200,6 +1228,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
             {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(context === 'channel' &&
+              !isSystemMessage &&
+              !isMessageDeleted && {
+                headerContent: (
+                  <ThreadTags
+                    conversationId={conversation?.conversationId}
+                    threadType={conversation?.threadType}
+                    canEdit
+                  />
+                ),
+              })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,

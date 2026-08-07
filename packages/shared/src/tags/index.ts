@@ -51,3 +51,6 @@ export const findDuplicateTags = (list: string[] | undefined): DuplicateTag[] =>
   });
   return duplicates;
 };
+
+// Controlled classification vocabularies (message acts / thread types).
+export * from './vocabularies';

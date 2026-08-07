@@ -10,6 +10,7 @@ import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { vespaFileWorker } from './workers/vespaFileWorker'
+import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
@@ -38,6 +39,7 @@ import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
+import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 config()
@@ -76,6 +78,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
     const workflowType = process.env.WORKFLOW_TYPE
@@ -154,6 +157,15 @@ class WorkerService {
       if (callValidationEnabled) {
         logger.info('Starting call validation worker service...');
         await callValidationWorker.start();
+      }
+
+      // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
+      // this worker consumes. Both sides call initialize(), which no-ops when the flag is
+      // off — so with it off nothing is produced either, and no backlog builds up.
+      if (messageClassificationEnabled) {
+        logger.info('Starting message classification worker service...')
+        await messageClassificationQueue.initialize()
+        messageClassificationQueue.startProcessing()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -274,6 +286,12 @@ class WorkerService {
 
         tagGenerationPipeline.onCompleted(DESK_EMAIL_SOURCE_TYPE, (result) => {
           void enqueueTagVespaRefeed(DESK_EMAIL_SOURCE_TYPE, result.sourceId);
+          logger.info(`Tag generation completed for sourceId=${result.sourceId}, emitting tagGenerated event...`);
+          void emitTagGenerated({
+            sourceId: result.sourceId,
+            sourceType: result.sourceType,
+            tags: result.tags.map(t => ({ category: t.tagCategory, tag: t.tag, reason: t.reason ?? null })),
+          });
         });
       }
 
@@ -333,6 +351,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
       if (enableRecovery) {
@@ -378,6 +397,10 @@ class WorkerService {
 
       if (callValidationEnabled) {
         await callValidationWorker.stop();
+      }
+
+      if (messageClassificationEnabled) {
+        await messageClassificationQueue.shutdown()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {

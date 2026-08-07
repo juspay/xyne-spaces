@@ -1,7 +1,8 @@
-import { ActivityClassification } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityClassification } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -17,6 +18,7 @@ import {
   type TicketUpdatedField,
 } from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 const TICKET_UPDATED_FIELDS: ReadonlyArray<TicketUpdatedField> = TicketUpdatedFieldSchema.options;
 
@@ -109,7 +111,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     if (Object.keys(changes).length > 0) {
       const fullTicket = await db.ticket.findUnique({ where: { id: ticketId } });
       if (fullTicket) {
-        void emitTicketUpdated({ ticket: fullTicket, changes, performedById: actorId });
+        void emitTicketUpdated({ ticket: fullTicket as TicketLike, changes, performedById: actorId });
         const snapshot = (await buildKanbanCountsSnapshot(ticketId)) ?? {
           id: fullTicket.id,
           workspaceId: fullTicket.workspaceId,
@@ -215,13 +217,16 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     let subscribedParticipants: string[] = [];
     if (ticket.conversationId) {
       try {
-        const participants = await db.conversationParticipant.findMany({
-          where: {
-            conversationId: ticket.conversationId,
-            isSubscribed: true,
-          },
-          select: { userId: true },
-        });
+        // Fans out to every subscriber, so it runs above the caller's own scope.
+        const participants = await withWorkspaceScope(() =>
+          db.conversationParticipant.findMany({
+            where: {
+              conversationId: ticket.conversationId,
+              isSubscribed: true,
+            },
+            select: { userId: true },
+          }),
+        );
         subscribedParticipants = participants.map(p => p.userId);
       } catch (error) {
         logger.warn(`[TicketsSideEffectHandler] Failed to fetch conversation participants for ticket ${ticketId}:`, error);

@@ -1,4 +1,5 @@
-import { PrismaClient, FormFieldType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { FormFieldType } from '@xyne/shared';
 import { FieldInfo, FieldType, AvailableFields, getPrismaModelName, isSupportedEntityType, isValidFormEntityType } from './types';
 import {logger} from '@/utils/logger';
 
@@ -196,7 +197,7 @@ export class GenericFieldRegistry {
           continue;
         }
 
-        const fieldType = FORM_FIELD_TYPE_MAPPING[rawFieldType];
+        const fieldType = FORM_FIELD_TYPE_MAPPING[rawFieldType as FormFieldType];
 
         // Determine sortable, filterable, aggregatable based on field type
         const sortable = fieldType === 'string' || fieldType === 'number' || fieldType === 'date' || fieldType === 'boolean';

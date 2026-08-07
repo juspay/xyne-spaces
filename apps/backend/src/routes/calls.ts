@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import { callController } from '@/controllers/callController';
+import { recordingEmailController } from '@/controllers/recordingEmailController';
 import { callHostControlController } from '@/controllers/callHostControlController';
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
+import { summaryTemplateController } from '@/controllers/summaryTemplateController';
+import { recordingSharingController } from '@/controllers/recordingSharingController';
+import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
 
 const router = Router();
 
@@ -18,9 +22,21 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
+router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.get(
+  '/recordings/:callId/email-compose-context',
+  recordingEmailController.getComposeContext,
+);
+router.post('/recordings/:callId/send-email', recordingEmailController.sendRecordingEmail);
+router.post('/recordings/:callId/export-google-doc', recordingGoogleDocController.export);
+router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
+router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
+router.get('/summary-templates', summaryTemplateController.list);
+router.post('/summary-templates', summaryTemplateController.create);
+router.patch('/summary-templates/:templateId', summaryTemplateController.update);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 

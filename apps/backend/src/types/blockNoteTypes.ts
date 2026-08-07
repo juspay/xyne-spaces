@@ -35,8 +35,36 @@ interface BlockNoteLinkContent {
     content: BlockNoteTextInline[];
 }
 
+/**
+ * Inline citation chip in a call-summary canvas. Emitted by callDocumentService
+ * from `[clf-<n>]` tokens the summariser LLM writes; each maps to one transcript
+ * segment. Props are self-contained so the citation survives canvas regeneration
+ * (no external map to keep in sync) — mirrors how mentions carry their own props.
+ * The frontend CanvasCitationSpec renders these as a clickable chip that opens
+ * the transcript at `timestamp`. Prop keys MUST match the frontend + server specs.
+ */
+export interface BlockNoteCitationInline {
+    type: 'citation';
+    props: {
+        /** Call externalId — tells the chip which transcript to open. */
+        callId: string;
+        /** 1-based transcript segment number (display + ordering). */
+        segment: string;
+        /** Segment start time as "MM:SS" / "HH:MM:SS" — the transcript deep-link target. */
+        timestamp: string;
+        /** Speaker name for the cited segment. */
+        speaker: string;
+        /** Resolved participant userId for the speaker (best-effort; '' if unmatched) → real avatar. */
+        speakerId: string;
+        /** Short excerpt of the cited segment text (hover preview). */
+        snippet: string;
+        /** JSON array of ALL segments in this (possibly grouped) citation:
+         *  `[{n,timestamp,speaker,speakerId,snippet}]`. Length 1 for a single citation. */
+        segments: string;
+    };
+}
 
-export type BlockNoteInlineContent = BlockNoteTextInline | BlockNoteMentionInline | BlockNoteLinkContent;
+export type BlockNoteInlineContent = BlockNoteTextInline | BlockNoteMentionInline | BlockNoteLinkContent | BlockNoteCitationInline;
 
 // ---------------------------------------------------------------------------
 // Block types

@@ -44,6 +44,7 @@ interface TicketListViewProps {
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
+    conversationLabelId?: string | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onTicketClick: (ticket: SupportTicketRow) => void;
@@ -115,6 +116,7 @@ export const TicketListView = function TicketListView({
     lastEmailAtStart,
     lastEmailAtEnd,
     dynamicFieldFilters,
+    conversationLabelId,
   } = filter;
 
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
@@ -146,6 +148,7 @@ export const TicketListView = function TicketListView({
       dynamicFieldFilters,
       limit: fetchLimit,
       userGroups,
+      ...(conversationLabelId ? { conversationLabelId } : {}),
       start: pageStart,
       dir: 'forward',
     }),
@@ -169,6 +172,7 @@ export const TicketListView = function TicketListView({
         ds: lastEmailAtStart ?? null,
         de: lastEmailAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
+        l: conversationLabelId ?? null,
       }),
     [
       channelId,
@@ -183,6 +187,7 @@ export const TicketListView = function TicketListView({
       lastEmailAtStart,
       lastEmailAtEnd,
       dynamicFieldEntries,
+      conversationLabelId,
     ],
   );
 
@@ -259,6 +264,12 @@ export const TicketListView = function TicketListView({
             );
           case 'spam':
             return state === MailboxState.SPAM;
+          case 'sent':
+          case 'drafts':
+            // Filtered server-side by a positive exists() (sent email / reply draft by me);
+            // the exists() also runs on the client, so every fetched row already qualifies —
+            // no overlay check here.
+            return true;
           case 'inbox':
           default:
             return state === MailboxState.INBOX;
@@ -469,7 +480,7 @@ export const TicketListView = function TicketListView({
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
-                  onToggleSelect: () => {
+                  onToggleSelect: (): void => {
                     const emailReads = row.emailReads as
                       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
                       | undefined;
@@ -542,14 +553,14 @@ export const TicketListView = function TicketListView({
     { label: 'None', run: () => onToggleSelectAll?.(pageRows, false) },
     {
       label: 'Read',
-      run: () => {
+      run: (): void => {
         onToggleSelectAll?.(pageRows, false);
         onToggleSelectAll?.(readRows, true);
       },
     },
     {
       label: 'Unread',
-      run: () => {
+      run: (): void => {
         onToggleSelectAll?.(pageRows, false);
         onToggleSelectAll?.(unreadRows, true);
       },
@@ -614,30 +625,42 @@ export const TicketListView = function TicketListView({
         ) : (
           <span />
         )}
-        <div data-slot='ticket-list-pagination' className='flex items-center gap-2'>
-          <span className='text-sm text-muted-foreground px-1'>{rangeLabel}</span>
-          <button
-            type='button'
-            onClick={goToPrevPage}
-            disabled={pageIndex === 0}
-            aria-label='Previous page'
-            data-track-category='Support'
-            data-track-name='PaginationPrev'
-            className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <button
-            type='button'
-            onClick={goToNextPage}
-            disabled={isLastPage}
-            aria-label='Next page'
-            data-track-category='Support'
-            data-track-name='PaginationNext'
-            className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
-          >
-            <ChevronRight size={14} />
-          </button>
+        <div className='flex flex-col items-end gap-1'>
+          <div data-slot='ticket-list-pagination' className='flex items-center gap-2'>
+            <span className='text-sm text-muted-foreground px-1'>{rangeLabel}</span>
+            <button
+              type='button'
+              onClick={goToPrevPage}
+              disabled={pageIndex === 0}
+              aria-label='Previous page'
+              data-track-category='Support'
+              data-track-name='PaginationPrev'
+              className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <button
+              type='button'
+              onClick={goToNextPage}
+              disabled={isLastPage}
+              aria-label='Next page'
+              data-track-category='Support'
+              data-track-name='PaginationNext'
+              className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+          <div className='flex items-center gap-3' aria-hidden='true'>
+            <span className='w-[100px]' />
+            <span className='w-5' />
+            <span className='w-[118px] text-right text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Created at
+            </span>
+            <span className='w-[120px] text-right text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Latest email
+            </span>
+          </div>
         </div>
       </div>
       <div className='flex-1 min-h-0'>{list}</div>

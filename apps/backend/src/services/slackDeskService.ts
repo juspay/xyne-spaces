@@ -1,4 +1,11 @@
-import { EmailType, Prisma, MessageDirection, ExternalEntityType, ActivityType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import {
+  EmailType,
+  MessageDirection,
+  ExternalEntityType,
+  ActivityType,
+  AttachmentEntityType,
+} from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
@@ -9,7 +16,6 @@ import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { extractSlackChannelId } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { ExternalAttachmentService } from '@/services/externalAttachmentService';
-import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 

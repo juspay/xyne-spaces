@@ -14,6 +14,7 @@ import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
+import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
@@ -474,7 +475,7 @@ export class ChatController {
         senderId: userId,
         senderName: agentSlug ?? 'agent',
         content: JSON.stringify({ type: 'agent_progress', data: payload }),
-        msgType: 'SYSTEM' as const,
+        msgType: MessageType.SYSTEM as const,
         createdAt: new Date(),
       };
       await redisService.broadcastMessageToSession(resolvedChannelId, event);
@@ -609,11 +610,9 @@ export class ChatController {
 
     // Forward to the external URL server-side (no CORS issues)
     // callerUserId is derived from the authenticated session (XYNE-12145)
-    // ACCEPTED RISK (secops #61 / XYNE-17825): `actionableUrl` is caller-supplied and is NOT
-    // passed through the SSRF guard, so an authenticated user can point this server-side fetch
-    // at internal / cloud-metadata hosts. A guarded internal-domain-allowlist version was
-    // implemented and then intentionally removed (see #9257 commit history); the team has
-    // accepted this SSRF exposure. Do not re-add a guard without re-opening that decision.
+    // `actionableUrl` is caller-supplied, so it goes through `assertWebhookUrlSafe`.
+    // The first-party internal callback (same origin as backendUrl, authenticated
+    // with the S2S key) is exempt so it works even when backendUrl is a private/dev host.
     try {
       const isInternalSpacesCallback = (() => {
         try {
@@ -622,6 +621,11 @@ export class ChatController {
           return false;
         }
       })();
+
+      if (!isInternalSpacesCallback) {
+        // Throws on a blocked target; caught below, so the action simply isn't dispatched.
+        await assertWebhookUrlSafe(actionableUrl);
+      }
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (isInternalSpacesCallback) {
@@ -637,6 +641,7 @@ export class ChatController {
         method: 'POST',
         headers,
         body: JSON.stringify({ actionId, context, messageId, conversationId, callerUserId }),
+        redirect: 'manual', // don't follow 3xx redirects
         signal: AbortSignal.timeout(30_000),
       });
       if (!callbackRes.ok) {

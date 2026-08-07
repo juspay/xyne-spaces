@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
@@ -49,8 +49,7 @@ class EventRouter {
           __meta: { error: null, chain },
         };
 
-        const execution = await runWithContext(
-          { userId: 'automation', workspaceId },
+        const execution = await runAsServiceActor('automation', workspaceId,
           () =>
             db.$transaction(async tx => {
               const created = await tx.workflowExecution.create({

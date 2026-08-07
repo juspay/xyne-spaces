@@ -44,10 +44,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xyne -d xyne_dev_db"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U xyne -d xyne_dev_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 180s
 
   # Redis
   redis:
@@ -74,6 +75,8 @@ services:
       - "${LIVEKIT_HTTP_BIND_PORT:-7880}:7880"
       - "${LIVEKIT_HTTPS_BIND_PORT:-7881}:7881"
       - "${LIVEKIT_UDP_BIND_PORT:-7882}:7882/udp"
+    volumes:
+      - ./docker/livekit.yaml:/etc/livekit.yaml
     environment:
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=devsecret

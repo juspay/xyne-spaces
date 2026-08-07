@@ -32,7 +32,7 @@ export const RecipientSuggestionsDropdown = ({
 }: RecipientSuggestionsDropdownProps): ReactElement | null => {
   const isOpen = visible && suggestions.length > 0;
 
-  const [pos, setPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
 
   useLayoutEffect(() => {
     if (!isOpen) return undefined;
@@ -43,9 +43,7 @@ export const RecipientSuggestionsDropdown = ({
       const rect = anchor.getBoundingClientRect();
       setPos({
         left: rect.left,
-        // bottom is distance from viewport bottom; we want the dropdown's
-        // bottom edge to sit `DROPDOWN_GAP` above the anchor's top.
-        bottom: window.innerHeight - rect.top + DROPDOWN_GAP,
+        top: rect.bottom + DROPDOWN_GAP,
         width: rect.width,
       });
     };
@@ -76,9 +74,10 @@ export const RecipientSuggestionsDropdown = ({
       style={{
         position: 'fixed',
         left: pos.left,
-        bottom: pos.bottom,
+        top: pos.top,
         width: pos.width,
         maxHeight: DROPDOWN_MAX_HEIGHT,
+        pointerEvents: 'auto',
       }}
       className='z-50 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md recipient-suggestions-dropdown'
     >

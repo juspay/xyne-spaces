@@ -1,343 +1,356 @@
+<div align="center">
+
 # Xyne Spaces
 
-A comprehensive workflow automation platform that enables teams to create, manage, and execute complex workflows with AI-powered agents and intelligent automation.
+**The org OS — a collaborative workspace that is your organization's context layer.
+Real-time by default, permission-aware by default, and built for agents.**
 
-## Overview
+Chat, threads, tickets, boards, calls and shared canvases — where your team actually does
+the work. And because the work happens here, every conversation, ticket, call, document and
+calendar is already in one place, indexed and served back to your people *and* your
+agents — with each read and write filtered through the same permission model.
 
-Xyne Spaces is a modern, scalable platform built with a TypeScript backend and React dashboard frontend. It provides powerful workflow automation capabilities, agent management, and real-time collaboration features.
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml/badge.svg)](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6.svg)](https://www.typescriptlang.org/)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## Features
+</div>
 
-### Core Platform
-- **Workflow Automation**: Create and manage complex multi-step workflows
-- **AI Agents**: Deploy and manage intelligent agents with various capabilities
-- **Real-time Collaboration**: Live updates and multi-user support
-- **Resource Management**: Efficient allocation and monitoring of system resources
-- **Organization & Project Management**: Hierarchical structure with vision tracking
+<details>
+<summary><b>📁 Table of Contents</b></summary>
 
-### Backend Capabilities
-- **TypeScript/Express.js**: Type-safe, high-performance API server
-- **Layered Architecture**: Clean separation of concerns
-- **Health Monitoring**: Comprehensive health checks and monitoring
-- **Security**: Built-in security features with rate limiting and CORS
-- **Database Integration**: Prisma ORM with PostgreSQL
-- **API Documentation**: Comprehensive REST API documentation
+- [Why Xyne Spaces?](#why-xyne-spaces)
+- [What can I do with Xyne Spaces?](#what-can-i-do-with-xyne-spaces)
+- [Architecture](#architecture)
+- [Agents and the sandbox](#agents-and-the-sandbox)
+- [Quickstart](#quickstart)
+- [Connectors](#connectors)
+- [MCP tools](#mcp-tools)
+- [Demos](#demos)
+- [Repository map](#repository-map)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Feature requests and bugs](#feature-requests-and-bugs)
+- [License](#license)
 
-### Dashboard Features
-- **React/TypeScript**: Modern, responsive frontend
-- **Real-time UI**: Live updates with WebSocket connections
-- **Rich Text Editing**: Advanced text editing with TipTap
-- **File Management**: Support for multiple file formats
-- **Interactive Workflows**: Visual workflow builder and editor
-- **Component Library**: Built with Radix UI and Tailwind CSS
-
-## Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Dashboard     │    │     Backend     │    │   Database      │
-│   (React)       │◄──►│   (Express)     │◄──►│  (PostgreSQL)   │
-│                 │    │                 │    │                 │
-│ - UI Components │    │ - REST API      │    │ - Workflows     │
-│ - State Mgmt    │    │ - WebSocket     │    │ - Agents        │
-│ - Real-time     │    │ - Business Logic│    │ - Organizations │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js >= 18.0.0
-- npm >= 8.0.0
-- Docker (or OrbStack) with Docker Compose, or Podman with podman-compose
-
-### Installation
-
-1. **Clone the repository**:
-```bash
-git clone <repository-url>
-cd xyne-spaces
-```
-
-2. **Start everything** (install, build, infrastructure, seeds, dev servers):
-```bash
-npm run up
-```
-
-`npm run up` is an alias for `npm run bootstrap`, which runs every phase serially and
-stops at the first failure:
-- `npm run env:setup` — copy each app's `.env.example` to the filename that app reads (never overwrites an existing file)
-- `npm run setup` — install dependencies for root and every package (including `/shared` and `/icons`) and build shared packages
-- `npm run secrets` — generate the local secrets that ship as `set-me` placeholders (JWT, encryption, VAPID keys)
-- `npm run services` — start infrastructure containers and seed all databases
-- `npm run dev:all` — start backend, dashboard, `xyne-claw`, and `xyne-claw-auth/backend` dev servers in parallel
-
-Every phase is idempotent, so re-running `up` on an existing checkout is safe.
-
-Alternatively, run the phases separately:
-```bash
-npm run env:setup
-npm run setup
-npm run secrets
-npm run services
-npm run dev:all
-```
-
-`npm run services` will:
-- Start all infrastructure containers (PostgreSQL, Redis, LiveKit, Zero cache, fake-gcs, MinIO, etc.)
-- Auto-create `.env.local` for backend and dashboard from `.env.example` if they don't exist
-- Run database migrations and seed the ACL system
-- Auto-create `.env` for `xyne-claw-auth/backend` and `xyne-claw` from their `.env.example` files
-- Install dependencies for `xyne-claw`, `xyne-claw-auth`, `xyne-claw-shared`, and `kata-sdk` if needed
-- Set up the claw-auth database schema, seed agents, link Spaces workspace to claw org, and create a dev admin user
-
-3. **Access the application**:
-- Dashboard: http://localhost:5173
-- Backend API: http://localhost:3001
-- XyneClaw: http://localhost:3002
-- Claw Auth: http://localhost:3003
-- API Documentation: http://localhost:3001/api-docs
-
-4. **Login**:
-```
-========================================
-🔐 Local Dev Login Credentials
-========================================
-  Email:     admin@xyne.ai
-  Password:  xynelocal@123
-========================================
-```
-
-## Development Setup
-
-### Backend
-
-1. Navigate to the backend directory:
-```bash
-cd backend
-```
-
-2. Copy environment variables:
-```bash
-cp .env.example .env.local
-```
-
-3. Configure your environment variables in `.env.local`
-
-4. Start the development server:
-```bash
-npm run dev
-```
-
-### Dashboard
-
-1. Navigate to the dashboard directory:
-```bash
-cd dashboard
-```
-
-2. Start the development server:
-```bash
-npm run dev
-```
-
-The dashboard will automatically reload when you make changes.
-
-### XyneClaw (Agent Server)
-
-1. Navigate to the xyne-claw directory:
-```bash
-cd xyne-claw
-```
-
-2. Copy environment variables (auto-created by `npm run services`):
-```bash
-cp .env.example .env
-```
-
-3. Configure your environment variables in `.env`
-
-4. Start the development server:
-```bash
-npm run dev
-```
-
-### Claw Auth (MCP Credential Management)
-
-1. Navigate to the claw-auth backend directory:
-```bash
-cd xyne-claw-auth/backend
-```
-
-2. Copy environment variables (auto-created by `npm run services`):
-```bash
-cp .env.example .env
-```
-
-3. Configure your environment variables in `.env`
-
-4. Start the development server:
-```bash
-npm run dev
-```
-
-5. (Optional) Start the claw-auth frontend:
-```bash
-cd ../frontend && npm run dev
-```
-
-## Project Structure
-
-```
-xyne-spaces/
-├── backend/                 # TypeScript/Express.js API server
-│   ├── src/
-│   │   ├── config/         # Configuration files
-│   │   ├── controllers/    # Route controllers
-│   │   ├── middleware/     # Custom middleware
-│   │   ├── routes/         # Route definitions
-│   │   ├── services/       # Business logic
-│   │   ├── types/          # TypeScript type definitions
-│   │   ├── utils/          # Utility functions
-│   │   └── validators/     # Request validation schemas
-│   ├── tests/              # Test files
-│   └── docs/               # Backend documentation
-├── dashboard/              # React/TypeScript frontend
-│   ├── src/
-│   │   ├── components/     # Reusable UI components
-│   │   ├── pages/          # Page components
-│   │   ├── hooks/          # Custom React hooks
-│   │   ├── services/       # API services
-│   │   ├── types/          # TypeScript type definitions
-│   │   └── utils/          # Utility functions
-│   ├── public/             # Static assets
-│   └── docs/               # Frontend documentation
-├── xyne-claw/              # Multi-tenant agent orchestration server
-│   ├── src/
-│   └── scripts/
-├── xyne-claw-auth/         # MCP credential management service
-│   ├── backend/
-│   │   ├── src/
-│   │   └── prisma/
-│   └── frontend/
-├── xyne-claw-shared/       # Shared library for xyne-claw ecosystem
-│   └── src/
-├── packages/
-│   └── kata-sdk/           # Kubernetes SDK for xyne-claw-shared
-├── docker/                 # Docker configuration files
-├── scripts/                # Build and deployment scripts
-├── API_DOCUMENTATION.md    # Comprehensive API documentation
-└── README.md              # This file
-```
-
-## Available Scripts
-
-### Root Level
-- `npm run services` - Start infrastructure services (Docker/OrbStack or Podman)
-- `npm run services:stop` - Stop infrastructure services
-- `npm run cleanup` - Clean up storage and containers
-
-### Backend
-- `npm run dev` - Start development server with hot reload
-- `npm run build` - Build the application
-- `npm start` - Start production server
-- `npm test` - Run tests
-- `npm run test:watch` - Run tests in watch mode
-- `npm run test:coverage` - Run tests with coverage
-- `npm run lint` - Run ESLint
-- `npm run lint:fix` - Fix ESLint issues
-- `npm run format` - Format code with Prettier
-- `npm run typecheck` - Run TypeScript type checking
-
-### Dashboard
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-- `npm run lint:fix` - Fix ESLint issues
-- `npm run typecheck` - Run TypeScript type checking
-- `npm run format` - Format code with Prettier
-- `npm run validate` - Run all validation checks
-
-### XyneClaw
-- `npm run dev` - Start agent server with hot reload
-- `npm run typecheck` - Run TypeScript type checking
-
-### Claw Auth
-- `npm run dev` - Start auth backend with hot reload
-- `npm run db:push` - Push database schema
-- `npm run db:generate` - Generate Prisma client
-- `npm run db:seed` - Seed database
-
-## Documentation
-
-- **[API Documentation](./API_DOCUMENTATION.md)** - Comprehensive REST API reference
-- **[Backend README](./backend/README.md)** - Backend-specific documentation
-- **[Dashboard README](./dashboard/README.md)** - Frontend-specific documentation
-
-## Technology Stack
-
-### Backend
-- **Runtime**: Node.js with TypeScript
-- **Framework**: Express.js
-- **Database**: PostgreSQL with Prisma ORM
-- **Validation**: Joi
-- **Testing**: Jest
-- **Code Quality**: ESLint, Prettier, Husky
-
-### Frontend
-- **Framework**: React 19 with TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-- **UI Components**: Radix UI, Blend Design System
-- **State Management**: React Query, XState
-- **Rich Text**: TipTap
-- **Testing**: ESLint, Prettier, Husky
-
-### DevOps
-- **Containerization**: Docker & Docker Compose
-- **CI/CD**: Jenkins
-- **Code Quality**: Husky git hooks
-- **Monorepo Management**: Yama
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run the validation scripts:
-   ```bash
-   # Backend
-   cd backend && npm run validate
-   
-   # Dashboard
-   cd dashboard && npm run validate
-   ```
-5. Commit your changes (`git commit -m 'Add some amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-### Code Standards
-
-- Follow TypeScript best practices
-- Use ESLint and Prettier configurations
-- Write meaningful commit messages
-- Add tests for new features
-- Update documentation as needed
-
-## License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For support and questions:
-- Check the [API Documentation](./API_DOCUMENTATION.md)
-- Review the [Backend README](./backend/README.md)
-- Review the [Dashboard README](./dashboard/README.md)
-- Open an issue in the repository
+</details>
 
 ---
 
-**Built with ❤️ by the Xyne Team**
+## Why Xyne Spaces?
+
+Most "context platforms" are a layer bolted onto tools people work in somewhere else, which
+means the context is always a stale copy of the real thing. Xyne Spaces inverts that: **it
+is the place the work happens.** Teams chat, run calls, file tickets, draft on canvases and
+review each other's work here — collaboratively and in real time — and the context is simply
+the exhaust of that, current by construction rather than by sync schedule.
+
+Which leads to the wall everyone hits next. An organization's context is scattered across a
+dozen tools, and the moment you gather it somewhere useful: **most of it is not safe to show
+to everyone.** Search that ignores permissions is a leak. An assistant that ignores them is
+a worse one.
+
+Xyne Spaces starts from the opposite end. Context is centralized, but **access control
+lives in the data layer, not in a filter bolted on top**:
+
+- **Synced reads are narrowed before they run.** Every table carries a policy that rewrites
+  the query for the acting user, so rows they may not see are never selected — not fetched
+  and then hidden.
+- **Writes are wrapped, not trusted.** Sync mutations are ACL-wrapped centrally, and REST
+  routes go through a permission matrix of resource × access level resolved per user and
+  group. Both paths are enforced in one place each, so a new feature is guarded by default
+  rather than by someone remembering to add a check.
+- **Agents inherit the same boundary.** An agent acts *as the person who invoked it*. It
+  reaches exactly their slice of the org, and there is no system-token back door around it.
+
+That last point is what makes it worth pointing an agent at your company's context at all.
+It can use everything that person could have found themselves — no more, and no less.
+
+---
+
+## What can I do with Xyne Spaces?
+
+<details>
+<summary><b>Bring your org's context into one place</b></summary>
+<br>
+
+Sync conversations, tickets, email and calendars from the tools you already use, or bulk
+import history from Jira, Confluence and Slack. Everything is normalized, deduplicated,
+threaded and indexed for hybrid search.
+
+</details>
+
+<details>
+<summary><b>Work in real time, together</b></summary>
+<br>
+
+Channels, threads, tickets, boards, calls and collaborative canvases. The client keeps a
+live local replica rather than polling, so edits appear instantly, keep working offline,
+and replay on reconnect.
+
+</details>
+
+<details>
+<summary><b>Run agents that actually have context</b></summary>
+<br>
+
+Agents run inside an isolated sandbox with no credentials of their own, reach your context
+through the same permission checks as the UI, and pause for explicit approval before doing
+anything that writes. They can search, summarize, triage, draft, review code and act across
+connected systems.
+
+</details>
+
+<details>
+<summary><b>Search across everything you're allowed to see</b></summary>
+<br>
+
+Hybrid retrieval over the full corpus — conversations, documents, tickets, call
+transcripts — scoped to the person asking. The same index backs both the search box and an
+agent's context lookups.
+
+</details>
+
+<details>
+<summary><b>Automate the routine work</b></summary>
+<br>
+
+Scheduled agent runs, ticket triage and classification, entity extraction, draft replies,
+SLA and deadline tracking, recaps and daily briefs — background jobs rather than things
+someone has to remember.
+
+</details>
+
+---
+
+## Architecture
+
+<div align="center">
+  <img src="docs/assets/architecture.svg" alt="Xyne Spaces layered architecture" width="960">
+</div>
+
+## Agents and the sandbox
+
+Agents here run real code — they read repositories, execute shell commands, call internal
+APIs and write files. That is the point, and it is also the risk. So the agent plane is
+split across three tiers, and the split *is* the security model:
+
+**the tier that runs untrusted code holds no secrets, and the tier that holds every secret
+runs no untrusted code.**
+
+<div align="center">
+  <img src="docs/assets/agent-sandbox.svg" alt="Xyne Claw and sandbox layered architecture" width="1000">
+</div>
+
+**The gateway holds everything.** `claw-auth` verifies the HMAC-signed webhook from Spaces,
+resolves the agent and its credentials, dispatches the run, and then executes *every*
+external tool call itself through `/mcp/call`. It also owns the backing stores — Postgres
+for agents and credentials, Redis and BullMQ for scheduled jobs and run recovery, GCS for
+session checkpoints.
+
+**The runtime has no secrets and no shell.** The `xyne-claw` pod runs the LLM agent loop and
+a set of path-scoped filesystem tools. It cannot reach a connected system directly: it posts
+a tool name and parameters back to the gateway with a short-lived HMAC session token and
+receives only the result. A compromised run yields no reusable secret, because none was ever
+there.
+
+**Bash lives behind a hypervisor.** Anything that needs a real shell runs in a
+[Kata Containers](https://katacontainers.io/) QEMU microVM with its own kernel, driven by
+the gateway through `sandbox-*` control-plane calls. That VM has **egress closed** — no
+network, no gateway credentials — so it is safe by isolation rather than by permission.
+Setup lives in `apps/xyne-claw/infra/kata/`.
+
+**Writes need a human.** Read tools run freely. Tools that create a ticket, schedule a call,
+edit a canvas or send a message *as you* post an approve/decline card in the thread and wait
+for a click. The distinction is identity, not danger: acting as the bot is autonomous,
+acting as you needs your consent.
+
+---
+
+## Quickstart
+
+**Prerequisites** — Node.js 22.x, pnpm 10.15.0, and Docker (or OrbStack / Podman) with
+Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
+with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
+
+```bash
+git clone https://github.com/juspay/xyne-spaces.git
+cd xyne-spaces
+pnpm run up
+```
+
+<details>
+<summary>What <code>pnpm run up</code> does</summary>
+<br>
+
+Each phase runs serially and stops at the first failure. Every phase is idempotent, so
+re-running it on an existing checkout is safe — and you can run any phase on its own.
+
+| Phase | What it does |
+| --- | --- |
+| `pnpm run env:setup` | Copies each app's `.env.example` into place — never overwrites an existing file |
+| `pnpm run setup` | Installs workspace dependencies and builds the shared packages |
+| `pnpm run secrets` | Generates the local secrets that ship as `set-me` placeholders |
+| `pnpm run services` | Asks which features you need, checks ports, starts infrastructure containers, runs migrations, seeds the databases |
+| `pnpm run dev` | Asks which apps to run, then opens them in a multi-pane process TUI (one pane per app, restart any one with `r`) |
+
+The pickers remember previous answers, and both stages check that the ports they
+need are free before starting — naming the process that holds a busy one. Scripted
+runs skip every prompt (`pnpm run bootstrap:raw`, `XYNE_DEV_APPS=all pnpm run dev`).
+
+The bootstrap phases and `validate` use **Xyne Doctor**. In an interactive
+terminal, a nonzero exit can package a redacted local failure report and hand it to Claude Code or
+Codex without leaving the terminal. Plain and automated runs keep normal output without persisting
+a report. See [Xyne Doctor](docs/setup/xyne-doctor.md) for safety behavior and a demo.
+
+</details>
+
+Once it finishes:
+
+| Service | URL |
+| --- | --- |
+| Dashboard | http://localhost:5173 |
+| Backend API | http://localhost:3001 |
+| API reference | [API_DOCUMENTATION.md](API_DOCUMENTATION.md) |
+| Xyne Claw | http://localhost:3002 |
+| Claw Auth | http://localhost:3003 |
+
+Sign in locally with `admin@xyne.ai` / `xynelocal@123`.
+
+Stuck? → [Troubleshooting](docs/setup/troubleshooting.md). Configuring model providers?
+→ [AI providers](docs/setup/ai-providers.md).
+
+---
+
+## Connectors
+
+Context arrives two ways. **Live sync** is continuous — webhooks in, scheduled pulls out.
+**Migration** is a one-time bulk import of history. Both end in the same place: normalized
+records in PostgreSQL, indexed into Vespa, behind the same ACLs as everything else.
+
+| Connector | Type | Brings in |
+| --- | --- | --- |
+| **Slack** | Live sync + migration | Channels, threads, messages; ticket intake from Slack |
+| **Gmail / Google Workspace** | Live sync | Mail, attachments, calendar |
+| **Microsoft 365** | Live sync | Mail and calendar |
+| **Jira** | Migration | Projects, issues and history |
+| **Confluence** | Migration | Spaces, page trees and attachments |
+
+The pipeline is platform-agnostic: each connector is an adapter — resolve, authenticate,
+transform, sync — and everything after it is shared. Adding a platform means writing an
+adapter, not touching the pipeline. Credentials are stored encrypted and decrypted only at
+the moment of use.
+
+→ Adapter contract: [`apps/backend/src/integrations/README.md`](apps/backend/src/integrations/README.md)
+
+---
+
+## MCP tools
+
+Connectors bring context **in**. MCP tools let an agent **act on** an external system —
+different system, different code path, configured per user rather than per workspace.
+
+Claw Auth brokers **50+ MCP integrations**. A representative slice:
+
+| Category | Examples |
+| --- | --- |
+| Code and delivery | GitHub, Bitbucket, Sentry, Grafana, Honeycomb, Kibana |
+| Work tracking | Asana, Notion, Calendly, Docusign |
+| Data | BigQuery, ClickHouse, Databricks, MongoDB, Neo4j |
+| Product and growth | Amplitude, Mixpanel, Customer.io, HubSpot, Salesforce, Intercom |
+| Design and docs | Figma, Miro, Excalidraw, Webflow |
+| Xyne first-party | Spaces context search, ticket and canvas tools, knowledge base, dashboard |
+
+A connector only appears for a user once they have connected it, so an agent's available
+tools are a function of that user's own integrations — and tool sets are scoped per agent
+rather than handing every run the full catalogue.
+
+---
+
+## Demos
+
+> 📹 Walkthroughs are being recorded. Links land here as they are published.
+
+| Demo | What it covers | Link |
+| --- | --- | --- |
+| Getting started | Clone to running locally in one command | _coming soon_ |
+| Spaces tour | Channels, threads, tickets, boards and canvases | _coming soon_ |
+| Permission-aware context | The same search, two users, two different result sets | _coming soon_ |
+| Agents in a thread | Asking an agent, citations, approving a write action | _coming soon_ |
+| Connecting a source | Connecting Slack and watching context arrive | _coming soon_ |
+| Migrating from Jira / Confluence | Preview, mapping and import | _coming soon_ |
+
+---
+
+## Repository map
+
+```
+xyne-spaces/
+├── apps/
+│   ├── backend/            REST API, Zero sync server, workers, integrations
+│   ├── dashboard/          Web client — React 19 + Vite + Zero
+│   ├── dashboard-external/ Externally embeddable dashboard
+│   ├── electron/           Desktop wrapper
+│   ├── public-web/         Public marketing site
+│   ├── site/               Documentation site
+│   ├── xyne-claw/          Agent runtime — the sandbox
+│   └── xyne-claw-auth/     Identity, credential store, MCP gateway
+├── packages/
+│   ├── shared/             Zero schema, query ACLs, shared types
+│   ├── framework/          Agentic framework library
+│   ├── icons/              Icon set
+│   └── xyne-claw-mcp/      MCP server + plugin for Xyne Claw agents
+├── vespa-core/             Search schemas and deployment
+├── docker/                 Container configuration
+├── docs/                   Setup documentation
+├── scripts/                Bootstrap, seeding and validation scripts
+└── tools/                  E2E automation and analysis tooling
+```
+
+| Component | Stack |
+| --- | --- |
+| Backend | Node 22, TypeScript, Express, Prisma, PostgreSQL, Redis, Bull |
+| Sync | Zero (Rocicorp), ACL-enforced queries and mutators |
+| Dashboard | React 19, Vite, Tailwind, Radix UI, XState, TipTap |
+| Search | Vespa |
+| Agents | Xyne Claw + Claw Auth, MCP tooling, LiteLLM for model access |
+| Isolation | Kata Containers with QEMU microVMs, egress closed |
+
+---
+
+## Documentation
+
+| Guide | |
+| --- | --- |
+| [Local setup](docs/setup/local-setup.md) | From a blank machine to a running environment |
+| [Prerequisites](docs/setup/prerequisites.md) | Versions and tooling you need first |
+| [Local development](docs/setup/local-development.md) | Getting a working environment |
+| [Services](docs/setup/services.md) | What the infrastructure containers do |
+| [AI providers](docs/setup/ai-providers.md) | Configuring model access |
+| [Troubleshooting](docs/setup/troubleshooting.md) | When setup goes wrong |
+| [API reference](API_DOCUMENTATION.md) | REST API documentation |
+
+---
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first — it covers what the tooling enforces, so a
+first pull request does not bounce on something mechanical. In short: branches are `fix/*`
+or `feature/*`, commits are `<type>: <TICKET-ID> <subject>`, and dependencies are added
+with a `--filter`.
+
+For anything larger than a small fix, open an issue first so the approach can be agreed
+before it is written. Participation is governed by our
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Feature requests and bugs
+
+- **Bug** — [open a bug report](https://github.com/juspay/xyne-spaces/issues/new?template=bug_report.yml)
+  with what you ran, what happened, and the output.
+- **Feature** — [open a feature request](https://github.com/juspay/xyne-spaces/issues/new?template=feature_request.yml)
+  describing the problem before the solution.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

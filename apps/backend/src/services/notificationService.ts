@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { runAsSystem } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import webpush from 'web-push';
 import { websocketService } from './websocketService';
@@ -10,14 +11,19 @@ import {
   createTag,
 } from '@/bots/json-ui';
 import type { FlowJson } from '@/bots/json-ui/types';
-import { ChannelScopeType, NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd, isDeskChannelType, type InitialMessageSummary } from '@xyne/shared';
+import { serializeInitialMessageMd,
+  isDeskChannelType,
+  type InitialMessageSummary,
+  ChannelScopeType,
+  NotificationDeliveryMethod,
+  NotificationType, MessageType, NotificationStatus, UserStatus } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -141,6 +147,13 @@ export interface NotificationData {
   actionUrl?: string;
   metadata?: any;
   imageUrl?: string;
+  /**
+   * Workspace the notification belongs to. Optional at the call sites; when
+   * omitted, createSessionNotification derives it from the recipient's
+   * (workspace-scoped) User row. Callers that already know the event's workspace
+   * should pass it to avoid the extra lookup.
+   */
+  workspaceId?: string;
 }
 
 interface NotificationOptions {
@@ -169,7 +182,13 @@ class NotificationService {
     data: NotificationData,
     deliveryMethod: NotificationDeliveryMethod = NotificationDeliveryMethod.BROWSER
   ) {
+    // Prefer a caller-provided workspace (the event's workspace); otherwise derive
+    // it from the recipient's own workspace-scoped User row. resolveWorkspaceIdFromModel
+    // resolves under a system context, so it is safe even for cross-workspace recipients.
+    const workspaceId =
+      data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId }));
     return await repositories.notifications.create({
+      workspaceId,
       userId,
       type: data.type,
       title: data.title,
@@ -338,7 +357,7 @@ class NotificationService {
       const existingMessages = await repositories.messages.findMany({
         where: {
           conversationId: conversationId,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
         },
         orderBy: {
           createdAt: 'desc',
@@ -553,7 +572,7 @@ class NotificationService {
           conversationId: conversationId,
           senderId: botInfo.id,
           content: flowJsonString,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           hasAttachment: false,
         });
 
@@ -866,6 +885,12 @@ class NotificationService {
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
 
+            // Resolve the tenant ONCE — see createFCMNotification.
+            const sessionData: NotificationData = {
+              ...data,
+              workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
+            };
+
             for (const session of sessions) {
               const deliveryMethod = session.platform === 'ios'
                 ? NotificationDeliveryMethod.IOS
@@ -874,7 +899,7 @@ class NotificationService {
               if(!isSilent){
                 const sessionNotification = await this.createSessionNotification(
                   userId,
-                  data,
+                  sessionData,
                   deliveryMethod
                 );
                 const mobilePayload = {
@@ -920,7 +945,7 @@ class NotificationService {
           userId,
           data.type,
           data.title,
-          (data.metadata?.scopeType !== 'DM' && data.metadata?.senderName) ? `${data.metadata.senderName}: ${data.message}` : data.message,
+          (data.metadata?.scopeType !== ChannelScopeType.DM && data.metadata?.senderName) ? `${data.metadata.senderName}: ${data.message}` : data.message,
           {
             ...data.metadata,
             relatedEntityType: data.relatedEntityType,
@@ -1279,7 +1304,9 @@ class NotificationService {
     workspaceId: string,
     channelName?: string,
     blockId?: string,
+    commentThreadId?: string,
     channelId?: string | null,
+    mentionContext: 'canvas' | 'comment' = 'canvas',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
     if (recipientIds.length === 0) {
@@ -1302,13 +1329,18 @@ class NotificationService {
 
     getNotificationJobsExpected().add(desktopUsers.length + mobileUsers.length, { platform: 'desktop', message_type: 'channel' });
 
-    // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
-    const title = channelName
-      ? `You were mentioned in #${channelName}`
-      : `You were mentioned in ${canvasTitle}`;
-    const message = channelName
-      ? `${senderName} mentioned you in #${channelName}`
-      : `${senderName} mentioned you in a canvas`;
+    // Mirror message mentions for canvas body; make comment mentions explicit.
+    const isCommentMention = mentionContext === 'comment';
+    const title = isCommentMention
+      ? `You were mentioned in a comment on ${canvasTitle}`
+      : channelName
+        ? `You were mentioned in #${channelName}`
+        : `You were mentioned in ${canvasTitle}`;
+    const message = isCommentMention
+      ? ''
+      : channelName
+        ? `${senderName} mentioned you in #${channelName}`
+        : `${senderName} mentioned you in a canvas`;
 
     const notificationData = {
       title,
@@ -1320,14 +1352,20 @@ class NotificationService {
         canvasId,
         canvasTitle,
         senderId,
-        senderName,
+        ...(!isCommentMention ? { senderName } : {}),
         workspaceId,
+        mentionContext,
         ...(blockId ? { blockId } : {}),
+        ...(commentThreadId ? { commentThreadId } : {}),
       },
     };
 
-    const actionUrl = blockId
-      ? `/${workspaceId}/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}`
+    const canvasQueryParams = new URLSearchParams();
+    if (blockId) canvasQueryParams.set('blockId', blockId);
+    if (commentThreadId) canvasQueryParams.set('commentThreadId', commentThreadId);
+    const queryString = canvasQueryParams.toString();
+    const actionUrl = queryString
+      ? `/${workspaceId}/chat/canvas/${canvasId}?${queryString}`
       : `/${workspaceId}/chat/canvas/${canvasId}`;
 
     // Send desktop-only notifications
@@ -1421,6 +1459,59 @@ class NotificationService {
     const deliveredUserIds = results
       .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
       .map(r => r.value);
+
+    return { deliveredUserIds };
+  }
+
+  async createRecordingSharedNotifications(
+    recipientUserIds: string[],
+    callId: string,
+    recordingTitle: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'recording_shared' | 'recording_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'recording',
+    });
+
+    const isRevoked = actorAction === 'recording_access_revoked';
+    const title = isRevoked
+      ? `${actorName} removed your access to a recording`
+      : `${actorName} shared a recording with you`;
+    const message = isRevoked
+      ? `${actorName} removed your access to "${recordingTitle}"`
+      : `${actorName} shared "${recordingTitle}" with you`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'RECORDING_SHARED' as NotificationType,
+          relatedEntityType: 'call',
+          relatedEntityId: callId,
+          metadata: {
+            callId,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      }),
+    );
+
+    const deliveredUserIds = results
+      .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+      .map(result => result.value);
 
     return { deliveredUserIds };
   }
@@ -1572,6 +1663,7 @@ class NotificationService {
       relatedEntityId: messageId,
       actionUrl: `/${workspaceId}/chat/dm/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
+        workspaceId,
         senderId,
         senderName,
         senderPicture,
@@ -1658,6 +1750,13 @@ class NotificationService {
 
       const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
 
+      // Resolve the tenant ONCE. userId is fixed for this call, so leaving it to
+      // createSessionNotification would repeat the same lookup for every session.
+      const sessionData: NotificationData = {
+        ...data,
+        workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
+      };
+
       await Promise.allSettled(
         sessions.map(async (session) => {
           // Determine specific delivery method based on platform
@@ -1668,7 +1767,7 @@ class NotificationService {
           // Create individual tracking entry for this session
           const sessionNotification = await this.createSessionNotification(
             userId,
-            data,
+            sessionData,
             deliveryMethod
           );
 
@@ -1767,51 +1866,54 @@ class NotificationService {
       count: number;
     }>
   > {
-    // Step 1: Get all active users for this member across workspaces
-    const users = await prisma.user.findMany({
-      where: {
-        orgMemberId: memberId,
-        leftAt: null,
-        status: 'ACTIVE',
-      },
-      select: {
-        id: true,
-        workspaceId: true,
-      },
+    // Spans the caller's own identities across workspaces.
+    return runAsSystem(async () => {
+      // Step 1: Get all active users for this member across workspaces
+      const users = await prisma.user.findMany({
+        where: {
+          orgMemberId: memberId,
+          leftAt: null,
+          status: UserStatus.ACTIVE,
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+        },
+      });
+
+      if (users.length === 0) {
+        return [];
+      }
+
+      const userIds = users.map(u => u.id);
+
+      // Step 2: Count unread+delivered notifications per user
+      const notificationCounts = await prisma.notification.groupBy({
+        by: ['userId'],
+        where: {
+          userId: { in: userIds },
+          status: { in: [NotificationStatus.UNREAD, NotificationStatus.DELIVERED] },
+          readAt: null,
+          dismissedAt: null,
+        },
+        _count: {
+          id: true,
+        },
+      });
+
+      // Build a map: userId -> count
+      const countMap = new Map<string, number>();
+      for (const nc of notificationCounts) {
+        countMap.set(nc.userId, nc._count.id);
+      }
+
+      // Step 3: Merge users with their counts
+      return users.map(u => ({
+        workspaceId: u.workspaceId,
+        userId: u.id,
+        count: countMap.get(u.id) ?? 0,
+      }));
     });
-
-    if (users.length === 0) {
-      return [];
-    }
-
-    const userIds = users.map(u => u.id);
-
-    // Step 2: Count unread+delivered notifications per user
-    const notificationCounts = await prisma.notification.groupBy({
-      by: ['userId'],
-      where: {
-        userId: { in: userIds },
-        status: { in: ['UNREAD', 'DELIVERED'] },
-        readAt: null,
-        dismissedAt: null,
-      },
-      _count: {
-        id: true,
-      },
-    });
-
-    // Build a map: userId -> count
-    const countMap = new Map<string, number>();
-    for (const nc of notificationCounts) {
-      countMap.set(nc.userId, nc._count.id);
-    }
-
-    // Step 3: Merge users with their counts
-    return users.map(u => ({
-      workspaceId: u.workspaceId,
-      userId: u.id,
-      count: countMap.get(u.id) ?? 0,
-    }));
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {
@@ -1937,7 +2039,7 @@ class NotificationService {
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',
         message: `You have been assigned to ticket "${ticket.title}"`,
-        type: 'TICKET_ASSIGNMENT',
+        type: NotificationType.TICKET_ASSIGNMENT,
         relatedEntityType: 'ticket',
         relatedEntityId: ticketId,
         actionUrl,

@@ -3,11 +3,31 @@ import { extractChannelMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
-import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
+import {
+  CanvasVisibility,
+  ChannelScopeType,
+  ChannelVisibility,
+  TicketStatus,
+  TicketStatusV2,
+  type Schema,
+  AttachmentEntityType,
+  VespaOperationType as VespaOpType,
+} from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Channel, Message, Project, Ticket, Email, User, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
+import {
+  Channel,
+  Message,
+  Project,
+  Ticket,
+  Email,
+  User,
+  Canvas,
+  Call,
+  CollectionItem,
+  Apps,
+} from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
@@ -426,6 +446,37 @@ export const mapMessage = async (
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
+  // Message acts, denormalized onto the doc so search can filter on them. Stored as a
+  // stringified JSON array; parsed defensively because it is plain TEXT with no DB-level
+  // guarantee of shape.
+  let messageActs: string[] = [];
+  if (args.messageActs) {
+    try {
+      const parsed: unknown = JSON.parse(args.messageActs);
+      if (Array.isArray(parsed)) {
+        messageActs = parsed.filter((v): v is string => typeof v === 'string');
+      }
+    } catch {
+      logger.warn('[VESPA] Ignoring malformed messageActs', { messageId: args.messageId });
+    }
+  }
+
+  // Thread types, same stringified-array shape as messageActs.
+  let threadType: string[] = [];
+  if (conversation.threadType) {
+    try {
+      const parsed: unknown = JSON.parse(conversation.threadType);
+      threadType = Array.isArray(parsed)
+        ? parsed.filter((v): v is string => typeof v === 'string')
+        : typeof parsed === 'string'
+          ? [parsed]
+          : [];
+    } catch {
+      // Rows written before the column held an array stored a bare name.
+      threadType = [conversation.threadType];
+    }
+  }
+
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
 
@@ -447,6 +498,7 @@ export const mapMessage = async (
     docId: args.messageId,
     docType: VespaDocType.MESSAGE,
     text: messageContent,
+    chunks: chunkPlainText(messageContent),
     username: sender?.name || '',
     userEmail: sender?.email || '',
     image: "",
@@ -458,6 +510,13 @@ export const mapMessage = async (
     channelRef: getRef(channelSchema, conversation.channelId),
     threadId: args.conversationId,
     isRootMessage: args.messageId === conversation.initialMessageId,
+    messageActs,
+    // Only the root message carries the thread's types — one doc to refeed when they
+    // change rather than the whole thread. Free-form tags are indexed alongside the
+    // built-in vocabulary, so both are searchable.
+    ...(args.messageId === conversation.initialMessageId && threadType.length > 0
+      ? { threadType }
+      : {}),
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1
     },
@@ -649,6 +708,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     title: args.title,
     workflowType: "",// later we should populate workflow type
     description: args.description,
+    chunks: chunkPlainText(extractPlainTextFromHtml(args.description || '')),
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,
@@ -704,7 +764,7 @@ export const mapCollection = async (
 
   const attachment = collectionItem
     ? await db.messageAttachment.findFirst({
-        where: { entityId: collectionItem.id, entityType: 'COLLECTION' },
+        where: { entityId: collectionItem.id, entityType: AttachmentEntityType.COLLECTION },
       })
     : null;
 
@@ -1349,7 +1409,7 @@ export const mapFile = async (
  * Chunk a plain-text string into segments of at most `maxLen` characters,
  * splitting on word boundaries so search snippets are coherent.
  */
-const chunkPlainText = (text: string, maxLen = 2000): string[] => {
+const chunkPlainText = (text: string, maxLen = 1500): string[] => {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks: string[] = [];
   let current = '';
@@ -1673,7 +1733,7 @@ export const fetchAndMapBySchema = async (
 
 
 export const VespaOperationType: Record<VespaJobType, VespaOpType> = {
-  feed: 'INSERT',
-  update: 'UPDATE',
-  delete: 'DELETE',
+  feed: VespaOpType.INSERT,
+  update: VespaOpType.UPDATE,
+  delete: VespaOpType.DELETE,
 }

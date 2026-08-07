@@ -40,6 +40,7 @@ import {
   type AppPermission,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
+import { AppIncomingWebhookAction, CommandAccessibility, CommandType } from '@xyne/shared';
 
 // ─── Inline command row ───────────────────────────────────────────────────────
 
@@ -122,8 +123,8 @@ const CommandFormInline = ({
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
-  const [accessibility, setAccessibility] = useState<'CHAT' | 'THREAD' | 'BOTH'>(
-    (initial?.commandAccessibility as 'CHAT' | 'THREAD' | 'BOTH') ?? 'BOTH',
+  const [accessibility, setAccessibility] = useState<CommandAccessibility>(
+    initial?.commandAccessibility ?? CommandAccessibility.BOTH,
   );
   const [nameError, setNameError] = useState('');
 
@@ -146,7 +147,7 @@ const CommandFormInline = ({
       const payload: UpsertCommandRequest = {
         commandName: trimmed,
         description: desc.trim(),
-        commandType: 'COMMAND',
+        commandType: CommandType.COMMAND,
         commandAccessibility: accessibility,
       };
       const saved = initial
@@ -206,8 +207,8 @@ const CommandFormInline = ({
           <input
             type='radio'
             name='command-accessibility'
-            checked={accessibility === 'CHAT'}
-            onChange={() => setAccessibility('CHAT')}
+            checked={accessibility === CommandAccessibility.CHAT}
+            onChange={() => setAccessibility(CommandAccessibility.CHAT)}
             disabled={saving}
             data-track-category='app-command'
             data-track-name='toggle-accessibility-chat'
@@ -218,8 +219,8 @@ const CommandFormInline = ({
           <input
             type='radio'
             name='command-accessibility'
-            checked={accessibility === 'THREAD'}
-            onChange={() => setAccessibility('THREAD')}
+            checked={accessibility === CommandAccessibility.THREAD}
+            onChange={() => setAccessibility(CommandAccessibility.THREAD)}
             disabled={saving}
             data-track-category='app-command'
             data-track-name='toggle-accessibility-thread'
@@ -230,8 +231,8 @@ const CommandFormInline = ({
           <input
             type='radio'
             name='command-accessibility'
-            checked={accessibility === 'BOTH'}
-            onChange={() => setAccessibility('BOTH')}
+            checked={accessibility === CommandAccessibility.BOTH}
+            onChange={() => setAccessibility(CommandAccessibility.BOTH)}
             disabled={saving}
             data-track-category='app-command'
             data-track-name='toggle-accessibility-both'
@@ -291,7 +292,7 @@ const ShortcutRow = ({
         </span>
         <span
           className={`text-[10px] px-1 py-0.5 rounded ${
-            shortcut.commandAccessibility === 'GLOBAL'
+            shortcut.commandAccessibility === CommandAccessibility.GLOBAL
               ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
               : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
           }`}
@@ -775,8 +776,8 @@ const WEBHOOK_TYPE_OPTIONS = [
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
 const WEBHOOK_ACTION_OPTIONS = [
-  { value: 'MESSAGE', label: 'Message' },
-  { value: 'TICKET', label: 'Ticket' },
+  { value: AppIncomingWebhookAction.MESSAGE, label: 'Message' },
+  { value: AppIncomingWebhookAction.TICKET, label: 'Ticket' },
 ] as const;
 type IncomingWebhookAction = (typeof WEBHOOK_ACTION_OPTIONS)[number]['value'];
 
@@ -870,8 +871,9 @@ export const EditAppForm = ({
   const [webhookName, setWebhookName] = useState('');
   const [selectedChannelId, setSelectedChannelId] = useState('');
   const [selectedWebhookType, setSelectedWebhookType] = useState<IncomingWebhookType>('SLACK');
-  const [selectedWebhookAction, setSelectedWebhookAction] =
-    useState<IncomingWebhookAction>('MESSAGE');
+  const [selectedWebhookAction, setSelectedWebhookAction] = useState<IncomingWebhookAction>(
+    AppIncomingWebhookAction.MESSAGE,
+  );
   const [projectBoards, setProjectBoards] = useState<ProjectBoard[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -917,7 +919,7 @@ export const EditAppForm = ({
   useEffect(() => {
     if (
       selectedWebhookType !== 'SENTINELONE' ||
-      selectedWebhookAction !== 'TICKET' ||
+      selectedWebhookAction !== AppIncomingWebhookAction.TICKET ||
       !selectedChannelId
     ) {
       setProjectBoards([]);
@@ -963,18 +965,21 @@ export const EditAppForm = ({
       await appsService.createIncomingWebhook({
         installedAppId: incomingInstalledAppId,
         channelId: selectedChannelId,
-        ...(selectedWebhookAction === 'TICKET' && selectedBoardId
+        ...(selectedWebhookAction === AppIncomingWebhookAction.TICKET && selectedBoardId
           ? { boardId: selectedBoardId }
           : {}),
         name: webhookName.trim(),
         type: selectedWebhookType,
-        action: selectedWebhookType === 'SENTINELONE' ? selectedWebhookAction : 'MESSAGE',
+        action:
+          selectedWebhookType === 'SENTINELONE'
+            ? selectedWebhookAction
+            : AppIncomingWebhookAction.MESSAGE,
       });
       setShowCreateForm(false);
       setWebhookName('');
       setSelectedChannelId('');
       setSelectedWebhookType('SLACK');
-      setSelectedWebhookAction('MESSAGE');
+      setSelectedWebhookAction(AppIncomingWebhookAction.MESSAGE);
       setProjectBoards([]);
       setSelectedBoardId('');
       toast.success('Incoming webhook created');
@@ -1043,7 +1048,7 @@ export const EditAppForm = ({
     // Install mode: read-only snapshot from installed_app_commands. Template mode: app_commands.
     const fetcher =
       isInstallMode && installedAppId
-        ? appsService.getInstalledCommands(installedAppId, 'COMMAND')
+        ? appsService.getInstalledCommands(installedAppId, CommandType.COMMAND)
         : appsService.getCommands(appId);
     fetcher
       .then(setCommands)
@@ -1055,7 +1060,7 @@ export const EditAppForm = ({
     setShortcutsLoading(true);
     const fetcher =
       isInstallMode && installedAppId
-        ? appsService.getInstalledCommands(installedAppId, 'SHORTCUT')
+        ? appsService.getInstalledCommands(installedAppId, CommandType.SHORTCUT)
         : appsService.getShortcuts(appId);
     fetcher
       .then(setShortcuts)
@@ -1508,50 +1513,51 @@ export const EditAppForm = ({
                       </SelectContent>
                     </Select>
                   </div>
-                  {selectedWebhookType === 'SENTINELONE' && selectedWebhookAction === 'TICKET' && (
-                    <div className='space-y-2'>
-                      <label
-                        htmlFor='webhook-board-select'
-                        className='block text-xs font-medium text-foreground'
-                      >
-                        Board
-                      </label>
-                      <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
-                        <SelectTrigger
-                          id='webhook-board-select'
-                          className='w-full'
-                          disabled={!selectedChannelId || projectBoards.length === 0}
+                  {selectedWebhookType === 'SENTINELONE' &&
+                    selectedWebhookAction === AppIncomingWebhookAction.TICKET && (
+                      <div className='space-y-2'>
+                        <label
+                          htmlFor='webhook-board-select'
+                          className='block text-xs font-medium text-foreground'
                         >
-                          <SelectValue
-                            placeholder={
-                              !selectedChannelId
-                                ? 'Select a channel first'
-                                : projectBoards.length === 0
-                                  ? 'No boards available'
-                                  : 'Select a board'
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {projectBoards.map(board => (
-                            <SelectItem key={board.id} value={board.id}>
-                              {board.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {!selectedChannelId && (
-                        <p className='text-xs text-muted-foreground'>
-                          Choose a channel first so we can load boards from that project.
-                        </p>
-                      )}
-                      {selectedChannelId && projectBoards.length === 0 && (
-                        <p className='text-xs text-muted-foreground'>
-                          No boards found for the selected channel&apos;s project.
-                        </p>
-                      )}
-                    </div>
-                  )}
+                          Board
+                        </label>
+                        <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
+                          <SelectTrigger
+                            id='webhook-board-select'
+                            className='w-full'
+                            disabled={!selectedChannelId || projectBoards.length === 0}
+                          >
+                            <SelectValue
+                              placeholder={
+                                !selectedChannelId
+                                  ? 'Select a channel first'
+                                  : projectBoards.length === 0
+                                    ? 'No boards available'
+                                    : 'Select a board'
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {projectBoards.map(board => (
+                              <SelectItem key={board.id} value={board.id}>
+                                {board.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!selectedChannelId && (
+                          <p className='text-xs text-muted-foreground'>
+                            Choose a channel first so we can load boards from that project.
+                          </p>
+                        )}
+                        {selectedChannelId && projectBoards.length === 0 && (
+                          <p className='text-xs text-muted-foreground'>
+                            No boards found for the selected channel&apos;s project.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   <div className='space-y-1'>
                     <label
                       htmlFor='webhook-name-input'
@@ -1577,7 +1583,7 @@ export const EditAppForm = ({
                         !webhookName.trim() ||
                         !selectedChannelId ||
                         (selectedWebhookType === 'SENTINELONE' &&
-                          selectedWebhookAction === 'TICKET' &&
+                          selectedWebhookAction === AppIncomingWebhookAction.TICKET &&
                           !selectedBoardId)
                       }
                     >
@@ -1592,7 +1598,7 @@ export const EditAppForm = ({
                         setWebhookName('');
                         setSelectedChannelId('');
                         setSelectedWebhookType('SLACK');
-                        setSelectedWebhookAction('MESSAGE');
+                        setSelectedWebhookAction(AppIncomingWebhookAction.MESSAGE);
                         setProjectBoards([]);
                         setSelectedBoardId('');
                       }}
@@ -1665,7 +1671,9 @@ export const EditAppForm = ({
                           {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                          {webhook.action === 'TICKET' ? 'Ticket' : 'Message'}
+                          {webhook.action === AppIncomingWebhookAction.TICKET
+                            ? 'Ticket'
+                            : 'Message'}
                         </span>
                         <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
                           <span className='w-3 flex-shrink-0 flex items-center justify-center'>

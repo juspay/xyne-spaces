@@ -1,8 +1,8 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { AnalyticsController } from '../controllers/analyticsController';
 import { MultiPullRequestController } from '../controllers/multiPullRequestController';
 import { authorize } from '../middleware/authorize';
-import { AccessType } from '@prisma/client';
 import { aclMiddleware } from '../middleware/acl';
 import { analyticsAuthMiddleware } from '../middleware/analyticsAuth';
 

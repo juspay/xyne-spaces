@@ -41,7 +41,7 @@ export class InstalledAppCommandsBackfillController {
   private static async syncInstall(
     installedAppId: string,
     appId: string,
-    workspaceId: string | null,
+    workspaceId: string,
     dryRun: boolean,
     summary: BackfillSummary,
   ): Promise<void> {
@@ -106,7 +106,7 @@ export class InstalledAppCommandsBackfillController {
 
     do {
       batchNumber += 1;
-      const installs: Array<{ id: string; appId: string; workspaceId: string | null }> = await db.installedApps.findMany({
+      const installs: Array<{ id: string; appId: string; workspaceId: string }> = await db.installedApps.findMany({
         select: { id: true, appId: true, workspaceId: true },
         orderBy: { id: 'asc' },
         take: options.batchSize,

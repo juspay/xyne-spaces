@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification, NotificationType } from '@prisma/client';
+import { ActivityClassification, NotificationType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
@@ -10,7 +10,7 @@ import {
   emailFetchQueue,
   type EmailFetchJobData,
 } from '@/queues/emailFetchQueue';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 class EmailFetchWorker {
   private isInitialized = false;
@@ -75,8 +75,7 @@ class EmailFetchWorker {
     try {
       // Background job → open a tenant scope from the job's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await runWithContext(
-        { userId: 'email-fetch-worker', workspaceId: job.data.workspaceId },
+      result = await runAsServiceActor('email-fetch-worker', job.data.workspaceId,
         () => adapter.refetch!(source, options),
       );
     } catch (error) {

@@ -46,6 +46,10 @@ const ActivitySupportTicket = (): ReactElement => {
     () => !!channelId && userChannelStatuses.some(status => status.channelId === channelId),
     [userChannelStatuses, channelId],
   );
+  const [channelPreferenceRows, channelPreferenceDetails] = useCachedQuery(
+    queries.getEmailChannelPreference({ channelId: channelId || '' }),
+    { enabled: !!channelId },
+  );
 
   // No ticket id in the URL yet — resolve it from the conversation, then redirect.
   if (!ticketId) {
@@ -57,6 +61,8 @@ const ActivitySupportTicket = (): ReactElement => {
       ticketFilter={EMPTY_TICKET_FILTER}
       isMember={isMember}
       onMailtoClick={email => window.open(`mailto:${email}`, '_blank', 'noopener,noreferrer')}
+      channelPreference={channelPreferenceRows?.[0]}
+      channelPreferenceLoaded={channelPreferenceDetails.type === 'complete'}
       navBasePath={ticketBase}
       onBack={() => {
         void navigate(activityBase);

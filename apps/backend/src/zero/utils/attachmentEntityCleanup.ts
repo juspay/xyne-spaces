@@ -1,7 +1,6 @@
 import type { Transaction } from '@rocicorp/zero';
 import { AttachmentEntityType, type Schema } from '@xyne/shared';
-import { AttachmentEntityType as PrismaAttachmentEntityType } from '@prisma/client';
-import { gcsService } from '@/services/gcsService';
+import { storageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { zql } from '../queries';
@@ -23,9 +22,9 @@ async function deleteEntityAttachmentsByType(
     asyncTasks.push(async () => {
       try {
         if (url) {
-          await gcsService.deleteFile(url);
+          await storageService.deleteFile(url);
           if (thumbnailUrl) {
-            await gcsService.deleteFile(thumbnailUrl);
+            await storageService.deleteFile(thumbnailUrl);
           }
         }
       } catch (error) {
@@ -73,7 +72,7 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
   const attachments = await db.messageAttachment.findMany({
     where: {
       entityId: delayedMessageId,
-      entityType: PrismaAttachmentEntityType.DELAYED_MESSAGE,
+      entityType: AttachmentEntityType.DELAYED_MESSAGE,
     },
   });
 
@@ -81,9 +80,9 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
     await db.messageAttachment.delete({ where: { id: attachment.id } });
     try {
       if (attachment.url) {
-        await gcsService.deleteFile(attachment.url);
+        await storageService.deleteFile(attachment.url);
         if (attachment.thumbnailUrl) {
-          await gcsService.deleteFile(attachment.thumbnailUrl);
+          await storageService.deleteFile(attachment.thumbnailUrl);
         }
       }
     } catch (error) {

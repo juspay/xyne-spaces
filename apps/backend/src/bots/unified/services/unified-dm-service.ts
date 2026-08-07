@@ -5,7 +5,8 @@
  * Works with any bot from the unified catalog.
  */
 
-import { Channel, ChannelScopeType, ChannelVisibility, ChannelRole } from '@prisma/client';
+import { Channel } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, ChannelRole } from '@xyne/shared';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
@@ -127,6 +128,11 @@ class UnifiedDMService {
 
     const definition = await unifiedBotUserService.getBotDefinition(botUserId);
     return definition?.id ?? null;
+  }
+
+  async getOrCreateDirectMessage(userAId: string, userBId: string, workspaceId: string): Promise<string> {
+    const channel = await this.getOrCreateBotDM(userAId, userBId, workspaceId);
+    return channel.id;
   }
 }
 

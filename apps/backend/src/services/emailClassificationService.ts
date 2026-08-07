@@ -19,9 +19,8 @@ import type {
   TicketClassificationDataWithPriority,
   PriorityClassificationResult,
 } from '../types/classification.js';
-import { TicketPriority } from '@prisma/client';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
 const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
@@ -356,8 +355,8 @@ export class EmailClassificationService {
     const formMapping = await db.formContextMapping.findFirst({
       where: {
         contextId: ticket.boardId,
-        contextType: 'BOARD',
-        entityType: 'TICKET',
+        contextType: FormContextType.BOARD,
+        entityType: FormEntityType.TICKET,
       },
     });
     if (!formMapping) return;
@@ -387,7 +386,7 @@ export class EmailClassificationService {
       if (!valueStr) continue;
 
       // actualFieldValue: arrays for MULTI_SELECT/USER, scalar otherwise
-      const isMulti = field.fieldType === 'MULTI_SELECT' || field.fieldType === 'USER';
+      const isMulti = field.fieldType === FormFieldType.MULTI_SELECT || field.fieldType === FormFieldType.USER;
       const actualFieldValue = isMulti ? [valueStr] : valueStr;
 
       try {

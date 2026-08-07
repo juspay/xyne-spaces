@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { logger } from '@/utils/logger';
+import { createRedisClient, connectWithRetryForever } from '@/services/redisFactory';
 
 class NotificationRedisService {
   private redis: Redis | null = null;
@@ -12,43 +13,25 @@ class NotificationRedisService {
 
   private initializeRedis(): void {
     try {
-      const config = {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        maxRetriesPerRequest: 3,
-        lazyConnect: true,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && {
-          tls: { rejectUnauthorized: false }
-        })
-      };
-
-      this.redis = new Redis(config);
-      this.publisher = new Redis(config);
-      this.subscriber = new Redis(config);
-
-      this.redis.on('connect', () => {
-        logger.info('Notification Redis connected successfully');
-      });
-
-      this.redis.on('error', (error) => {
-        logger.error('Notification Redis connection error:', error);
-      });
-
+      this.redis = createRedisClient('notification');
+      this.publisher = createRedisClient('notification-publisher');
+      this.subscriber = createRedisClient('notification-subscriber');
     } catch (error) {
       logger.error('Failed to initialize Notification Redis:', error);
     }
   }
 
   async connect(): Promise<void> {
-    try {
-      if (this.redis) await this.redis.connect();
-      if (this.publisher) await this.publisher.connect();
-      if (this.subscriber) await this.subscriber.connect();
-      logger.info('All Notification Redis connections established');
-    } catch (error) {
-      logger.error('Failed to connect to Notification Redis:', error);
-    }
+    await Promise.all([
+      this.redis ? connectWithRetryForever(this.redis, 'notification') : Promise.resolve(),
+      this.publisher
+        ? connectWithRetryForever(this.publisher, 'notification-publisher')
+        : Promise.resolve(),
+      this.subscriber
+        ? connectWithRetryForever(this.subscriber, 'notification-subscriber')
+        : Promise.resolve(),
+    ]);
+    logger.info('All Notification Redis connections established');
   }
 
   async disconnect(): Promise<void> {

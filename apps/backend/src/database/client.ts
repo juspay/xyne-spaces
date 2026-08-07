@@ -1,15 +1,22 @@
 import { PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { retryForever } from '@/utils/retry';
+import { installPrismaRetryMiddleware } from './retryMiddleware';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
+import { withAclExtension } from './tenant/acl-extension';
+import { withWorkspaceStamp } from './tenant/stamp';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
+import { setupEnumTextValidation } from './middleware/enumTextValidation';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
+  private static wrappedInstance: PrismaClient | null = null;
   private static readReplicaInstance: PrismaClient | null = null;
+  private static wrappedReplicaInstance: PrismaClient | null = null;
   private static isConnected = false;
 
   static getReadReplicaInstance(): PrismaClient | null {
@@ -26,8 +33,14 @@ export class DatabaseClient {
           },
         },
       });
+
+      installPrismaRetryMiddleware(DatabaseClient.readReplicaInstance, 'prisma.replica');
+
+      // ACL-scope reads and authorize writes per the current tenant context.
+      // Stamp workspaceId onto INSERT + nested creates from tenant context.
+      DatabaseClient.wrappedReplicaInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.readReplicaInstance));
     }
-    return DatabaseClient.readReplicaInstance;
+    return DatabaseClient.wrappedReplicaInstance ?? DatabaseClient.readReplicaInstance;
   }
 
   static getInstance(): PrismaClient {
@@ -52,10 +65,15 @@ export class DatabaseClient {
         setupUserSessionLogging(DatabaseClient.instance, true);
       }
 
+      setupEnumTextValidation(DatabaseClient.instance);
+
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);
       setupUserVespaSync(DatabaseClient.instance);
+
+      // Registered last on purpose — see installPrismaRetryMiddleware.
+      installPrismaRetryMiddleware(DatabaseClient.instance);
 
       (DatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Database error:', e);
@@ -69,9 +87,10 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
-    return DatabaseClient.instance;
+    return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;
   }
 
   static async connect(): Promise<void> {
@@ -79,15 +98,11 @@ export class DatabaseClient {
       return;
     }
 
-    try {
-      const client = DatabaseClient.getInstance();
-      await client.$connect();
-      DatabaseClient.isConnected = true;
-      logger.info('Database connected successfully');
-    } catch (error) {
-      logger.error('Failed to connect to database:', error);
-      throw error;
-    }
+    const client = DatabaseClient.getInstance();
+    await retryForever(() => client.$connect(), 'prisma.connect');
+
+    DatabaseClient.isConnected = true;
+    logger.info('Database connected successfully');
   }
 
   static async disconnect(): Promise<void> {
@@ -95,6 +110,7 @@ export class DatabaseClient {
       try {
         await DatabaseClient.instance.$disconnect();
         DatabaseClient.instance = null;
+        DatabaseClient.wrappedInstance = null;
         DatabaseClient.isConnected = false;
         logger.info('Database disconnected successfully');
       } catch (error) {
@@ -107,6 +123,7 @@ export class DatabaseClient {
       try {
         await DatabaseClient.readReplicaInstance.$disconnect();
         DatabaseClient.readReplicaInstance = null;
+        DatabaseClient.wrappedReplicaInstance = null;
         logger.info('Read replica disconnected successfully');
       } catch (error) {
         logger.error('Error disconnecting from read replica:', error);

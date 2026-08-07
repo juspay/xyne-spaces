@@ -4,7 +4,8 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
-import { AttachmentEntityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
 
 export class DraftAttachmentController {
@@ -104,6 +105,30 @@ export class DraftAttachmentController {
           message: 'You do not have permission to upload to this draft'
         });
         return;
+      }
+
+      // The attachmentIds are client-supplied and the upsert below keys on them
+      // (create branch pins `id`, but a colliding existing row falls through to an
+      // update). Reject any id that already resolves to a row the caller does not own
+      // as a DRAFT.
+      if (attachmentIdsArray.length > 0) {
+        const existingAttachments = await this.db.messageAttachment.findMany({
+          where: { id: { in: attachmentIdsArray } },
+          select: { id: true, uploadedByUserId: true, entityType: true },
+        });
+        const foreign = existingAttachments.find(
+          a => a.uploadedByUserId !== userId || a.entityType !== AttachmentEntityType.DRAFT,
+        );
+        if (foreign) {
+          logger.warn(
+            `Unauthorized draft attachment reuse: user ${userId} referenced attachment ${foreign.id} they do not own`,
+          );
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'One or more attachment ids reference a resource you do not own',
+          });
+          return;
+        }
       }
 
       // Check if draft message already exists for this user+channel+conversation

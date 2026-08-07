@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
+import { ChannelType } from '@xyne/shared';
 
 const SLEEP_BETWEEN_BATCHES_MS = 5000;
 
@@ -107,7 +108,7 @@ export class TicketEmailCountBackfillController {
     let channelCursor: string | null = null;
     while (true) {
       const channels: Array<{ id: string }> = await db.channel.findMany({
-        where: { type: 'EMAIL' },
+        where: { type: ChannelType.EMAIL },
         select: { id: true },
         orderBy: { id: 'asc' },
         take: options.batchSize,
@@ -145,6 +146,7 @@ export class TicketEmailCountBackfillController {
       channelsSeen,
       durationMs: Date.now() - startTime,
     });
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<Response> {

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { InvitationResponse, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { InvitationResponse } from '@xyne/shared';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { repositories } from '@/database/repositories';
 import {

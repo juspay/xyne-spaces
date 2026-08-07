@@ -11,6 +11,7 @@ import type { FocusEvent } from 'react';
 import {
   useCreateBlockNote,
   SuggestionMenuController,
+  FormattingToolbarController,
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
@@ -31,8 +32,14 @@ import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
 import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
-import { canvasSchema, knownCanvasBlockTypes } from '../canvasSchema';
+import {
+  canvasSchema,
+  canvasTableOptions,
+  canvasTiptapOptions,
+  knownCanvasBlockTypes,
+} from '../canvasSchema';
 import { createElement } from 'react';
+import { MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
 import { CanvasEditorProps, CanvasEditorRef } from '../Canvas.types';
@@ -66,6 +73,11 @@ import { logger, Event } from '../../../utils/logger';
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
+import Button from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
+import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
+import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
 const canvasDictionary = {
   ...en,
@@ -111,11 +123,12 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       editable = true,
       placeholder: _placeholder = 'Start writing your canvas...',
       className = '',
-      channelId: _channelId,
+      channelId,
       canvasId,
       canvasTitle: _canvasTitle,
       onMentionInsert,
       initialBlockIdToFocus,
+      initialCommentThreadId,
       autoFocus,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
@@ -154,6 +167,8 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       dictionary: canvasDictionary,
+      tables: canvasTableOptions,
+      _tiptapOptions: canvasTiptapOptions,
     });
 
     // Auto-focus the editor on mount if requested (fire only once, cursor at end)
@@ -387,6 +402,28 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const [isSearchOpen, setIsSearchOpen] = useState(false);
 
     useCanvasTableFilters(containerRef);
+    const getCanvasCommentEditor = useCallback(
+      () => (editor ? asBlockNoteEditorForView(editor) : null),
+      [editor],
+    );
+    const {
+      isCommentsOpen,
+      setIsCommentsOpen,
+      activeCommentBlockId,
+      activeCommentThreadId,
+      activeCommentAnchor,
+      refreshCommentHighlights,
+      openCommentsForCurrentBlock,
+      focusCommentBlock,
+      applyCommentAnchorStyle,
+      removeCommentAnchorStyle,
+    } = useCanvasCommentEditorBridge({
+      canvasId,
+      containerRef,
+      getEditor: getCanvasCommentEditor,
+      initialBlockIdToFocus,
+      initialCommentThreadId,
+    });
 
     useScope('canvas', isFocused);
 
@@ -428,6 +465,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
 
     // Handle content changes with debouncing
     const handleChange = useCallback((): void => {
+      refreshCommentHighlights();
       if (onChange && editor) {
         // Clear existing timer
         if (debounceTimerRef.current) {
@@ -465,7 +503,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           onChange(clonedBlocks);
         }, 500); // 500ms debounce delay
       }
-    }, [editor, onChange, extractHeadings]);
+    }, [editor, onChange, extractHeadings, refreshCommentHighlights]);
 
     // Cleanup debounce timer on unmount
     useEffect(() => {
@@ -483,18 +521,10 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       }
     }, [editor, content, extractHeadings]);
 
-    // Focus and scroll to block when navigating from activity notification
-    useEffect(() => {
-      if (!editor || !initialBlockIdToFocus || !containerRef.current) return;
-      const editorTyped = asBlockNoteEditorForView(editor);
-      try {
-        editorTyped.setTextCursorPosition(initialBlockIdToFocus, 'start');
-        scrollToHeading(initialBlockIdToFocus, containerRef.current);
-      } catch {
-        // Block may not exist yet (e.g. still loading); scroll only
-        scrollToHeading(initialBlockIdToFocus, containerRef.current);
-      }
-    }, [editor, initialBlockIdToFocus]);
+    const canvasFormattingToolbar = useMemo(
+      () => createCanvasFormattingToolbar(openCommentsForCurrentBlock),
+      [openCommentsForCurrentBlock],
+    );
 
     const handleSave = useCallback((): void => {
       if (!onSave || !editor) return;
@@ -529,20 +559,67 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         onBlurCapture={handleBlurCapture}
         data-testid='canvas-editor'
       >
-        <div className='thin-scrollbar flex-1 overflow-auto pt-8'>
-          <CanvasMentionContext.Provider value={mentionContextValue}>
-            <BlockNoteView
-              editor={asBlockNoteEditorForView(editor)}
+        <div className='flex min-h-0 flex-1 overflow-hidden'>
+          <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
+            {canvasId && (
+              <div className='absolute right-4 top-3 z-10 flex items-center gap-1 rounded-md border border-border bg-background/95 p-1 shadow-sm backdrop-blur'>
+                {editable && (
+                  <Tooltip content='Add comment'>
+                    <Button
+                      variant='ghost'
+                      size='iconSm'
+                      onClick={openCommentsForCurrentBlock}
+                      aria-label='Add comment'
+                    >
+                      <MessageSquarePlus className='size-4' />
+                    </Button>
+                  </Tooltip>
+                )}
+                <Tooltip content='Comments'>
+                  <Button
+                    variant={isCommentsOpen ? 'secondary' : 'ghost'}
+                    size='iconSm'
+                    onClick={() => setIsCommentsOpen(open => !open)}
+                    aria-label='Comments'
+                  >
+                    <MessageSquare className='size-4' />
+                  </Button>
+                </Tooltip>
+              </div>
+            )}
+
+            <CanvasMentionContext.Provider value={mentionContextValue}>
+              <BlockNoteView
+                editor={asBlockNoteEditorForView(editor)}
+                editable={editable}
+                onChange={handleChange}
+                theme={theme === 'midnight' ? 'dark' : 'light'}
+                formattingToolbar={false}
+                tableHandles={editable}
+                slashMenu={false}
+              >
+                <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
+                <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
+              </BlockNoteView>
+            </CanvasMentionContext.Provider>
+          </div>
+
+          {canvasId && isCommentsOpen && (
+            <CanvasCommentsPanel
+              canvasId={canvasId}
+              canvasTitle={_canvasTitle}
+              channelId={channelId}
+              activeBlockId={activeCommentBlockId}
+              activeThreadId={activeCommentThreadId}
+              activeAnchor={activeCommentAnchor}
               editable={editable}
-              onChange={handleChange}
-              theme={theme === 'midnight' ? 'dark' : 'light'}
-              formattingToolbar={true}
-              slashMenu={false}
-            >
-              <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
-              <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
-            </BlockNoteView>
-          </CanvasMentionContext.Provider>
+              onClose={() => setIsCommentsOpen(false)}
+              onSelectBlock={focusCommentBlock}
+              onBeforeCreateThread={applyCommentAnchorStyle}
+              onCreateThreadFailed={removeCommentAnchorStyle}
+            />
+          )}
         </div>
 
         {/* Presentation Modal */}

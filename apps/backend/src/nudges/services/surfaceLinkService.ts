@@ -1,6 +1,6 @@
 import { db } from '@/database/client';
+import { SurfaceAreaType, SurfaceLinkKind } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import type { SurfaceAreaType, SurfaceLinkKind } from '@prisma/client';
 
 interface CreateLinkInput {
   sourceType: SurfaceAreaType;

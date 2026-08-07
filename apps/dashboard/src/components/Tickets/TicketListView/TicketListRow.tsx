@@ -10,6 +10,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
 import { AssigneePicker } from './AssigneePicker';
 import { PriorityPicker } from './PriorityPicker';
+import { AutoDraftStatus } from '@xyne/shared';
 
 interface TicketListRowProps {
   ticket: TicketListItem;
@@ -98,6 +99,7 @@ export const TicketListRow = ({
   const { width } = useMeasure({ ref: containerRef, observeResize: true });
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
   const shouldHideDetails = width < 500;
+  const shouldHideTicketId = width < 1120;
 
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
@@ -111,6 +113,7 @@ export const TicketListRow = ({
   const dueDate = useMemo(() => {
     return ticket.lastEmailAt ? new Date(ticket.lastEmailAt) : new Date();
   }, [ticket.lastEmailAt]);
+  const createdDate = useMemo(() => new Date(ticket.createdAt), [ticket.createdAt]);
 
   const displayEmail = senderEmail || (showExtraFields ? fromEmailAddress?.trim() || null : null);
   // Show the sender's display name when the email carries one (like Gmail),
@@ -133,7 +136,7 @@ export const TicketListRow = ({
     }>;
     if (drafts.length === 0) return null;
     if (drafts.some(d => d.userId !== null)) return 'user';
-    if (drafts.some(d => d.userId === null && d.autoDraftStatus === 'GENERATING'))
+    if (drafts.some(d => d.userId === null && d.autoDraftStatus === AutoDraftStatus.GENERATING))
       return 'generating';
     return 'auto';
   }, [ticket.emailDrafts]);
@@ -204,14 +207,16 @@ export const TicketListRow = ({
         ) : (
           <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
         )}
-        <span
-          className={cn(
-            'text-xs font-mono flex-shrink-0',
-            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium',
-          )}
-        >
-          {ticketIdValue}
-        </span>
+        {!shouldHideTicketId && (
+          <span
+            className={cn(
+              'text-xs font-mono flex-shrink-0',
+              hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium',
+            )}
+          >
+            {ticketIdValue}
+          </span>
+        )}
         <TruncatedTooltip content={ticket.title}>
           <span
             className={cn(
@@ -325,7 +330,16 @@ export const TicketListRow = ({
           assignedTo={ticket.assignedTo}
           channelId={ticket.channelId ?? undefined}
         />
-        <Tooltip delayDuration={500} content={formatDateTime(dueDate)} side='top'>
+        <Tooltip delayDuration={500} content={`Created: ${formatDateTime(createdDate)}`} side='top'>
+          <span className='w-[118px] text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground'>
+            {formatDate(createdDate)} · {formatTime(createdDate)}
+          </span>
+        </Tooltip>
+        <Tooltip
+          delayDuration={500}
+          content={`Latest email: ${formatDateTime(dueDate)}`}
+          side='top'
+        >
           <span
             className={cn(
               'text-xs whitespace-nowrap w-[44px] text-right tabular-nums',

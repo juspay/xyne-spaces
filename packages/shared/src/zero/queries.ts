@@ -1,14 +1,16 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
-import { BaseTicketType } from '../tickets/types.js';
+import { BaseTicketType } from './types.js';
 import { defineQuery } from './acl/define-query.js';
 import {
   BoardType,
   CallType,
+  EntityUserAccess,
   FormContextType,
   FormEntityType,
   LookupType,
   ProjectType,
   SavedConfigContextType,
+  ShareableEntityType,
 } from './schema.js';
 import { z } from 'zod';
 import {
@@ -34,6 +36,7 @@ import {
   TicketReferenceRelation,
   DelayedMessageStatus,
   RecapEntityType,
+  UserResponsibility,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -354,7 +357,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.prReviewers?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'PR_REVIEWER')
+        .where('userResponsibility', UserResponsibility.PR_REVIEWER)
         .where('userId', 'IN', filters.prReviewers ?? []),
     );
   }
@@ -362,7 +365,7 @@ const applyKanbanTicketPageConditions = (
   if (filters?.qaAssigned?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
-        .where('userResponsibility', 'QA')
+        .where('userResponsibility', UserResponsibility.QA)
         .where('userId', 'IN', filters.qaAssigned ?? []),
     );
   }
@@ -1107,10 +1110,11 @@ export const queries = defineQueries({
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1146,6 +1150,11 @@ export const queries = defineQueries({
 
       if (userGroups && userGroups.length > 0) {
         query = query.where('userGroupId', 'IN', userGroups);
+      }
+      if (conversationLabelId) {
+        query = query.where(({ exists }) =>
+          exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
+        );
       }
 
       if (lastEmailAtStart !== undefined) {
@@ -1240,6 +1249,27 @@ export const queries = defineQueries({
         .one();
     },
   ),
+
+  supportTicketDetailV2: defineQuery(
+    z.object({
+      id: z.string().optional(),
+      xyneId: z.string().optional(),
+      workspaceId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
+    ({ args: { id, xyneId, workspaceId } }) => {
+      const base = id
+        ? zql.tickets.where('id', id)
+        : zql.tickets.where('xyneId', xyneId ?? '').where('workspaceId', workspaceId);
+      return base
+        .related('referencesIn', ref =>
+          ref.where('relationType', TicketReferenceRelation.MERGED_INTO)
+            .related('sourceTicket'),
+        )
+        .one();
+    },
+  ),
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
   // Cursor = (lastEmailAt, id) matching the orderBy. Active threads bubble up.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
@@ -1253,16 +1283,17 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
-      mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam']).optional(),
+      mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1313,10 +1344,35 @@ export const queries = defineQueries({
               ),
           ),
         );
+      } else if (mailboxFolder === 'sent') {
+        // "Sent" = tickets the current user has sent an outbound email on (REPLY /
+        // REPLY_ALL / COMPOSE). A positive exists() runs client-side too, so pagination
+        // stays meaningful and the list is one-row-per-ticket (no email-level collapse).
+        query = query.where(({ exists }) =>
+          exists('emails', e =>
+            e
+              .where('type', 'IN', [EmailType.REPLY, EmailType.REPLY_ALL, EmailType.COMPOSE])
+              .where('sentByUserId', ctx.userID),
+          ),
+        );
+      } else if (mailboxFolder === 'drafts') {
+        // "Drafts" = tickets the current user has a saved reply draft on (conversationId
+        // set → tied to a ticket). Compose drafts (no conversationId, no ticket yet) are
+        // surfaced separately via the Drafts chip banner, not in this list.
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', d =>
+            d.where('userId', ctx.userID).where('conversationId', 'IS NOT', null),
+          ),
+        );
       }
 
       if (userGroups && userGroups.length > 0) {
         query = query.where('userGroupId', 'IN', userGroups);
+      }
+      if (conversationLabelId) {
+        query = query.where(({ exists }) =>
+          exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
+        );
       }
 
       if (lastEmailAtStart !== undefined) {
@@ -1460,81 +1516,6 @@ export const queries = defineQueries({
         .where('userId', ctx.userID)
         .where('conversationId', 'IS', null)
         .orderBy('updatedAt', 'desc');
-    },
-  ),
-  userEmailDrafts: defineQuery(
-    z.object({
-      channelId: z.string(),
-      limit: z.number(),
-      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
-    }),
-    ({ ctx, args: { channelId, limit, start } }) => {
-      let query = zql.email_drafts
-        .where('channelId', channelId)
-        .where('userId', '=', ctx.userID)
-        // Reply drafts only. Compose drafts (conversationId IS NULL) live in the same
-        // table but are paginated separately (composeDraftsByChannel); without this they
-        // would consume page slots here and can hide reply drafts behind the keyset window.
-        .where('conversationId', 'IS NOT', null)
-        // id is part of the keyset cursor below, so it must also be in the sort —
-        // otherwise drafts sharing an updatedAt can be skipped/duplicated across pages.
-        .orderBy('updatedAt', 'desc')
-        .orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
-      }
-
-      return query
-        .limit(limit)
-        .related('ticket');
-    },
-  ),
-  // Per-desk "Sent" view: outbound emails in a channel (REPLY / REPLY_ALL /
-  // COMPOSE), newest-first, keyset-paginated on (createdAt, id).
-  //   scope 'mine'    → only the current user's sends (ctx.userID is the boundary).
-  //   scope 'channel' → every user's sends in the channel; gated to channel
-  //                     members (public channel, or a participant of a private one)
-  //                     so a crafted request can't read another channel's mail.
-  userEmailsSent: defineQuery(
-    z.object({
-      channelId: z.string(),
-      limit: z.number(),
-      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
-      scope: z.enum(['mine', 'channel']).optional(),
-    }),
-    ({ ctx, args: { channelId, limit, start, scope = 'mine' } }) => {
-      let query = zql.emails
-        .where('channelId', channelId)
-        .where('type', 'IN', [EmailType.REPLY, EmailType.REPLY_ALL, EmailType.COMPOSE]);
-
-      if (scope === 'channel') {
-        query = query.whereExists('channel', ch =>
-          ch.where(helpers =>
-            helpers.or(
-              helpers.cmp('visibility', ChannelVisibility.PUBLIC),
-              helpers.and(
-                helpers.cmp('visibility', ChannelVisibility.PRIVATE),
-                helpers.exists('participants', p => p.where('userId', ctx.userID)),
-              ),
-            ),
-          ),
-        );
-      } else {
-        query = query.where('sentByUserId', '=', ctx.userID);
-      }
-
-      // id is part of the keyset cursor below, so it must also be in the sort —
-      // otherwise emails sharing a createdAt can be skipped/duplicated across pages.
-      query = query.orderBy('createdAt', 'desc').orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
-      }
-
-      return query
-        .limit(limit)
-        .related('ticket');
     },
   ),
   getEmailChannelPreference: defineQuery(
@@ -1981,9 +1962,10 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
     }),
-    ({ args: { limit, start } }) => {
+    ({ ctx, args: { limit, start } }) => {
       let query = zql.calls
         .where('callType', CallType.HEADLESS)
+        .where('createdByUserId', ctx.userID)
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -1993,6 +1975,88 @@ export const queries = defineQueries({
 
       return query.limit(limit);
     },
+  ),
+
+  createdOatsRecordings: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('createdByUserId', ctx.userID)
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+      return query.limit(limit);
+    },
+  ),
+
+  sharedOatsRecordings: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('createdByUserId', '!=', ctx.userID)
+        .whereExists('shares', share =>
+          share
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
+                exists('channelMembers', m => m.where('userId', ctx.userID)),
+              ),
+            ),
+        )
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+      return query.limit(limit);
+    },
+  ),
+
+  // Fetches the HEADLESS recording (+ shares) by its public
+  // externalId (what's in the URL / RecordingDetail.externalId) — used by
+  // the Share modal and the detail screen alike.
+  oatsRecordingByExternalId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('externalId', callId)
+        .related('shares', shares =>
+          shares
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .related('user')
+            .related('userGroup')
+            .related('channel'),
+        )
+        .one(),
+  ),
+
+  summaryTemplates: defineQuery(
+    z.object({}),
+    ({ ctx }) =>
+      zql.summary_templates
+        .where('workspaceId', ctx.workspaceId)
+        .orderBy('name', 'asc')
+        .orderBy('version', 'desc'),
   ),
 
   recurringSeriesById: defineQuery(z.object({ seriesId: z.string() }), ({ args: { seriesId } }) => {
@@ -2019,6 +2083,7 @@ export const queries = defineQueries({
       .related('message', m => m.related('conversation').related('attachments'))
       .related('reaction')
       .related('canvas')
+      .related('call')
       .related('ticket');
   }),
   userActivitiesPaginated: defineQuery(
@@ -2101,6 +2166,7 @@ export const queries = defineQueries({
         .related('message', m => m.related('conversation').related('attachments'))
         .related('reaction')
         .related('canvas')
+        .related('call')
         .related('ticket');
     },
   ),
@@ -2278,6 +2344,25 @@ export const queries = defineQueries({
   canvasParticipants: defineQuery(z.object({ canvasId: z.string() }), ({ args: { canvasId } }) => {
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
   }),
+
+  canvasCommentThreads: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ args: { canvasId } }) => {
+      return zql.canvas_comment_threads
+        .where('canvasId', canvasId)
+        .orderBy('createdAt', 'asc')
+        .related('initialComment');
+    },
+  ),
+
+  canvasThreadComments: defineQuery(
+    z.object({ threadId: z.string() }),
+    ({ args: { threadId } }) => {
+      return zql.canvas_comments
+        .where('threadId', threadId)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
 
   channelAndThreadMessages: defineQuery(
     z.object({ channelId: z.string() }),
@@ -3170,17 +3255,6 @@ export const queries = defineQueries({
       return zql.conversation_label_mappings
         .where('conversationId', conversationId)
         .orderBy('labelName', 'asc');
-    },
-  ),
-  // All conversation mappings carrying a given label (for the per-label panel view).
-  // Pulls the conversation and its ticket so the panel can navigate to the thread.
-  conversationLabelMappingsByLabelId: defineQuery(
-    z.object({ labelId: z.string() }),
-    ({ args: { labelId } }) => {
-      return zql.conversation_label_mappings
-        .where('labelId', labelId)
-        .related('conversation', c => c.related('ticket'))
-        .orderBy('createdAt', 'desc');
     },
   ),
   // The caller's mailbox overlay for a single ticket (ACL scopes to userId = me).

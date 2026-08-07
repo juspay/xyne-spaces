@@ -12,14 +12,28 @@ import { isHexToken } from '../utils/validation';
 let mainWindow: BrowserWindow | null = null;
 
 /**
- * XYNE Issues 398/405 (CWE-601): a xyne-spaces:// deep link is externally
- * triggerable (any web page can set location.href = 'xyne-spaces://...'), and
- * its path is forwarded to the renderer's router via 'navigate-to'. Only allow
- * plain in-app route paths — reject anything with an embedded scheme, a
- * protocol-relative '//', backslashes, or path traversal (raw or percent-
- * encoded), so an attacker cannot force an external-looking redirect or reach
- * unexpected routes via traversal tricks.
+ * A xyne-spaces:// deep link is externally triggerable (any web page can set
+ * location.href = 'xyne-spaces://...') and its path is forwarded to the renderer's
+ * router via 'navigate-to'. Only plain in-app route paths are allowed — anything with
+ * an embedded scheme, a protocol-relative '//', backslashes, or path traversal (raw or
+ * percent-encoded) is rejected.
  */
+/**
+ * Route prefixes a deep link may open, matched against the first path segment.
+ *
+ * Empty means "allow any well-formed in-app path", which is the current behaviour. Add the
+ * app's top-level routes here to narrow it — for example 'chat', 'canvas', 'tickets' — and
+ * anything outside the list stops being reachable from a link. Keep it in step with the
+ * renderer's router when routes are added or renamed.
+ */
+const DEEP_LINK_ROUTE_ALLOWLIST: readonly string[] = [];
+
+function isAllowedDeepLinkRoute(pathStr: string): boolean {
+  if (DEEP_LINK_ROUTE_ALLOWLIST.length === 0) return true;
+  const [firstSegment] = pathStr.replace(/^\//, '').split(/[/?#]/);
+  return DEEP_LINK_ROUTE_ALLOWLIST.includes(firstSegment);
+}
+
 function isSafeDeepLinkPath(pathStr: string): boolean {
   if (typeof pathStr !== 'string' || !pathStr.startsWith('/') || pathStr.startsWith('//')) {
     return false;
@@ -38,7 +52,8 @@ function isSafeDeepLinkPath(pathStr: string): boolean {
     if (/[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(c)) return false;     // embedded scheme (http:, javascript:, data:)
   }
   // Conservative in-app route charset (path + query only).
-  return /^\/[A-Za-z0-9\-._~/?=&%]*$/.test(pathStr);
+  if (!/^\/[A-Za-z0-9\-._~/?=&%]*$/.test(pathStr)) return false;
+  return isAllowedDeepLinkRoute(pathStr);
 }
 
 /** Parse JSON body from an Electron IncomingMessage stream */
@@ -357,12 +372,8 @@ async function handleDeepLink(url: string): Promise<void> {
       pathStr = '/' + pathStr;
     }
 
-    // ACCEPTED RISK (secops #398, LOW): isSafeDeepLinkPath (#9110) is a SYNTAX filter — it blocks
-    // protocol-relative '//', backslashes, path traversal and non-route charsets, but it is NOT the
-    // route-prefix allowlist the finding recommends, so a syntactically-valid path to any in-app
-    // route can still be forwarded. The team accepted this residual (the renderer router only
-    // exposes known screens). Tighten to an explicit allowlist if the deep-link surface grows.
-    // XYNE Issues 398/405: only forward validated in-app route paths.
+    // Only well-formed in-app route paths are forwarded: protocol-relative prefixes,
+    // backslashes, traversal and non-route character sets are all rejected.
     if (!isSafeDeepLinkPath(pathStr)) {
       log.warn('[DeepLinks] Rejected unsafe deep-link navigation path:', pathStr);
       return;

@@ -1,10 +1,6 @@
 import { DatabaseClient } from '../client';
-import {
-  Prisma,
-  RecordingStatus,
-  RecordingType,
-  type CallRecording,
-} from '@prisma/client';
+import { Prisma, type CallRecording } from '@prisma/client';
+import { RecordingStatus, RecordingType } from '@xyne/shared';
 
 export type { CallRecording };
 

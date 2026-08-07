@@ -15,11 +15,13 @@ import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
+import { calculateRecordingElapsedMs } from '../utils/recordingUtils';
 import {
   AGENT_LEFT_CONFIRM_DELAY_MS,
   isTranscriptionAgentIdentity,
   shouldConfirmTranscriptionAgentLeft,
 } from '../utils/livekitAgent';
+import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
@@ -33,6 +35,17 @@ export interface TranscriptEntry {
   spokenAt: number;
 }
 
+/**
+ * A moment the user flagged during the recording. Held locally so the transcript
+ * divider appears the instant the flag is clicked; persistence to Call.markedItems
+ * happens separately through the calls.markMoment mutator.
+ */
+export interface MarkedMoment {
+  transcriptId: number | null;
+  timestampSeconds: number;
+  elapsedMs: number;
+}
+
 export type RecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'stopping' | 'error';
 export type SttModel = 'google' | 'azure' | 'deepgram';
 
@@ -44,15 +57,20 @@ export interface RecordingState {
   room: Room | null;
   externalId: string | null;
   channelId: string | null;
+  title: string | null;
   status: RecordingStatus;
   isRecording: boolean;
   startTime: number | null;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
   transcripts: TranscriptEntry[];
+  markedMoments: MarkedMoment[];
   error: string | null;
   sttModel: SttModel;
   pendingAutoStart: boolean;
+  autoStartRequestedAt: number | null;
   pendingStop: boolean;
-  /** Canvas (cuid/uuid) for notes taken during this recording — null until the user creates one */
+  /** Canvas created as part of starting a headless recording. */
   notesCanvasId: string | null;
   /** Public view-access id used to build the canvas share link */
   notesCanvasViewAccessId: string | null;
@@ -69,13 +87,18 @@ const initialContext: RecordingState = {
   room: null,
   externalId: null,
   channelId: null,
+  title: null,
   status: 'idle',
   isRecording: false,
   startTime: null,
+  pauseStartedAt: null,
+  accumulatedPausedMs: 0,
   error: null,
-  sttModel: 'azure',
+  sttModel: 'google',
   transcripts: [],
+  markedMoments: [],
   pendingAutoStart: false,
+  autoStartRequestedAt: null,
   pendingStop: false,
   notesCanvasId: null,
   notesCanvasViewAccessId: null,
@@ -86,6 +109,8 @@ const initialContext: RecordingState = {
   agentLeft: false,
 };
 
+const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
+
 export const recordingStore = createStore({
   context: initialContext,
   on: {
@@ -93,12 +118,26 @@ export const recordingStore = createStore({
     requestAutoStart: (context): RecordingState => ({
       ...context,
       pendingAutoStart: true,
+      autoStartRequestedAt: Date.now(),
     }),
 
-    requestStop: (context): RecordingState => ({
+    clearAutoStart: (context): RecordingState => ({
       ...context,
-      pendingStop: true,
+      pendingAutoStart: false,
+      autoStartRequestedAt: null,
     }),
+
+    requestStop: (context): RecordingState => {
+      const isInFlight =
+        context.status === 'recording' ||
+        context.status === 'paused' ||
+        context.status === 'starting';
+      if (!isInFlight) return context;
+      return {
+        ...context,
+        pendingStop: true,
+      };
+    },
 
     startRecording: (
       context,
@@ -133,13 +172,9 @@ export const recordingStore = createStore({
             room,
             externalId: session.externalId,
             channelId: session.channelId,
+            notesCanvasId: session.notesCanvasId,
             startTime: session.startTime,
             defaultLayout,
-          });
-
-          toast.success('Recording started', {
-            description: 'Your voice is being recorded and transcribed',
-            duration: 3000,
           });
         })
         .catch(error => {
@@ -162,6 +197,7 @@ export const recordingStore = createStore({
         sttModel,
         error: null,
         pendingAutoStart: false,
+        pendingStop: false,
         activeLayout: defaultLayout,
       };
     },
@@ -171,7 +207,8 @@ export const recordingStore = createStore({
       event: {
         room: Room;
         externalId: string;
-        channelId: string;
+        channelId: string | null;
+        notesCanvasId: string;
         startTime: number;
         defaultLayout?: RecordingLayout;
       },
@@ -264,12 +301,17 @@ export const recordingStore = createStore({
         room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
       };
 
+      playAudio(AUDIO_PATHS.RECORDING_START);
+
       return {
         ...context,
         room: event.room,
         externalId: event.externalId,
         channelId: event.channelId,
+        notesCanvasId: event.notesCanvasId,
         startTime: event.startTime,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
         status: 'recording',
         isRecording: true,
         error: null,
@@ -279,6 +321,9 @@ export const recordingStore = createStore({
     },
 
     pauseRecording: (context): RecordingState => {
+      if (context.status !== 'recording') return context;
+
+      const pauseStartedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(false);
       }
@@ -289,10 +334,14 @@ export const recordingStore = createStore({
       return {
         ...context,
         status: 'paused',
+        pauseStartedAt,
       };
     },
 
     resumeRecording: (context): RecordingState => {
+      if (context.status !== 'paused') return context;
+
+      const resumedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(true);
       }
@@ -302,11 +351,21 @@ export const recordingStore = createStore({
       return {
         ...context,
         status: 'recording',
+        pauseStartedAt: null,
+        accumulatedPausedMs:
+          context.accumulatedPausedMs +
+          (context.pauseStartedAt !== null ? resumedAt - context.pauseStartedAt : 0),
       };
     },
 
     stopRecording: (context): RecordingState => {
-      const durationMs = context.startTime ? Date.now() - context.startTime : null;
+      const durationMs = context.startTime
+        ? calculateRecordingElapsedMs(
+            context.startTime,
+            context.pauseStartedAt,
+            context.accumulatedPausedMs,
+          )
+        : null;
 
       // Cleanup room
       if (context.room) {
@@ -320,6 +379,10 @@ export const recordingStore = createStore({
       }
       transcriptIdCounter = 0;
 
+      if (ACTIVE_STATUSES.has(context.status)) {
+        playAudio(AUDIO_PATHS.RECORDING_END);
+      }
+
       // Show toast
       const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
       toast.success('Recording stopped', {
@@ -332,13 +395,18 @@ export const recordingStore = createStore({
         room: null,
         externalId: null,
         channelId: null,
+        title: null,
         status: 'idle',
         isRecording: false,
         startTime: null,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
         error: null,
         sttModel: context.sttModel, // Preserve STT model preference
         transcripts: [], // Clear transcripts when recording stops
+        markedMoments: [],
         pendingAutoStart: false,
+        autoStartRequestedAt: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
@@ -368,35 +436,52 @@ export const recordingStore = createStore({
       }
       transcriptIdCounter = 0;
 
+      if (ACTIVE_STATUSES.has(context.status)) {
+        playAudio(AUDIO_PATHS.RECORDING_END);
+      }
+
       return {
         ...context,
         status: 'error',
         isRecording: false,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
         error: event.error,
         agentLeft: false,
       };
     },
 
-    reset: (context): RecordingState => ({
-      room: null,
-      externalId: null,
-      channelId: null,
-      status: 'idle',
-      isRecording: false,
-      startTime: null,
-      error: null,
-      sttModel: context.sttModel, // Preserve STT model preference
-      transcripts: [], // Clear transcripts
-      pendingAutoStart: false,
-      pendingStop: false,
-      notesCanvasId: null,
-      notesCanvasViewAccessId: null,
-      notesCanvasTitle: DEFAULT_NOTES_TITLE,
-      isCanvasPaneOpen: false,
-      activeLayout: 'transcript',
-      isTranscriptMinimized: false,
-      agentLeft: false,
-    }),
+    reset: (context): RecordingState => {
+      if (ACTIVE_STATUSES.has(context.status)) {
+        playAudio(AUDIO_PATHS.RECORDING_END);
+      }
+
+      return {
+        room: null,
+        externalId: null,
+        channelId: null,
+        title: null,
+        status: 'idle',
+        isRecording: false,
+        startTime: null,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
+        error: null,
+        sttModel: context.sttModel, // Preserve STT model preference
+        transcripts: [], // Clear transcripts
+        markedMoments: [],
+        pendingAutoStart: false,
+        autoStartRequestedAt: null,
+        pendingStop: false,
+        notesCanvasId: null,
+        notesCanvasViewAccessId: null,
+        notesCanvasTitle: DEFAULT_NOTES_TITLE,
+        isCanvasPaneOpen: false,
+        activeLayout: 'transcript',
+        isTranscriptMinimized: false,
+        agentLeft: false,
+      };
+    },
 
     addTranscript: (context, event: { entry: TranscriptEntry }): RecordingState => ({
       ...context,
@@ -406,6 +491,16 @@ export const recordingStore = createStore({
     clearTranscripts: (context): RecordingState => ({
       ...context,
       transcripts: [],
+      markedMoments: [],
+    }),
+
+    /**
+     * Record a flagged moment locally. The caller (NoteTakerOverlayHost) derives the
+     * anchor and timestamp and owns persisting it, so this is a plain append.
+     */
+    markMoment: (context, event: { moment: MarkedMoment }): RecordingState => ({
+      ...context,
+      markedMoments: [...context.markedMoments, event.moment],
     }),
 
     /**
@@ -438,6 +533,11 @@ export const recordingStore = createStore({
     setNotesCanvasTitle: (context, event: { title: string }): RecordingState => ({
       ...context,
       notesCanvasTitle: event.title,
+    }),
+
+    setTitle: (context, event: { title: string }): RecordingState => ({
+      ...context,
+      title: event.title,
     }),
 
     setActiveLayout: (context, event: { layout: RecordingLayout }): RecordingState => ({
