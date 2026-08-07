@@ -1186,12 +1186,27 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Set up SSE
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
     });
 
     // Send conversationId immediately
     res.write(`event: meta\ndata: ${JSON.stringify({ conversationId })}\n\n`);
+
+    // Heartbeat: every LB/proxy hop kills idle SSE connections, and tool-heavy
+    // runs (/design sandbox creation, long generations) go 60s+ with no events
+    // — the browser then freezes on the last event with no error while the run
+    // continues server-side (prod 2026-08-08). SSE comment frames are invisible
+    // to EventSource parsers, so this keeps every hop's idle timer at zero with
+    // no client change. res "close" fires on ALL end paths (server res.end()
+    // and client disconnect), so the interval can never leak.
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded && !res.destroyed) {
+        try { res.write(":hb\n\n"); } catch { /* client gone; close handler clears */ }
+      }
+    }, 15_000);
+    res.on("close", () => clearInterval(heartbeat));
 
     const callbackId = randomUUID();
 
@@ -2121,6 +2136,13 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
   });
   res.write(`event: open\ndata: ${JSON.stringify({ conversationId: convId })}\n\n`);
+  // Same idle-timeout protection as the chat stream: comment-frame heartbeat.
+  const liveHeartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) {
+      try { res.write(":hb\n\n"); } catch { /* close handler clears */ }
+    }
+  }, 15_000);
+  res.on("close", () => clearInterval(liveHeartbeat));
   log.info(`[agent-chat] /live connected: conv=${convId} agent=${slug} user=${userId} admin=${isAdmin}`);
 
   // Only cross-user (admin + All Runs) viewers receive events for other users'
