@@ -12,7 +12,6 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
-import { cn } from '../../../utils/classNames';
 import { StageRemapTable } from './StageRemapTable';
 import type {
   ApiEnvelope,
@@ -21,7 +20,6 @@ import type {
   ExecuteCopySummary,
   JobStatusResponse,
   PlanCopyResult,
-  StageRemapMode,
 } from './BoardConfigCopyScreen.types';
 
 interface BoardConfigCopyScreenProps {
@@ -81,7 +79,6 @@ const BoardConfigCopyScreen = ({
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
-  const [remapMode, setRemapMode] = useState<StageRemapMode>('SEND_TO_INITIAL');
   const [remapOverrides, setRemapOverrides] = useState<Record<string, string>>({});
 
   const [executing, setExecuting] = useState(false);
@@ -89,6 +86,11 @@ const BoardConfigCopyScreen = ({
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
   const [summary, setSummary] = useState<ExecuteCopySummary | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
+  // A completed/failed job from a PRIOR run, found on mount — surfaced as a dismissible
+  // banner on the select step rather than forcing the admin into the result screen every
+  // time they reopen this board's copy-config modal (jobId is deterministic per target
+  // board, so that job stays queryable until the next run overwrites it).
+  const [previousJobStatus, setPreviousJobStatus] = useState<JobStatusResponse | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -116,13 +118,13 @@ const BoardConfigCopyScreen = ({
     setCategories({ customFields: true, roles: true, stages: true });
     setPlan(null);
     setPlanError(null);
-    setRemapMode('SEND_TO_INITIAL');
     setRemapOverrides({});
     setExecuting(false);
     setJobId(null);
     setJobStatus(null);
     setSummary(null);
     setResultError(null);
+    setPreviousJobStatus(null);
   };
 
   const handleClose = (): void => {
@@ -130,52 +132,49 @@ const BoardConfigCopyScreen = ({
     onClose();
   };
 
-  const fetchPlan = useCallback(
-    async (mode: StageRemapMode): Promise<PlanCopyResult | null> => {
-      if (!sourceBoardId) return null;
-      setPlanLoading(true);
-      setPlanError(null);
-      try {
-        const response = await apiInstance.post<ApiEnvelope<PlanCopyResult>>(
-          '/admin/board-config-copy/plan',
-          { sourceBoardId, targetBoardId, categories, remapMode: mode },
-        );
-        const result = response.data.data;
-        if (!result) {
-          setPlanError(response.data.error ?? 'Failed to load copy plan');
-          return null;
-        }
-        setPlan(result);
-        if (result.errors.length > 0) {
-          setPlanError(result.errors.join(' '));
-        }
-        const seeded: Record<string, string> = { ...(result.suggestedMapping ?? {}) };
-        setRemapOverrides(prev => ({ ...seeded, ...prev }));
-        return result;
-      } catch (error) {
-        // Validation failures (e.g. mismatched project) come back as HTTP 400 with the
-        // PlanCopyResult still attached under `data.data` — surface it if present so the
-        // UI can show the structured `errors` list, not just a generic message.
-        const withResponse = error as {
-          response?: { data?: ApiEnvelope<PlanCopyResult> };
-        };
-        const attached = withResponse?.response?.data?.data;
-        if (attached) {
-          setPlan(attached);
-          setPlanError(
-            attached.errors.join(' ') || extractErrorMessage(error, 'Failed to load copy plan'),
-          );
-          return attached;
-        }
-        const message = extractErrorMessage(error, 'Failed to load copy plan');
-        setPlanError(message);
+  const fetchPlan = useCallback(async (): Promise<PlanCopyResult | null> => {
+    if (!sourceBoardId) return null;
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const response = await apiInstance.post<ApiEnvelope<PlanCopyResult>>(
+        '/admin/board-config-copy/plan',
+        { sourceBoardId, targetBoardId, categories },
+      );
+      const result = response.data.data;
+      if (!result) {
+        setPlanError(response.data.error ?? 'Failed to load copy plan');
         return null;
-      } finally {
-        setPlanLoading(false);
       }
-    },
-    [sourceBoardId, targetBoardId, categories],
-  );
+      setPlan(result);
+      if (result.errors.length > 0) {
+        setPlanError(result.errors.join(' '));
+      }
+      const seeded: Record<string, string> = { ...(result.suggestedMapping ?? {}) };
+      setRemapOverrides(prev => ({ ...seeded, ...prev }));
+      return result;
+    } catch (error) {
+      // Validation failures (e.g. mismatched project) come back as HTTP 400 with the
+      // PlanCopyResult still attached under `data.data` — surface it if present so the
+      // UI can show the structured `errors` list, not just a generic message.
+      const withResponse = error as {
+        response?: { data?: ApiEnvelope<PlanCopyResult> };
+      };
+      const attached = withResponse?.response?.data?.data;
+      if (attached) {
+        setPlan(attached);
+        setPlanError(
+          attached.errors.join(' ') || extractErrorMessage(error, 'Failed to load copy plan'),
+        );
+        return attached;
+      }
+      const message = extractErrorMessage(error, 'Failed to load copy plan');
+      setPlanError(message);
+      return null;
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [sourceBoardId, targetBoardId, categories]);
 
   const handleContinueFromSelect = async (): Promise<void> => {
     if (!sourceBoardId) {
@@ -191,7 +190,7 @@ const BoardConfigCopyScreen = ({
       return;
     }
 
-    const result = await fetchPlan(remapMode);
+    const result = await fetchPlan();
     if (!result || result.errors.length > 0) return;
 
     const hasTicketsToRemap = (result.oldStages ?? []).some(stage => stage.ticketCount > 0);
@@ -202,18 +201,10 @@ const BoardConfigCopyScreen = ({
     }
   };
 
-  const handleRemapModeChange = async (mode: StageRemapMode): Promise<void> => {
-    setRemapMode(mode);
-    await fetchPlan(mode);
-  };
-
   const visibleRemapRows = useMemo(() => {
     if (!plan) return [];
-    const rows = (plan.oldStages ?? []).filter(stage => stage.ticketCount > 0);
-    if (remapMode === 'MAP_EXISTING') return rows;
-    const requiresExplicit = plan.requiresExplicit ?? [];
-    return rows.filter(stage => requiresExplicit.includes(stage.id));
-  }, [plan, remapMode]);
+    return (plan.oldStages ?? []).filter(stage => stage.ticketCount > 0);
+  }, [plan]);
 
   const newStageOptions = useMemo(
     () =>
@@ -250,12 +241,14 @@ const BoardConfigCopyScreen = ({
             toast.success('Board configuration copy completed');
           } else if (status.state === 'failed') {
             stopPolling();
+            setSummary(null);
             setResultError(status.failedReason ?? 'The copy job failed');
             setStep('result');
             toast.error('Board configuration copy failed');
           }
         } catch (error) {
           stopPolling();
+          setSummary(null);
           setResultError(extractErrorMessage(error, 'Lost track of the copy job status'));
           setStep('result');
         }
@@ -277,6 +270,12 @@ const BoardConfigCopyScreen = ({
 
     setExecuting(true);
     setResultError(null);
+    // Clear any stale summary/job-status carried over from viewing a PRIOR run's result
+    // within this same still-mounted session (e.g. via the "View details" banner) — a
+    // fresh run must never render leftover numbers from a different job.
+    setSummary(null);
+    setJobStatus(null);
+    setPreviousJobStatus(null);
     try {
       const stageRemapOverrides = categories.stages
         ? Object.entries(overrides ?? remapOverrides).map(([oldStageId, newStageId]) => ({
@@ -291,7 +290,7 @@ const BoardConfigCopyScreen = ({
           sourceBoardId,
           targetBoardId,
           categories,
-          ...(categories.stages && { remapMode, stageRemapOverrides }),
+          ...(categories.stages && { stageRemapOverrides }),
           dryRun: false,
         },
       );
@@ -337,9 +336,8 @@ const BoardConfigCopyScreen = ({
         setJobStatus(status);
         setStep('progress');
         startPolling(targetBoardId);
-      } else if (status.state === 'completed' && status.result) {
-        setSummary(status.result);
-        setStep('result');
+      } else if (status.state === 'completed' || status.state === 'failed') {
+        setPreviousJobStatus(status);
       }
     } catch {
       // No prior job for this board — nothing to recover, stay on the select step.
@@ -360,7 +358,7 @@ const BoardConfigCopyScreen = ({
       <div className='bg-background flex flex-col w-[90vw] max-w-3xl h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
-            {step === 'remap' && (
+            {(step === 'remap' || (step === 'result' && previousJobStatus)) && (
               <Button variant='ghost' size='sm' onClick={() => setStep('select')}>
                 <ArrowLeft size={15} /> Back
               </Button>
@@ -378,6 +376,45 @@ const BoardConfigCopyScreen = ({
         <div className='flex-1 overflow-y-auto p-4 space-y-4'>
           {step === 'select' && (
             <>
+              {previousJobStatus && (
+                <div className='flex items-start justify-between gap-3 text-xs bg-muted/40 border border-border rounded-md px-3 py-2'>
+                  <span className='text-muted-foreground'>
+                    {previousJobStatus.state === 'completed'
+                      ? 'A previous copy into this board completed.'
+                      : `A previous copy into this board failed${previousJobStatus.failedReason ? `: ${previousJobStatus.failedReason}` : '.'}`}
+                  </span>
+                  <div className='flex items-center gap-3 shrink-0'>
+                    <button
+                      type='button'
+                      className='text-primary hover:underline'
+                      onClick={() => {
+                        setSummary(previousJobStatus.result ?? null);
+                        setResultError(
+                          previousJobStatus.state === 'failed'
+                            ? (previousJobStatus.failedReason ?? 'The copy job failed')
+                            : null,
+                        );
+                        setStep('result');
+                      }}
+                      data-track-category='BOARD_CONFIG_COPY'
+                      data-track-name='VIEW_PREVIOUS_JOB_RESULT'
+                    >
+                      View details
+                    </button>
+                    <button
+                      type='button'
+                      aria-label='Dismiss'
+                      className='text-muted-foreground hover:text-foreground'
+                      onClick={() => setPreviousJobStatus(null)}
+                      data-track-category='BOARD_CONFIG_COPY'
+                      data-track-name='DISMISS_PREVIOUS_JOB_BANNER'
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <p className='text-sm font-medium text-foreground mb-1.5 block'>
                   Copy configuration from
@@ -438,63 +475,10 @@ const BoardConfigCopyScreen = ({
                 ))}
               </div>
 
-              <div className='flex gap-3'>
-                <label
-                  htmlFor='remap-mode-send-to-initial'
-                  className={cn(
-                    'flex-1 flex items-start gap-2 px-3 py-2 border rounded-md cursor-pointer',
-                    remapMode === 'SEND_TO_INITIAL'
-                      ? 'border-[#185FA5] bg-[#E6F1FB]'
-                      : 'border-border',
-                  )}
-                >
-                  <input
-                    id='remap-mode-send-to-initial'
-                    type='radio'
-                    name='remap-mode'
-                    aria-label='Send existing tickets to the initial stage'
-                    checked={remapMode === 'SEND_TO_INITIAL'}
-                    onChange={() => void handleRemapModeChange('SEND_TO_INITIAL')}
-                    data-track-category='BOARD_CONFIG_COPY'
-                    data-track-name='SET_REMAP_MODE_SEND_TO_INITIAL'
-                  />
-                  <span className='text-sm'>
-                    <span className='font-medium text-foreground'>
-                      Send existing tickets to the initial stage
-                    </span>
-                    <span className='block text-xs text-muted-foreground'>
-                      To-do and in-progress tickets reset to the first stage. Completed, cancelled,
-                      and paused tickets still need your input below.
-                    </span>
-                  </span>
-                </label>
-                <label
-                  htmlFor='remap-mode-map-existing'
-                  className={cn(
-                    'flex-1 flex items-start gap-2 px-3 py-2 border rounded-md cursor-pointer',
-                    remapMode === 'MAP_EXISTING'
-                      ? 'border-[#185FA5] bg-[#E6F1FB]'
-                      : 'border-border',
-                  )}
-                >
-                  <input
-                    id='remap-mode-map-existing'
-                    type='radio'
-                    name='remap-mode'
-                    aria-label='Map every existing ticket'
-                    checked={remapMode === 'MAP_EXISTING'}
-                    onChange={() => void handleRemapModeChange('MAP_EXISTING')}
-                    data-track-category='BOARD_CONFIG_COPY'
-                    data-track-name='SET_REMAP_MODE_MAP_EXISTING'
-                  />
-                  <span className='text-sm'>
-                    <span className='font-medium text-foreground'>Map every existing ticket</span>
-                    <span className='block text-xs text-muted-foreground'>
-                      Choose where tickets from each old stage should land.
-                    </span>
-                  </span>
-                </label>
-              </div>
+              <p className='text-sm text-muted-foreground'>
+                Every old stage below has existing tickets — choose which new stage each should land
+                on. A stage can only be mapped to a new stage of the same status.
+              </p>
 
               {planLoading ? (
                 <p className='text-sm text-muted-foreground'>Loading...</p>

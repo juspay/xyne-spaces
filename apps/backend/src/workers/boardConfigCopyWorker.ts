@@ -123,8 +123,14 @@ class BoardConfigCopyWorker {
       }
     }
 
-    // Phase 3: verify no ticket still points at a stage we're about to delete.
-    const oldStageNames = data.oldStages.map(s => s.name);
+    // Phase 3: verify no ticket still points at a stage we're about to delete. Ticket
+    // identity for a stage is a plain name string (no stageId FK) — when the source and
+    // target already share a stage name (e.g. re-running the same copy a second time),
+    // a remapped ticket's stageName never actually changes text even though it correctly
+    // now refers to the freshly-inserted stage row. Excluding names that the new stage
+    // set still provides avoids false-flagging those as "stuck on an old stage".
+    const newStageNames = new Set(data.newStages.map(s => s.name));
+    const oldStageNames = data.oldStages.map(s => s.name).filter(name => !newStageNames.has(name));
     const remaining = await boardConfigCopyService.countTicketsOnOldStages(data.targetBoardId, oldStageNames);
     if (remaining > 0) {
       throw new Error(

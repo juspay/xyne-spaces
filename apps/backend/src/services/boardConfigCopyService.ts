@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
-import { BoardType, TicketStatusV2, FormContextType, FormEntityType, ApproverType } from '@xyne/shared';
+import { BoardType, FormContextType, FormEntityType, ApproverType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { calculateETADeadline, recomputeOverallTicketEta } from '@/utils/etaCalculation';
@@ -22,8 +22,6 @@ export interface CopyCategorySelection {
   stages: boolean;
 }
 
-export type StageRemapMode = 'MAP_EXISTING' | 'SEND_TO_INITIAL';
-
 export interface StageRemapOverride {
   oldStageId: string;
   // sourceStageId of the translated new stage this old stage's tickets should land on
@@ -34,7 +32,6 @@ export interface CopyRequestInput {
   sourceBoardId: string;
   targetBoardId: string;
   categories: CopyCategorySelection;
-  remapMode?: StageRemapMode;
 }
 
 export interface ExecuteCopyInput extends CopyRequestInput {
@@ -89,7 +86,7 @@ export interface PlanCopyResult {
   newStages?: NewStagePreview[];
   oldStages?: OldStageInfo[];
   suggestedMapping?: Record<string, string>; // oldStageId -> sourceStageId
-  requiresExplicit?: string[]; // oldStageIds needing explicit input for the requested remapMode
+  requiresExplicit?: string[]; // oldStageIds with tickets that still need an explicit mapping
 }
 
 export class BoardConfigCopyValidationError extends Error {
@@ -253,24 +250,21 @@ export class BoardConfigCopyService {
     return suggestion;
   }
 
-  private findInitialStage(newStages: NewStagePreview[]): NewStagePreview | undefined {
-    return [...newStages].sort((a, b) => a.sequenceNumber - b.sequenceNumber)[0];
-  }
-
   /**
-   * Resolves which new stage each old-stage-with-tickets should land on, per the two
-   * modes described in the approved plan. Returns the resolved mapping (oldStageId ->
-   * sourceStageId) plus the list of old stage ids that still need an explicit override.
+   * Resolves which new stage each old-stage-with-tickets should land on. Every old
+   * stage with tickets always requires an explicit admin-supplied mapping — there is
+   * no auto-resolution to an "initial stage" or similar. Returns the resolved mapping
+   * (oldStageId -> sourceStageId), the list of old stage ids still missing an override,
+   * and any supplied overrides that were rejected for a category mismatch.
    *
    * Invariant: a ticket may only be remapped to a new stage of the SAME defaultTicketStatusV2
    * category it's currently in (e.g. a STARTED-status ticket can only land on a STARTED-status
-   * new stage). This is enforced here — not just in the frontend picker — for every
-   * admin-supplied override, so a malformed/bypassed request can't violate it.
+   * new stage). This is enforced here — not just in the frontend picker — so a
+   * malformed/bypassed request can't violate it.
    */
   private resolveRemapPlan(
     oldStages: OldStageInfo[],
     newStages: NewStagePreview[],
-    mode: StageRemapMode,
     overrides: StageRemapOverride[],
   ): { mapping: Map<string, string>; requiresExplicit: string[]; invalidCategoryOverrides: string[] } {
     const overrideByOldStage = new Map(overrides.map(o => [o.oldStageId, o.newStageId]));
@@ -278,48 +272,22 @@ export class BoardConfigCopyService {
     const mapping = new Map<string, string>();
     const requiresExplicit: string[] = [];
     const invalidCategoryOverrides: string[] = [];
-    const initialStage = this.findInitialStage(newStages);
-    const completedStages = newStages.filter(s => s.defaultTicketStatusV2 === TicketStatusV2.COMPLETED);
 
     for (const old of oldStages) {
       if (old.ticketCount === 0) continue;
 
       const override = overrideByOldStage.get(old.id);
-      if (override) {
-        const overrideStage = newStageBySourceId.get(override);
-        if (!overrideStage || overrideStage.defaultTicketStatusV2 !== old.defaultTicketStatusV2) {
-          invalidCategoryOverrides.push(old.id);
-          continue;
-        }
-        mapping.set(old.id, override);
-        continue;
-      }
-
-      if (mode === 'MAP_EXISTING') {
+      if (!override) {
         requiresExplicit.push(old.id);
         continue;
       }
 
-      // SEND_TO_INITIAL, branched by category per the plan's exact rules.
-      switch (old.defaultTicketStatusV2) {
-        case TicketStatusV2.TODO:
-        case TicketStatusV2.STARTED:
-          if (initialStage) mapping.set(old.id, initialStage.sourceStageId);
-          else requiresExplicit.push(old.id);
-          break;
-        case TicketStatusV2.COMPLETED:
-          if (completedStages.length === 1 && completedStages[0]) {
-            mapping.set(old.id, completedStages[0].sourceStageId);
-          } else {
-            requiresExplicit.push(old.id);
-          }
-          break;
-        case TicketStatusV2.CANCELLED:
-        case TicketStatusV2.PAUSED:
-        default:
-          requiresExplicit.push(old.id);
-          break;
+      const overrideStage = newStageBySourceId.get(override);
+      if (!overrideStage || overrideStage.defaultTicketStatusV2 !== old.defaultTicketStatusV2) {
+        invalidCategoryOverrides.push(old.id);
+        continue;
       }
+      mapping.set(old.id, override);
     }
 
     return { mapping, requiresExplicit, invalidCategoryOverrides };
@@ -358,12 +326,7 @@ export class BoardConfigCopyService {
     const oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
 
     const suggestedMapping = this.computeSuggestedMapping(oldStages, newStages);
-    const { requiresExplicit } = this.resolveRemapPlan(
-      oldStages,
-      newStages,
-      input.remapMode ?? 'SEND_TO_INITIAL',
-      [],
-    );
+    const { requiresExplicit } = this.resolveRemapPlan(oldStages, newStages, []);
 
     if (sourceBoard.boardType !== targetBoard.boardType) {
       result.warnings.push(
@@ -515,7 +478,6 @@ export class BoardConfigCopyService {
     const { mapping, requiresExplicit, invalidCategoryOverrides } = this.resolveRemapPlan(
       oldStages,
       newStagesPreview,
-      input.remapMode ?? 'SEND_TO_INITIAL',
       input.stageRemapOverrides ?? [],
     );
 

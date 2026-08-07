@@ -22,7 +22,6 @@ const planSchema = z
     sourceBoardId: z.string().min(1),
     targetBoardId: z.string().min(1),
     categories: categoriesSchema,
-    remapMode: z.enum(['MAP_EXISTING', 'SEND_TO_INITIAL']).optional(),
   })
   .strict();
 
@@ -31,7 +30,6 @@ const executeSchema = z
     sourceBoardId: z.string().min(1),
     targetBoardId: z.string().min(1),
     categories: categoriesSchema,
-    remapMode: z.enum(['MAP_EXISTING', 'SEND_TO_INITIAL']).optional(),
     stageRemapOverrides: z
       .array(z.object({ oldStageId: z.string().min(1), newStageId: z.string().min(1) }))
       .optional(),

@@ -16,8 +16,6 @@ export interface CopyCategorySelection {
   stages: boolean;
 }
 
-export type StageRemapMode = 'MAP_EXISTING' | 'SEND_TO_INITIAL';
-
 export interface StageRemapOverride {
   oldStageId: string;
   newStageId: string;

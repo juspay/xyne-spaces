@@ -6,6 +6,7 @@ import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapsh
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
+import { calculateETADeadline } from '@/utils/etaCalculation';
 import {
   BaseTicketType,
   isReleaseTicket,
@@ -16,7 +17,6 @@ import {
   PRStatusEvent,
   EmailType,
 } from '@xyne/shared';
-import { calculateETADeadline, recomputeOverallTicketEta } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
@@ -384,151 +384,123 @@ export class TicketRepository {
     const isForwardMovement = !currentStage || targetStage.sequenceNumber > currentStage.sequenceNumber;
     const now = new Date();
 
-    // Recomputed overall Ticket.eta (see below); only touched when the stage actually changes.
-    let recomputedEta: Date | null = null;
+    if (isForwardMovement) {
+      // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
 
-    if (stageChanged) {
-      // Fresh deadline for the target stage visit, used both to persist TicketStageEta and to
-      // recompute the overall Ticket.eta below. `now` acts as the "no ETA configured" placeholder,
-      // matching the convention used elsewhere (e.g. VisitSlaMode.NONE on non-linear boards).
-      const targetStageEta =
-        targetStage.eta !== null && targetStage.eta > 0
-          ? calculateETADeadline(now, targetStage.eta)
-          : now;
-
-      if (isForwardMovement) {
-        // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
-
-        // 1. Mark current stage as left (if exists)
-        if (currentStage) {
-          await prisma.ticketStageEta.updateMany({
-            where: {
-              ticketId: ticketId,
-              stageId: currentStage.id,
-              stageLeftAt: null // Only update active entry
-            },
-            data: {
-              stageLeftAt: now,
-              updatedAt: now,
-              updatedBy: updatedBy
-            }
-          });
-        }
-
-        // 2. Check if target stage entry already exists (re-entry case)
-        const existingEntry = await prisma.ticketStageEta.findFirst({
+      // 1. Mark current stage as left (if exists)
+      if (currentStage) {
+        await prisma.ticketStageEta.updateMany({
           where: {
             ticketId: ticketId,
-            stageId: targetStage.id
-          }
-        });
-
-        if (existingEntry) {
-          // Re-entering a stage - always give it a fresh clock, so a stale deadline
-          // from a previous visit doesn't linger (previously only stageEnteredAt was reset).
-          await prisma.ticketStageEta.update({
-            where: { id: existingEntry.id },
-            data: {
-              stageEnteredAt: now, // Update entered time to now
-              stageLeftAt: null, // Mark as active
-              stageEta: targetStageEta,
-              updatedAt: now,
-              updatedBy: updatedBy
-            }
-          });
-        } else {
-          // First time entering this stage - create new entry only if stage has ETA
-          if (targetStage.eta !== null && targetStage.eta > 0) {
-            await prisma.ticketStageEta.create({
-              data: {
-                ticketId: ticketId,
-                workspaceId: currentTicket.workspaceId,
-                stageId: targetStage.id,
-                stageEnteredAt: now,
-                stageLeftAt: null,
-                stageEta: targetStageEta,
-                updatedBy: updatedBy
-              }
-            });
-          }
-        }
-      } else {
-        // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
-
-        // 1. Get all stageIds with sequenceNumber > target
-        const forwardStages = await prisma.stage.findMany({
-          where: {
-            boardId: currentTicket.boardId,
-            sequenceNumber: { gt: targetStage.sequenceNumber }
+            stageId: currentStage.id,
+            stageLeftAt: null // Only update active entry
           },
-          select: { id: true }
-        });
-
-        const forwardStageIds = forwardStages.map(s => s.id);
-
-        // 2. Delete all entries for those forward stages
-        if (forwardStageIds.length > 0) {
-          await prisma.ticketStageEta.deleteMany({
-            where: {
-              ticketId: ticketId,
-              stageId: { in: forwardStageIds }
-            }
-          });
-
-        }
-
-        // 3. Reactivate target stage (set stageLeftAt to null)
-        const targetEntry = await prisma.ticketStageEta.findFirst({
-          where: {
-            ticketId: ticketId,
-            stageId: targetStage.id
+          data: {
+            stageLeftAt: now,
+            updatedAt: now,
+            updatedBy: updatedBy
           }
         });
-
-        if (targetEntry) {
-          // Entry exists - reactivate it with a fresh clock (previously the stale
-          // stageEnteredAt/stageEta from the earlier visit were left untouched).
-          await prisma.ticketStageEta.update({
-            where: { id: targetEntry.id },
-            data: {
-              stageEnteredAt: now,
-              stageLeftAt: null,
-              stageEta: targetStageEta,
-              updatedAt: now,
-              updatedBy: updatedBy
-            }
-          });
-        } else {
-          // Entry doesn't exist (edge case - create it)
-          if (targetStage.eta !== null && targetStage.eta > 0) {
-            await prisma.ticketStageEta.create({
-              data: {
-                ticketId: ticketId,
-                workspaceId: currentTicket.workspaceId,
-                stageId: targetStage.id,
-                stageEnteredAt: now,
-                stageLeftAt: null,
-                stageEta: targetStageEta,
-                updatedBy: updatedBy
-              }
-            });
-          }
-        }
       }
 
-      // Recompute Ticket.eta = calculateETADeadline(targetStageEta, futureStagesEtaHours), so the
-      // overall deadline can never precede the stage deadline we just set (calculateETADeadline
-      // only ever moves forward). futureStagesEtaHours sums the eta of every stage still ahead of
-      // the one we just entered.
-      const futureStages = await prisma.stage.findMany({
+      // 2. Check if target stage entry already exists (re-entry case)
+      const existingEntry = await prisma.ticketStageEta.findFirst({
+        where: {
+          ticketId: ticketId,
+          stageId: targetStage.id
+        }
+      });
+
+      if (existingEntry) {
+        // Re-entering a stage - reactivate it
+        await prisma.ticketStageEta.update({
+          where: { id: existingEntry.id },
+          data: {
+            stageEnteredAt: now, // Update entered time to now
+            stageLeftAt: null, // Mark as active
+            updatedAt: now,
+            updatedBy: updatedBy
+          }
+        });
+      } else {
+        // First time entering this stage - create new entry only if stage has ETA
+        if (targetStage.eta !== null && targetStage.eta > 0) {
+
+          const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
+
+          await prisma.ticketStageEta.create({
+            data: {
+              ticketId: ticketId,
+              workspaceId: currentTicket.workspaceId,
+              stageId: targetStage.id,
+              stageEnteredAt: now,
+              stageLeftAt: null,
+              stageEta: stageEtaDeadline,
+              updatedBy: updatedBy
+            }
+          });
+        }
+      }
+    } else {
+      // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
+
+      // 1. Get all stageIds with sequenceNumber > target
+      const forwardStages = await prisma.stage.findMany({
         where: {
           boardId: currentTicket.boardId,
           sequenceNumber: { gt: targetStage.sequenceNumber }
         },
-        select: { eta: true }
+        select: { id: true }
       });
-      const futureStagesEtaHours = futureStages.reduce((sum, s) => sum + (s.eta || 0), 0);
-      recomputedEta = recomputeOverallTicketEta(targetStageEta, now, futureStagesEtaHours);
+
+      const forwardStageIds = forwardStages.map(s => s.id);
+
+      // 2. Delete all entries for those forward stages
+      if (forwardStageIds.length > 0) {
+        await prisma.ticketStageEta.deleteMany({
+          where: {
+            ticketId: ticketId,
+            stageId: { in: forwardStageIds }
+          }
+        });
+
+      }
+
+      // 3. Reactivate target stage (set stageLeftAt to null)
+      const targetEntry = await prisma.ticketStageEta.findFirst({
+        where: {
+          ticketId: ticketId,
+          stageId: targetStage.id
+        }
+      });
+
+      if (targetEntry) {
+        // Entry exists - reactivate it
+        await prisma.ticketStageEta.update({
+          where: { id: targetEntry.id },
+          data: {
+            stageLeftAt: null,
+            updatedAt: now,
+            updatedBy: updatedBy
+          }
+        });
+      } else {
+        // Entry doesn't exist (edge case - create it)
+        if (targetStage.eta !== null && targetStage.eta > 0) {
+          const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
+          await prisma.ticketStageEta.create({
+            data: {
+              ticketId: ticketId,
+              workspaceId: currentTicket.workspaceId,
+              stageId: targetStage.id,
+              stageEnteredAt: now,
+              stageLeftAt: null,
+              stageEta: stageEtaDeadline,
+              updatedBy: updatedBy
+            }
+          });
+        }
+      }
     }
 
     // Update the ticket stage and status (synced with stage's default status)
@@ -539,7 +511,6 @@ export class TicketRepository {
         data: {
           stageName: newStageName,
           statusV2: newStatusV2,
-          ...(recomputedEta && { eta: recomputedEta }),
           updatedBy: updatedBy,
           updatedAt: new Date()
         }

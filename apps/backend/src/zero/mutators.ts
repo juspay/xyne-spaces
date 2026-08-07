@@ -132,7 +132,7 @@ import { livekitService } from '@/services/liveKitService';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { calculateETADeadline, calculateWorkingDurationMs, recomputeOverallTicketEta } from '@/utils/etaCalculation';
+import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
 import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
@@ -5943,21 +5943,6 @@ export function createMutators(
               const isForwardMovement = !oldStage || newStage.sequenceNumber > oldStage.sequenceNumber;
               const now = Date.now();
 
-              // Fresh deadline for the target stage visit — used both to persist ticket_stage_eta
-              // and to recompute the overall Ticket.eta below. `now` acts as the "no ETA configured"
-              // placeholder, matching the convention used elsewhere (e.g. VisitSlaMode.NONE).
-              const targetStageEta =
-                newStage.eta !== null && newStage.eta > 0
-                  ? calculateETADeadline(new Date(now), newStage.eta).getTime()
-                  : now;
-
-              // All stages on the board, reused below both to find forward stages (backward
-              // movement) and to sum the ETA hours still ahead of the stage we just entered.
-              const boardStages = await tx.run(zql.stages.where('boardId', ticket.boardId));
-              const futureStagesEtaHours = boardStages
-                .filter(s => s.sequenceNumber > newStage.sequenceNumber)
-                .reduce((sum, s) => sum + (s.eta || 0), 0);
-
               if (isForwardMovement) {
                 // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
 
@@ -5990,19 +5975,22 @@ export function createMutators(
                 const existingEntry = existingEntries[0]; // Get first entry if exists
                 if (newStage.eta !== null && newStage.eta > 0) {
                   if (existingEntry) {
-                    // Re-entering a stage - always give it a fresh clock, so a stale deadline
-                    // from a previous visit doesn't linger (previously based off the old stageEnteredAt).
+                    // Re-entering a stage - reactivate it
+                    const newStageEtaDeadline = calculateETADeadline(
+                      new Date(existingEntry.stageEnteredAt),
+                      newStage.eta // Add stage ETA hours
+                    ).getTime();
                     await tx.mutate.ticket_stage_eta.update({
                       id: existingEntry.id,
-                      stageEnteredAt: now,
                       stageLeftAt: null,
-                      stageEta: targetStageEta,
+                      stageEta: newStageEtaDeadline,
                       updatedAt: now,
                       updatedBy: authData.sub
                     });
                   } else {
                     // First time entering this stage - create new entry only if stage has ETA
                     const newEntryId = uuidv4();
+                    const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                     await tx.mutate.ticket_stage_eta.insert({
                       workspaceId: authData.workspaceId,
                       id: newEntryId,
@@ -6011,7 +5999,7 @@ export function createMutators(
                       version: 1,
                       stageEnteredAt: now,
                       stageLeftAt: null,
-                      stageEta: targetStageEta,
+                      stageEta: stageEtaDeadline,
                       createdAt: now,
                       updatedBy: authData.sub
                     });
@@ -6020,8 +6008,13 @@ export function createMutators(
               } else {
                 // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
 
-                // 1. Get all stageIds with sequenceNumber > target
-                const forwardStageIds = boardStages
+                // 1. Get all stages with sequenceNumber > target
+                const forwardStages = await tx.run(
+                  zql.stages
+                    .where('boardId', ticket.boardId)
+                );
+
+                const forwardStageIds = forwardStages
                   .filter(s => s.sequenceNumber > newStage.sequenceNumber)
                   .map(s => s.id);
 
@@ -6048,19 +6041,16 @@ export function createMutators(
                 const targetEntry = targetEntries[0];
 
                 if (targetEntry) {
-                  // Entry exists - reactivate it with a fresh clock (previously the stale
-                  // stageEnteredAt/stageEta from the earlier visit were left untouched).
                   await tx.mutate.ticket_stage_eta.update({
                     id: targetEntry.id,
-                    stageEnteredAt: now,
                     stageLeftAt: null,
-                    stageEta: targetStageEta,
                     updatedAt: now,
                     updatedBy: authData.sub
                   });
                 } else {
                   // Create new entry only if stage has ETA
                   if (newStage.eta !== null && newStage.eta > 0) {
+                    const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                     const newEntryId = uuidv4();
                     await tx.mutate.ticket_stage_eta.insert({
                       workspaceId: authData.workspaceId,
@@ -6070,25 +6060,11 @@ export function createMutators(
                       version: 1,
                       stageEnteredAt: now,
                       stageLeftAt: null,
-                      stageEta: targetStageEta,
+                      stageEta: stageEtaDeadline,
                       createdAt: now,
                       updatedBy: authData.sub
                     });
                   }
-                }
-              }
-
-              // Recompute Ticket.eta = calculateETADeadline(targetStageEta, futureStagesEtaHours),
-              // so the overall deadline can never precede the stage deadline we just set. Skipped
-              // when the caller explicitly set `eta` in this same mutation — that value wins.
-              if (params.eta === undefined) {
-                const recomputedEta = recomputeOverallTicketEta(
-                  new Date(targetStageEta),
-                  new Date(now),
-                  futureStagesEtaHours,
-                );
-                if (recomputedEta) {
-                  updateData.eta = recomputedEta.getTime();
                 }
               }
             }
