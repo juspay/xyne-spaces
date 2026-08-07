@@ -1085,10 +1085,41 @@ model ChatAttachment {
   createdAt        DateTime @default(now())
 
   chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
+  designShares DesignArtifactShare[]
 
   @@index([chatMessageId])
   @@index([uploaderUserId, createdAt])
   @@map("chat_attachments")
+}
+
+/// A stable, revocable public link to the latest published HTML attachment in
+/// one Design Studio conversation. Only the bearer token hash is used for
+/// verification; its encrypted copy exists so
+/// the owner can reopen the Share dialog without rotating a live link.
+model DesignArtifactShare {
+  id              String   @id @default(cuid())
+  tokenHash       String   @unique
+  tokenCiphertext String
+  tokenIv         String
+  tokenAuthTag    String
+  ownerUserId     String
+  orgId           String
+  conversationId  String
+  attachmentId    String
+  title           String
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  viewCount       Int      @default(0)
+  lastViewedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  attachment ChatAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerUserId, conversationId])
+  @@index([orgId, updatedAt])
+  @@index([attachmentId])
+  @@map("design_artifact_shares")
 }
 
 model AgentRequest {

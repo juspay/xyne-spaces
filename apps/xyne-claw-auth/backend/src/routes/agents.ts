@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -2467,7 +2467,7 @@ const pictureUpload = multer({
 
 router.post(
   "/:slug/upload-picture",
-  pictureUpload.single("picture"),
+  pictureUpload.single("picture") as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
       const userToken = extractUserToken(req);

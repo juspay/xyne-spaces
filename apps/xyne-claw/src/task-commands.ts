@@ -27,6 +27,43 @@ export interface TaskCommand {
   missingToolInstruction: string;
 }
 
+export const DESIGN_SYSTEM_MAX_CHARS = 32_000;
+
+export interface DesignSystemPromptInjection {
+  id: string;
+  label: string;
+  content: string;
+}
+
+export type DesignSystemPromptInjectionResult =
+  | { status: "injected"; injection: DesignSystemPromptInjection }
+  | { status: "absent" }
+  | { status: "oversized"; length: number };
+
+export function buildDesignSystemPromptInjection(
+  command: TaskCommand | null,
+  agentConfig: Record<string, unknown> | undefined,
+): DesignSystemPromptInjectionResult {
+  if (command?.command !== "/design") return { status: "absent" };
+  const raw = agentConfig?.["designSystem"];
+  if (typeof raw !== "string") return { status: "absent" };
+  const designSystem = raw.trim();
+  if (!designSystem) return { status: "absent" };
+  if (designSystem.length > DESIGN_SYSTEM_MAX_CHARS) {
+    return { status: "oversized", length: designSystem.length };
+  }
+  return {
+    status: "injected",
+    injection: {
+      id: "__design-system-brand-contract",
+      label: "## Design System — binding brand contract",
+      content:
+        "The artifact MUST comply with these tokens/rules; when the user's request conflicts, follow the user but keep everything else on-system.\n\n" +
+        designSystem,
+    },
+  };
+}
+
 const TASK_COMMANDS: TaskCommand[] = [
   {
     command: "/design",

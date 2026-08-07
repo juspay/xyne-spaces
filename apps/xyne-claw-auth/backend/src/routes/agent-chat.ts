@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -571,7 +571,7 @@ router.post(
   uploadMiddleware.fields([
     { name: "files", maxCount: 10 },
     { name: "thumbnails", maxCount: 10 },
-  ]),
+  ]) as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
     try {
       const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;

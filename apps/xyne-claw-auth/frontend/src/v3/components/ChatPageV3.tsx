@@ -34,6 +34,10 @@ import {
   BrainIcon,
   ArrowsClockwiseIcon,
   CursorClickIcon,
+  ShareNetworkIcon,
+  CopySimpleIcon,
+  ArrowSquareOutIcon,
+  LinkBreakIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
@@ -52,8 +56,11 @@ import {
   approveChatAction,
   uploadChatAttachments,
   chatAttachmentDownloadUrl,
+  publishDesignArtifact,
+  revokeDesignArtifactShare,
   type AttachedContextRef,
   type ChatAttachmentMeta,
+  type DesignArtifactShare,
   type ContextItem,
   type ContextSearchType,
   type ConversationSummary,
@@ -71,6 +78,7 @@ import { Avatar, nameToHsl } from "./ui/Avatar";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { DesignSystemSheet } from "./DesignSystemSheet";
 import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
 import { Badge } from "./ui/Badge";
@@ -1323,6 +1331,8 @@ function MessageThread({
   runByMsgId,
   onRated,
   hideHtmlSource = false,
+  designVersionByMessageId,
+  onSelectDesignVersion,
 }: {
   messages: ChatMsg[];
   sending: boolean;
@@ -1356,6 +1366,8 @@ function MessageThread({
   /** Design consumes fenced HTML in the preview, so do not duplicate the
    *  entire source document inside the adjacent conversation panel. */
   hideHtmlSource?: boolean;
+  designVersionByMessageId?: Map<string, DesignVersion>;
+  onSelectDesignVersion?: (index: number) => void;
 }) {
   // Inline edit state for the latest visible user message. Older messages are
   // intentionally not editable — see comment in useChat.editLatestUserMessage.
@@ -1556,6 +1568,7 @@ function MessageThread({
         const displayContent = hideHtmlSource ? designChatContent(msg.content) : msg.content;
         const hasText = displayContent.length > 0;
         const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText;
+        const designVersion = designVersionByMessageId?.get(msg.id);
 
         return (
           <div key={msg.id} data-id="agent-message" className="flex items-start gap-2">
@@ -1646,6 +1659,17 @@ function MessageThread({
                       sending={sending}
                       onSelectBranch={onSelectBranch}
                     />
+                  )}
+                  {designVersion && onSelectDesignVersion && (
+                    <button
+                      type="button"
+                      data-id="message-design-version-chip"
+                      onClick={() => onSelectDesignVersion(Number(designVersion.label.slice(1)) - 1)}
+                      className="inline-flex h-5 items-center rounded border border-xyne-brand/25 bg-xyne-brand/5 px-1.5 text-[10px] font-semibold text-xyne-brand transition-colors hover:bg-xyne-brand/10"
+                      title={`Preview ${designVersion.label}`}
+                    >
+                      {designVersion.label}
+                    </button>
                   )}
                 </div>
               )}
@@ -3220,6 +3244,16 @@ type DesignPreviewSource =
   | { kind: "attachment"; attachment: ChatAttachmentMeta }
   | { kind: "inline"; html: string; fileName: string };
 
+type DesignVersion = {
+  source: DesignPreviewSource;
+  messageId: string;
+  messageIndex: number;
+  createdAt: string;
+  label: string;
+};
+
+const DESIGN_STUDIO_COMPAT_INSTRUCTION = `Design Studio compatibility fallback: if this run does not include the server-owned /design command contract, create or revise a complete responsive self-contained HTML document. Return the complete document in one fenced html code block so the preview can render it. Use available sandbox and delivery tools when present. Do not ask for a plan or storyboard approval.`;
+
 export interface DesignNodeSelection {
   selector: string;
   tagName: string;
@@ -3411,38 +3445,75 @@ function designChatContent(content: string): string {
   return withoutHtml || (hadHtml ? "Design updated in preview." : content);
 }
 
-function latestDesignPreview(messages: ChatMsg[]): DesignPreviewSource | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
+function designVersionFileName(version: DesignVersion): string {
+  return version.source.kind === "attachment"
+    ? version.source.attachment.originalFilename
+    : version.source.fileName;
+}
+
+function designVersions(messages: ChatMsg[]): DesignVersion[] {
+  const versions: DesignVersion[] = [];
+  for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (!message || message.role !== "assistant") continue;
     const attachment = [...(message.attachments ?? [])].reverse().find((item) =>
       item.mimeType.toLowerCase().includes("text/html") || item.originalFilename.toLowerCase().endsWith(".html"),
     );
-    if (attachment) return { kind: "attachment", attachment };
-    const html = htmlFromMessage(message);
-    if (html) return { kind: "inline", html, fileName: "xyne-design.html" };
+    const source: DesignPreviewSource | null = attachment
+      ? { kind: "attachment", attachment }
+      : (() => {
+          const html = htmlFromMessage(message);
+          return html ? { kind: "inline", html, fileName: "xyne-design.html" } : null;
+        })();
+    if (!source) continue;
+    versions.push({
+      source,
+      messageId: message.id,
+      messageIndex: i,
+      createdAt: message.createdAt,
+      label: `v${versions.length + 1}`,
+    });
   }
-  return null;
+  return versions;
 }
 
 function DesignPreviewPanel({
   source,
+  versions,
+  activeVersionIndex,
+  latestVersionAvailable,
   userId,
   sending,
+  conversationId,
   selection,
+  onSelectVersion,
+  onFollowLatest,
   onSelectionChange,
+  onOpenDesignSystem,
 }: {
   source: DesignPreviewSource | null;
+  versions: DesignVersion[];
+  activeVersionIndex: number | null;
+  latestVersionAvailable: boolean;
   userId: string;
   sending: boolean;
+  conversationId: string | null;
   selection: DesignNodeSelection | null;
+  onSelectVersion: (index: number) => void;
+  onFollowLatest: () => void;
   onSelectionChange: (selection: DesignNodeSelection | null) => void;
+  onOpenDesignSystem: () => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [rawHtml, setRawHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
   const [inspecting, setInspecting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareRecord, setShareRecord] = useState<DesignArtifactShare | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -3520,6 +3591,12 @@ function DesignPreviewPanel({
   const fileName = source?.kind === "attachment"
     ? source.attachment.originalFilename
     : source?.fileName ?? "Design preview";
+  const displayedVersionIndex = source && versions.length > 0
+    ? activeVersionIndex ?? versions.length - 1
+    : null;
+  const displayedVersion = displayedVersionIndex == null ? null : versions[displayedVersionIndex] ?? null;
+  const canGoPrev = displayedVersionIndex != null && displayedVersionIndex > 0;
+  const canGoNext = displayedVersionIndex != null && displayedVersionIndex < versions.length - 1;
 
   const download = () => {
     if (!rawHtml) return;
@@ -3529,6 +3606,89 @@ function DesignPreviewPanel({
     anchor.download = fileName;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+  };
+
+  const shareFile = async () => {
+    if (!rawHtml) return;
+    const file = new File([rawHtml], fileName, { type: "text/html" });
+    try {
+      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: fileName.replace(/\.html?$/i, ""),
+          text: "Shared from Xyne Design Studio",
+          files: [file],
+        });
+        return;
+      }
+      download();
+    } catch (err) {
+      // Closing the native share sheet is an intentional cancel, not an error
+      // and must not unexpectedly download the file.
+      if (!(err instanceof DOMException && err.name === "AbortError")) download();
+    }
+  };
+
+  const shareUrl = shareRecord
+    ? new URL(shareRecord.sharePath, window.location.origin).toString()
+    : "";
+
+  const openShare = async () => {
+    if (source?.kind !== "attachment" || !conversationId) {
+      await shareFile();
+      return;
+    }
+    setShareOpen(true);
+    setShareBusy(true);
+    setShareError(null);
+    setShareCopied(false);
+    try {
+      const record = await publishDesignArtifact({
+        attachmentId: source.attachment.id,
+        conversationId,
+        title: fileName.replace(/\.html?$/i, ""),
+        expiresInDays: null,
+      });
+      setShareRecord(record);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : "Unable to publish this design");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setShareCopied(true);
+    window.setTimeout(() => setShareCopied(false), 1800);
+  };
+
+  const sharePublicLink = async () => {
+    if (!shareUrl) return;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: shareRecord?.title ?? fileName, url: shareUrl });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+    }
+    await copyShareLink();
+  };
+
+  const revokeShare = async () => {
+    if (!shareRecord) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      await revokeDesignArtifactShare(shareRecord.id);
+      setShareRecord(null);
+      setShareOpen(false);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : "Unable to revoke this link");
+    } finally {
+      setShareBusy(false);
+    }
   };
 
   return (
@@ -3544,6 +3704,91 @@ function DesignPreviewPanel({
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenDesignSystem}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            <SparkleIcon size={13} /> Design system
+          </button>
+          {versions.length > 0 && displayedVersion && (
+            <div data-id="design-version-strip" className="flex items-center gap-1 rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-1 py-1">
+              <button
+                type="button"
+                aria-label="Previous design version"
+                disabled={!canGoPrev}
+                onClick={() => {
+                  if (displayedVersionIndex != null) onSelectVersion(displayedVersionIndex - 1);
+                }}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-xyne-fg-muted hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <CaretLeftIcon size={12} />
+              </button>
+              <BaseMenu.Root>
+                <BaseMenu.Trigger
+                  render={(triggerProps) => (
+                    <button
+                      {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+                      type="button"
+                      data-id="design-version-menu-trigger"
+                      className="inline-flex h-6 min-w-[62px] items-center justify-center gap-1 rounded px-1.5 text-[11px] font-medium text-xyne-fg-secondary hover:bg-xyne-surface hover:text-xyne-fg-primary"
+                    >
+                      {displayedVersion.label} of {versions.length}
+                      <CaretDownIcon size={10} />
+                    </button>
+                  )}
+                />
+                <BaseMenu.Portal>
+                  <BaseMenu.Positioner side="bottom" align="end" sideOffset={6}>
+                    <BaseMenu.Popup className="z-50 w-64 rounded-lg border border-xyne-border bg-xyne-surface p-1 shadow-lg">
+                      {versions.map((version, index) => (
+                        <BaseMenu.Item
+                          key={`${version.messageId}:${version.label}`}
+                          data-id="design-version-menu-item"
+                          onClick={() => onSelectVersion(index)}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] outline-none hover:bg-xyne-surface-subtle data-[highlighted]:bg-xyne-surface-subtle"
+                        >
+                          <span className={index === displayedVersionIndex
+                            ? "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-brand px-1.5 text-[10px] font-semibold text-white"
+                            : "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-surface-subtle px-1.5 text-[10px] font-semibold text-xyne-fg-muted"
+                          }>
+                            {version.label}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-xyne-fg-primary">{designVersionFileName(version)}</span>
+                            <span className="block truncate text-[10px] text-xyne-fg-muted">
+                              Message {version.messageIndex + 1} · {fmtDateShort(version.createdAt)}
+                            </span>
+                          </span>
+                        </BaseMenu.Item>
+                      ))}
+                    </BaseMenu.Popup>
+                  </BaseMenu.Positioner>
+                </BaseMenu.Portal>
+              </BaseMenu.Root>
+              <button
+                type="button"
+                aria-label="Next design version"
+                disabled={!canGoNext}
+                onClick={() => {
+                  if (displayedVersionIndex != null) onSelectVersion(displayedVersionIndex + 1);
+                }}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-xyne-fg-muted hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <CaretRightIcon size={12} />
+              </button>
+            </div>
+          )}
+          {latestVersionAvailable && (
+            <button
+              type="button"
+              data-id="design-latest-version-jump"
+              onClick={onFollowLatest}
+              className="inline-flex h-8 items-center rounded-md border border-xyne-brand/25 bg-xyne-brand/5 px-2.5 text-[11px] font-medium text-xyne-brand transition hover:bg-xyne-brand/10"
+            >
+              Latest: {versions.at(-1)?.label}
+            </button>
+          )}
           <button
             type="button"
             disabled={!previewUrl}
@@ -3563,6 +3808,14 @@ function DesignPreviewPanel({
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ArrowsClockwiseIcon size={12} /> Refresh
+          </button>
+          <button
+            type="button"
+            disabled={!rawHtml}
+            onClick={() => { void openShare(); }}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ShareNetworkIcon size={13} /> Share
           </button>
           <button
             type="button"
@@ -3617,6 +3870,74 @@ function DesignPreviewPanel({
           </div>
         )}
       </div>
+
+      <Dialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        title="Share design"
+        description="Anyone with this unlisted link can view the published artifact."
+        maxWidth={520}
+        footer={shareRecord ? (
+          <>
+            <button
+              type="button"
+              disabled={shareBusy}
+              onClick={() => { void revokeShare(); }}
+              className="mr-auto inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium text-xyne-error hover:bg-xyne-error/10 disabled:opacity-40"
+            >
+              <LinkBreakIcon size={14} /> Revoke link
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open(shareUrl, "_blank", "noopener,noreferrer")}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-xyne-border px-3 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary"
+            >
+              <ArrowSquareOutIcon size={14} /> Open
+            </button>
+            <button
+              type="button"
+              onClick={() => { void sharePublicLink(); }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-xyne-fg-primary px-3 text-[12px] font-medium text-xyne-fg-inverse"
+            >
+              <ShareNetworkIcon size={14} /> Share link
+            </button>
+          </>
+        ) : undefined}
+      >
+        {shareBusy && !shareRecord ? (
+          <div className="flex items-center gap-2 rounded-lg bg-xyne-surface-subtle px-3 py-4 text-[12px] text-xyne-fg-secondary">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-xyne-brand" /> Publishing current design…
+          </div>
+        ) : shareError ? (
+          <div className="rounded-lg border border-xyne-error/25 bg-xyne-error/5 px-3 py-3 text-[12px] text-xyne-error">
+            {shareError}
+          </div>
+        ) : shareRecord ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-2">
+              <input
+                readOnly
+                aria-label="Public design link"
+                value={shareUrl}
+                onFocus={(event) => event.currentTarget.select()}
+                className="min-w-0 flex-1 bg-transparent px-1 font-mono text-[11px] text-xyne-fg-secondary outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => { void copyShareLink(); }}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-xyne-surface px-2.5 text-[11px] font-medium text-xyne-fg-primary shadow-sm ring-1 ring-xyne-border-subtle"
+              >
+                {shareCopied ? <CheckIcon size={13} /> : <CopySimpleIcon size={13} />}
+                {shareCopied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-xyne-fg-muted">
+              <span>Published version updates when you share this design again.</span>
+              <span>{shareRecord.viewCount} view{shareRecord.viewCount === 1 ? "" : "s"}</span>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </section>
   );
 }
@@ -4318,10 +4639,34 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     return null;
   }, [messages]);
 
-  const designPreviewSource = useMemo(
-    () => mode === "design" ? latestDesignPreview(messages) : null,
+  const [activeVersionIndex, setActiveVersionIndex] = useState<number | null>(null);
+  const [designSystemOpen, setDesignSystemOpen] = useState(false);
+
+  const designVersionList = useMemo(
+    () => mode === "design" ? designVersions(messages) : [],
     [messages, mode],
   );
+  const displayedVersionIndex = activeVersionIndex == null
+    ? designVersionList.length - 1
+    : Math.min(activeVersionIndex, designVersionList.length - 1);
+  const displayedDesignVersion = displayedVersionIndex >= 0 ? designVersionList[displayedVersionIndex] ?? null : null;
+  const designPreviewSource = displayedDesignVersion?.source ?? null;
+  const designVersionByMessageId = useMemo(() => {
+    const next = new Map<string, DesignVersion>();
+    for (const version of designVersionList) next.set(version.messageId, version);
+    return next;
+  }, [designVersionList]);
+  const latestVersionAvailable = activeVersionIndex != null && activeVersionIndex < designVersionList.length - 1;
+
+  useEffect(() => {
+    setActiveVersionIndex(null);
+  }, [conversationId, mode]);
+
+  useEffect(() => {
+    if (activeVersionIndex != null && activeVersionIndex >= designVersionList.length) {
+      setActiveVersionIndex(designVersionList.length > 0 ? designVersionList.length - 1 : null);
+    }
+  }, [activeVersionIndex, designVersionList.length]);
 
   const handleDesignSelection = useCallback((selection: DesignNodeSelection | null) => {
     setDesignSelection(selection);
@@ -4333,7 +4678,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
 
   useEffect(() => {
     setDesignSelection(null);
-  }, [designPreviewSource]);
+  }, [displayedVersionIndex]);
 
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
@@ -4372,6 +4717,15 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     const designArtifactAttachmentId = mode === "design" && designPreviewSource?.kind === "attachment"
       ? designPreviewSource.attachment.id
       : undefined;
+    const designCompatibilityInstruction = designSelectionSnapshot
+      ? [
+          DESIGN_STUDIO_COMPAT_INSTRUCTION,
+          `Selected node fallback — scope=${designSelectionSnapshot.scope}; selector=${designSelectionSnapshot.selector}; ` +
+            `node=${designSelectionSnapshot.tagName}; label=${designSelectionSnapshot.label}; ` +
+            `current styles=${JSON.stringify(designSelectionSnapshot.styles)}. Apply the user's request to that node. ` +
+            "For component or design-system scope, change the shared rule and all matching instances rather than adding one inline override.",
+        ].join("\n\n")
+      : DESIGN_STUDIO_COMPAT_INSTRUCTION;
     const placeholderText =
       text ||
       (hasFiles
@@ -4382,6 +4736,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     setPendingFiles([]);
     setSelectedContext([]);
     setMentionOpen(false);
+    if (mode === "design") setActiveVersionIndex(null);
 
     const dispatch = async () => {
       let uploadedIds: string[] = [];
@@ -4413,6 +4768,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           attachmentIds: uploadedIds.length > 0 ? uploadedIds : undefined,
           attachedContext: contextSnapshot.length > 0 ? contextSnapshot : undefined,
           ...(mode === "design" ? { studioMode: "design" as const } : {}),
+          ...(mode === "design" ? { additionalInstructions: designCompatibilityInstruction } : {}),
           ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),
           ...(designSelectionSnapshot ? { designSelection: designSelectionSnapshot } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
@@ -4539,10 +4895,25 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
             {mode === "design" && (
               <DesignPreviewPanel
                 source={designPreviewSource}
+                versions={designVersionList}
+                activeVersionIndex={activeVersionIndex}
+                latestVersionAvailable={latestVersionAvailable}
                 userId={userId}
                 sending={sending}
+                conversationId={conversationId ?? null}
                 selection={designSelection}
+                onSelectVersion={setActiveVersionIndex}
+                onFollowLatest={() => setActiveVersionIndex(null)}
                 onSelectionChange={handleDesignSelection}
+                onOpenDesignSystem={() => setDesignSystemOpen(true)}
+              />
+            )}
+            {mode === "design" && (
+              <DesignSystemSheet
+                open={designSystemOpen}
+                agentSlug={activeAgent.slug}
+                agentName={activeAgent.name}
+                onClose={() => setDesignSystemOpen(false)}
               />
             )}
             <div className={mode === "design"
@@ -4626,6 +4997,8 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                     onApproveAndContinueAction={handleApproveAndContinueAction}
                     onDeclineAction={handleDeclineAction}
                     hideHtmlSource={mode === "design"}
+                    designVersionByMessageId={mode === "design" ? designVersionByMessageId : undefined}
+                    onSelectDesignVersion={mode === "design" ? setActiveVersionIndex : undefined}
                   />
                 )}
 

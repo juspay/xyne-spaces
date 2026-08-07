@@ -12,6 +12,78 @@ export class ApiError extends Error {
   }
 }
 
+export interface DesignArtifactShare {
+  id: string;
+  title: string;
+  attachmentId: string;
+  conversationId: string;
+  sharePath: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  viewCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicDesignArtifact {
+  title: string;
+  updatedAt: string;
+  expiresAt: string | null;
+}
+
+export async function publishDesignArtifact(input: {
+  attachmentId: string;
+  conversationId: string;
+  title: string;
+  expiresInDays?: 1 | 7 | 30 | 90 | null;
+}): Promise<DesignArtifactShare> {
+  const result = await request<{ success: true; data: DesignArtifactShare }>(
+    `${AUTH_API_URL}/api/v1/design-shares`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return result.data;
+}
+
+export async function getDesignArtifactShare(conversationId: string): Promise<DesignArtifactShare | null> {
+  const result = await request<{ success: true; data: DesignArtifactShare | null }>(
+    `${AUTH_API_URL}/api/v1/design-shares/conversation/${encodeURIComponent(conversationId)}`,
+  );
+  return result.data;
+}
+
+export async function revokeDesignArtifactShare(shareId: string): Promise<void> {
+  await request<{ success: true }>(
+    `${AUTH_API_URL}/api/v1/design-shares/${encodeURIComponent(shareId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function getPublicDesignArtifact(token: string): Promise<PublicDesignArtifact> {
+  const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/metadata`, {
+    headers: { "x-design-share-token": token },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(response.status, body.error ?? "Shared design is unavailable");
+  }
+  const result = await response.json() as { success: true; data: PublicDesignArtifact };
+  return result.data;
+}
+
+export async function getPublicDesignArtifactHtml(token: string): Promise<Blob> {
+  const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/content`, {
+    headers: { "x-design-share-token": token },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(response.status, body.error ?? "Shared design is unavailable");
+  }
+  return response.blob();
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     credentials: "include",

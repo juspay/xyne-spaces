@@ -33,6 +33,7 @@ import { organizationsRouter } from "./routes/organizations.js";
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
+import { designSharesRouter, publicDesignSharesRouter } from "./routes/design-shares.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
 import { experimentsInternalRouter } from "./routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "./routes/error-pipeline.js";
@@ -159,6 +160,11 @@ app.get("/claw/health", (_req: Request, res: Response) => {
 
 const BASE = "/claw/api/v1";
 
+// Public bearer-link viewer. The secret arrives in x-design-share-token, not
+// the URL, so request/access logs never capture it. Every route verifies the
+// token hash and serves HTML under a CSP sandbox.
+app.use(`${BASE}/public/design-shares`, publicDesignSharesRouter);
+
 // MCP connector CRUD. requireUserAuth verifies a real Spaces session cookie and
 // sets x-user-id from it — so a client-supplied x-user-id header is ignored and
 // can't be forged. Was previously fully unauthenticated: anyone could POST a
@@ -197,6 +203,7 @@ app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
 app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
 app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)

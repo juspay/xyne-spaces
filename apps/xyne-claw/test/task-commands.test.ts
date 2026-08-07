@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { loadCustomTools } from "../src/custom-tools.js";
-import { parseTaskCommand, resolveTaskCommandMode } from "../src/task-commands.js";
+import {
+  DESIGN_SYSTEM_MAX_CHARS,
+  buildDesignSystemPromptInjection,
+  parseTaskCommand,
+  resolveTaskCommandMode,
+} from "../src/task-commands.js";
 
 describe("/design task command", () => {
   it("matches only the leading command token and runs immediately", () => {
@@ -36,6 +41,40 @@ describe("/design task command", () => {
     expect(names).toContain("sandbox-pw-screenshot");
     expect(names).toContain("generate-image");
     expect(names).toContain("sandbox-deliver-files");
+  });
+
+  it("injects a design system contract for /design runs", () => {
+    const command = parseTaskCommand("/design page");
+    const result = buildDesignSystemPromptInjection(command, {
+      designSystem: "\n# Brand\nUse #123456 for primary actions.\n",
+    });
+    expect(result.status).toBe("injected");
+    if (result.status !== "injected") throw new Error("expected design system injection");
+    expect(result.injection.id).toBe("__design-system-brand-contract");
+    expect(result.injection.label).toBe("## Design System — binding brand contract");
+    expect(result.injection.content).toContain("MUST comply");
+    expect(result.injection.content).toContain("# Brand\nUse #123456");
+  });
+
+  it("skips the design system contract when absent or empty", () => {
+    const command = parseTaskCommand("/design page");
+    expect(buildDesignSystemPromptInjection(command, {}).status).toBe("absent");
+    expect(buildDesignSystemPromptInjection(command, { designSystem: "   \n" }).status).toBe("absent");
+    expect(
+      buildDesignSystemPromptInjection(parseTaskCommand("/explainer Redis"), {
+        designSystem: "# Brand",
+      }).status,
+    ).toBe("absent");
+  });
+
+  it("skips oversized design system contracts", () => {
+    const command = parseTaskCommand("/design page");
+    const result = buildDesignSystemPromptInjection(command, {
+      designSystem: "x".repeat(DESIGN_SYSTEM_MAX_CHARS + 1),
+    });
+    expect(result.status).toBe("oversized");
+    if (result.status !== "oversized") throw new Error("expected oversized result");
+    expect(result.length).toBe(DESIGN_SYSTEM_MAX_CHARS + 1);
   });
 });
 

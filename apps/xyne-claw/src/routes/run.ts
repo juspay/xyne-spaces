@@ -128,7 +128,11 @@ import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { parseTaskCommand, resolveTaskCommandMode } from "../task-commands.js";
+import {
+  buildDesignSystemPromptInjection,
+  parseTaskCommand,
+  resolveTaskCommandMode,
+} from "../task-commands.js";
 import { createLogger } from "../logger.js";
 
 const clog = createLogger("run");
@@ -2939,6 +2943,15 @@ async function processTask(
       });
       log(
         `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,
+      );
+    }
+    const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
+    if (designSystemInjection.status === "injected") {
+      activeInjections.push(designSystemInjection.injection);
+      log("[task-command] /design designSystem prompt injection applied");
+    } else if (designSystemInjection.status === "oversized") {
+      log(
+        `[task-command] /design designSystem ignored: ${designSystemInjection.length} chars exceeds 32000 char cap`,
       );
     }
 
