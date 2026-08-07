@@ -47,32 +47,17 @@ with each read and write filtered through the same permission model.
 
 ## Why Xyne Spaces?
 
-Start with the context. In the age of AI, what your organization knows — its
-conversations, decisions, tickets, documents, calls — is the raw material for everything
-else: answers, automation, agents. Each of those is only as good as the context it can
-reach, so **the context has to live in one place** — normalised, indexed, and served
-through one API — rather than pieced together from a dozen tools every time someone,
-or something, asks.
+**Context is the foundation.** Every conversation, decision, ticket, document, and call adds to your organization’s understanding of what it knows, how it works, and where it’s going. Query responses, automation, and agents are only as good as the context they can reach.
 
-The apps are there for the same reason. Instead of bolting AI onto the old ways of
-working and waiting out one slow migration after another, they are built **agent-first
-and collaboration-first** from the start: real-time and shared by default, with agents
-in the same threads, tickets and canvases as people — producing context the moment the
-work happens.
+That context has to live in one place — normalized, indexed, and served through one interface — rather than pieced together from a dozen tools every time a person or agent needs it.
 
-Centralizing context creates an access problem: most of it is not safe to show to
-everyone. Search results and agent answers both have to respect who is allowed to see
-what, so **access control is enforced in the data layer**:
+**The apps build the context as work happens.** They are agent-first and collaboration-first: real-time and shared by default, with people and agents working together in the same threads, tickets, and canvases.
 
-- **Synced reads are scoped per user.** Every table carries a policy that rewrites the
-  query for the acting user, so a query only selects rows that user is allowed to see.
-- **Writes are checked centrally.** Sync mutations are ACL-wrapped in one place, and
-  REST routes resolve a permission matrix of resource × access level per user and
-  group. Since both paths are enforced centrally, new features get the same checks by
-  default.
-- **Agents operate within the same boundary.** An agent acts *as the person who invoked
-  it* and has that person's access — including for search and context lookups. There is
-  no privileged system token that bypasses this.
+Accessing context — through search or agents — must respect the permissions of the underlying work, so **access control is enforced at the data layer**:
+
+* **Reads respect user permissions.** Queries are scoped to the acting user, returning only the context they’re allowed to access.
+* **Writes are enforced centrally.** Mutations go through the same permission layer, so access rules apply consistently across apps and features.
+* **Agents inherit the user’s access.** Agents act as the person invoking them, so they can only search, read, and act on context that person can access. There is no privileged bypass.
 
 ---
 
