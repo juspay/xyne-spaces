@@ -8,6 +8,10 @@ import { HttpClient } from './core/http.js';
 import { Transport } from './core/transport.js';
 import { UsersResource } from './resources/users.js';
 import { SearchResource } from './resources/search.js';
+import { ChannelsResource } from './resources/channels.js';
+import { ConversationsResource } from './resources/conversations.js';
+import { MessagesResource } from './resources/messages.js';
+import { ActivitiesResource } from './resources/activities.js';
 
 export interface SpacesClientOptions {
   /**
@@ -59,6 +63,18 @@ export class SpacesClient {
   /** Search operations */
   readonly search: SearchResource;
 
+  /** Channel membership, settings, participants, and sidebar sections */
+  readonly channels: ChannelsResource;
+
+  /** Threads: listing, reading, pinning, and subscription */
+  readonly conversations: ConversationsResource;
+
+  /** Messages, drafts, and scheduled sends */
+  readonly messages: MessagesResource;
+
+  /** The current user's activity feed and its read state */
+  readonly activities: ActivitiesResource;
+
   constructor(options: SpacesClientOptions = {}) {
     this.http = new HttpClient({
       baseUrl: options.baseUrl ?? 'https://spaces.xyne.app',
@@ -71,6 +87,10 @@ export class SpacesClient {
     // Initialize resources
     this.users = new UsersResource(this.transport);
     this.search = new SearchResource(this.transport);
+    this.channels = new ChannelsResource(this.transport);
+    this.conversations = new ConversationsResource(this.transport);
+    this.messages = new MessagesResource(this.transport);
+    this.activities = new ActivitiesResource(this.transport);
   }
 
   /**
