@@ -23,7 +23,7 @@ import type {
 } from '@xyne/shared';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_CUSTOM_RANGE_MS = 90 * DAY_MS;
+const MAX_CUSTOM_RANGE_MS = 31 * DAY_MS;
 
 type CustomFieldFilterArg = {
   keys: string[];
