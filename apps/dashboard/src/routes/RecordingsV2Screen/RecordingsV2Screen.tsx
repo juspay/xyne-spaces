@@ -228,15 +228,15 @@ const RecordingsV2Screen = (): ReactElement => {
     <div
       data-testid='recordings-v2-page'
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
-      aria-labelledby='xyne-oats-heading'
+      aria-labelledby='xyne-scribe-heading'
     >
       <div ref={setScrollContainer} className='h-full w-full overflow-y-scroll'>
         <div className='flex min-h-full w-full flex-col items-center px-4'>
           <header className='max-w-[860px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-y-6'>
               <div className='col-start-1 row-start-1 min-w-0'>
-                <h1 id='xyne-oats-heading' className='text-3xl font-semibold text-foreground'>
-                  Xyne Oats
+                <h1 id='xyne-scribe-heading' className='text-3xl font-semibold text-foreground'>
+                  Xyne Scribe
                 </h1>
                 <p className='mt-1 text-sm text-muted-foreground/70'>
                   {ownershipFilteredRecordings.length} recordings · {recordingsCapturedThisWeek}{' '}

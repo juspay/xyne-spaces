@@ -176,11 +176,6 @@ export const recordingStore = createStore({
             startTime: session.startTime,
             defaultLayout,
           });
-
-          toast.success('Recording started', {
-            description: 'Your voice is being recorded and transcribed',
-            duration: 3000,
-          });
         })
         .catch(error => {
           logger.error(Event.RECORDING_ERROR, {

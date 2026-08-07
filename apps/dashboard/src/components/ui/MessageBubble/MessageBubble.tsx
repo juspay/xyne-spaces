@@ -529,6 +529,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   showLinkPreview: shouldRenderLinkPreview = true,
   searchItemView = false,
   afterTextContent,
+  headerContent,
   onUserClick,
 }) => {
   const navigate = useNavigate();
@@ -1135,6 +1136,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {headerContent}
             </div>
           )}
 

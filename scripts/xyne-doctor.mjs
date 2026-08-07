@@ -36,17 +36,21 @@ const PRESETS = {
     label: "bootstrap",
     command: ["pnpm", "run", "bootstrap:raw"],
   },
+  "bootstrap-infra": {
+    label: "bootstrap:infra",
+    command: ["pnpm", "run", "bootstrap:infra:raw"],
+  },
   services: {
     label: "services",
     command: ["pnpm", "run", "services:raw"],
   },
   dev: {
     label: "dev",
-    command: ["pnpm", "run", "dev:all:raw"],
+    command: ["pnpm", "run", "dev:all:plain"],
   },
   "dev:all": {
     label: "dev:all",
-    command: ["pnpm", "run", "dev:all:raw"],
+    command: ["pnpm", "run", "dev:all:plain"],
   },
   validate: {
     label: "dashboard:validate",
@@ -1419,7 +1423,7 @@ const runChildCommand = (command, cwd, capture, options = {}) =>
         detached: useProcessGroup,
         env: environment,
         shell: false,
-        stdio: piped ? ["inherit", "pipe", "pipe"] : "inherit",
+        stdio: piped ? ["ignore", "pipe", "pipe"] : "inherit",
       });
     } catch (error) {
       const message = safeSpawnErrorMessage(error);

@@ -79,7 +79,7 @@ export const SummaryGenerationPanel = ({
               </p>
               <p className='mt-1 text-sm text-muted-foreground'>
                 {canGenerate
-                  ? 'Transcript’s ready. Oats takes up to 2 minutes to write the recap, decisions and action items — often less.'
+                  ? 'Transcript ready. Scribe takes up to 2 minutes to write the recap, decisions and action items — often less.'
                   : 'A summary needs a transcript. This recording doesn’t have one yet.'}
               </p>
             </motion.div>
@@ -91,7 +91,7 @@ export const SummaryGenerationPanel = ({
             >
               <p className='text-sm font-medium text-foreground'>Writing your summary…</p>
               <p className='mt-1 text-sm text-muted-foreground'>
-                The recap, decisions and action items land here as soon as Oats is done.
+                The recap, decisions and action items land here as soon as Scribe is done.
               </p>
             </motion.div>
           </div>

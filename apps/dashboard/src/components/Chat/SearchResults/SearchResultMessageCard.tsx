@@ -141,6 +141,8 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     ? {
         messageId: renderedMessageId,
         conversationId,
+        // Search results carry no classification; chips don't render on this card.
+        messageActs: null,
         senderId: searchThread.senderId,
         content: searchSnippet ?? '',
         msgType: searchThread.msgType,
@@ -175,6 +177,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           replyCount: searchThread.replyCount,
           pinned: false,
           createdAt: searchThread.createdAt,
+          threadType: null,
           ticket_md: searchThread.ticketMd,
           workspaceId: channel?.workspaceId ?? '',
           parentMessageId: null,

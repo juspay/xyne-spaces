@@ -58,7 +58,7 @@ const envSchema = Joi.object({
       'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
     ),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(1800), // 30 minutes in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
@@ -70,14 +70,14 @@ const envSchema = Joi.object({
   S3_BUCKET_NAME: Joi.string().allow('').default(''),
   S3_ENDPOINT: Joi.string().allow('').default(''), // for MinIO/LocalStack in dev
   // Google Cloud Storage Configuration (Workload Identity)
-  GCS_PROJECT_ID: Joi.string().default(''),
-  GCS_BUCKET_NAME: Joi.string().default(''),
-  GCS_BUNDLE_BUCKET_NAME: Joi.string().default(''),
-  GCS_CANVAS_BUCKET_NAME: Joi.string().default(''),
-  GCS_DOCS_BUCKET_NAME: Joi.string().default(''),
+  GCS_PROJECT_ID: Joi.string().allow('').default(''),
+  GCS_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
+  GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
-  FAKE_GCS_HOST: Joi.string().default('localhost:4443'),
-  TRANSCRIPTION_BUCKET_NAME: Joi.string().default(''),
+  FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
+  TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_WORKFLOW_STEPS_BUCKET_NAME: Joi.string().default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
   GCS_WORKFLOW_VR_BUCKET_NAME: Joi.string().default(''),
@@ -196,6 +196,7 @@ const envSchema = Joi.object({
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
@@ -241,6 +242,10 @@ const envSchema = Joi.object({
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
   TEAM_INTELLIGENCE_SYNC_API_KEY: Joi.string().allow('').default(''),
+  // Telepresence monitoring sync API Key (for S2S authentication)
+  TELEPRESENCE_MONITORING_API_KEY: Joi.string().allow('').default(''),
+  // Max allowed range (in days) for telepresence health time-series queries
+  TELEPRESENCE_MONITORING_LIFESPAN: Joi.number().integer().positive().default(7),
   // API-support CSAT sync API Key (for S2S authentication) — shared by any external system posting CSAT results
   API_SUPPORT_CSAT_API_KEY: Joi.string().allow('').default(''),
   // Mettle API Configuration (for fetching employee details)
@@ -720,6 +725,8 @@ export const config = {
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
+  telepresenceMonitoringApiKey: envVars.TELEPRESENCE_MONITORING_API_KEY,
+  telepresenceMonitoringLifespanDays: envVars.TELEPRESENCE_MONITORING_LIFESPAN,
   apiSupportCsatApiKey: envVars.API_SUPPORT_CSAT_API_KEY,
   mettleApiBaseUrl: envVars.METTLE_API_BASE_URL,
   mettleToken: envVars.METTLE_TOKEN,
@@ -776,6 +783,7 @@ export const config = {
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
+  messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,

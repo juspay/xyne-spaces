@@ -38,6 +38,7 @@ import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
@@ -70,6 +71,15 @@ const AddAttachmentsFromConversationBodySchema = z.object({
   sourceConversationId: z.string().min(1, 'sourceConversationId is required'),
   sourceMessageId: z.string().min(1).optional(),
 });
+
+const SupportTicketCreateSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  fileMetadata: z.string().optional(),
+}).strict();
+
+const SUPPORT_TICKET_CREATED_RESPONSE = Object.freeze({ success: true as const });
+
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { TicketIdService } from '@/services/ticketIdService';
 import { unifiedBotUserService } from '@/bots/unified';
@@ -432,8 +442,27 @@ export class TicketController {
 
   createTicket = async (req: Request, res: Response): Promise<void> => {
     try {
+      const isSupportTicketRequest = req.headers['x-support-ticket'] === 'true';
+
       // If this is a support/error-report ticket, resolve channel+board from CAC
-      if (req.headers['x-support-ticket'] === 'true') {
+      if (isSupportTicketRequest) {
+        const validationResult = SupportTicketCreateSchema.safeParse(req.body);
+        if (!validationResult.success) {
+          const unexpectedFields = validationResult.error.issues.flatMap(issue =>
+            issue.code === 'unrecognized_keys' ? issue.keys : [],
+          );
+          res.status(400).json({
+            error: 'Invalid support ticket request',
+            code: 'INVALID_TICKET_FIELDS',
+            ...(unexpectedFields.length > 0 && { unexpectedFields }),
+          });
+          return;
+        }
+
+        // Drop the original object before adding server-owned routing fields. This
+        // ensures no client property can reach the internal ticket model.
+        req.body = validationResult.data;
+
         const cacConfig = await superpositionClient.getObjectValue(
           'error_report_channel_config',
           null,
@@ -451,17 +480,12 @@ export class TicketController {
           return;
         }
 
-        const SUPPORT_TAG = 'Support Ticket';
-        const existingTags: string[] = Array.isArray(req.body.tags) ? req.body.tags : [];
         req.body.channelId = cacConfig.channelId;
         req.body.projectId = channel.projectId;
         if (cacConfig.boardId) {
           req.body.boardId = cacConfig.boardId;
         }
-        req.body.tags = [
-          SUPPORT_TAG,
-          ...existingTags.filter(t => t.toLowerCase() !== SUPPORT_TAG.toLowerCase()),
-        ];
+        req.body.tags = ['Support Ticket'];
       }
 
       // Handle both FormData (with files) and JSON requests
@@ -873,6 +897,11 @@ export class TicketController {
           }, initialMessageId);
           await messageMetadataService.syncInitialMessageMd(conversationId);
 
+          // Ticket creation writes its message through Prisma, not a Zero mutator, so the
+          // vespa-injection handler that normally triggers classification never fires here.
+          // The thread has no user messages yet — the classifier reads the ticket instead.
+          void messageClassificationQueue.enqueueForMessage(conversationId);
+
           const ticketMd = serializeTicketMd({
             id: ticket.id,
             title: ticket.title,
@@ -1260,7 +1289,7 @@ export class TicketController {
         updatedAt: ticket.updatedAt,
       };
 
-      res.status(201).json(response);
+      res.status(201).json(isSupportTicketRequest ? SUPPORT_TICKET_CREATED_RESPONSE : response);
 
       // Check if this is a support channel by fetching the channel type
       const channel = await this.channelRepository.findById(ticket.channelId);

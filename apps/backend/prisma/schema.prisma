@@ -862,6 +862,7 @@ model UserPreference {
   channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
+  showThreadTags           Boolean  @default(false) // Render thread classification chips in chat; opt-in
 
   // Global notification settings
   globalDesktopNotificationLevel  String?            // Default level for all channels (desktop)
@@ -1191,6 +1192,29 @@ model PullRequests {
   @@index([date])
   @@map("pull_requests")
   @@schema("public")
+}
+
+/// Links a PR to channel threads where its link was posted (e.g. -merge channels).
+/// Written when the "Run PR Check" button is posted on a PR-link message; read to
+/// mirror PR lifecycle updates (merged, build status) into those threads.
+model PrThreadLink {
+  id             String   @id @default(cuid())
+  prUrl          String   // Canonical PR URL: <base>/projects/{KEY}/repos/{SLUG}/pull-requests/{ID}
+  prId           Int
+  projectKey     String
+  repositorySlug String
+  conversationId String   // Thread where the PR link was posted
+  channelId      String
+  messageId      String   // The button message posted in that thread
+  workspaceId    String   // Denormalized for workspace scoping (matches channels.workspaceId convention)
+  createdAt      DateTime // Supplied by the application — no DB default
+  updatedAt      DateTime @updatedAt
+
+  @@unique([prUrl, conversationId]) // Idempotency guard against duplicate side-effect delivery
+  @@index([prId])
+  @@index([conversationId])
+  @@map("pr_thread_links")
+  @@schema("non_zero")
 }
 
 model TeamIntelligenceIngestionBatchV2 {
@@ -1850,6 +1874,7 @@ model Conversation {
   parent_message_md  String?
   doNotPostToChannel Boolean?
   createdAt         DateTime @default(now())
+  threadType        String?
 
   // Relations
   channel         Channel                  @relation(fields: [channelId], references: [id])
@@ -2145,6 +2170,7 @@ model Message {
   isSent              Boolean     @default(true) // Whether the message is sent
   reactions_md      String?
   link_preview_md   String?
+  messageActs       String?
 
   // Relations
   messageSearch  MessageSearch? // One-to-one relation with search index

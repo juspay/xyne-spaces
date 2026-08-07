@@ -92,7 +92,6 @@ export class CommitAnalysisService {
   private initialize(): void {
     try {
       if (
-        this.ticketRepository &&
         this.applicationRepository &&
         this.xyneRelease &&
         this.releaseRepository
@@ -104,12 +103,16 @@ export class CommitAnalysisService {
       // TODO: we should have a factory/service to generate the release change requests
       this.xyneRelease = new XyneRelease();
       this.releaseRepository = new ReleaseRepository();
-      this.ticketRepository = new TicketRepository();
       logger.info('[CommitAnalysisService] Successfully initialized all repositories');
     } catch (error) {
       logger.error('[CommitAnalysisService] Failed to initialize repositories:', error);
     }
 
+  }
+
+  private get tickets(): TicketRepository {
+    this.ticketRepository ??= new TicketRepository();
+    return this.ticketRepository;
   }
 
 
@@ -148,7 +151,7 @@ export class CommitAnalysisService {
     prAuthor?: StubAuthor,
   ): Promise<TicketInfo | null> {
     try {
-      const ticket = await this.ticketRepository!.getTicketByXyneId(xyneId, workspaceId);
+      const ticket = await this.tickets.getTicketByXyneId(xyneId, workspaceId);
 
       if (ticket) {
         return {

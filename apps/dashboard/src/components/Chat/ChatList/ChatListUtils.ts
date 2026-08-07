@@ -99,6 +99,16 @@ export const shouldShowAvatar = (
     return !!isPreviousMessageAWorkflowMessage || isPreviousMessageAnActivity;
   };
 
+  // A tagged thread shows its chip beside the name and timestamp, so it needs its own
+  // header row — grouped under the previous message there is nowhere to put it. Raw check
+  // rather than parsing: '[]' means the tags were cleared, so there is nothing to show.
+  const hasThreadTag = (): boolean => {
+    if (currentItem.type !== 'conversation') return false;
+    const raw = currentItem.data.threadType;
+    return !!raw && raw !== '[]';
+  };
+
+  if (hasThreadTag()) return true;
   if (isCurrentItemCallMessage()) return true;
   if (!isSameDayMessege()) return true;
 

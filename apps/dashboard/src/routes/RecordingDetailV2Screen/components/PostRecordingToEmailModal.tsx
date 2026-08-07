@@ -181,6 +181,7 @@ const RecipientLine = ({
           onChange={event => {
             setInputValue(event.target.value);
             setHighlightedIndex(0);
+            setSuggestionsOpen(true);
           }}
           onFocus={() => setSuggestionsOpen(true)}
           onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 100)}
