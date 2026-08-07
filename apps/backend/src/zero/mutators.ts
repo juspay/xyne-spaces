@@ -90,7 +90,8 @@ import {
   normalizeNotificationKeywords,
   isDeskChannelType,
   deskTypeForChannelType,
-  Platform 
+  Platform,
+  UserStatus
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
@@ -500,6 +501,25 @@ async function assertCanvasChannelNotArchived(
 
   if (channel.isArchived) {
     throw new Error('Channel is archived');
+  }
+}
+
+/**
+ * Resolve a user id supplied by the caller, for the workspace the caller is acting in.
+ *
+ * Mutator reads go straight to the sync layer, so an id arriving in a payload has not
+ * been checked against anything. Anywhere one is written onto a row -- an assignee, an
+ * invitee -- it is resolved here first, so only a live member of the same workspace can
+ * be named.
+ */
+async function assertWorkspaceMember(
+  tx: Transaction<Schema>,
+  userId: string,
+  workspaceId: string,
+): Promise<void> {
+  const user = await tx.run(zql.users.where('id', userId).one());
+  if (!user || user.workspaceId !== workspaceId || user.status !== UserStatus.ACTIVE) {
+    throw new Error('User is not an active member of this workspace');
   }
 }
 
@@ -4715,10 +4735,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Call not found');
           }
 
+          // Inviting is a call-member action: the caller has to be on the call already.
+          const inviter = await tx.run(zql.call_participants
+            .where('callId', call.id)
+            .where('userId', authData.sub)
+            .one());
+          if (!inviter && call.createdByUserId !== authData.sub && call.organizerId !== authData.sub) {
+            throw new Error('You are not a participant of this call');
+          }
+
           const now = timestamp;
 
           // Invite each user
           for (const userId of userIds) {
+            await assertWorkspaceMember(tx, userId, authData.workspaceId);
+
             // Check if user already has a participant record
             const existingParticipant = await tx.run(zql.call_participants
               .where('callId', call.id)
@@ -6342,6 +6373,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error("Ticket not found");
           }
 
+          if (assignedTo !== null) {
+            await assertWorkspaceMember(tx, assignedTo, authData.workspaceId);
+          }
+
           const oldAssignedTo = ticket.assignedTo;
 
           // Update ticket assignment
@@ -6645,6 +6680,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           assignedTo: z.string().optional().nullable(),
         }),
         async ({ tx, args: { subTicketId, timestamp, mappedTicketId, conversationId, assignedTo } }) => {
+          // Re-parenting moves the subticket under a different ticket, so the new parent
+          // has to be one the caller's workspace owns -- otherwise the id alone decides.
+          if (mappedTicketId !== undefined) {
+            const parent = await tx.run(zql.tickets.where('id', mappedTicketId).one());
+            if (!parent || parent.workspaceId !== authData.workspaceId) {
+              throw new Error('Ticket not found');
+            }
+          }
+
+          if (assignedTo !== undefined && assignedTo !== null) {
+            await assertWorkspaceMember(tx, assignedTo, authData.workspaceId);
+          }
+
           // Update the subticket
           await tx.mutate.sub_tickets.update({
             id: subTicketId,
