@@ -505,6 +505,32 @@ async function assertCanvasChannelNotArchived(
 }
 
 /**
+ * The audience of a channel: everyone for a public one, its participants for a private one.
+ *
+ * This is the same line the read side draws, kept here so mutators that act on something
+ * owned by a channel decide it the same way rather than each inventing a rule.
+ */
+async function assertChannelAudience(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error('Channel not found');
+  }
+  if (channel.visibility === ChannelVisibility.PUBLIC) {
+    return;
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  if (!participant) {
+    throw new Error('You are not a participant of this channel');
+  }
+}
+
+/**
  * Resolve a user id supplied by the caller, for the workspace the caller is acting in.
  *
  * Mutator reads go straight to the sync layer, so an id arriving in a payload has not
@@ -2649,24 +2675,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           // Pinning writes to a conversation, so it needs the same audience that
-          // reading one does: a public channel, or membership of a private one.
-          const channel = await tx.run(
-            zql.channels.where('id', conversation.channelId).one(),
-          );
-          if (!channel) {
-            throw new Error("Conversation doesn't exist");
-          }
-          if (channel.visibility !== ChannelVisibility.PUBLIC) {
-            const participant = await tx.run(
-              zql.channel_participants
-                .where('channelId', conversation.channelId)
-                .where('userId', authData.sub)
-                .one(),
-            );
-            if (!participant) {
-              throw new Error('You are not a participant of this channel');
-            }
-          }
+          // reading one does.
+          await assertChannelAudience(tx, conversation.channelId, authData.sub);
 
           await tx.mutate.conversations.update({
             conversationId,
@@ -4735,13 +4745,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Call not found');
           }
 
-          // Inviting is a call-member action: the caller has to be on the call already.
-          const inviter = await tx.run(zql.call_participants
-            .where('callId', call.id)
-            .where('userId', authData.sub)
-            .one());
-          if (!inviter && call.createdByUserId !== authData.sub && call.organizerId !== authData.sub) {
-            throw new Error('You are not a participant of this call');
+          // Anyone in the audience of the call's channel may invite to it. A call with no
+          // channel has no such audience, so it falls back to the call's own membership.
+          if (call.channelId) {
+            await assertChannelAudience(tx, call.channelId, authData.sub);
+          } else {
+            const inviter = await tx.run(zql.call_participants
+              .where('callId', call.id)
+              .where('userId', authData.sub)
+              .one());
+            if (!inviter && call.createdByUserId !== authData.sub && call.organizerId !== authData.sub) {
+              throw new Error('You are not a participant of this call');
+            }
           }
 
           const now = timestamp;
