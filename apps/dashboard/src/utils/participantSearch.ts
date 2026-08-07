@@ -1,5 +1,7 @@
 import { searchUsers, searchChannels } from '@xyne/shared/utils';
 
+const MAX_PARTICIPANT_SEARCH_RESULTS = 100;
+
 /**
  * Shared participant-search ranking for the call modals (Instant / Scheduled /
  * thread add-participant).
@@ -66,11 +68,36 @@ export function rankParticipantOptions<T extends RankableOption>(options: T[], q
     else groups.push(opt); // `user_group:` and any future prefixes
   }
 
+  // The shared Fuse matchers intentionally ignore one-character queries. Use
+  // a lightweight substring fallback until there is enough input to rank, so
+  // every participant picker can show matches from the first keystroke.
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length === 1) {
+    const matches = (option: T): boolean => {
+      const name = typeof option.name === 'string' ? option.name : '';
+      const email = typeof option.email === 'string' ? option.email : '';
+      const displayName = typeof option.displayName === 'string' ? option.displayName : '';
+      return [option.label, name, email, displayName].some(value =>
+        value.toLowerCase().includes(normalizedQuery),
+      );
+    };
+
+    return [
+      ...users.filter(matches).slice(0, MAX_PARTICIPANT_SEARCH_RESULTS),
+      ...channels.filter(matches).slice(0, MAX_PARTICIPANT_SEARCH_RESULTS),
+      ...groups,
+    ];
+  }
+
   // Some channel-member payloads arrive as `{ id, name }` with no email, while
   // the shared matcher dereferences both fields. Normalize them at this boundary.
   const rankedUsers: T[] =
     users.length > 0
-      ? searchUsers<SearchableUserOption<T>>(users.map(toSearchableUserOption), query, users.length)
+      ? searchUsers<SearchableUserOption<T>>(
+          users.map(toSearchableUserOption),
+          query,
+          Math.min(users.length, MAX_PARTICIPANT_SEARCH_RESULTS),
+        )
       : [];
 
   const rankedChannels: T[] =
@@ -78,7 +105,7 @@ export function rankParticipantOptions<T extends RankableOption>(options: T[], q
       ? searchChannels<T & { name: string }>(
           channels.map(toSearchableChannelOption),
           query,
-          channels.length,
+          Math.min(channels.length, MAX_PARTICIPANT_SEARCH_RESULTS),
         )
       : [];
 

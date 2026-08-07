@@ -85,20 +85,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       value: `user:${user.id}`,
     }));
 
-    const query = searchQuery.trim().toLowerCase();
-    // The shared Fuse matcher deliberately ignores one-character queries. Keep
-    // the previous substring behaviour here so thread members are discoverable
-    // as soon as the user starts typing.
-    if (query.length === 1) {
-      return options.filter(user => {
-        const name = typeof user.name === 'string' ? user.name.toLowerCase() : '';
-        const email = typeof user.email === 'string' ? user.email.toLowerCase() : '';
-        return (
-          user.label.toLowerCase().includes(query) || name.includes(query) || email.includes(query)
-        );
-      });
-    }
-
     return rankParticipantOptions(options, searchQuery);
   }, [channelUsers, searchQuery]);
 
