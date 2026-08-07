@@ -8,6 +8,8 @@ import { userStatusService } from './userStatusService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 // import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { logger } from '@/utils/logger';
+// Aliased: broadcastZeroFallbackConfig takes a parameter named `config`.
+import { config as appConfig } from '@/config/env';
 import { authMiddleware } from '../middleware/auth';
 import { notificationService } from '@/notification-service';
 import { type NotificationData } from './notificationService';
@@ -226,23 +228,32 @@ class WebSocketService {
 
     socket.join(`user:${userId}`);
 
-    // Observe-only: log (once per window) when a socket exceeds the candidate
-    // inbound-event budget, but never drop events. Enforcement is deferred.
+    // How many inbound events one socket may send per window. Counted always and logged
+    // once per window; refused only where a deployment has turned the throttle on, so the
+    // same numbers can be read from real traffic before they start rejecting anything.
     let evtCount = 0;
     let evtWindowStart = Date.now();
     let evtWindowLogged = false;
-    const SOCKET_EVT_OBSERVE_THRESHOLD = 300;
-    const SOCKET_EVT_WINDOW_MS = 10_000;
+    const { throttleEnabled, eventLimit, eventWindowMs } = appConfig.websocket;
     socket.use((_packet, next) => {
       const now = Date.now();
-      if (now - evtWindowStart > SOCKET_EVT_WINDOW_MS) {
+      if (now - evtWindowStart > eventWindowMs) {
         evtWindowStart = now;
         evtCount = 0;
         evtWindowLogged = false;
       }
-      if (++evtCount > SOCKET_EVT_OBSERVE_THRESHOLD && !evtWindowLogged) {
-        evtWindowLogged = true;
-        logger.warn(`[WS-EVT-OBSERVE] Socket ${socket.id} (user ${userId}) exceeded ${SOCKET_EVT_OBSERVE_THRESHOLD} events in ${SOCKET_EVT_WINDOW_MS}ms (not enforced)`);
+      if (++evtCount > eventLimit) {
+        if (!evtWindowLogged) {
+          evtWindowLogged = true;
+          logger.warn(
+            `[WS-EVT] Socket ${socket.id} (user ${userId}) exceeded ${eventLimit} events in ${eventWindowMs}ms` +
+              `${throttleEnabled ? '' : ' (not enforced)'}`,
+          );
+        }
+        if (throttleEnabled) {
+          next(new Error('Too many events; slow down'));
+          return;
+        }
       }
       next();
     });
@@ -938,12 +949,20 @@ class WebSocketService {
       const { userId } = socket;
       const channels = Array.isArray(data?.channels) ? data.channels : [];
       const conversations = Array.isArray(data?.conversations) ? data.conversations : [];
-      // Observe-only: no cap enforced (see needs-design). Log large requests so
-      // real subscription counts inform the eventual bound.
-      const BULK_SUB_OBSERVE_THRESHOLD = 500;
+      // How many sessions one request may ask for. Each is authorized individually below,
+      // so the bound is on the work a single request can demand. Logged always, refused
+      // only where a deployment has turned the throttle on.
+      const { throttleEnabled, bulkSubscriptionLimit } = appConfig.websocket;
       const requestedCount = channels.length + conversations.length;
-      if (requestedCount > BULK_SUB_OBSERVE_THRESHOLD) {
-        logger.warn(`[BULK-SUB-OBSERVE] Socket ${socket.id} (user ${userId}) requested ${requestedCount} subscriptions (no cap enforced)`);
+      if (requestedCount > bulkSubscriptionLimit) {
+        logger.warn(
+          `[BULK-SUB] Socket ${socket.id} (user ${userId}) requested ${requestedCount} subscriptions, limit ${bulkSubscriptionLimit}` +
+            `${throttleEnabled ? '' : ' (not enforced)'}`,
+        );
+        if (throttleEnabled) {
+          socket.emit('subscription_error', { message: 'Too many subscriptions requested' });
+          return;
+        }
       }
 
       // 🔒 Authorize every requested session against the user's channel membership /
