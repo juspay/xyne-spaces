@@ -1856,6 +1856,14 @@ export class JiraMigrationImportService {
           },
           data: { lastReplyAt: lastCommentAt },
         });
+
+        await db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: lastCommentAt } }],
+          },
+          data: { lastReadAt: lastCommentAt },
+        });
       }
     }
 

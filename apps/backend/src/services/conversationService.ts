@@ -101,6 +101,8 @@ export interface AddMessageToConversationParams {
   createdAt?: Date;
   isAddingParticipant?: boolean;
   isMarkdown?: boolean;
+  /** Migration-only: advance participant read state to the imported reply timestamp. */
+  markParticipantsRead?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -568,6 +570,7 @@ export class ConversationService {
       isMarkdown,
       createdAt,
       isAddingParticipant = true,
+      markParticipantsRead = false,
     } = params;
 
     const conversation = await this.conversationRepository.findById(conversationId);
@@ -748,6 +751,7 @@ export class ConversationService {
     await this.conversationRepository.incrementReplyCount(
       conversationId,
       createdAt === undefined ? undefined : message.createdAt,
+      markParticipantsRead,
     );
     await messageMetadataService.addReply(conversationId, userId);
 

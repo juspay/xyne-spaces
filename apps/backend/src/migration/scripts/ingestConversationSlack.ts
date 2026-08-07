@@ -491,6 +491,7 @@ export async function ingestConversationSlack(
           lastActivityAt: createdAt,
           createdAt,
           isAddingParticipant: false,
+          markParticipantsRead: true,
         });
 
         message = result.message;
