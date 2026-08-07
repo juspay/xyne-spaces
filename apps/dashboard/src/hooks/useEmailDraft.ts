@@ -56,19 +56,17 @@ function sameStringList(a: string[] | null | undefined, b: string[] | null | und
 }
 
 /**
- * Returns the current draft for a conversation from Zero cache.
+ * Returns all drafts visible to the current user for a conversation from Zero cache.
  */
-export function useEmailDraft(
-  conversationId: string | null | undefined,
-): EmailDraftRecord | undefined {
+export function useEmailDrafts(conversationId: string | null | undefined): EmailDraftRecord[] {
   const [dbDrafts] = useCachedQuery(
     queries.getDraftForConversation({ conversationId: conversationId || '' }),
     { enabled: !!conversationId },
   );
-  const rows = (dbDrafts as unknown as EmailDraftRecord[] | undefined) ?? [];
-  const row = rows[0];
-  // Memoized on the row snapshot so consumers keep stable references between renders.
-  return useMemo(() => (row ? parseDraftRecipients(row) : undefined), [row]);
+  return useMemo(() => {
+    const rows = (dbDrafts as unknown as EmailDraftRecord[] | undefined) ?? [];
+    return rows.map(parseDraftRecipients);
+  }, [dbDrafts]);
 }
 
 /**
@@ -83,6 +81,7 @@ export function useEmailDraft(
 export function useEmailDraftOperations(
   conversationId: string | null | undefined,
   channelId: string | null | undefined,
+  drafts?: readonly EmailDraftRecord[],
 ): {
   saveDraft: (
     content: string,
@@ -93,21 +92,14 @@ export function useEmailDraftOperations(
   deleteDraft: () => void;
   draftId: string | null;
   draft: EmailDraftRecord | undefined;
+  latestDraft: EmailDraftRecord | undefined;
 } {
   const zero = useZero();
   const { userID } = useAuthContextValues();
-  const [dbDrafts] = useCachedQuery(
-    queries.getDraftForConversation({ conversationId: conversationId || '' }),
-    { enabled: !!conversationId },
+  const ownDraft = useMemo(
+    () => (userID ? drafts?.find(draft => draft.userId === userID) : undefined),
+    [drafts, userID],
   );
-
-  const ownRow =
-    dbDrafts && userID
-      ? (dbDrafts as unknown as EmailDraftRecord[]).find(d => d.userId === userID)
-      : undefined;
-  // Memoized on the row snapshot: the sameStringList guard below and EmailComposer's
-  // hydration effect both depend on this object keeping a stable reference.
-  const ownDraft = useMemo(() => (ownRow ? parseDraftRecipients(ownRow) : undefined), [ownRow]);
   const ownDraftId = ownDraft?.id;
 
   const deleteDraft = useCallback(() => {
@@ -190,5 +182,12 @@ export function useEmailDraftOperations(
     ],
   );
 
-  return { saveDraft, saveRecipients, deleteDraft, draftId: ownDraftId ?? null, draft: ownDraft };
+  return {
+    saveDraft,
+    saveRecipients,
+    deleteDraft,
+    draftId: ownDraftId ?? null,
+    draft: ownDraft,
+    latestDraft: drafts?.[0],
+  };
 }

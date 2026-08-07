@@ -1413,6 +1413,27 @@ export const queries = defineQueries({
         .one();
     }
   ),
+
+  supportTicketDetailV2: defineQuery(
+    z.object({
+      id: z.string().optional(),
+      xyneId: z.string().optional(),
+      workspaceId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
+    ({ args: { id, xyneId, workspaceId } }) => {
+      const base = id
+        ? zql.tickets.where('id', id)
+        : zql.tickets.where('xyneId', xyneId ?? '').where('workspaceId', workspaceId);
+      return base
+        .related('referencesIn', ref =>
+          ref.where('relationType', TicketReferenceRelation.MERGED_INTO)
+            .related('sourceTicket'),
+        )
+        .one();
+    }
+  ),
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
   // Cursor = (lastEmailAt, id) matching the orderBy. Active threads bubble up.
   // channelId + isMember are forwarded to TicketsACL for membership gating.

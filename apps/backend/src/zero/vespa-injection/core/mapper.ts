@@ -498,6 +498,7 @@ export const mapMessage = async (
     docId: args.messageId,
     docType: VespaDocType.MESSAGE,
     text: messageContent,
+    chunks: chunkPlainText(messageContent),
     username: sender?.name || '',
     userEmail: sender?.email || '',
     image: "",
@@ -707,6 +708,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     title: args.title,
     workflowType: "",// later we should populate workflow type
     description: args.description,
+    chunks: chunkPlainText(extractPlainTextFromHtml(args.description || '')),
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,
@@ -1407,7 +1409,7 @@ export const mapFile = async (
  * Chunk a plain-text string into segments of at most `maxLen` characters,
  * splitting on word boundaries so search snippets are coherent.
  */
-const chunkPlainText = (text: string, maxLen = 2000): string[] => {
+const chunkPlainText = (text: string, maxLen = 1500): string[] => {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks: string[] = [];
   let current = '';
