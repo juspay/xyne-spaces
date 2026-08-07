@@ -19,6 +19,9 @@ import { ProjectsResource } from './resources/projects.js';
 import { CanvasesResource } from './resources/canvases.js';
 import { CollectionsResource } from './resources/collections.js';
 import { FormsResource } from './resources/forms.js';
+import { CallsResource } from './resources/calls.js';
+import { EmailResource } from './resources/email.js';
+import { RecapsResource } from './resources/recaps.js';
 
 export interface SpacesClientOptions {
   /**
@@ -103,6 +106,15 @@ export class SpacesClient {
   /** Custom forms, their mappings, and submitted values */
   readonly forms: FormsResource;
 
+  /** Calls, scheduling, participation, and recordings */
+  readonly calls: CallsResource;
+
+  /** Desk email: drafts, signatures, read state, and labels */
+  readonly email: EmailResource;
+
+  /** Daily channel and project recaps, and entity nudges */
+  readonly recaps: RecapsResource;
+
   constructor(options: SpacesClientOptions = {}) {
     this.http = new HttpClient({
       baseUrl: options.baseUrl ?? 'https://spaces.xyne.app',
@@ -126,6 +138,9 @@ export class SpacesClient {
     this.canvases = new CanvasesResource(this.transport);
     this.collections = new CollectionsResource(this.transport);
     this.forms = new FormsResource(this.transport);
+    this.calls = new CallsResource(this.transport);
+    this.email = new EmailResource(this.transport);
+    this.recaps = new RecapsResource(this.transport);
   }
 
   /**
