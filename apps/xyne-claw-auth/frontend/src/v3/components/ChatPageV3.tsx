@@ -38,6 +38,7 @@ import {
   CopySimpleIcon,
   ArrowSquareOutIcon,
   LinkBreakIcon,
+  FileIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
@@ -2509,7 +2510,7 @@ export interface InputAreaHandle {
 /** Local pending file (not yet uploaded). Lives on the parent until send. */
 export interface PendingFile {
   file: File;
-  previewUrl: string;
+  previewUrl: string | null;
 }
 
 export interface InputAreaProps {
@@ -2573,6 +2574,8 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
@@ -2621,6 +2624,37 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     e.target.value = "";
   };
 
+  const hasDraggedFiles = (event: React.DragEvent): boolean =>
+    Array.from(event.dataTransfer.types).includes("Files");
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDraggingFiles(true);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingFiles(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDraggingFiles(false);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) onAddFiles(files);
+  };
+
   const hasChips = pendingFiles.length > 0 || selectedContext.length > 0;
   const sendDisabled = !value.trim() && !hasChips ? true : disabled;
 
@@ -2636,8 +2670,21 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
         )}
 
         <div
-          className={`rounded-3xl border border-xyne-border-subtle bg-xyne-surface px-4 pb-2.5 pt-3 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.18)] transition-shadow focus-within:border-xyne-border focus-within:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.22)]`}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`relative rounded-3xl border bg-xyne-surface px-4 pb-2.5 pt-3 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.18)] transition-all focus-within:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.22)] ${
+            isDraggingFiles
+              ? "border-xyne-brand ring-2 ring-xyne-brand/20"
+              : "border-xyne-border-subtle focus-within:border-xyne-border"
+          }`}
         >
+          {isDraggingFiles && (
+            <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-[20px] border border-dashed border-xyne-brand bg-xyne-surface/95 text-[13px] font-medium text-xyne-brand backdrop-blur-sm">
+              Drop files to attach
+            </div>
+          )}
           {/* Chip rail — context @-mentions + pending file previews, above the textarea */}
           {hasChips && (
             <div className="mb-2 flex flex-wrap gap-1.5">
@@ -2667,11 +2714,17 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
                   className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface-subtle py-0.5 pl-0.5 pr-2.5 text-[11px] text-xyne-fg-secondary"
                   title={p.file.name}
                 >
-                  <img
-                    src={p.previewUrl}
-                    alt=""
-                    className="h-4 w-4 shrink-0 rounded-full object-cover"
-                  />
+                  {p.previewUrl ? (
+                    <img
+                      src={p.previewUrl}
+                      alt=""
+                      className="h-4 w-4 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-xyne-surface text-xyne-fg-muted">
+                      <FileIcon size={10} />
+                    </span>
+                  )}
                   <span className="truncate">{p.file.name}</span>
                   <button
                     type="button"
@@ -2710,7 +2763,6 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
                 multiple
                 onChange={handleFilePick}
                 className="hidden"
@@ -2718,8 +2770,8 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               <button
                 type="button"
                 data-id="input-btn-attach"
-                title="Attach images"
-                aria-label="Attach images"
+                title="Attach files"
+                aria-label="Attach files"
                 onClick={() => fileInputRef.current?.click()}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-xyne-surface-subtle text-xyne-fg-tertiary transition-colors hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
               >
@@ -3247,6 +3299,7 @@ type DesignPreviewSource =
 
 type DesignVersion = {
   source: DesignPreviewSource;
+  projectAttachment?: ChatAttachmentMeta;
   messageId: string;
   messageIndex: number;
   createdAt: string;
@@ -3269,8 +3322,65 @@ export interface DesignNodeSelection {
 
 export type DesignEditScope = "element" | "component" | "design-system";
 
+export interface DesignManualEdit {
+  selector: string;
+  oldText?: string;
+  newText?: string;
+  styles?: Record<string, string>;
+  stale?: boolean;
+}
+
+export interface AppliedManualEdits {
+  html: string;
+  edits: DesignManualEdit[];
+}
+
 const DESIGN_INSPECTOR_EVENT = "xyne-design-node-selected";
 const DESIGN_INSPECTOR_MODE_EVENT = "xyne-design-inspector-mode";
+const DESIGN_EDIT_EVENT = "xyne-design-text-edited";
+
+function serializeDesignDocument(document: Document): string {
+  const doctype = document.doctype;
+  const serializedDoctype = doctype
+    ? `<!DOCTYPE ${doctype.name}${doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : ""}${
+        doctype.systemId ? `${doctype.publicId ? "" : " SYSTEM"} "${doctype.systemId}"` : ""
+      }>`
+    : "";
+  return `${serializedDoctype}${document.documentElement.outerHTML}`;
+}
+
+/** Applies text/style edits without string-splicing the artifact. Stale edits remain
+ * in the returned list so callers can preserve and surface their status. */
+export function applyManualEdits(html: string, edits: DesignManualEdit[]): AppliedManualEdits {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  const appliedEdits = edits.map((edit) => {
+    let element: Element | null = null;
+    try {
+      element = document.querySelector(edit.selector);
+    } catch {
+      // A malformed selector is stale just like one that no longer matches.
+    }
+    if (!element) {
+      return { ...edit, stale: true };
+    }
+    if (edit.styles) {
+      if (!(element instanceof HTMLElement)) return { ...edit, stale: true };
+      for (const [property, value] of Object.entries(edit.styles)) {
+        element.style.setProperty(property, value);
+      }
+      return { ...edit, stale: false };
+    }
+    if (
+      typeof edit.oldText !== "string" || typeof edit.newText !== "string" ||
+      (element.textContent ?? "").trim() !== edit.oldText.trim()
+    ) {
+      return { ...edit, stale: true };
+    }
+    element.textContent = edit.newText;
+    return { ...edit, stale: false };
+  });
+  return { html: serializeDesignDocument(document), edits: appliedEdits };
+}
 
 function normalizeDesignNodeSelection(input: unknown): DesignNodeSelection | null {
   if (!input || typeof input !== "object") return null;
@@ -3311,15 +3421,18 @@ function normalizeDesignNodeSelection(input: unknown): DesignNodeSelection | nul
   };
 }
 
-/** Inject a tiny, isolated selection bridge into the generated artifact. It
- * never mutates the design itself; it only draws a hover outline and sends a
- * bounded description of the clicked node to the parent Design Studio. */
+/** Inject a tiny, isolated selection and text-edit bridge into the generated artifact. */
 function withDesignInspector(html: string): string {
   const inspector = String.raw`
 (function () {
   if (window.__xyneDesignInspector) return;
   window.__xyneDesignInspector = true;
   var enabled = false;
+  var editingElement = null;
+  var editingOriginalText = '';
+  var editingOutline = '';
+  var editingOutlineOffset = '';
+  var clickTimer = null;
   var overlay = document.createElement('div');
   overlay.setAttribute('data-xyne-design-inspector', 'true');
   overlay.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:2147483647;border:2px solid #7657ff;background:rgba(118,87,255,.09);box-shadow:0 0 0 1px rgba(255,255,255,.7) inset;border-radius:3px;transition:all 60ms linear';
@@ -3394,14 +3507,60 @@ function withDesignInspector(html: string): string {
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
     };
   }
+  function canEditText(element) {
+    if (element === overlay || element.isContentEditable) return false;
+    var text = String(element.textContent || '');
+    if (text.trim().length < 2) return false;
+    var allowed = { A: true, B: true, I: true, SPAN: true, STRONG: true, EM: true };
+    return Array.prototype.every.call(element.querySelectorAll('*'), function (child) { return allowed[child.tagName] === true; });
+  }
+  function finishEditing(commit) {
+    if (!editingElement) return;
+    var element = editingElement;
+    var originalText = editingOriginalText;
+    var newText = String(element.textContent || '');
+    editingElement = null;
+    if (!commit) element.textContent = originalText;
+    element.removeAttribute('contenteditable');
+    element.style.outline = editingOutline;
+    element.style.outlineOffset = editingOutlineOffset;
+    if (commit && newText !== originalText) {
+      window.parent.postMessage({
+        type: '${DESIGN_EDIT_EVENT}',
+        edit: { selector: selectorFor(element), oldText: originalText, newText: newText }
+      }, '*');
+    }
+  }
+  function beginEditing(element) {
+    if (!canEditText(element)) return;
+    if (editingElement) finishEditing(true);
+    editingElement = element;
+    editingOriginalText = String(element.textContent || '');
+    editingOutline = element.style.outline;
+    editingOutlineOffset = element.style.outlineOffset;
+    element.setAttribute('contenteditable', 'true');
+    element.style.outline = '2px dashed #7657ff';
+    element.style.outlineOffset = '2px';
+    element.focus();
+    var selection = window.getSelection();
+    var range = document.createRange();
+    range.selectNodeContents(element);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
   window.addEventListener('message', function (event) {
     if (!event.data || event.data.type !== '${DESIGN_INSPECTOR_MODE_EVENT}') return;
     enabled = event.data.enabled === true;
     document.documentElement.style.cursor = enabled ? 'crosshair' : '';
-    if (!enabled) overlay.style.display = 'none';
+    if (!enabled) {
+      if (editingElement) finishEditing(true);
+      overlay.style.display = 'none';
+    }
   });
   document.addEventListener('mousemove', function (event) {
-    if (!enabled) return;
+    if (!enabled || editingElement) return;
     var target = event.target;
     if (!(target instanceof Element) || target === overlay) return;
     moveOverlay(target);
@@ -3410,12 +3569,44 @@ function withDesignInspector(html: string): string {
     if (!enabled) return;
     var target = event.target;
     if (!(target instanceof Element) || target === overlay) return;
+    if (editingElement && editingElement.contains(target)) return;
     event.preventDefault();
     event.stopPropagation();
     moveOverlay(target);
-    window.parent.postMessage({ type: '${DESIGN_INSPECTOR_EVENT}', selection: describe(target) }, '*');
+    if (clickTimer) window.clearTimeout(clickTimer);
+    clickTimer = window.setTimeout(function () {
+      clickTimer = null;
+      window.parent.postMessage({ type: '${DESIGN_INSPECTOR_EVENT}', selection: describe(target) }, '*');
+    }, 220);
+  }, true);
+  document.addEventListener('dblclick', function (event) {
+    if (!enabled) return;
+    var target = event.target;
+    if (!(target instanceof Element) || !canEditText(target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (clickTimer) {
+      window.clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+    beginEditing(target);
+  }, true);
+  document.addEventListener('focusout', function (event) {
+    if (editingElement && event.target === editingElement) finishEditing(true);
   }, true);
   document.addEventListener('keydown', function (event) {
+    if (editingElement && event.target instanceof Node && editingElement.contains(event.target)) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finishEditing(false);
+      } else if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        finishEditing(true);
+      }
+      return;
+    }
     if (event.key === 'Escape') {
       enabled = false;
       overlay.style.display = 'none';
@@ -3460,6 +3651,11 @@ function designVersions(messages: ChatMsg[]): DesignVersion[] {
     const attachment = [...(message.attachments ?? [])].reverse().find((item) =>
       item.mimeType.toLowerCase().includes("text/html") || item.originalFilename.toLowerCase().endsWith(".html"),
     );
+    const projectAttachment = [...(message.attachments ?? [])].reverse().find((item) => {
+      const name = item.originalFilename.toLowerCase();
+      const archive = name.endsWith(".zip") || name.endsWith(".tar.gz") || name.endsWith(".tgz");
+      return archive && /(react|source|project)/.test(name);
+    });
     const source: DesignPreviewSource | null = attachment
       ? { kind: "attachment", attachment }
       : (() => {
@@ -3469,6 +3665,7 @@ function designVersions(messages: ChatMsg[]): DesignVersion[] {
     if (!source) continue;
     versions.push({
       source,
+      ...(projectAttachment ? { projectAttachment } : {}),
       messageId: message.id,
       messageIndex: i,
       createdAt: message.createdAt,
@@ -3476,6 +3673,141 @@ function designVersions(messages: ChatMsg[]): DesignVersion[] {
     });
   }
   return versions;
+}
+
+function cssColorToHex(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const normalized = value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) return normalized;
+  const match = /^rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)/i.exec(normalized);
+  if (!match) return fallback;
+  return `#${[match[1], match[2], match[3]]
+    .map((part) => Math.max(0, Math.min(255, Number(part))).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function cssNumber(value: string | undefined, fallback = "0"): string {
+  const match = /-?\d+(?:\.\d+)?/.exec(value ?? "");
+  return match?.[0] ?? fallback;
+}
+
+function DesignStyleInspector({
+  selection,
+  onApply,
+  onClose,
+}: {
+  selection: DesignNodeSelection;
+  onApply: (property: string, value: string) => void;
+  onClose: () => void;
+}) {
+  const [fontSize, setFontSize] = useState(cssNumber(selection.styles["font-size"], "16"));
+  const [radius, setRadius] = useState(cssNumber(selection.styles["border-radius"]));
+  const [padding, setPadding] = useState(selection.styles["padding"] ?? "0px");
+  const [gap, setGap] = useState(cssNumber(selection.styles["gap"]));
+
+  const commitPixels = (property: string, value: string) => {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) onApply(property, `${Math.max(0, parsed)}px`);
+  };
+
+  return (
+    <aside
+      data-id="design-style-inspector"
+      className="absolute right-6 top-6 z-20 w-64 overflow-hidden rounded-xl border border-black/10 bg-xyne-surface/95 shadow-[0_18px_50px_rgba(0,0,0,.22)] backdrop-blur"
+      aria-label="Visual style inspector"
+    >
+      <div className="flex items-start justify-between border-b border-xyne-border-subtle px-3 py-2.5">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-muted">Inspector</p>
+          <p className="mt-0.5 truncate text-[12px] font-medium text-xyne-fg-primary">{selection.label}</p>
+          <p className="truncate font-mono text-[9px] text-xyne-fg-tertiary">{selection.selector}</p>
+        </div>
+        <button type="button" aria-label="Close inspector" onClick={onClose} className="rounded p-1 text-xyne-fg-muted hover:bg-xyne-surface-subtle">
+          <XIcon size={13} />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 p-3 text-[10px] text-xyne-fg-muted">
+        <label className="flex flex-col gap-1">
+          Text color
+          <input
+            type="color"
+            defaultValue={cssColorToHex(selection.styles["color"], "#111827")}
+            onChange={(event) => onApply("color", event.target.value)}
+            className="h-8 w-full cursor-pointer rounded border border-xyne-border-subtle bg-transparent p-0.5"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Background
+          <input
+            type="color"
+            defaultValue={cssColorToHex(selection.styles["background-color"], "#ffffff")}
+            onChange={(event) => onApply("background-color", event.target.value)}
+            className="h-8 w-full cursor-pointer rounded border border-xyne-border-subtle bg-transparent p-0.5"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Font size
+          <input
+            type="number" min="1" max="240" value={fontSize}
+            onChange={(event) => setFontSize(event.target.value)}
+            onBlur={() => commitPixels("font-size", fontSize)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Weight
+          <select
+            defaultValue={cssNumber(selection.styles["font-weight"], "400")}
+            onChange={(event) => onApply("font-weight", event.target.value)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          >
+            {[300, 400, 500, 600, 700, 800].map((weight) => <option key={weight} value={weight}>{weight}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          Radius
+          <input
+            type="number" min="0" max="999" value={radius}
+            onChange={(event) => setRadius(event.target.value)}
+            onBlur={() => commitPixels("border-radius", radius)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Gap
+          <input
+            type="number" min="0" max="240" value={gap}
+            onChange={(event) => setGap(event.target.value)}
+            onBlur={() => commitPixels("gap", gap)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          Padding
+          <input
+            value={padding}
+            onChange={(event) => setPadding(event.target.value)}
+            onBlur={() => { if (padding.trim()) onApply("padding", padding.trim().slice(0, 80)); }}
+            placeholder="12px 16px"
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 font-mono text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          Layout
+          <select
+            defaultValue={selection.styles["display"] ?? "block"}
+            onChange={(event) => onApply("display", event.target.value)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          >
+            {["block", "flex", "grid", "inline", "inline-flex", "inline-block", "none"].map((display) => <option key={display}>{display}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="border-t border-xyne-border-subtle px-3 py-2 text-[9px] leading-4 text-xyne-fg-tertiary">
+        Changes are local and reversible. Send a message to materialize them as the next design version.
+      </p>
+    </aside>
+  );
 }
 
 function DesignPreviewPanel({
@@ -3487,9 +3819,12 @@ function DesignPreviewPanel({
   sending,
   conversationId,
   selection,
+  manualEdits,
   onSelectVersion,
   onFollowLatest,
   onSelectionChange,
+  onManualEditsChange,
+  onEditedHtmlChange,
   onOpenDesignSystem,
 }: {
   source: DesignPreviewSource | null;
@@ -3500,9 +3835,12 @@ function DesignPreviewPanel({
   sending: boolean;
   conversationId: string | null;
   selection: DesignNodeSelection | null;
+  manualEdits: DesignManualEdit[];
   onSelectVersion: (index: number) => void;
   onFollowLatest: () => void;
   onSelectionChange: (selection: DesignNodeSelection | null) => void;
+  onManualEditsChange: React.Dispatch<React.SetStateAction<DesignManualEdit[]>>;
+  onEditedHtmlChange: (html: string | null) => void;
   onOpenDesignSystem: () => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -3524,9 +3862,14 @@ function DesignPreviewPanel({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
+  const appliedManualEdits = useMemo(
+    () => rawHtml == null ? null : applyManualEdits(rawHtml, manualEdits),
+    [rawHtml, manualEdits],
+  );
+  const editedHtml = appliedManualEdits?.html ?? null;
+
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       if (!source) {
@@ -3552,8 +3895,6 @@ function DesignPreviewPanel({
           }
           if (cancelled) return;
           setRawHtml(html);
-          objectUrl = URL.createObjectURL(new Blob([withDesignInspector(html)], { type: "text/html" }));
-          setPreviewUrl(objectUrl);
           setError(null);
         } catch (err) {
           if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
@@ -3569,9 +3910,31 @@ function DesignPreviewPanel({
       cancelled = true;
       controller.abort();
       window.clearTimeout(timer);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [source, userId, reloadVersion, sending]);
+
+  useEffect(() => {
+    if (!editedHtml) {
+      setPreviewUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(new Blob([withDesignInspector(editedHtml)], { type: "text/html" }));
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [editedHtml]);
+
+  useEffect(() => {
+    onEditedHtmlChange(editedHtml);
+    return () => onEditedHtmlChange(null);
+  }, [editedHtml, onEditedHtmlChange]);
+
+  useEffect(() => {
+    if (!appliedManualEdits) return;
+    const staleStatusChanged = appliedManualEdits.edits.some(
+      (edit, index) => edit.stale !== manualEdits[index]?.stale,
+    );
+    if (staleStatusChanged) onManualEditsChange(appliedManualEdits.edits);
+  }, [appliedManualEdits, manualEdits, onManualEditsChange]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -3581,13 +3944,23 @@ function DesignPreviewPanel({
         setFullscreen(false);
         return;
       }
+      if (event.data?.type === DESIGN_EDIT_EVENT) {
+        const edit = event.data.edit as Partial<DesignManualEdit> | null | undefined;
+        if (typeof edit?.selector === "string" && typeof edit.oldText === "string" && typeof edit.newText === "string") {
+          onManualEditsChange((current) => [
+            ...current,
+            { selector: edit.selector!, oldText: edit.oldText!, newText: edit.newText!, stale: false },
+          ]);
+        }
+        return;
+      }
       if (event.data?.type !== DESIGN_INSPECTOR_EVENT) return;
       const candidate = normalizeDesignNodeSelection(event.data.selection);
       if (candidate) onSelectionChange(candidate);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [onSelectionChange]);
+  }, [onManualEditsChange, onSelectionChange]);
 
   const syncInspectorMode = useCallback(() => {
     iframeRef.current?.contentWindow?.postMessage({ type: DESIGN_INSPECTOR_MODE_EVENT, enabled: inspecting }, "*");
@@ -3629,6 +4002,7 @@ function DesignPreviewPanel({
     ? activeVersionIndex ?? versions.length - 1
     : null;
   const displayedVersion = displayedVersionIndex == null ? null : versions[displayedVersionIndex] ?? null;
+  const projectAttachment = displayedVersion?.projectAttachment ?? null;
   const canGoPrev = displayedVersionIndex != null && displayedVersionIndex > 0;
   const canGoNext = displayedVersionIndex != null && displayedVersionIndex < versions.length - 1;
   const presetWidth = devicePreset === "tablet" ? 768 : devicePreset === "mobile" ? 390 : null;
@@ -3655,8 +4029,8 @@ function DesignPreviewPanel({
   ] as const;
 
   const download = () => {
-    if (!rawHtml) return;
-    const downloadUrl = URL.createObjectURL(new Blob([rawHtml], { type: "text/html" }));
+    if (!editedHtml) return;
+    const downloadUrl = URL.createObjectURL(new Blob([editedHtml], { type: "text/html" }));
     const anchor = document.createElement("a");
     anchor.href = downloadUrl;
     anchor.download = fileName;
@@ -3664,16 +4038,39 @@ function DesignPreviewPanel({
     window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
   };
 
+  const downloadProject = async () => {
+    if (!projectAttachment) return;
+    const response = await fetch(chatAttachmentDownloadUrl(projectAttachment.id), {
+      credentials: "include",
+      headers: { "x-user-id": userId },
+    });
+    if (!response.ok) return;
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = projectAttachment.originalFilename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const applyVisualStyle = useCallback((property: string, value: string) => {
+    if (!selection) return;
+    onManualEditsChange((current) => [
+      ...current,
+      { selector: selection.selector, styles: { [property]: value }, stale: false },
+    ]);
+  }, [onManualEditsChange, selection]);
+
   const openInNewTab = () => {
-    if (!rawHtml) return;
-    const tabUrl = URL.createObjectURL(new Blob([rawHtml], { type: "text/html" }));
+    if (!editedHtml) return;
+    const tabUrl = URL.createObjectURL(new Blob([editedHtml], { type: "text/html" }));
     window.open(tabUrl, "_blank", "noopener,noreferrer");
     window.setTimeout(() => URL.revokeObjectURL(tabUrl), 60_000);
   };
 
   const copySource = async () => {
-    if (!rawHtml) return;
-    await navigator.clipboard.writeText(rawHtml);
+    if (!editedHtml) return;
+    await navigator.clipboard.writeText(editedHtml);
     setSourceCopied(true);
     window.setTimeout(() => setSourceCopied(false), 1800);
   };
@@ -3683,8 +4080,8 @@ function DesignPreviewPanel({
   };
 
   const shareFile = async () => {
-    if (!rawHtml) return;
-    const file = new File([rawHtml], fileName, { type: "text/html" });
+    if (!editedHtml) return;
+    const file = new File([editedHtml], fileName, { type: "text/html" });
     try {
       if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
         await navigator.share({
@@ -3707,7 +4104,7 @@ function DesignPreviewPanel({
     : "";
 
   const openShare = async () => {
-    if (source?.kind !== "attachment" || !conversationId) {
+    if (source?.kind !== "attachment" || !conversationId || manualEdits.length > 0) {
       await shareFile();
       return;
     }
@@ -3964,6 +4361,16 @@ function DesignPreviewPanel({
           >
             <ShareNetworkIcon size={13} /> Share
           </button>
+          {projectAttachment && (
+            <button
+              type="button"
+              data-id="design-download-react-project"
+              onClick={() => { void downloadProject(); }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+            >
+              <FileIcon size={13} /> React project
+            </button>
+          )}
           <button
             type="button"
             disabled={!rawHtml}
@@ -3975,13 +4382,48 @@ function DesignPreviewPanel({
         </div>
       </header>
 
+      {manualEdits.length > 0 && (
+        <div
+          data-id="design-manual-edits-bar"
+          className="flex h-9 shrink-0 items-center justify-end gap-2 border-b border-xyne-border-subtle bg-xyne-surface px-4 text-[11px] text-xyne-fg-secondary"
+        >
+          <span data-id="design-manual-edits-count">
+            {manualEdits.length} manual {manualEdits.length === 1 ? "edit" : "edits"}
+          </span>
+          <button
+            type="button"
+            data-id="design-manual-edits-undo"
+            onClick={() => onManualEditsChange((current) => current.slice(0, -1))}
+            className="inline-flex h-6 items-center rounded px-2 font-medium text-xyne-fg-primary hover:bg-xyne-surface-subtle"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            data-id="design-manual-edits-reset"
+            onClick={() => onManualEditsChange([])}
+            className="inline-flex h-6 items-center rounded px-2 font-medium text-xyne-fg-muted hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+          >
+            Reset
+          </button>
+        </div>
+      )}
+
       <div
         ref={canvasRef}
         data-id="design-preview-canvas"
         className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
         style={canvasStyle}
       >
-        {viewSource && rawHtml ? (
+        {selection && !viewSource && (
+          <DesignStyleInspector
+            key={selection.selector}
+            selection={selection}
+            onApply={applyVisualStyle}
+            onClose={() => onSelectionChange(null)}
+          />
+        )}
+        {viewSource && editedHtml ? (
           <div data-id="design-source-view" className="relative h-full w-full overflow-hidden rounded-lg border border-black/10 bg-[#17181a] shadow-[0_18px_55px_rgba(0,0,0,0.16)]">
             <button
               type="button"
@@ -3993,7 +4435,7 @@ function DesignPreviewPanel({
               {sourceCopied ? "Copied" : "Copy"}
             </button>
             <pre className="h-full overflow-auto p-5 pr-24 font-mono text-[12px] leading-relaxed text-zinc-200">
-              <code>{rawHtml}</code>
+              <code>{editedHtml}</code>
             </pre>
           </div>
         ) : previewUrl ? (
@@ -4219,6 +4661,8 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const [convLoading, setConvLoading]         = useState(false);
   const [inputValue, setInputValue]           = useState("");
   const [designSelection, setDesignSelection] = useState<DesignNodeSelection | null>(null);
+  const [manualEdits, setManualEdits]         = useState<DesignManualEdit[]>([]);
+  const [editedDesignHtml, setEditedDesignHtml] = useState<string | null>(null);
   const [designEditScope, setDesignEditScope] = useState<DesignEditScope>("element");
   const [showModal, setShowModal]             = useState(false);
   const [showDebugger, setShowDebugger]       = useState(false);
@@ -4277,25 +4721,29 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
 
-  // Composer attachments — images queued for upload, kept on the parent so
+  // Composer attachments — files queued for upload, kept on the parent so
   // they survive composer re-renders. previewUrl is an object URL that we
   // revoke on removal / after upload completes.
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
 
   const handleAddFiles = useCallback((files: File[]) => {
-    const additions: PendingFile[] = [];
-    for (const file of files) {
-      if (!file.type.startsWith("image/")) continue;
-      if (file.size > 25 * 1024 * 1024) continue; // 25MB cap, matches V1
-      additions.push({ file, previewUrl: URL.createObjectURL(file) });
-    }
-    if (additions.length > 0) setPendingFiles((prev) => [...prev, ...additions]);
+    setPendingFiles((prev) => {
+      const available = Math.max(0, 10 - prev.length);
+      const accepted = files
+        .filter((file) => file.size <= 25 * 1024 * 1024)
+        .slice(0, available);
+      const additions = accepted.map((file) => ({
+        file,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      }));
+      return additions.length > 0 ? [...prev, ...additions] : prev;
+    });
   }, []);
 
   const handleRemoveFile = useCallback((idx: number) => {
     setPendingFiles((prev) => {
       const removed = prev[idx];
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       return prev.filter((_, i) => i !== idx);
     });
   }, []);
@@ -4885,6 +5333,11 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     setDesignSelection(null);
   }, [displayedVersionIndex]);
 
+  useEffect(() => {
+    setManualEdits([]);
+    setEditedDesignHtml(null);
+  }, [conversationId, displayedDesignVersion?.messageId, mode]);
+
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
     void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined);
@@ -4903,6 +5356,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     // behaviour as V1. Block while a stream is already in flight.
     if (!activeAgentSlug || sending) return;
     if (!text && !hasFiles && !hasContext) return;
+    if (mode === "design" && manualEdits.length > 0 && !editedDesignHtml) return;
 
     // Snapshot composer state and clear immediately for snappy UX.
     const filesSnapshot = pendingFiles.map((p) => p.file);
@@ -4919,9 +5373,20 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     const designSelectionSnapshot = mode === "design" && designSelection
       ? { ...designSelection, scope: designEditScope }
       : undefined;
-    const designArtifactAttachmentId = mode === "design" && designPreviewSource?.kind === "attachment"
+    const manualEditsSnapshot = mode === "design" ? manualEdits : [];
+    const editedHtmlSnapshot = manualEditsSnapshot.length > 0 ? editedDesignHtml : null;
+    const designArtifactAttachmentId = mode === "design" && manualEditsSnapshot.length === 0 && designPreviewSource?.kind === "attachment"
       ? designPreviewSource.attachment.id
       : undefined;
+    const editedBaseFile = editedHtmlSnapshot
+      ? new File(
+          [editedHtmlSnapshot],
+          `${(designPreviewSource?.kind === "attachment"
+            ? designPreviewSource.attachment.originalFilename
+            : designPreviewSource?.fileName ?? "xyne-design").replace(/\.html?$/i, "") || "xyne-design"}-edited.html`,
+          { type: "text/html" },
+        )
+      : null;
     const designCompatibilityInstruction = designSelectionSnapshot
       ? [
           DESIGN_STUDIO_COMPAT_INSTRUCTION,
@@ -4934,20 +5399,21 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     const placeholderText =
       text ||
       (hasFiles
-        ? `Sent ${filesSnapshot.length} image${filesSnapshot.length !== 1 ? "s" : ""}`
+        ? `Attached ${filesSnapshot.length} file${filesSnapshot.length !== 1 ? "s" : ""}`
         : `Attached ${contextSnapshot.length} context item${contextSnapshot.length !== 1 ? "s" : ""}`);
 
     setInputValue("");
     setPendingFiles([]);
     setSelectedContext([]);
     setMentionOpen(false);
-    if (mode === "design") setActiveVersionIndex(null);
+    if (mode === "design" && manualEditsSnapshot.length === 0) setActiveVersionIndex(null);
 
     const dispatch = async () => {
       let uploadedIds: string[] = [];
-      if (filesSnapshot.length > 0) {
+      const filesToUpload = editedBaseFile ? [...filesSnapshot, editedBaseFile] : filesSnapshot;
+      if (filesToUpload.length > 0) {
         try {
-          const uploaded = await uploadChatAttachments(activeAgentSlug, userId, filesSnapshot);
+          const uploaded = await uploadChatAttachments(activeAgentSlug, userId, filesToUpload);
           uploadedIds = uploaded.map((a) => a.id);
         } catch (err) {
           console.error("[chat] upload failed:", err);
@@ -4955,7 +5421,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           setPendingFiles((prev) => [
             ...filesSnapshot.map((f, i) => ({
               file: f,
-              previewUrl: previewsToRevoke[i] ?? URL.createObjectURL(f),
+              previewUrl: previewsToRevoke[i] ?? (f.type.startsWith("image/") ? URL.createObjectURL(f) : null),
             })),
             ...prev,
           ]);
@@ -4974,12 +5440,17 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           attachedContext: contextSnapshot.length > 0 ? contextSnapshot : undefined,
           ...(mode === "design" ? { studioMode: "design" as const } : {}),
           ...(mode === "design" ? { additionalInstructions: designCompatibilityInstruction } : {}),
+          // A materialized manual-edit upload is the revision base; sending the prior artifact too would duplicate it.
           ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),
           ...(designSelectionSnapshot ? { designSelection: designSelectionSnapshot } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
         });
         if (designSelectionSnapshot) setDesignSelection(null);
+        if (manualEditsSnapshot.length > 0) {
+          setManualEdits([]);
+          setActiveVersionIndex(null);
+        }
         listChatConversations(activeAgentSlug, userId)
           .then((convs) => setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug }))))
           .catch(() => {});
@@ -4987,14 +5458,14 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
         // Revoke object URLs whether send succeeded or not — they're a memory leak.
         previewsToRevoke.forEach((u) => {
           try {
-            URL.revokeObjectURL(u);
+            if (u) URL.revokeObjectURL(u);
           } catch {}
         });
       }
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -5107,9 +5578,12 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                 sending={sending}
                 conversationId={conversationId ?? null}
                 selection={designSelection}
+                manualEdits={manualEdits}
                 onSelectVersion={setActiveVersionIndex}
                 onFollowLatest={() => setActiveVersionIndex(null)}
                 onSelectionChange={handleDesignSelection}
+                onManualEditsChange={setManualEdits}
+                onEditedHtmlChange={setEditedDesignHtml}
                 onOpenDesignSystem={() => setDesignSystemOpen(true)}
               />
             )}

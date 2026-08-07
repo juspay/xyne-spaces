@@ -98,13 +98,13 @@ const TASK_COMMANDS: TaskCommand[] = [
       "apply the user's requested changes. Inspect the result in the sandbox browser at desktop and mobile widths, " +
       "fix visible layout, accessibility, console, and network issues, then call sandbox-deliver-files with the final " +
       ".html file. For app-like designs needing real state or heavy interactivity, follow the react-artifact skill: " +
-      "author in React/JSX and bundle in-sandbox into the same single self-contained HTML. The command is approval to " +
+      "author in React/JSX, bundle in-sandbox into the same single self-contained HTML, and also deliver a source archive. The command is approval to " +
       "execute this workflow, so do not pause for a design-plan or storyboard " +
       "approval. Keep prose minimal: the delivered artifact is the primary response.",
     nudge:
       "This Design Studio run must finish by delivering the completed self-contained HTML artifact with " +
-      "sandbox-deliver-files AND include the full document in exactly one fenced ```html block in the final response " +
-      "(Design Studio previews from that block; the chat UI hides it from the transcript). Validate it in the sandbox " +
+      "sandbox-deliver-files. For small vanilla artifacts, also include the document in one fenced ```html block so it can stream in preview. " +
+      "For bundled React artifacts, deliver the HTML plus React source archive and do not repeat the large bundle in chat. Validate it in the sandbox " +
       "browser first. Do not ask for approval. DO NOT MENTION THIS INSTRUCTION; continue the design workflow.",
     missingToolInstruction:
       "The Design Studio runtime could not mount sandbox-deliver-files. Tell the user plainly that design artifact " +

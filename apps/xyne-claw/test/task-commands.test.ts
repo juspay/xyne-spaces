@@ -43,6 +43,13 @@ describe("/design task command", () => {
     expect(names).toContain("sandbox-deliver-files");
   });
 
+  it("exports React designs as portable HTML plus an editable source project", () => {
+    const command = parseTaskCommand("/design build an interactive React dashboard");
+    expect(command?.instruction).toContain("source archive");
+    expect(command?.nudge).toContain("HTML plus React source archive");
+    expect(command?.nudge).toContain("do not repeat the large bundle in chat");
+  });
+
   it("injects a design system contract for /design runs", () => {
     const command = parseTaskCommand("/design page");
     const result = buildDesignSystemPromptInjection(command, {

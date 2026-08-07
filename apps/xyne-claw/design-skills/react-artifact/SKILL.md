@@ -3,11 +3,10 @@ name: react-artifact
 description: Author app-like designs in React/JSX and bundle them in-sandbox into the same single self-contained HTML artifact Design Studio delivers. Use when the design needs real state, complex interactivity, or component reuse beyond what vanilla JS comfortably handles.
 ---
 
-# React artifacts — author in JSX, deliver one HTML file
+# React artifacts — author in JSX, deliver HTML + source project
 
-Design Studio's contract never changes: the deliverable is ONE self-contained
-`.html` file. React is an authoring tool, not a new artifact kind — you bundle
-everything in the sandbox and inline the result.
+The primary artifact remains ONE self-contained `.html` file. React designs
+also deliver a small source archive so the user can continue in an editor.
 
 ## When to choose React over plain HTML+JS
 
@@ -27,11 +26,11 @@ bun init -y
 bun add react@18 react-dom@18
 ```
 
-Author the app as ONE entry file (split into a few files only if genuinely
-large):
+Author the app as a normal small project. Keep source under `src/`, with the
+entry at `src/app.jsx`:
 
 ```jsx
-// app.jsx
+// src/app.jsx
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
@@ -43,7 +42,7 @@ createRoot(document.getElementById("root")).render(<App />);
 Bundle to a single minified script, then inline it into the HTML shell:
 
 ```bash
-bun build app.jsx --minify --outfile bundle.js
+bun build src/app.jsx --minify --outfile dist/bundle.js
 ```
 
 ```html
@@ -68,7 +67,7 @@ the artifact must open from a single file with no siblings:
 ```bash
 node -e '
 const fs = require("fs");
-const bundle = fs.readFileSync("bundle.js", "utf8");
+const bundle = fs.readFileSync("dist/bundle.js", "utf8");
 const shell = fs.readFileSync("shell.html", "utf8");
 fs.writeFileSync("index.html", shell.replace("/*__BUNDLE__*/", () => bundle));
 '
@@ -76,6 +75,13 @@ fs.writeFileSync("index.html", shell.replace("/*__BUNDLE__*/", () => bundle));
 
 (Use a placeholder comment in the shell and `replace` with a function arg so
 `$` sequences in the bundle are not mangled.)
+
+Add a short README with `bun install` and run/build instructions, then archive
+source without dependencies or generated output:
+
+```bash
+tar -czf "design-react-project.tar.gz" src package.json bun.lock README.md shell.html
+```
 
 ## Rules
 
@@ -87,10 +93,9 @@ fs.writeFileSync("index.html", shell.replace("/*__BUNDLE__*/", () => bundle));
   A 2KB index.html means you shipped the shell without the bundle.
 - **QA exactly like any other artifact**: open `index.html` in the sandbox
   browser, exercise the interactions you built (click through state changes),
-  check desktop + mobile widths and the console, then deliver the single
-  `.html` via sandbox-deliver-files.
-- The final chat response still includes the full document in one fenced
-  ```html block — yes, including the inlined bundle — so the preview can
-  render without the attachment.
+  check desktop + mobile widths and the console.
+- Deliver BOTH `index.html` and `design-react-project.tar.gz` in one
+  `sandbox-deliver-files` call. The attachment is canonical; do not repeat a
+  large inlined React bundle in the final chat response.
 - Keep dependencies minimal: react + react-dom only unless the design truly
   needs more. Every dependency inflates the artifact the user downloads.
