@@ -135,15 +135,17 @@ export interface RecordingDetail extends Recording {
   linkedTicketMessageId?: string | null;
 }
 
+export type RecordingRepairReason =
+  | 'browser_offline'
+  | 'livekit_disconnected'
+  | 'reconnect_timeout'
+  | 'agent_left'
+  | 'stt_failed';
+
 export interface RecordingRepairOutage {
   startedAt: string;
-  endedAt: string | null;
-  reason:
-    | 'browser_offline'
-    | 'livekit_disconnected'
-    | 'reconnect_timeout'
-    | 'agent_left'
-    | 'stt_failed';
+  endedAt: string;
+  reasons: RecordingRepairReason[];
 }
 
 export interface RecordingRepairStatus {

@@ -22,6 +22,7 @@ import {
   shouldConfirmTranscriptionAgentLeft,
 } from '../utils/livekitAgent';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
+import type { RecordingRepairReason } from '../services/Recording/recordingService';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
@@ -81,6 +82,9 @@ export interface RecordingState {
   activeLayout: RecordingLayout;
   isTranscriptMinimized: boolean;
   agentLeft: boolean;
+  fallbackProtection: 'ready' | 'unavailable';
+  fallbackReasons: RecordingRepairReason[];
+  repairPending: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -107,6 +111,9 @@ const initialContext: RecordingState = {
   activeLayout: 'transcript',
   isTranscriptMinimized: false,
   agentLeft: false,
+  fallbackProtection: 'ready',
+  fallbackReasons: [],
+  repairPending: false,
 };
 
 const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
@@ -321,6 +328,9 @@ export const recordingStore = createStore({
         error: null,
         activeLayout: defaultLayout,
         agentLeft: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -419,6 +429,9 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -452,6 +465,9 @@ export const recordingStore = createStore({
         accumulatedPausedMs: 0,
         error: event.error,
         agentLeft: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -484,6 +500,9 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -512,10 +531,8 @@ export const recordingStore = createStore({
      * a recording is genuinely in progress — if we're already stopping / idle, the
      * agent is just following the room down on a user-initiated stop.
      *
-     * `agentLeft` is a one-shot signal: the UI (RecordingsScreen / RecordingOverlay)
-     * reacts by auto-ending the recording, and stopRecording clears the flag. There
-     * is deliberately no "continue" path — a note-taker with no transcription is
-     * pointless, so the recording is always ended.
+     * Agent loss is an independent fallback reason. Recording lifecycle stays
+     * recording/paused so both dashboard versions remain usable.
      */
     agentLeftUnexpectedly: (context): RecordingState => {
       if (context.status !== 'recording' && context.status !== 'paused') {
@@ -523,9 +540,30 @@ export const recordingStore = createStore({
       }
       return {
         ...context,
-        agentLeft: true,
+        agentLeft: false,
+        fallbackReasons: [...new Set([...context.fallbackReasons, 'agent_left' as const])],
       };
     },
+
+    setFallbackReason: (
+      context,
+      event: { reason: RecordingRepairReason; active: boolean },
+    ): RecordingState => ({
+      ...context,
+      fallbackReasons: event.active
+        ? [...new Set([...context.fallbackReasons, event.reason])].sort()
+        : context.fallbackReasons.filter(reason => reason !== event.reason),
+    }),
+
+    setFallbackProtection: (
+      context,
+      event: { availability: RecordingState['fallbackProtection'] },
+    ): RecordingState => ({ ...context, fallbackProtection: event.availability }),
+
+    setRepairPending: (context, event: { pending: boolean }): RecordingState => ({
+      ...context,
+      repairPending: event.pending,
+    }),
 
     setNotesCanvas: (context, event: { canvasId: string; title?: string }): RecordingState => ({
       ...context,

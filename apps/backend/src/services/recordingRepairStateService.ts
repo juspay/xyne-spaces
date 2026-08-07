@@ -1,12 +1,12 @@
 import { redisService } from '@/services/redisService';
 
 export type RecordingRepairStatus = 'OPEN' | 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
-export type RecordingRepairOutageReason = 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left' | 'stt_failed';
+export type RecordingRepairReason = 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left' | 'stt_failed';
 
 export interface RecordingRepairOutage {
   startedAt: number;
   endedAt: number;
-  reason: RecordingRepairOutageReason;
+  reasons: RecordingRepairReason[];
 }
 
 export interface RecordingRepairCaptureState {
@@ -15,6 +15,7 @@ export interface RecordingRepairCaptureState {
   finalizedAt: number | null;
   processingError: string | null;
   mergedAt: number | null;
+  retryable: boolean;
 }
 
 const MERGED_RETENTION_SECONDS = 30 * 24 * 60 * 60;
@@ -33,6 +34,7 @@ class RecordingRepairStateService {
       finalizedAt: fields.finalizedAt ? Number(fields.finalizedAt) : null,
       processingError: fields.processingError || null,
       mergedAt: fields.mergedAt ? Number(fields.mergedAt) : null,
+      retryable: fields.retryable !== 'false',
     };
   }
 
@@ -57,7 +59,7 @@ class RecordingRepairStateService {
     const claimed = await redisService.getClient().eval(`
       local status = redis.call('HGET', KEYS[1], 'status')
       local retryable = redis.call('HGET', KEYS[1], 'retryable')
-      if status == 'FINALIZED' or (status == 'FAILED' and retryable ~= 'false') then
+      if status == 'FINALIZED' or status == 'PROCESSING' or (status == 'FAILED' and retryable ~= 'false') then
         redis.call('HSET', KEYS[1], 'status', 'PROCESSING', 'processingError', '')
         return 1
       end
@@ -93,7 +95,7 @@ class RecordingRepairStateService {
       cursor = nextCursor;
       for (const key of keys) {
         const [status, retryable] = await client.hmget(key, 'status', 'retryable');
-        if (status !== 'FINALIZED' && (status !== 'FAILED' || retryable === 'false')) continue;
+        if (status !== 'FINALIZED' && status !== 'PROCESSING' && (status !== 'FAILED' || retryable === 'false')) continue;
         const [, callId, ...captureParts] = key.split(':');
         const captureId = captureParts.join(':');
         if (callId && captureId) pending.push({ callId, captureId });

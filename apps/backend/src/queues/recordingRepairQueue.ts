@@ -1,6 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { InvalidRecordingRepairAudioError, recordingRepairService } from '@/services/recordingRepairService';
+import { RecordingRepairTerminalError, recordingRepairService } from '@/services/recordingRepairService';
 import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 import { redisService } from '@/services/redisService';
 
@@ -18,7 +18,7 @@ class RecordingRepairQueue {
     this.queue = new Bull<RecordingRepairJobData>('recording-repair', {
       redis: redisConfig,
       defaultJobOptions: {
-        attempts: 3,
+        attempts: 5,
         backoff: { type: 'exponential', delay: 10000 },
         removeOnComplete: true,
         removeOnFail: false,
@@ -28,7 +28,7 @@ class RecordingRepairQueue {
     return this.queue;
   }
 
-  async enqueue(callId: string, captureId: string): Promise<void> {
+  async enqueue(callId: string, captureId: string, finalizedAt: number | null = null): Promise<void> {
     const queue = this.ensureQueue();
     const jobId = `recording-repair:${callId}:${captureId}`;
     const existing = await queue.getJob(jobId);
@@ -36,12 +36,14 @@ class RecordingRepairQueue {
       if (await existing.getState() !== 'failed') return;
       await existing.remove();
     }
-    await queue.add('repair', { callId, captureId }, { jobId });
+    const delay = Math.max(0, (finalizedAt ?? Date.now()) + 45_000 - Date.now());
+    await queue.add('repair', { callId, captureId }, { jobId, delay });
   }
 
   async recoverPending(): Promise<void> {
     for (const { callId, captureId } of await recordingRepairStateService.findPending()) {
-      await this.enqueue(callId, captureId);
+      const state = await recordingRepairStateService.get(callId, captureId);
+      await this.enqueue(callId, captureId, state?.finalizedAt ?? null);
     }
   }
 
@@ -52,11 +54,22 @@ class RecordingRepairQueue {
         await recordingRepairService.process(job.data.callId, job.data.captureId);
       } catch (error) {
         // A headerless MediaRecorder fragment cannot become valid on retry.
-        if (error instanceof InvalidRecordingRepairAudioError) job.discard();
+        if (error instanceof RecordingRepairTerminalError) job.discard();
         throw error;
       }
     });
-    queue.on('failed', (job, error) => logger.error(`[RECORDING-REPAIR] Job for ${job.data?.callId}/${job.data?.captureId} failed:`, error));
+    queue.on('failed', (job, error) => {
+      logger.error(`[RECORDING-REPAIR] Job for ${job.data?.callId}/${job.data?.captureId} failed:`, error);
+      const attempts = Number(job.opts.attempts ?? 1);
+      if (job.attemptsMade >= attempts && job.data?.callId && job.data?.captureId) {
+        void recordingRepairStateService.markFailed(
+          job.data.callId,
+          job.data.captureId,
+          error.message,
+          false,
+        );
+      }
+    });
     logger.info('[RECORDING-REPAIR] Consumer started');
   }
 

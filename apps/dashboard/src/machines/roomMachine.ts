@@ -195,8 +195,6 @@ export interface RoomContext {
   isCallChatOpen: boolean;
   unreadCallChatCount: number;
   hostControls: HostControls;
-  // Set before an in-app or host-enforced stop so an unpublish can be classified.
-  expectedScreenShareStop: 'user' | 'host' | null;
   // Background blur on the local camera feed (web only). Off by default.
   isBackgroundBlurEnabled: boolean;
 }
@@ -251,8 +249,8 @@ export type RoomMachineEvent =
   | { type: 'PARTICIPANTS_CHANGED' }
   | { type: 'TRACK_SUBSCRIBED'; participant: RemoteParticipant; track: RemoteTrack }
   | { type: 'TRACK_UNSUBSCRIBED'; participant: RemoteParticipant; track: RemoteTrack }
-  | { type: 'LOCAL_TRACK_PUBLISHED'; source: Track.Source }
-  | { type: 'LOCAL_TRACK_UNPUBLISHED'; source: Track.Source }
+  | { type: 'LOCAL_TRACK_PUBLISHED' }
+  | { type: 'LOCAL_TRACK_UNPUBLISHED' }
   | { type: 'ERROR'; error: string }
   | { type: 'UPDATE_ACTIVE_CALLS'; calls: Call[] }
   | { type: 'HOST_CONTROLS_CHANGED'; hostControls: HostControls }
@@ -576,7 +574,7 @@ export const roomMachine = setup({
             isLocal: true,
           });
           updateParticipants();
-          sendBack({ type: 'LOCAL_TRACK_PUBLISHED', source: publication.source });
+          sendBack({ type: 'LOCAL_TRACK_PUBLISHED' });
         });
 
         room.on(LiveKitRoomEvent.LocalTrackUnpublished, (publication: LocalTrackPublication) => {
@@ -589,7 +587,7 @@ export const roomMachine = setup({
             isLocal: true,
           });
           updateParticipants();
-          sendBack({ type: 'LOCAL_TRACK_UNPUBLISHED', source: publication.source });
+          sendBack({ type: 'LOCAL_TRACK_UNPUBLISHED' });
         });
 
         // Track muted/unmuted events
@@ -1328,56 +1326,6 @@ export const roomMachine = setup({
         duration: 4000,
       });
     },
-    markUserScreenShareStopExpected: assign({
-      expectedScreenShareStop: ({ context }) => {
-        if (isHostControlTurnedOffForLocal(context, 'turnOffScreenShare')) {
-          return context.expectedScreenShareStop;
-        }
-        const isSharing = context.isNativeMode
-          ? (context.participants.find(participant => participant.isLocal)?.isScreenShareEnabled ??
-            false)
-          : (context.room?.localParticipant.isScreenShareEnabled ?? false);
-        return isSharing ? 'user' : context.expectedScreenShareStop;
-      },
-    }),
-    markHostScreenShareStopExpected: assign({
-      expectedScreenShareStop: ({ context }) => {
-        const isSharing = context.isNativeMode
-          ? (context.participants.find(participant => participant.isLocal)?.isScreenShareEnabled ??
-            false)
-          : (context.room?.localParticipant.isScreenShareEnabled ?? false);
-        return isHostControlTurnedOffForLocal(context, 'turnOffScreenShare') && isSharing
-          ? 'host'
-          : context.expectedScreenShareStop;
-      },
-    }),
-    clearExpectedScreenShareStop: assign({
-      expectedScreenShareStop: ({ context, event }) =>
-        (event.type === 'LOCAL_TRACK_PUBLISHED' && event.source === Track.Source.ScreenShare) ||
-        (event.type === 'LOCAL_TRACK_UNPUBLISHED' && event.source === Track.Source.ScreenShare) ||
-        event.type === 'SCREEN_SHARE_FAILED'
-          ? null
-          : context.expectedScreenShareStop,
-    }),
-    notifyScreenShareStopped: ({ context, event }) => {
-      if (event.type !== 'LOCAL_TRACK_UNPUBLISHED' || event.source !== Track.Source.ScreenShare)
-        return;
-
-      if (context.expectedScreenShareStop === 'user') return;
-
-      if (context.expectedScreenShareStop === 'host') {
-        toast.info('Screen sharing stopped', {
-          description: 'The host has disabled screen sharing for this call.',
-          duration: 5000,
-        });
-        return;
-      }
-
-      toast.warning('Screen sharing stopped unexpectedly', {
-        description: 'You are no longer sharing your screen.',
-        duration: 5000,
-      });
-    },
     // Sync the background-blur processor with context flag (web only).
     // If enabling fails (e.g. WASM/model load), revert the flag so the toggle
     // doesn't lie, and tell the user.
@@ -1481,7 +1429,6 @@ export const roomMachine = setup({
     unreadCallChatCount: 0,
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
-    expectedScreenShareStop: null,
   },
   id: 'roomMachine',
   on: {
@@ -1490,7 +1437,6 @@ export const roomMachine = setup({
         assign({
           activeCalls: ({ event }) => (event.type === 'UPDATE_ACTIVE_CALLS' ? event.calls : []),
         }),
-        'markHostScreenShareStopExpected',
         'enforceHostControls',
       ],
     },
@@ -1500,7 +1446,6 @@ export const roomMachine = setup({
           hostControls: ({ event, context }) =>
             event.type === 'HOST_CONTROLS_CHANGED' ? event.hostControls : context.hostControls,
         }),
-        'markHostScreenShareStopExpected',
         'enforceHostControls',
       ],
     },
@@ -1930,42 +1875,38 @@ export const roomMachine = setup({
           ],
         },
         TOGGLE_SCREEN_SHARE: {
-          actions: [
-            'markUserScreenShareStopExpected',
-            ({ context, self }): void => {
-              if (isHostControlTurnedOffForLocal(context, 'turnOffScreenShare')) return;
+          actions: ({ context }): void => {
+            if (isHostControlTurnedOffForLocal(context, 'turnOffScreenShare')) return;
 
-              if (context.isNativeMode) {
-                // Get current state from participants
-                const localParticipant = context.participants.find(p => p.isLocal);
-                const currentState = localParticipant?.isScreenShareEnabled ?? false;
-                reactNativeBridge.livekitToggleScreenShare(!currentState);
-              } else if (context.room) {
-                const currentState = context.room.localParticipant.isScreenShareEnabled;
-                const { screenShareQuality } = getCallMediaQualitySettings();
-                const quality = CALL_MEDIA_QUALITY_CONFIG[screenShareQuality];
-                void context.room.localParticipant
-                  .setScreenShareEnabled(!currentState, {
-                    resolution: {
-                      width: quality.width,
-                      height: quality.height,
-                      frameRate: quality.frameRate,
+            if (context.isNativeMode) {
+              // Get current state from participants
+              const localParticipant = context.participants.find(p => p.isLocal);
+              const currentState = localParticipant?.isScreenShareEnabled ?? false;
+              reactNativeBridge.livekitToggleScreenShare(!currentState);
+            } else if (context.room) {
+              const currentState = context.room.localParticipant.isScreenShareEnabled;
+              const { screenShareQuality } = getCallMediaQualitySettings();
+              const quality = CALL_MEDIA_QUALITY_CONFIG[screenShareQuality];
+              void context.room.localParticipant
+                .setScreenShareEnabled(!currentState, {
+                  resolution: {
+                    width: quality.width,
+                    height: quality.height,
+                    frameRate: quality.frameRate,
+                  },
+                })
+                .catch((error: Error) => {
+                  // User cancelled or error occurred
+                  logRoomMachineEvent(
+                    context.externalId ?? context.callId,
+                    'screen_share_toggle_failed',
+                    {
+                      error: error.message,
                     },
-                  })
-                  .catch((error: Error) => {
-                    // User cancelled or error occurred
-                    logRoomMachineEvent(
-                      context.externalId ?? context.callId,
-                      'screen_share_toggle_failed',
-                      {
-                        error: error.message,
-                      },
-                    );
-                    self.send({ type: 'SCREEN_SHARE_FAILED' });
-                  });
-              }
-            },
-          ],
+                  );
+                });
+            }
+          },
         },
         TOGGLE_VIEW: {
           actions: assign({
@@ -2243,23 +2184,10 @@ export const roomMachine = setup({
         LOCAL_TRACK_PUBLISHED: {
           // Re-apply blur when the camera track (re)publishes: join, re-enable,
           // or device switch (which republishes a fresh track, dropping the processor).
-          actions: [
-            'clearExpectedScreenShareStop',
-            'updateParticipants',
-            'markHostScreenShareStopExpected',
-            'enforceHostControls',
-            'applyBackgroundBlur',
-          ],
+          actions: ['updateParticipants', 'enforceHostControls', 'applyBackgroundBlur'],
         },
         LOCAL_TRACK_UNPUBLISHED: {
-          actions: [
-            'notifyScreenShareStopped',
-            'clearExpectedScreenShareStop',
-            'updateParticipants',
-          ],
-        },
-        SCREEN_SHARE_FAILED: {
-          actions: 'clearExpectedScreenShareStop',
+          actions: 'updateParticipants',
         },
         ERROR: {
           actions: 'setError',

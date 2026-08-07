@@ -35,6 +35,10 @@ export interface UploadResult {
   size: number;
 }
 
+export interface ConditionalUploadResult extends UploadResult {
+  created: boolean;
+}
+
 export interface DeleteResult {
   filename: string;
   deleted: boolean;
@@ -70,6 +74,7 @@ export interface StorageService {
   uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult>;
   uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult>;
   uploadStreamToPath(stream: NodeJS.ReadableStream, options: UploadToPathOptions): Promise<UploadResult>;
+  uploadFileIfAbsent(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<ConditionalUploadResult>;
   deleteFile(filename: string): Promise<DeleteResult>;
   generateSignedUrl(filename: string, expirationHours?: number): Promise<string>;
   fileExists(filename: string): Promise<boolean>;

@@ -727,6 +727,10 @@ class MultiUserTranscriber:
 
     async def _emit_transcription(self, data: dict):
         """Emit transcription event via EventBus."""
+        await self.bus.emit("STT_STATUS", {
+            "type": "stt_recovered",
+            "timestamp": time.time(),
+        })
         await self.bus.emit("TRANSCRIPTION", data)
 
     async def _emit_identified_transcription(self, data: dict):
@@ -1122,4 +1126,3 @@ class MultiUserTranscriber:
         task = asyncio.create_task(self._close_session(session, participant.identity))
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._tasks.discard(t))
-

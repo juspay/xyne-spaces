@@ -2,7 +2,6 @@ import { useCallback, useEffect, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useZeroOfflineState } from '@xyne/shared/hooks';
 import { AnimatePresence } from 'framer-motion';
-import { toast } from 'sonner';
 import { refreshOatsRecordings } from '../../../hooks/usePaginatedOatsRecordings';
 import { useMarkMoment } from '../../../hooks/useMarkMoment';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
@@ -21,7 +20,7 @@ export function NoteTakerOverlayHost(): ReactElement {
   const title = useRecordingStore(context => context.title);
   const notesCanvasId = useRecordingStore(context => context.notesCanvasId);
   const pendingStop = useRecordingStore(context => context.pendingStop);
-  const agentLeft = useRecordingStore(context => context.agentLeft);
+  const fallbackReasons = useRecordingStore(context => context.fallbackReasons);
   const transcripts = useRecordingStore(context => context.transcripts);
   const markedMoments = useRecordingStore(context => context.markedMoments);
   const isMinimized = useRecordingStore(context => context.isTranscriptMinimized);
@@ -59,9 +58,8 @@ export function NoteTakerOverlayHost(): ReactElement {
 
   useEffect(() => {
     if (!isActive) return;
-    if (agentLeft) toast.warning('Recording ended because the note taker left the call.');
-    if (pendingStop || agentLeft) handleStop();
-  }, [agentLeft, handleStop, isActive, pendingStop]);
+    if (pendingStop) handleStop();
+  }, [handleStop, isActive, pendingStop]);
 
   // ─── Native pill hand-off (Electron only) ─────────────────────────────────
   const isElectron = isElectronApp();
@@ -99,7 +97,7 @@ export function NoteTakerOverlayHost(): ReactElement {
             channelId={channelId}
             recordingId={externalId}
             notesCanvasId={notesCanvasId}
-            isOffline={showOfflineBanner}
+            isOffline={showOfflineBanner || fallbackReasons.length > 0}
             title={title ?? undefined}
             onStop={handleStop}
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}

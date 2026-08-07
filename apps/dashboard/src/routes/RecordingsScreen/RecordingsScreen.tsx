@@ -7,7 +7,7 @@
  * Recording persists across navigation via the global RecordingOverlay.
  */
 
-import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { v4 as uuidv4 } from 'uuid';
@@ -55,8 +55,6 @@ import {
 } from './components/RecordingConnectionStatus';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { DEFAULT_NOTES_TITLE } from '../../stores/recordingStore';
-import { shouldConfirmTranscriptionAgentLeft } from '../../utils/livekitAgent';
-import { offlineRecordingService } from '../../services/Recording/offlineRecordingService';
 
 const AUTO_START_TTL_MS = 60_000;
 
@@ -128,6 +126,8 @@ export default function RecordingsScreen(): ReactElement {
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
+  // True when the title modal was opened because the agent dropped (auto-end),
+  // not by a user-initiated stop. Drives the warning banner in SaveTitleModal.
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
   // Multi-select for bulk actions (delete / ask AI)
@@ -154,6 +154,7 @@ export default function RecordingsScreen(): ReactElement {
   const room = useRecordingStore(ctx => ctx.room);
   const activeLayout = useRecordingStore(ctx => ctx.activeLayout);
   const isTranscriptMinimized = useRecordingStore(ctx => ctx.isTranscriptMinimized);
+  const fallbackReasons = useRecordingStore(ctx => ctx.fallbackReasons);
 
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [canvasCreationFailed, setCanvasCreationFailed] = useState(false);
@@ -164,7 +165,6 @@ export default function RecordingsScreen(): ReactElement {
 
   const isActive =
     recordingStatus === 'recording' ||
-    recordingStatus === 'offline' ||
     recordingStatus === 'paused' ||
     recordingStatus === 'starting';
 
@@ -179,35 +179,8 @@ export default function RecordingsScreen(): ReactElement {
     }
   }, [isActive]);
 
-  const startOfflineFallback = useCallback(
-    (reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout'): void => {
-      sendRecordingEvent({ type: 'enterOfflineFallback', reason });
-    },
-    [],
-  );
-
   const { roomConnectionState, showConnectionWarning, networkQuality, dismissConnectionWarning } =
-    useRecordingConnectionState(room, isActive, recordingStatus, startOfflineFallback);
-
-  useEffect(() => {
-    if (
-      recordingStatus === 'offline' &&
-      roomConnectionState === ConnectionState.Connected &&
-      room &&
-      !shouldConfirmTranscriptionAgentLeft(room)
-    ) {
-      sendRecordingEvent({ type: 'resumeLiveRecording' });
-    }
-  }, [recordingStatus, roomConnectionState, room]);
-
-  useEffect(() => {
-    void offlineRecordingService.initialize().catch(() => undefined);
-    const recover = (): void => {
-      void offlineRecordingService.initialize().catch(() => undefined);
-    };
-    window.addEventListener('online', recover);
-    return (): void => window.removeEventListener('online', recover);
-  }, []);
+    useRecordingConnectionState(room, isActive, recordingStatus);
 
   // Live transcript streaming from global store (subscription is managed by the store)
   const { transcripts } = useTranscriptStream();
@@ -310,7 +283,7 @@ export default function RecordingsScreen(): ReactElement {
   // Auto-create canvas when recording starts if this session's layout is split/notes
   useEffect(() => {
     // Only proceed when recording has just started
-    if (recordingStatus !== 'recording' && recordingStatus !== 'offline') return;
+    if (recordingStatus !== 'recording') return;
     // Don't auto-create if we've already attempted for this session
     if (hasAttemptedAutoCanvasRef.current) return;
     // Don't auto-create if canvas already exists or is being created
@@ -347,12 +320,7 @@ export default function RecordingsScreen(): ReactElement {
 
   // Stop from the floating pill — same flow as clicking Stop in the UI (shows title modal)
   useEffect(() => {
-    if (
-      pendingStop &&
-      (recordingStatus === 'recording' ||
-        recordingStatus === 'offline' ||
-        recordingStatus === 'paused')
-    ) {
+    if (pendingStop && (recordingStatus === 'recording' || recordingStatus === 'paused')) {
       handleStopRecording();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -877,15 +845,16 @@ export default function RecordingsScreen(): ReactElement {
         )}
       </div>
 
+      {isActive && fallbackReasons.length > 0 && (
+        <div className='fixed bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-full bg-amber-100 px-4 py-2 text-xs font-medium text-amber-900 shadow dark:bg-amber-950 dark:text-amber-100'>
+          Local protection active — transcript will catch up after recovery
+        </div>
+      )}
+
       {/* ─── Sticky Bottom Control Bar (always visible) ───── */}
       <RecordingControlBar
-        isRecording={
-          recordingStatus === 'recording' ||
-          recordingStatus === 'offline' ||
-          recordingStatus === 'paused'
-        }
+        isRecording={recordingStatus === 'recording' || recordingStatus === 'paused'}
         isPaused={recordingStatus === 'paused'}
-        isOffline={recordingStatus === 'offline'}
         isStarting={recordingStatus === 'starting'}
         startTime={startTime}
         onStart={handleStartRecording}

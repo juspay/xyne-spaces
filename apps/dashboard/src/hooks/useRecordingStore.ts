@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import type { RecordingLayout, RecordingState, TranscriptEntry } from '../stores/recordingStore';
+import type { RecordingRepairReason } from '../services/Recording/recordingService';
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 import { recordingStore as _rawStore } from '../stores/recordingStore';
 
@@ -44,12 +45,9 @@ export type RecordingStoreEvent =
   | { type: 'setActiveLayout'; layout: RecordingLayout }
   | { type: 'setTranscriptMinimized'; isMinimized: boolean }
   | { type: 'agentLeftUnexpectedly' }
-  | {
-      type: 'enterOfflineFallback';
-      reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'stt_failed';
-    }
-  | { type: 'sttRecovered' }
-  | { type: 'resumeLiveRecording' };
+  | { type: 'setFallbackReason'; reason: RecordingRepairReason; active: boolean }
+  | { type: 'setFallbackProtection'; availability: RecordingState['fallbackProtection'] }
+  | { type: 'setRepairPending'; pending: boolean };
 
 interface TypedRecordingStore {
   subscribe: (cb: () => void) => { unsubscribe: () => void };

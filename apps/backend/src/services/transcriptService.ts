@@ -580,6 +580,25 @@ export class TranscriptService {
     }
   }
 
+  /** Repair may be the first transcript writer when the live agent captured nothing. */
+  async retrieveTranscriptAllowEmpty(callId: string): Promise<string> {
+    const storagePath = `transcriptions/${callId}.jsonl`;
+    if (!(await this.transcriptStorage.fileExists(storagePath))) return '';
+    return (await this.transcriptStorage.getFileBuffer(storagePath)).toString('utf-8');
+  }
+
+  /** A single object replacement is the canonical, atomic JSONL commit point. */
+  async persistRawTranscript(callId: string, entries: TranscriptEntry[]): Promise<void> {
+    const storagePath = `transcriptions/${callId}.jsonl`;
+    const jsonl = entries.map(entry => JSON.stringify(entry)).join('\n') + '\n';
+    await this.transcriptStorage.uploadFileV2(Buffer.from(jsonl, 'utf-8'), {
+      path: storagePath,
+      contentType: 'application/x-ndjson',
+      cacheControl: 'private, max-age=0',
+      metadata: { callId, type: 'raw_transcript' },
+    });
+  }
+
   /**
    * Parse JSONL content into transcript entries
    */

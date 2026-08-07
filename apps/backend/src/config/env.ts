@@ -597,7 +597,6 @@ export const config = {
       .map((m: string) => m.trim())
       .filter(Boolean),
   },
-  enableRecordingRepairWorker: envVars.ENABLE_RECORDING_REPAIR_WORKER,
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,

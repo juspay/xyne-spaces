@@ -1,12 +1,16 @@
-import { gcsService } from '@/services/gcsService';
+import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { recordingRepairStateService } from '@/services/recordingRepairStateService';
-import { transcriptService } from '@/services/transcriptService';
+import {
+  recordingRepairStorageService,
+  type RecordingRepairChunkMetadata,
+} from '@/services/recordingRepairStorageService';
 import { voiceInputService } from '@/services/voiceInputService';
 import { logger } from '@/utils/logger';
 import { isStandaloneWebm } from '@/utils/webm';
+import { intersectRecordingRepairCoverage } from '@/services/recordingRepairIntervals';
 
-export class InvalidRecordingRepairAudioError extends Error {
-  override readonly name = 'InvalidRecordingRepairAudioError';
+export class RecordingRepairTerminalError extends Error {
+  override readonly name = 'RecordingRepairTerminalError';
 }
 
 class RecordingRepairService {
@@ -14,15 +18,24 @@ class RecordingRepairService {
     const capture = await recordingRepairStateService.claim(callId, captureId);
     if (!capture) return;
 
+    let chunks: RecordingRepairChunkMetadata[] = [];
     try {
-      const chunks = await gcsService.listRecordingRepairChunks(`recording-repairs/${callId}/${captureId}/`);
+      chunks = await recordingRepairStorageService.listChunks(callId, captureId);
+      const selected = chunks.filter(chunk =>
+        capture.outages.some(outage =>
+          chunk.startedAt < outage.endedAt && chunk.endedAt > outage.startedAt,
+        ),
+      );
+      if (selected.length === 0) {
+        throw new RecordingRepairTerminalError('No repair chunks overlap the finalized outages');
+      }
 
-      const repairs: Array<{ text: string; timestamp: number }> = [];
-      for (const chunk of chunks.sort((left, right) => left.sequence - right.sequence || left.startedAt - right.startedAt)) {
-        const buffer = await gcsService.getFileBuffer(chunk.path);
+      const repairs: Array<{ user: string; text: string; timestamp: number; participant_identity: string }> = [];
+      for (const chunk of selected) {
+        const buffer = await recordingRepairStorageService.readChunk(chunk.path);
         if (!isStandaloneWebm(buffer)) {
-          throw new InvalidRecordingRepairAudioError(
-            `Stored recording repair chunk ${chunk.sequence} is a WebM fragment without an EBML header`,
+          throw new RecordingRepairTerminalError(
+            `Stored recording repair chunk ${chunk.sequence} has no standalone WebM header`,
           );
         }
         const result = await voiceInputService.transcribeAudio({
@@ -31,28 +44,24 @@ class RecordingRepairService {
           mimetype: chunk.mimeType,
           originalname: `${chunk.sequence}.webm`,
         } as Express.Multer.File);
-        if (result.text.trim()) repairs.push({ text: result.text, timestamp: chunk.startedAt / 1000 });
+        if (result.text.trim()) {
+          repairs.push({
+            user: 'Recovered audio',
+            text: result.text.trim(),
+            timestamp: chunk.startedAt / 1000,
+            participant_identity: '',
+          });
+        }
       }
 
-      const messageId = await transcriptService.mergeRecordingRepairEntries(
+      await noteTakerTranscriptService.applyRecordingRepair(
         callId,
-        capture.outages.map(outage => ({ startedAt: new Date(outage.startedAt), endedAt: new Date(outage.endedAt) })),
         repairs,
+        intersectRecordingRepairCoverage(selected, capture.outages),
       );
-
-      // Persist the formatted transcript, attachment, call transcript path, and
-      // message attachment flag before acknowledging that the repair is merged.
-      // Unlike the general summary flow, failures here must keep the repair
-      // retryable instead of being swallowed as an optional post-processing step.
-      await transcriptService.persistCallTranscript(callId, messageId);
       await recordingRepairStateService.markMerged(callId, captureId);
-
-      // The durable transcript is already visible to clients. Continue optional
-      // summary/indexing work without writing the transcript attachment twice.
-      await transcriptService.processCallWithSummary(callId, messageId, true, {
-        skipTranscriptPersistence: true,
-      }).catch(error => {
-        logger.error('[RecordingRepairService] Optional post-merge processing failed', {
+      void recordingRepairStorageService.deleteChunks(chunks).catch(error => {
+        logger.warn('[RecordingRepairService] Post-merge chunk cleanup failed', {
           callId,
           captureId,
           error,
@@ -60,14 +69,20 @@ class RecordingRepairService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const failure =
+        error instanceof RecordingRepairTerminalError || message === 'Headless recording not found'
+          ? error instanceof RecordingRepairTerminalError
+            ? error
+            : new RecordingRepairTerminalError(message)
+          : error;
       await recordingRepairStateService.markFailed(
         callId,
         captureId,
         message,
-        !(error instanceof InvalidRecordingRepairAudioError),
+        !(failure instanceof RecordingRepairTerminalError),
       );
       logger.error('[RecordingRepairService] Repair processing failed', { callId, captureId, error });
-      throw error;
+      throw failure;
     }
   }
 }
