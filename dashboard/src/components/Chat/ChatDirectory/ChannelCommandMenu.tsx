@@ -2479,32 +2479,59 @@ const ChannelCommandMenu = ({
       {/* 2. Group DMs (from local channels) */}
       {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
         showGroupedLocalResults &&
-        localGroupDMs.length > 0 && (
-          <div className='mb-4'>
-            <Command.Group
-              heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-            >
-              {localGroupDMs.map(({ channel }, index) => {
-                const unreadCount = unreadCounts[channel.id] ?? 0;
-                return (
-                  <ChannelCommandItem
-                    key={channel.id}
-                    channel={channel}
-                    currentUserID={currentUserID}
-                    unreadCount={unreadCount}
-                    onSelect={displayName => {
-                      void handleChannelSelect(channel, displayName, index + 1);
-                    }}
-                    onItemMouseDown={handleItemMouseDown}
-                    getChannelIcon={getChannelIcon}
-                    isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                  />
-                );
-              })}
-            </Command.Group>
-          </div>
-        )}
+        localGroupDMs.length > 0 &&
+        (() => {
+          // Cap the number of mounted rows (with an inline expand) the same way
+          // the Starred / Channels sections do. A short query can match
+          // thousands of DMs; mounting them all as cmdk items is what drove the
+          // per-keystroke render + cmdk bookkeeping cost.
+          const category = ChannelCategory.GROUP_DMS;
+          const isExpanded = expandedCategories.has(category);
+          const hasMore = localGroupDMs.length > DISPLAY_LIMIT;
+          const displayItems =
+            !isExpanded && hasMore ? localGroupDMs.slice(0, DISPLAY_LIMIT) : localGroupDMs;
+          const hiddenCount = localGroupDMs.length - DISPLAY_LIMIT;
+          return (
+            <div className='mb-4'>
+              <Command.Group
+                heading={getCategoryLabel(category)}
+                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+              >
+                {displayItems.map(({ channel }, index) => {
+                  const unreadCount = unreadCounts[channel.id] ?? 0;
+                  return (
+                    <ChannelCommandItem
+                      key={channel.id}
+                      channel={channel}
+                      currentUserID={currentUserID}
+                      unreadCount={unreadCount}
+                      onSelect={displayName => {
+                        void handleChannelSelect(channel, displayName, index + 1);
+                      }}
+                      onItemMouseDown={handleItemMouseDown}
+                      getChannelIcon={getChannelIcon}
+                      isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                    />
+                  );
+                })}
+                {hasMore && (
+                  <button
+                    onClick={() => toggleCategoryExpansion(category)}
+                    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                    data-track-category='CHANNEL_SEARCH'
+                    data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                    data-track-metadata={JSON.stringify({
+                      category: category as string,
+                      isExpanded,
+                    })}
+                  >
+                    {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  </button>
+                )}
+              </Command.Group>
+            </div>
+          );
+        })()}
 
       {/* 3. Channels (from local channels) */}
       {includeChannels && renderSearchChannelsSection()}
