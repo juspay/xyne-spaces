@@ -1986,8 +1986,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   let streamRateTimer: ReturnType<typeof setInterval> | null = null;
   let turnStreamRateSamples: StreamRateSample[] = [];
   const MAX_RESULT_LEN = 50_000;
-  const MAX_INVOCATIONS_BYTES = 1_000_000;
-  let invocationsSizeEstimate = 0;
 
   const coerceResult = (result: unknown): string => {
     if (typeof result === "string") return result;
@@ -2275,10 +2273,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       const started = inflightCalls.get(event.toolCallId);
       if (!started) {
         log.warn(`[agent] tool_execution_end without matching start: ${event.toolCallId} (${event.toolName}) isError=${event.isError} — push skipped`);
-      } else if (invocationsSizeEstimate >= MAX_INVOCATIONS_BYTES) {
-        log.warn(`[agent] tool_execution_end size-cap reached: ${event.toolCallId} (${event.toolName}) — push skipped (size=${invocationsSizeEstimate})`);
       }
-      if (started && invocationsSizeEstimate < MAX_INVOCATIONS_BYTES) {
+      if (started) {
         // Persist EXACTLY what the model saw — no second, persist-only cut.
         // The model-visible result is already bounded in-execute: custom / MCP /
         // subagent tools go through promoteIfOversized (tool-output.ts — 32KB
@@ -2290,6 +2286,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         // and (b) cut the MCP `{"content":[…]}` JSON envelope mid-string, so the
         // frontend's JSON.parse failed and citation-chunk parsing broke. Storing
         // the coerced result verbatim keeps DB == model and the JSON valid.
+        //
+        // There is deliberately NO cumulative byte cap on this persist path: a
+        // run-wide cap silently dropped the DB + debug copies of every tool
+        // AFTER the threshold while the model still had them, breaking the
+        // DB == debug == model parity above and surfacing as the finalize sweep
+        // label "(no result — tool end event was not received)". Each result is
+        // already bounded by the in-execute spill (32KB bulk / 128KB retrieval),
+        // and MAX_TOOL_INVOCATIONS in agentRunRepository bounds the row count, so
+        // the full invocation set is persisted verbatim.
         const fullResult = coerceResult(event.result);
         const citations = takeCitations(event.toolCallId);
         const debug = takeDebug(event.toolCallId);
@@ -2312,7 +2317,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(bgTask ? { background: true, backgroundState: "running" as const, backgroundTaskId: bgTask.taskId } : {}),
         };
         toolInvocations.push(inv);
-        invocationsSizeEstimate += fullResult.length + 200; // rough overhead per invocation
         // Stream the invocation to xyne-claw-auth so Control Center watchers see tools populate live
         pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
         pushDebugEvent("tool_execution_end", {
