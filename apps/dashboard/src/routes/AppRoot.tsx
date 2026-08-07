@@ -105,7 +105,7 @@ import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
-import { getRecordingStatus, sendRecordingEvent } from '../hooks/useRecordingStore';
+import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -330,20 +330,9 @@ const AppRoot = (): ReactElement => {
   // do not expose a reliable lid-close event, so retain only the actual page
   // unload safeguard below.
   useEffect(() => {
-    const stopRecordingBeforePageIsFrozen = (): void => {
-      const status = getRecordingStatus();
-      if (status === 'starting') {
-        // Let the start sequence complete and consume the pending stop rather
-        // than allowing its in-flight connection to revive a stopped session.
-        sendRecordingEvent({ type: 'requestStop' });
-      } else if (status === 'recording' || status === 'paused') {
-        sendRecordingEvent({ type: 'stopRecording' });
-      }
-    };
-
-    window.addEventListener('pagehide', stopRecordingBeforePageIsFrozen);
+    window.addEventListener('pagehide', stopRecordingForTeardown);
     return (): void => {
-      window.removeEventListener('pagehide', stopRecordingBeforePageIsFrozen);
+      window.removeEventListener('pagehide', stopRecordingForTeardown);
     };
   }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));

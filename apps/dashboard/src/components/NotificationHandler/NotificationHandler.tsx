@@ -16,7 +16,11 @@ import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
-import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import {
+  sendRecordingEvent,
+  stopRecordingForTeardown,
+  useRecordingStore,
+} from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -522,15 +526,9 @@ export const NotificationHandler: React.FC = () => {
     });
   }, [isElectron]);
 
-  // macOS freezes the renderer immediately after the Electron main process
-  // receives `powerMonitor.suspend` (including a lid close). Do not use the
-  // normal deferred `requestStop` path here: disconnect LiveKit immediately so
-  // the recording session is finalized before the process is suspended.
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
-    return window.electronAPI.onRecordingSystemSuspend(() => {
-      sendRecordingEvent({ type: 'stopRecording' });
-    });
+    return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
   }, [isElectron]);
 
   const recordingStatus = useRecordingStore(ctx => ctx.status);
