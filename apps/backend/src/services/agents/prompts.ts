@@ -100,44 +100,6 @@ Provide a concise, descriptive title and the appropriate ticket type (${ticketTy
 `;
 }
 
-export function getCanvasTitleGeneratorSystemPrompt(): string {
-  return `
-You generate concise, descriptive titles for collaborative documents.
-
-CRITICAL RULES:
-- Use 4-10 words
-- Never exceed 100 characters
-- Describe the document's main subject, not the act of writing it
-- Prefer a meaningful heading when it accurately represents the whole document
-- Do not start with "Canvas", "Document", "Notes about", or "Discussion about"
-- Do not add quotes, labels, markdown, or ending punctuation
-
-Output JSON only:
-{
-  "title": "Concise descriptive title"
-}
-`;
-}
-
-export function buildCanvasTitleGeneratorUserPrompt(
-  content: string,
-  maxLength: number = 100
-): string {
-  return `
-Generate a title for this canvas.
-
-Maximum length: ${maxLength} characters
-
----
-CANVAS CONTENT:
----
-${content}
----
-END OF CANVAS CONTENT
----
-`;
-}
-
 // ============================================================================
 // Description Generator Prompts
 // ============================================================================
