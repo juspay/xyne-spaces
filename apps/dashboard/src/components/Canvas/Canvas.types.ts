@@ -149,12 +149,13 @@ export interface CanvasListProps {
   onDelete?: (canvasId: string) => void;
   onDuplicate?: (canvasId: string, canvas?: Canvas) => void;
   currentUserId?: string | undefined;
-  activeFilter?: 'all' | 'created_by_me';
-  onFilterChange?: (filter: 'all' | 'created_by_me') => void;
+  activeFilter?: 'all' | 'created_by_me' | 'shared';
+  onFilterChange?: (filter: 'all' | 'created_by_me' | 'shared') => void;
   selectedCanvasId?: string;
   paginated?: boolean;
   channelId?: string;
   excludeCallGeneratedCanvases?: boolean;
+  onlyCallGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
 }
