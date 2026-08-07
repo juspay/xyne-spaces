@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
-import { syncUserWorkload } from '@/utils/workloadUtils';
+import { handleTicketAssignmentChange } from '@/utils/workloadUtils';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 import { TicketStatusV2 } from '@xyne/shared';
 
@@ -141,7 +141,7 @@ class TicketReassignmentQueue {
               userGroupId,
               ticket.boardId,
               AssignmentType.TICKET_ASSIGNEE,
-              undefined,
+              userId,
               ticket.projectId,
               ticket.channelId,
             );
@@ -157,7 +157,13 @@ class TicketReassignmentQueue {
 
             const systemActorId = await getAutomationsBotUserId(ticket.workspaceId);
             await repositories.tickets.updateTicketAssignee(ticket.id, result.assignedUserId, systemActorId);
-            await syncUserWorkload(result.assignedUserId, userGroupId, ticket.boardId, systemActorId);
+            await handleTicketAssignmentChange(
+              result.assignedUserId,
+              userId,
+              userGroupId,
+              ticket.boardId,
+              systemActorId,
+            );
             reassigned++;
           } catch (error) {
             logger.error(`❌ [TICKET-REASSIGNMENT] Failed to reassign ticket ${ticket.id}:`, error);
