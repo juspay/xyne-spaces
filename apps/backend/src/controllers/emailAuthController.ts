@@ -6,9 +6,12 @@ import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';
 import {
-  verifyPassword,
   hashPassword,
   validatePasswordComplexity,
+  generateSixDigitCode,
+  isClientPasswordHash,
+  normalizeClientPasswordHash,
+  verifyEmailPassword,
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
 import { emailService } from '@/services/email/factory';
@@ -124,7 +127,7 @@ export class EmailAuthController {
       }
 
       // 2. Verify password against orgMember.passwordHash
-      const isValid = await verifyPassword(password, orgMember.passwordHash);
+      const isValid = await verifyEmailPassword(password, orgMember.passwordHash);
       if (!isValid) {
         const redis = redisService.getClient();
         const failedAttempts = await redis.incr(loginAttemptKey);
@@ -530,14 +533,14 @@ export class EmailAuthController {
       }
 
       // Verify current password
-      const isValid = await verifyPassword(currentPassword, orgMember.passwordHash);
+      const isValid = await verifyEmailPassword(currentPassword, orgMember.passwordHash);
       if (!isValid) {
         res.status(401).json({ error: 'Current password is incorrect' });
         return;
       }
 
       // Ensure new password is not the same as old
-      const isSameAsOld = await verifyPassword(newPassword, orgMember.passwordHash);
+      const isSameAsOld = await verifyEmailPassword(newPassword, orgMember.passwordHash);
       if (isSameAsOld) {
         res.status(400).json({
           error: 'New password must be different from your current password',
@@ -596,7 +599,7 @@ export class EmailAuthController {
       }
 
       // Generate 6-digit code
-      const code = crypto.randomInt(100000, 1000000).toString().padStart(6, '0')
+      const code = generateSixDigitCode();
       const attemptsKey = `pwdreset:attempts:${normalizedEmail}`;
       // Store in Redis with 15-min TTL, plus rate-limit flag (60 sec TTL)
       const payload: ResetCodePayload = { code };
@@ -714,7 +717,7 @@ export class EmailAuthController {
 
       if (orgMember.passwordHash) {
         // Ensure new password is not the same as old when a password already exists.
-        const isSameAsOld = await verifyPassword(newPassword, orgMember.passwordHash);
+        const isSameAsOld = await verifyEmailPassword(newPassword, orgMember.passwordHash);
         if (isSameAsOld) {
           res.status(400).json({
             error: 'New password must be different from your current password',
@@ -756,7 +759,7 @@ export class EmailAuthController {
    * Register a new account with email + password
    * POST /v2/auth/email/register
    *
-   * Validates email + password, hashes the password, stores pending
+   * Validates email + client-hashed password, stores pending
    * registration data in Redis, and sends a 6-digit verification code.
    * The OrgMember is NOT created until the code is verified.
    *
@@ -767,13 +770,13 @@ export class EmailAuthController {
    */
   register = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email, password, name } = req.body;
+      const { email, hashedPassword, name } = req.body;
       const workspaceId: string | undefined = req.body.workspaceId;
 
-      if (!email || !password || !name) {
+      if (!email || !hashedPassword || !name) {
         res.status(400).json({
           error: 'Missing required fields',
-          message: 'email, password, and name are required',
+          message: 'email, hashedPassword, and name are required',
         });
         return;
       }
@@ -791,9 +794,8 @@ export class EmailAuthController {
         return;
       }
 
-      const passwordValidationError = validatePasswordComplexity(password);
-      if (passwordValidationError) {
-        res.status(400).json({ error: passwordValidationError });
+      if (!isClientPasswordHash(hashedPassword)) {
+        res.status(400).json({ error: 'Invalid password' });
         return;
       }
 
@@ -847,11 +849,12 @@ export class EmailAuthController {
         return;
       }
 
-      // Hash the password now so we don't store plaintext in Redis
-      const passwordHash = await hashPassword(password);
+      // Dashboard already sends the register password as a SHA-256 hash.
+      // Store that credential directly so we do not hash it again.
+      const passwordHash = normalizeClientPasswordHash(hashedPassword);
 
       // Generate 6-digit verification code
-      const code = crypto.randomInt(100000, 1000000).toString().padStart(6, '0');
+      const code = generateSixDigitCode();
       const redisKey = `emailreg:code:${normalizedEmail}`;
       const attemptsKey = `emailreg:attempts:${normalizedEmail}`;
 
@@ -1208,7 +1211,7 @@ export class EmailAuthController {
       }
 
       // Generate new code
-      const newCode = crypto.randomInt(100000, 1000000).toString().padStart(6, '0');
+      const newCode = generateSixDigitCode();
       payload.code = newCode;
 
       const attemptsKey = `emailreg:attempts:${normalizedEmail}`;

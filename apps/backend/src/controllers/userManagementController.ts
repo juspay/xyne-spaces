@@ -999,9 +999,9 @@ export class UserManagementController {
         return;
       }
 
-      const { questionnaireType, response } = req.body as {
+      const { questionnaireType, payload } = req.body as {
         questionnaireType?: unknown;
-        response?: unknown;
+        payload?: unknown;
       };
 
       if (typeof questionnaireType !== 'string' || !questionnaireType.trim()) {
@@ -1009,38 +1009,38 @@ export class UserManagementController {
         return;
       }
 
-      if (!response || typeof response !== 'object' || Array.isArray(response)) {
-        res.status(400).json({ error: 'response must be an object' });
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        res.status(400).json({ error: 'payload must be an object' });
         return;
       }
 
       const type = questionnaireType.trim();
-      const questionnaireResponse = response as Prisma.InputJsonValue;
+      const questionnairePayload = payload as Prisma.InputJsonValue;
       const prisma = DatabaseClient.getInstance();
       const saved = await prisma.questionnaireResponse.upsert({
         where: {
-          workspaceId_userId_questionnaireType: {
+          workspaceId_questionnaireType_userId: {
             workspaceId,
-            userId,
             questionnaireType: type,
+            userId,
           },
         },
         update: {
-          response: questionnaireResponse,
+          payload: questionnairePayload,
           updatedAt: new Date(),
         },
         create: {
           workspaceId,
           userId,
           questionnaireType: type,
-          response: questionnaireResponse,
+          payload: questionnairePayload,
         },
       });
 
       res.status(200).json({
         id: saved.id,
         questionnaireType: saved.questionnaireType,
-        response: saved.response,
+        payload: saved.payload,
       });
     } catch (error) {
       logger.error('Error saving questionnaire response:', error);

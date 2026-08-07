@@ -92,9 +92,23 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
       await saveQuestionnaireResponse({
         questionnaireType: 'onboarding',
-        response: {
-          ...(companyName.trim() ? { company_name: companyName.trim() } : {}),
-          ...(companySize ? { company_size: companySize } : {}),
+        payload: {
+          ...(companyName.trim()
+            ? {
+                company_name: {
+                  question: 'Company name',
+                  answer: companyName.trim(),
+                },
+              }
+            : {}),
+          ...(companySize
+            ? {
+                company_size: {
+                  question: 'Company size',
+                  answer: companySize,
+                },
+              }
+            : {}),
         },
       });
     } catch {

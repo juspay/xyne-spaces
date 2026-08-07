@@ -12,6 +12,7 @@ import type {
 } from '../machines/authMachine';
 import { Context } from '@xyne/shared/index';
 import { apiInstance } from '../services/clients/apiClient';
+import { hashPasswordForAuth } from '../utils/passwordHash';
 
 export interface UseAuthReturn {
   // State
@@ -173,9 +174,10 @@ export const useAuth = (): UseAuthReturn => {
       workspaceId?: string,
     ): Promise<{ success: boolean; message?: string; error?: string }> => {
       try {
+        const hashedPassword = await hashPasswordForAuth(password);
         const response = await apiInstance.post(
           '/v2/auth/email/register',
-          { email, password, name, ...(workspaceId ? { workspaceId } : {}) },
+          { email, hashedPassword, name, ...(workspaceId ? { workspaceId } : {}) },
           { timeout: 30000 },
         );
         const data = response.data as { success: boolean; message?: string };
