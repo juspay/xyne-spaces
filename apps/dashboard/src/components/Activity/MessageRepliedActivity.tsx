@@ -1,8 +1,7 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
-import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { ActivityMessagePreview } from './ActivityMessagePreview';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -42,13 +41,7 @@ export const MessageRepliedActivity = ({
       useActivityCutoff
       isExpanded={isExpanded}
     >
-      {isExpanded ? (
-        <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
-      ) : (
-        <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
-        </div>
-      )}
+      <ActivityMessagePreview message={message} isExpanded={isExpanded} />
     </ActivityItemCard>
   );
 };
