@@ -1,7 +1,14 @@
 import { useState, useCallback } from 'react';
 import { type DateRangeValue } from '../components/ui/DateRangeFilter';
+import { TicketPriority } from '@xyne/shared';
 
-type RangeLabel = 'Today' | 'Yesterday' | 'Last 7 days' | 'Last 30 days' | 'custom';
+type RangeLabel =
+  | 'Today'
+  | 'Yesterday'
+  | 'Last 7 days'
+  | 'Last 30 days'
+  | 'Last 90 days'
+  | 'custom';
 
 const startOfDay = (d: Date): Date => {
   const r = new Date(d);
@@ -26,10 +33,13 @@ const detectLabel = (dr: DateRangeValue): RangeLabel => {
   s7.setDate(s7.getDate() - 6);
   const s30 = new Date(today);
   s30.setDate(s30.getDate() - 29);
+  const s90 = new Date(today);
+  s90.setDate(s90.getDate() - 89);
   if (isSameDay(dr.startDate, today) && isSameDay(dr.endDate, today)) return 'Today';
   if (isSameDay(dr.startDate, yest) && isSameDay(dr.endDate, yest)) return 'Yesterday';
   if (isSameDay(dr.startDate, s7) && isSameDay(dr.endDate, today)) return 'Last 7 days';
   if (isSameDay(dr.startDate, s30) && isSameDay(dr.endDate, today)) return 'Last 30 days';
+  if (isSameDay(dr.startDate, s90) && isSameDay(dr.endDate, today)) return 'Last 90 days';
   return 'custom';
 };
 
@@ -57,6 +67,11 @@ const rangeFromLabel = (
       s.setDate(s.getDate() - 29);
       return { startDate: startOfDay(s), endDate: endOfDay(today) };
     }
+    case 'Last 90 days': {
+      const s = new Date(today);
+      s.setDate(s.getDate() - 89);
+      return { startDate: startOfDay(s), endDate: endOfDay(today) };
+    }
     case 'custom':
       return {
         startDate: customStart ? new Date(customStart) : startOfDay(today),
@@ -68,6 +83,10 @@ const rangeFromLabel = (
 const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every(x => typeof x === 'string');
 
+const isTicketPriorityArray = (v: unknown): v is TicketPriority[] =>
+  isStringArray(v) &&
+  v.every(priority => Object.values(TicketPriority).includes(priority as TicketPriority));
+
 const isPerKeyValues = (v: unknown): v is Record<string, string[]> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every(isStringArray);
 
@@ -77,9 +96,11 @@ interface StoredFilters {
   customEnd?: string;
   startTime: string;
   endTime: string;
-  selectedAssigneeId: string | null;
-  selectedCustomFieldKeys: string[];
-  // Per-key checkbox selections: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
+  selectedAssigneeIds: string[];
+  selectedStageNames: string[];
+  selectedPriorities: TicketPriority[];
+  selectedUserGroupIds: string[];
+  // Per-field selected values or text terms: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
 }
@@ -88,8 +109,10 @@ const DEFAULT_STORED: StoredFilters = {
   rangeLabel: 'Last 7 days',
   startTime: '00:00',
   endTime: '23:59',
-  selectedAssigneeId: null,
-  selectedCustomFieldKeys: [],
+  selectedAssigneeIds: [],
+  selectedStageNames: [],
+  selectedPriorities: [],
+  selectedUserGroupIds: [],
   selectedCustomFieldValues: {},
   comparedChannelIds: [],
 };
@@ -104,6 +127,7 @@ const readStorage = (key: string): StoredFilters => {
       'Yesterday',
       'Last 7 days',
       'Last 30 days',
+      'Last 90 days',
       'custom',
     ];
     const result: StoredFilters = {
@@ -112,10 +136,17 @@ const readStorage = (key: string): StoredFilters => {
         : DEFAULT_STORED.rangeLabel,
       startTime: typeof p['startTime'] === 'string' ? p['startTime'] : DEFAULT_STORED.startTime,
       endTime: typeof p['endTime'] === 'string' ? p['endTime'] : DEFAULT_STORED.endTime,
-      selectedAssigneeId:
-        typeof p['selectedAssigneeId'] === 'string' ? p['selectedAssigneeId'] : null,
-      selectedCustomFieldKeys: isStringArray(p['selectedCustomFieldKeys'])
-        ? p['selectedCustomFieldKeys']
+      selectedAssigneeIds: isStringArray(p['selectedAssigneeIds'])
+        ? p['selectedAssigneeIds']
+        : typeof p['selectedAssigneeId'] === 'string'
+          ? [p['selectedAssigneeId']]
+          : [],
+      selectedStageNames: isStringArray(p['selectedStageNames']) ? p['selectedStageNames'] : [],
+      selectedPriorities: isTicketPriorityArray(p['selectedPriorities'])
+        ? p['selectedPriorities']
+        : [],
+      selectedUserGroupIds: isStringArray(p['selectedUserGroupIds'])
+        ? p['selectedUserGroupIds']
         : [],
       // Handle migration from old string[] format → default to empty
       selectedCustomFieldValues: isPerKeyValues(p['selectedCustomFieldValues'])
@@ -143,13 +174,17 @@ export interface PersistedDeskMetricsFilters {
   dateRange: DateRangeValue;
   startTime: string;
   endTime: string;
-  selectedAssigneeId: string | null;
-  selectedCustomFieldKeys: string[];
+  selectedAssigneeIds: string[];
+  selectedStageNames: string[];
+  selectedPriorities: TicketPriority[];
+  selectedUserGroupIds: string[];
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
-  setSelectedAssigneeId: (id: string | null) => void;
-  setSelectedCustomFieldKeys: (keys: string[]) => void;
+  setSelectedAssigneeIds: (ids: string[]) => void;
+  setSelectedStageNames: (names: string[]) => void;
+  setSelectedPriorities: (priorities: TicketPriority[]) => void;
+  setSelectedUserGroupIds: (ids: string[]) => void;
   setSelectedCustomFieldValues: (vals: Record<string, string[]>) => void;
   setComparedChannelIds: (ids: string[]) => void;
 }
@@ -195,16 +230,30 @@ export const usePersistedDeskMetricsFilters = (
     [persist],
   );
 
-  const setSelectedAssigneeId = useCallback(
-    (id: string | null) => {
-      persist(prev => ({ ...prev, selectedAssigneeId: id }));
+  const setSelectedAssigneeIds = useCallback(
+    (ids: string[]) => {
+      persist(prev => ({ ...prev, selectedAssigneeIds: ids }));
     },
     [persist],
   );
 
-  const setSelectedCustomFieldKeys = useCallback(
-    (keys: string[]) => {
-      persist(prev => ({ ...prev, selectedCustomFieldKeys: keys }));
+  const setSelectedStageNames = useCallback(
+    (names: string[]) => {
+      persist(prev => ({ ...prev, selectedStageNames: names }));
+    },
+    [persist],
+  );
+
+  const setSelectedPriorities = useCallback(
+    (priorities: TicketPriority[]) => {
+      persist(prev => ({ ...prev, selectedPriorities: priorities }));
+    },
+    [persist],
+  );
+
+  const setSelectedUserGroupIds = useCallback(
+    (ids: string[]) => {
+      persist(prev => ({ ...prev, selectedUserGroupIds: ids }));
     },
     [persist],
   );
@@ -228,13 +277,17 @@ export const usePersistedDeskMetricsFilters = (
     dateRange,
     startTime: stored.startTime,
     endTime: stored.endTime,
-    selectedAssigneeId: stored.selectedAssigneeId,
-    selectedCustomFieldKeys: stored.selectedCustomFieldKeys,
+    selectedAssigneeIds: stored.selectedAssigneeIds,
+    selectedStageNames: stored.selectedStageNames,
+    selectedPriorities: stored.selectedPriorities,
+    selectedUserGroupIds: stored.selectedUserGroupIds,
     selectedCustomFieldValues: stored.selectedCustomFieldValues,
     comparedChannelIds: stored.comparedChannelIds,
     setDateRange,
-    setSelectedAssigneeId,
-    setSelectedCustomFieldKeys,
+    setSelectedAssigneeIds,
+    setSelectedStageNames,
+    setSelectedPriorities,
+    setSelectedUserGroupIds,
     setSelectedCustomFieldValues,
     setComparedChannelIds,
   };

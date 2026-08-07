@@ -585,9 +585,23 @@ const SupportScreen = (): ReactElement => {
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
 
-  const [channelBoardId, setChannelBoardId] = useState<string | null>(null);
+  const [resolvedChannelBoard, setResolvedChannelBoard] = useState<{
+    channelId: string;
+    boardId: string;
+  } | null>(null);
+  const channelBoardId =
+    resolvedChannelBoard?.channelId === selectedChannelId ? resolvedChannelBoard.boardId : null;
+  const handleChannelBoardIdResolved = useCallback(
+    (boardId: string): void => {
+      if (selectedChannelId) {
+        setResolvedChannelBoard({ channelId: selectedChannelId, boardId });
+      }
+    },
+    [selectedChannelId],
+  );
+  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
   useEffect(() => {
-    setChannelBoardId(null);
+    setKanbanTickets([]);
   }, [selectedChannelId]);
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -1405,9 +1419,9 @@ const SupportScreen = (): ReactElement => {
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
     if (channelPreference?.boardId) {
-      setChannelBoardId(channelPreference.boardId);
+      handleChannelBoardIdResolved(channelPreference.boardId);
     }
-  }, [selectedChannelId, channelPreference?.boardId]);
+  }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -1612,11 +1626,6 @@ const SupportScreen = (): ReactElement => {
     () => sortedEmailChannels.find(c => c.id === selectedChannelId),
     [sortedEmailChannels, selectedChannelId],
   );
-
-  // Only the setter is read (onTicketsLoaded callbacks below); the loaded ticket
-  // array itself is not consumed here since the merge dialog is built from the
-  // selection map. See mergeDialogTickets for the rationale.
-  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
 
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
@@ -3019,6 +3028,8 @@ const SupportScreen = (): ReactElement => {
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
                   availableDesks={metricsSelectableDesks}
+                  customFieldDefinitions={deskDynamicFields}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3099,7 +3110,7 @@ const SupportScreen = (): ReactElement => {
                       <SupportKanbanBoard
                         channelId={selectedChannelId}
                         boardId={channelBoardId}
-                        onBoardIdResolved={setChannelBoardId}
+                        onBoardIdResolved={handleChannelBoardIdResolved}
                         ticketFilter={ticketFilter}
                         dynamicFieldEntries={dynamicFieldEntries}
                         onTicketClick={handleTicketClick}
@@ -3113,7 +3124,7 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         visibleColumns={tableVisibleColumns}
                         dynamicFieldColumns={tableDynamicFieldColumns}
-                        onBoardIdResolved={setChannelBoardId}
+                        onBoardIdResolved={handleChannelBoardIdResolved}
                         onTicketsLoaded={setKanbanTickets}
                         selectedIds={selectedTicketIds}
                         onSelectionChange={handleTableSelectionChange}
@@ -3139,7 +3150,7 @@ const SupportScreen = (): ReactElement => {
                         activeTicketId={ticketId}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
-                        onBoardIdReady={setChannelBoardId}
+                        onBoardIdReady={handleChannelBoardIdResolved}
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={setKanbanTickets}

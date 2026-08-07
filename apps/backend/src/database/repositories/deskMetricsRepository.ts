@@ -1,6 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { DatabaseClient, readReplicaDb } from '../client';
-import { DeskMetricsAgentRow, DeskMetricsResponse, DeskMetricsTicketRow, TicketStatusV2 } from '@xyne/shared';
+import {
+  DeskMetricsAgentRow,
+  DeskMetricsResponse,
+  DeskMetricsTicketRow,
+  TicketPriority,
+  TicketStatusV2,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 /**
@@ -21,10 +27,11 @@ import { logger } from '@/utils/logger';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const activeTicketFilter = (assigneeId?: string | null): Prisma.Sql => {
-  const assigneeCondition = assigneeId
-    ? Prisma.sql`AND t."assignedTo" = ${assigneeId}`
-    : Prisma.sql``;
+const activeTicketFilter = (assigneeIds: string[] = []): Prisma.Sql => {
+  const assigneeCondition =
+    assigneeIds.length > 0
+      ? Prisma.sql`AND t."assignedTo" IN (${Prisma.join(assigneeIds)})`
+      : Prisma.sql``;
 
   return Prisma.sql`AND EXISTS (
     SELECT 1
@@ -67,18 +74,31 @@ export class DeskMetricsRepository {
     channelId: string;
     timeRange?: string;
     frtStageNames: string[];
-    assigneeId?: string | null;
-    customFieldFilter?: { keys: string[]; perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }> };
+    assigneeIds: string[];
+    stageNames: string[];
+    priorities: TicketPriority[];
+    userGroupIds: string[];
+    customFieldFilter?: {
+      keys: string[];
+      perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
+    };
   }): Promise<DeskMetricsResponse> {
-    const { channelId, frtStageNames, assigneeId, customFieldFilter } = params;
+    const {
+      channelId,
+      frtStageNames,
+      assigneeIds,
+      stageNames,
+      priorities,
+      userGroupIds,
+      customFieldFilter,
+    } = params;
     const db = this.getDbInstance();
     const { gte, lte } = this.resolveRange(params.timeRange);
 
     // "__emailReply" sentinel: include email-reply arm in FRT stop.
     // When frtStageNames is empty (legacy), treat as email-only (backward compat).
-    const includeEmailReply =
-      frtStageNames.length === 0 || frtStageNames.includes('__emailReply');
-    const stageNames = frtStageNames.filter(n => n !== '__emailReply');
+    const includeEmailReply = frtStageNames.length === 0 || frtStageNames.includes('__emailReply');
+    const frtStopStageNames = frtStageNames.filter((name) => name !== '__emailReply');
 
     const stageEntryPredicate = (names: string[]): Prisma.Sql =>
       Prisma.sql`(
@@ -91,17 +111,18 @@ export class DeskMetricsRepository {
         (SELECT MIN(ta."timestamp") FROM "public"."ticket_activities" ta
           WHERE ta."ticketId" = c."ticketId" AND ta."activityType" = 'EMAIL_SENT'
             AND ta."timestamp" > c.created_at)`;
-      if (!includeEmailReply && stageNames.length === 0) return Prisma.sql`NULL::timestamptz`;
+      if (!includeEmailReply && frtStopStageNames.length === 0)
+        return Prisma.sql`NULL::timestamptz`;
       if (!includeEmailReply) {
         return Prisma.sql`
           (SELECT MIN(ta."timestamp") FROM "public"."ticket_activities" ta
-            WHERE ta."ticketId" = c."ticketId" AND ${stageEntryPredicate(stageNames)}
+            WHERE ta."ticketId" = c."ticketId" AND ${stageEntryPredicate(frtStopStageNames)}
               AND ta."timestamp" > c.created_at)`;
       }
-      if (stageNames.length === 0) return emailArm;
+      if (frtStopStageNames.length === 0) return emailArm;
       return Prisma.sql`LEAST(${emailArm},
         (SELECT MIN(ta."timestamp") FROM "public"."ticket_activities" ta
-          WHERE ta."ticketId" = c."ticketId" AND ${stageEntryPredicate(stageNames)}
+          WHERE ta."ticketId" = c."ticketId" AND ${stageEntryPredicate(frtStopStageNames)}
             AND ta."timestamp" > c.created_at))`;
     };
 
@@ -134,9 +155,7 @@ export class DeskMetricsRepository {
         AND ${reopenedPredicate}
     )`;
 
-    // Cohort: tickets created in range. Optionally filtered by assignee and/or custom field.
-    const ticketFilter = activeTicketFilter(assigneeId);
-
+    // Cohort: active tickets created in range, optionally scoped by the selected filters.
     let customFieldExists: Prisma.Sql = Prisma.sql``;
     if (customFieldFilter && customFieldFilter.keys.length > 0) {
       // Value conditions — OR across keys that have values/terms selected
@@ -151,18 +170,28 @@ export class DeskMetricsRepository {
         let valueCondition: Prisma.Sql;
         if (hasTerms) {
           // OR across all text terms within this field
-          valueCondition = kf!.textTerms!
-            .map(t => Prisma.sql`${fieldCol} ILIKE ${'%' + t + '%'}`)
-            .reduce((or, c, i) => i === 0 ? c : Prisma.sql`${or} OR ${c}`);
+          valueCondition = kf!
+            .textTerms!.map((t) => Prisma.sql`${fieldCol} ILIKE ${'%' + t + '%'}`)
+            .reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`));
         } else {
-          valueCondition = Prisma.sql`${fieldCol} IN (${Prisma.join(kf!.values!)})`;
+          valueCondition = Prisma.sql`(
+            ${fieldCol} IN (${Prisma.join(kf!.values!)})
+            OR (
+              jsonb_typeof(fev."actualFieldValue") = 'array'
+              AND jsonb_exists_any(
+                fev."actualFieldValue",
+                ARRAY[${Prisma.join(kf!.values!)}]::text[]
+              )
+            )
+          )`;
         }
         valueConditions.push(Prisma.sql`(${fieldNameMatch} AND (${valueCondition}))`);
       }
       // Single EXISTS: field-level pre-filter (fieldName IN keys) + optional value-level AND
-      const valueClause = valueConditions.length > 0
-        ? Prisma.sql`AND (${valueConditions.reduce((or, c, i) => i === 0 ? c : Prisma.sql`${or} OR ${c}`)})`
-        : Prisma.sql``;
+      const valueClause =
+        valueConditions.length > 0
+          ? Prisma.sql`AND (${valueConditions.reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`))})`
+          : Prisma.sql``;
       customFieldExists = Prisma.sql`AND EXISTS (
           SELECT 1 FROM "public"."form_entity_values" fev
           LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
@@ -174,6 +203,36 @@ export class DeskMetricsRepository {
         )`;
     }
 
+    const ticketAttributeConditions: Prisma.Sql[] = [];
+    if (stageNames.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket."stageName" IN (${Prisma.join(stageNames)})`
+      );
+    }
+    if (priorities.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket.priority IN (${Prisma.join(priorities)})`
+      );
+    }
+    if (userGroupIds.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket."userGroupId" IN (${Prisma.join(userGroupIds)})`
+      );
+    }
+    const ticketAttributeExists =
+      ticketAttributeConditions.length > 0
+        ? Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "public"."tickets" filter_ticket
+            WHERE filter_ticket.id = ta."ticketId"
+              AND ${ticketAttributeConditions.reduce(
+                (condition, next) => Prisma.sql`${condition} AND ${next}`
+              )}
+          )`
+        : Prisma.sql``;
+    const ticketScopeExists = Prisma.sql`${activeTicketFilter(
+      assigneeIds
+    )} ${ticketAttributeExists} ${customFieldExists}`;
+
     const cohortCte = Prisma.sql`
       cohort AS (
         SELECT ta."ticketId", ta."timestamp" AS created_at
@@ -181,19 +240,19 @@ export class DeskMetricsRepository {
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'TICKET_CREATED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-          ${ticketFilter}
-          ${customFieldExists}
+          ${ticketScopeExists}
       )`;
 
     const frtStop = frtStopSql();
-    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, agents] =
+    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, trend, agents] =
       await Promise.all([
         this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
         this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
-        this.emailRepliesCount(db, channelId, gte, lte, assigneeId, customFieldExists),
+        this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
         this.stageCounts(db, cohortCte),
         this.priorityBreakdown(db, cohortCte),
-        this.csatStats(db, channelId, gte, lte, assigneeId, customFieldExists),
+        this.csatStats(db, channelId, gte, lte, ticketScopeExists),
+        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
         this.agentPerformance(
           db,
           cohortCte,
@@ -203,8 +262,8 @@ export class DeskMetricsRepository {
           channelId,
           gte,
           lte,
-          assigneeId,
-          customFieldExists,
+          assigneeIds,
+          ticketScopeExists
         ),
       ]);
 
@@ -219,7 +278,7 @@ export class DeskMetricsRepository {
         stageCounts,
       },
       priority,
-      trend: [],
+      trend,
       tickets,
       agents,
     };
@@ -233,7 +292,7 @@ export class DeskMetricsRepository {
       where: { boardId, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
       select: { name: true },
     });
-    return stages.map(s => s.name);
+    return stages.map((s) => s.name);
   }
 
   private async boardIdForChannel(channelId: string): Promise<string | null> {
@@ -255,7 +314,7 @@ export class DeskMetricsRepository {
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     cohortCte: Prisma.Sql,
     frtStopSql: Prisma.Sql,
-    resolvedAtSql: Prisma.Sql,
+    resolvedAtSql: Prisma.Sql
   ): Promise<{
     opened: number;
     avgFrt: number | null;
@@ -287,7 +346,7 @@ export class DeskMetricsRepository {
             FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at)::float AS avg_rt,
           COUNT(*) FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at)::int AS resolved
         FROM per_ticket
-      `,
+      `
     );
     const r = rows[0];
     return {
@@ -303,7 +362,7 @@ export class DeskMetricsRepository {
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     cohortCte: Prisma.Sql,
     frtStopSql: Prisma.Sql,
-    resolvedAtSql: Prisma.Sql,
+    resolvedAtSql: Prisma.Sql
   ): Promise<DeskMetricsTicketRow[]> {
     const rows = await db.$queryRaw<
       Array<{
@@ -365,9 +424,9 @@ export class DeskMetricsRepository {
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
         LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
         ORDER BY c.created_at DESC
-      `,
+      `
     );
-    return rows.map(r => {
+    return rows.map((r) => {
       const rawScore = r.csat_value?.score;
       const score = typeof rawScore === 'string' ? Number(rawScore) : rawScore;
       return {
@@ -398,14 +457,13 @@ export class DeskMetricsRepository {
     channelId: string,
     gte: Date,
     lte: Date,
-    assigneeId?: string | null,
-    customFieldExists: Prisma.Sql = Prisma.sql``,
+    assigneeIds: string[],
+    customFieldExists: Prisma.Sql = Prisma.sql``
   ): Promise<DeskMetricsAgentRow[]> {
-    const replyActorFilter = assigneeId
-      ? Prisma.sql`AND ta."updatedBy" = ${assigneeId}`
-      : Prisma.sql``;
-    const ticketFilter = activeTicketFilter();
-
+    const replyActorFilter =
+      assigneeIds.length > 0
+        ? Prisma.sql`AND ta."updatedBy" IN (${Prisma.join(assigneeIds)})`
+        : Prisma.sql``;
     const [ownershipRows, replyRows, stageRows] = await Promise.all([
       db.$queryRaw<
         Array<{
@@ -467,7 +525,7 @@ export class DeskMetricsRepository {
             COUNT(*) FILTER (WHERE csat_rating = 'BAD')::int AS csat_bad
           FROM per_ticket
           GROUP BY assignee_id, assignee_name
-        `,
+        `
       ),
       db.$queryRaw<Array<{ user_id: string; user_name: string | null; replies: number }>>(
         Prisma.sql`
@@ -480,11 +538,10 @@ export class DeskMetricsRepository {
           WHERE ta."channelId" = ${channelId}
             AND ta."activityType" = 'EMAIL_SENT'
             AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-            ${ticketFilter}
             ${replyActorFilter}
             ${customFieldExists}
           GROUP BY ta."updatedBy", COALESCE(u."displayName", u.name)
-        `,
+        `
       ),
       db.$queryRaw<Array<{ assignee_id: string | null; stage_name: string; count: number }>>(
         Prisma.sql`
@@ -497,7 +554,7 @@ export class DeskMetricsRepository {
           JOIN "public"."tickets" t ON t.id = c."ticketId"
           WHERE t."isArchived" = false
           GROUP BY t."assignedTo", t."stageName"
-        `,
+        `
       ),
     ]);
 
@@ -557,27 +614,27 @@ export class DeskMetricsRepository {
       });
     }
 
-    const rows = [...byAgent.values()].filter(a => !assigneeId || a.assigneeId === assigneeId);
+    const rows = [...byAgent.values()].filter(
+      (agent) => assigneeIds.length === 0 || assigneeIds.includes(agent.assigneeId ?? '')
+    );
     rows.sort(
       (a, b) =>
         b.assigned - a.assigned ||
         b.resolved - a.resolved ||
         b.emailReplies - a.emailReplies ||
-        (a.assigneeName ?? '').localeCompare(b.assigneeName ?? ''),
+        (a.assigneeName ?? '').localeCompare(b.assigneeName ?? '')
     );
     return rows;
   }
 
-  /** Count email replies sent in range, optionally scoped to tickets assigned to assigneeId and/or matching a custom field. */
+  /** Count email replies sent in range, optionally scoped by assignee and/or ticket filters. */
   private async emailRepliesCount(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     channelId: string,
     gte: Date,
     lte: Date,
-    assigneeId?: string | null,
-    customFieldExists: Prisma.Sql = Prisma.sql``,
+    customFieldExists: Prisma.Sql = Prisma.sql``
   ): Promise<number> {
-    const ticketFilter = activeTicketFilter(assigneeId);
     const rows = await db.$queryRaw<Array<{ count: number }>>(
       Prisma.sql`
         SELECT COUNT(*)::int AS count
@@ -585,9 +642,8 @@ export class DeskMetricsRepository {
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'EMAIL_SENT'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-          ${ticketFilter}
           ${customFieldExists}
-      `,
+      `
     );
     return rows[0]?.count ?? 0;
   }
@@ -595,7 +651,7 @@ export class DeskMetricsRepository {
   /** Cohort-scoped: current stage of tickets created in the selected range. */
   private async stageCounts(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
-    cohortCte: Prisma.Sql,
+    cohortCte: Prisma.Sql
   ): Promise<Array<{ stageName: string; count: number }>> {
     const rows = await db.$queryRaw<Array<{ stage_name: string; count: number }>>(
       Prisma.sql`
@@ -606,14 +662,14 @@ export class DeskMetricsRepository {
         WHERE t."isArchived" = false
         GROUP BY t."stageName"
         ORDER BY count DESC
-      `,
+      `
     );
-    return rows.map(r => ({ stageName: r.stage_name, count: r.count }));
+    return rows.map((r) => ({ stageName: r.stage_name, count: r.count }));
   }
 
   private async priorityBreakdown(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
-    cohortCte: Prisma.Sql,
+    cohortCte: Prisma.Sql
   ): Promise<Array<{ priority: string; count: number }>> {
     const rows = await db.$queryRaw<Array<{ priority: string; count: number }>>(
       Prisma.sql`
@@ -623,7 +679,7 @@ export class DeskMetricsRepository {
         JOIN "public"."tickets" t ON t.id = c."ticketId"
         GROUP BY t.priority
         ORDER BY count DESC
-      `,
+      `
     );
     return rows;
   }
@@ -633,10 +689,8 @@ export class DeskMetricsRepository {
     channelId: string,
     gte: Date,
     lte: Date,
-    assigneeId?: string | null,
-    customFieldExists: Prisma.Sql = Prisma.sql``,
+    customFieldExists: Prisma.Sql = Prisma.sql``
   ): Promise<{ avgScore: number | null; scoredResponses: number; good: number; bad: number }> {
-    const ticketFilter = activeTicketFilter(assigneeId);
     const rows = await db.$queryRaw<
       Array<{ avg_score: number | null; scored_responses: number; good: number; bad: number }>
     >(
@@ -650,9 +704,8 @@ export class DeskMetricsRepository {
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'CSAT_RECEIVED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-          ${ticketFilter}
           ${customFieldExists}
-      `,
+      `
     );
     return {
       avgScore: rows[0]?.avg_score ?? null,
@@ -662,6 +715,99 @@ export class DeskMetricsRepository {
     };
   }
 
+  private async trendByDay(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    channelId: string,
+    gte: Date,
+    lte: Date,
+    resolvedPredicate: Prisma.Sql,
+    customFieldExists: Prisma.Sql = Prisma.sql``
+  ): Promise<Array<{ date: string; opened: number; closed: number }>> {
+    const rangeDays = (lte.getTime() - gte.getTime()) / DAY_MS;
+    const hourly = rangeDays <= 1;
+    const bucketFn = hourly
+      ? Prisma.sql`to_char(date_trunc('hour', (ta."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
+      : Prisma.sql`to_char(date_trunc('day',  (ta."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
+    const bucketFnR = hourly
+      ? Prisma.sql`to_char(date_trunc('hour', (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
+      : Prisma.sql`to_char(date_trunc('day',  (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
+
+    const [openedRows, closedRows] = await Promise.all([
+      db.$queryRaw<Array<{ day: string; count: number }>>(
+        Prisma.sql`
+          SELECT ${bucketFn} AS day, COUNT(*)::int AS count
+          FROM "public"."ticket_activities" ta
+          WHERE ta."channelId" = ${channelId}
+            AND ta."activityType" = 'TICKET_CREATED'
+            AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+            ${customFieldExists}
+          GROUP BY 1
+        `
+      ),
+      db.$queryRaw<Array<{ day: string; count: number }>>(
+        Prisma.sql`
+          SELECT ${bucketFnR} AS day, COUNT(*)::int AS count
+          FROM (
+            SELECT ta."ticketId", MAX(ta."timestamp") AS first_resolved
+            FROM "public"."ticket_activities" ta
+            WHERE ta."channelId" = ${channelId} AND ${resolvedPredicate}
+              ${customFieldExists}
+            GROUP BY ta."ticketId"
+          ) r
+          WHERE r.first_resolved >= ${gte} AND r.first_resolved <= ${lte}
+          GROUP BY 1
+        `
+      ),
+    ]);
+
+    const opened = new Map(openedRows.map((r) => [r.day, r.count]));
+    const closed = new Map(closedRows.map((r) => [r.day, r.count]));
+
+    // Fill all buckets so the chart has no gaps
+    const buckets: string[] = [];
+    const HOUR_MS = 60 * 60 * 1000;
+    const IST_TZ = 'Asia/Kolkata';
+    const toISTDateStr = (ms: number): string =>
+      new Date(ms).toLocaleDateString('en-CA', { timeZone: IST_TZ }); // → 'YYYY-MM-DD'
+    const toISTHourStr = (ms: number): string => {
+      const d = new Date(ms);
+      const date = d.toLocaleDateString('en-CA', { timeZone: IST_TZ });
+      const hour = d
+        .toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' })
+        .slice(0, 2);
+      return `${date} ${hour}:00`;
+    };
+    const floorToISTDay = (ms: number): number =>
+      new Date(`${toISTDateStr(ms)}T00:00:00+05:30`).getTime();
+    const floorToISTHour = (ms: number): number => {
+      const d = new Date(ms);
+      const date = d.toLocaleDateString('en-CA', { timeZone: IST_TZ });
+      const hour = d
+        .toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' })
+        .slice(0, 2);
+      return new Date(`${date}T${hour}:00:00+05:30`).getTime();
+    };
+
+    if (hourly) {
+      const startHour = floorToISTHour(gte.getTime());
+      const endHour = floorToISTHour(lte.getTime());
+      for (let t = startHour; t <= endHour; t += HOUR_MS) {
+        buckets.push(toISTHourStr(t));
+      }
+    } else {
+      const startDay = floorToISTDay(gte.getTime());
+      const endDay = floorToISTDay(lte.getTime());
+      for (let t = startDay; t <= endDay; t += DAY_MS) {
+        buckets.push(toISTDateStr(t));
+      }
+    }
+
+    return buckets.map((date) => ({
+      date,
+      opened: opened.get(date) ?? 0,
+      closed: closed.get(date) ?? 0,
+    }));
+  }
 }
 
 export const deskMetricsRepository = new DeskMetricsRepository();

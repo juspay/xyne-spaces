@@ -15,7 +15,7 @@ import {
   type DeskMetricsContribution,
 } from '../services/deskMetricsAggregator.js';
 import { logger } from '../utils/logger.js';
-import { DESK_METRICS_MAX_AGGREGATE_DESKS } from '@xyne/shared';
+import { DESK_METRICS_MAX_AGGREGATE_DESKS, TicketPriority } from '@xyne/shared';
 import type {
   DeskMetricsAggregateResponse,
   DeskMetricsResponse,
@@ -23,11 +23,16 @@ import type {
 } from '@xyne/shared';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_CUSTOM_RANGE_MS = 31 * DAY_MS;
+const MAX_CUSTOM_RANGE_MS = 90 * DAY_MS;
 
 type CustomFieldFilterArg = {
   keys: string[];
   perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
+};
+
+const getStringQueryParam = (req: Request, name: string): string | undefined => {
+  const value = req.query[name];
+  return typeof value === 'string' ? value : undefined;
 };
 
 export class DeskMetricsController {
@@ -45,13 +50,19 @@ export class DeskMetricsController {
   private parseMetricsQuery(
     req: Request,
   ):
-    | { ok: true; timeRange: string; assigneeId: string | null; customFieldFilter?: CustomFieldFilterArg }
+    | {
+        ok: true;
+        timeRange: string;
+        assigneeIds: string[];
+        stageNames: string[];
+        priorities: TicketPriority[];
+        userGroupIds: string[];
+        customFieldFilter?: CustomFieldFilterArg;
+      }
     | { ok: false; error: string } {
       const defaultEndMs = Date.now();
       const rawTimeRange =
-        typeof req.query.timeRange === 'string'
-          ? req.query.timeRange
-          : `${defaultEndMs - 7 * DAY_MS}_${defaultEndMs}`;
+        getStringQueryParam(req, 'timeRange') ?? `${defaultEndMs - 7 * DAY_MS}_${defaultEndMs}`;
       const parts = rawTimeRange.split('_');
       if (parts.length !== 2) {
         return { ok: false, error: 'Invalid timeRange. Use startMs_endMs' };
@@ -64,12 +75,13 @@ export class DeskMetricsController {
         return { ok: false, error: 'Invalid time range' };
       }
       if (toMs - fromMs > MAX_CUSTOM_RANGE_MS) {
-        return { ok: false, error: 'Custom time range cannot exceed 31 days' };
+        return { ok: false, error: 'Custom time range cannot exceed 90 days' };
       }
       const timeRange = rawTimeRange;
-      const assigneeId = typeof req.query.assigneeId === 'string' ? req.query.assigneeId : null;
 
-      const parseJsonStringArray = (raw: string): string[] => {
+      const parseJsonStringArray = (raw?: string): string[] => {
+        if (!raw) return [];
+
         try {
           const parsed: unknown = JSON.parse(raw);
           if (!Array.isArray(parsed)) return [];
@@ -78,12 +90,27 @@ export class DeskMetricsController {
           return [];
         }
       };
-      const rawKeys = typeof req.query.customFieldKeys === 'string' ? req.query.customFieldKeys : '';
-      const customFieldKeys = parseJsonStringArray(rawKeys);
 
-      const parsePerKeyFilters = (raw: string): Record<string, { values?: string[]; textTerms?: string[] }> => {
+      const rawAssigneeIds = getStringQueryParam(req, 'assigneeIds');
+      const legacyAssigneeId = getStringQueryParam(req, 'assigneeId');
+      const assigneeIds = rawAssigneeIds
+        ? parseJsonStringArray(rawAssigneeIds)
+        : legacyAssigneeId
+          ? [legacyAssigneeId]
+          : [];
+      const stageNames = parseJsonStringArray(getStringQueryParam(req, 'stageNames'));
+      const validPriorities = new Set<string>(Object.values(TicketPriority));
+      const priorities = parseJsonStringArray(getStringQueryParam(req, 'priorities')).filter(
+        (priority): priority is TicketPriority => validPriorities.has(priority),
+      );
+      const userGroupIds = parseJsonStringArray(getStringQueryParam(req, 'userGroupIds'));
+      const customFieldKeys = parseJsonStringArray(getStringQueryParam(req, 'customFieldKeys'));
+
+      const parsePerKeyFilters = (
+        raw?: string,
+      ): Record<string, { values?: string[]; textTerms?: string[] }> => {
         try {
-          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          const parsed = JSON.parse(raw ?? '') as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
           const result: Record<string, { values?: string[]; textTerms?: string[] }> = {};
           for (const [k, v] of Object.entries(parsed)) {
@@ -99,11 +126,14 @@ export class DeskMetricsController {
             result[k] = entry;
           }
           return result;
-        } catch { return {}; }
+        } catch {
+          return {};
+        }
       };
 
-      const rawPerKey = typeof req.query.customFieldPerKeyFilters === 'string' ? req.query.customFieldPerKeyFilters : '';
-      const perKeyFilters = rawPerKey ? parsePerKeyFilters(rawPerKey) : {};
+      const perKeyFilters = parsePerKeyFilters(
+        getStringQueryParam(req, 'customFieldPerKeyFilters'),
+      );
       const customFieldFilter =
         customFieldKeys.length > 0
           ? { keys: customFieldKeys, ...(Object.keys(perKeyFilters).length > 0 ? { perKeyFilters } : {}) }
@@ -112,7 +142,10 @@ export class DeskMetricsController {
       return {
         ok: true,
         timeRange,
-        assigneeId,
+        assigneeIds,
+        stageNames,
+        priorities,
+        userGroupIds,
         ...(customFieldFilter ? { customFieldFilter } : {}),
       };
   }
@@ -120,7 +153,14 @@ export class DeskMetricsController {
   private async metricsForChannel(
     channelId: string,
     preference: { frtStageNames?: string | null },
-    query: { timeRange: string; assigneeId: string | null; customFieldFilter?: CustomFieldFilterArg },
+    query: {
+      timeRange: string;
+      assigneeIds: string[];
+      stageNames: string[];
+      priorities: TicketPriority[];
+      userGroupIds: string[];
+      customFieldFilter?: CustomFieldFilterArg;
+    },
   ): Promise<DeskMetricsResponse> {
     const frtStageNames: string[] = (() => {
       try {
@@ -135,7 +175,10 @@ export class DeskMetricsController {
       channelId,
       timeRange: query.timeRange,
       frtStageNames,
-      assigneeId: query.assigneeId,
+      assigneeIds: query.assigneeIds,
+      stageNames: query.stageNames,
+      priorities: query.priorities,
+      userGroupIds: query.userGroupIds,
       customFieldFilter: query.customFieldFilter,
     });
   }
@@ -171,7 +214,7 @@ export class DeskMetricsController {
   };
 
   getAggregateMetrics = async (req: Request, res: Response): Promise<void> => {
-    const rawIds = typeof req.query.channelIds === 'string' ? req.query.channelIds : '';
+    const rawIds = getStringQueryParam(req, 'channelIds') ?? '';
     const channelIds = [
       ...new Set(
         rawIds
