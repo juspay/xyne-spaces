@@ -347,6 +347,191 @@ export interface TicketStageRequest {
   updatedAt: number;
 }
 
+// ----- Canvas Types -----
+
+export type CanvasVisibility = 'PUBLIC' | 'PRIVATE';
+export type CanvasRole = 'OWNER' | 'EDITOR' | 'VIEWER';
+export type CanvasCommentThreadStatus = 'OPEN' | 'RESOLVED';
+
+/**
+ * A collaborative document.
+ *
+ * `content` is a BlockNote block array, not markdown or HTML. `viewAccessId` and
+ * `editAccessId` are the share-link tokens that appear in canvas URLs.
+ */
+export interface Canvas {
+  id: string;
+  title: string;
+  content: unknown;
+  workspaceId: string;
+  channelId: string | null;
+  folderId: string | null;
+  projectId: string | null;
+  createdBy: string;
+  viewAccessId: string | null;
+  editAccessId: string | null;
+  visibility: CanvasVisibility;
+  isTemplate: boolean;
+  /** When true the document is edited through the realtime CRDT server. */
+  isCollaborative: boolean;
+  docType: string;
+  lastEditedBy: string | null;
+  lastEditedAt: number | null;
+  metadata: unknown;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CanvasFolder {
+  id: string;
+  name: string;
+  workspaceId: string;
+  projectId: string | null;
+  channelId: string | null;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CanvasParticipant {
+  id: string;
+  canvasId: string;
+  workspaceId: string;
+  /** Exactly one of userId / userGroupId / channelId is set. */
+  userId: string | null;
+  userGroupId: string | null;
+  channelId: string | null;
+  role: CanvasRole;
+  joinedAt: number;
+  updatedAt: number;
+}
+
+/** A comment thread anchored to a block within a canvas. */
+export interface CanvasCommentThread {
+  id: string;
+  canvasId: string;
+  blockId: string;
+  anchorText: string | null;
+  initialCommentId: string | null;
+  status: CanvasCommentThreadStatus;
+  statusUpdatedBy: string | null;
+  statusUpdatedAt: number | null;
+  createdBy: string;
+  createdAt: number;
+}
+
+export interface CanvasComment {
+  id: string;
+  threadId: string;
+  canvasId: string;
+  body: string;
+  /** Comma-separated user ids, as stored. */
+  mentionedUserIds: string;
+  isInitial: boolean;
+  createdBy: string;
+  editedAt: number | null;
+  deletedAt: number | null;
+  createdAt: number;
+}
+
+export interface CanvasVersion {
+  id: string;
+  canvasId: string;
+  workspaceId: string;
+  name: string;
+  content: unknown;
+  contentHash: string;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ----- Collection Types -----
+
+/**
+ * A knowledge-base collection. Collections nest: `parentId` is the immediate
+ * parent and `rootCollectionId` the top of the tree.
+ */
+export interface Collection {
+  id: string;
+  name: string;
+  description: string | null;
+  workspaceId: string;
+  ownerId: string;
+  parentId: string | null;
+  rootCollectionId: string | null;
+  scopeType: string;
+  scopeId: string;
+  isPrivate: boolean;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+/** A file in a collection. Versioned — `isLatest` marks the current revision. */
+export interface CollectionItem {
+  id: string;
+  name: string;
+  collectionId: string;
+  rootCollectionId: string;
+  workspaceId: string;
+  fileId: string;
+  ownerId: string;
+  uploadedById: string | null;
+  ingestionStatus: string;
+  versionNumber: number;
+  isLatest: boolean;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+// ----- Form Types -----
+
+export interface Form {
+  id: string;
+  formName: string;
+  formDescription: string | null;
+  entityType: string;
+  contextType: string;
+  workspaceId: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FormField {
+  id: string;
+  formId: string;
+  workspaceId: string;
+  globalFieldId: string | null;
+  fieldName: string | null;
+  fieldType: string | null;
+  fieldEnum: unknown;
+  fieldOptions: string | null;
+  isOptional: boolean | null;
+  sequenceNumber: number | null;
+  parentOptionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A value submitted for one form field against one entity (e.g. a ticket). */
+export interface FormEntityValue {
+  id: string;
+  entityId: string;
+  entityType: string;
+  formId: string;
+  fieldId: string;
+  workspaceId: string;
+  contextId: string | null;
+  version: number | null;
+  fieldValue: string;
+  actualFieldValue: unknown;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ----- Search Types -----
 
 export interface SearchResult {

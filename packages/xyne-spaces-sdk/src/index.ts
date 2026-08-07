@@ -70,6 +70,23 @@ export type {
   Board,
   Stage,
   Project,
+  // Canvases
+  Canvas,
+  CanvasFolder,
+  CanvasParticipant,
+  CanvasComment,
+  CanvasCommentThread,
+  CanvasVersion,
+  CanvasVisibility,
+  CanvasRole,
+  CanvasCommentThreadStatus,
+  // Collections
+  Collection,
+  CollectionItem,
+  // Forms
+  Form,
+  FormField,
+  FormEntityValue,
   // Search
   SearchResult,
   SearchResponse,
@@ -86,6 +103,8 @@ export type { ActivityCursor } from './registry/activities.js';
 export type { TicketCursor, TicketViewMode } from './registry/tickets.js';
 export type { SupportTicketCursor } from './registry/support-tickets.js';
 export type { StageInput } from './registry/boards.js';
+export type { CanvasCursor, CanvasScope } from './registry/canvases.js';
+export type { FormFieldInput } from './registry/forms.js';
 
 // ----- Registry Types (for advanced usage) -----
 export type {
