@@ -29,13 +29,27 @@ export const tagsApi = {
     return res.data.values;
   },
 
-  /** Bulk-resolve Tag ids (e.g. Call.labels entries) to their `{ id, tag }` rows. */
-  getTagsByIds: async (ids: string[]): Promise<{ id: string; tag: string }[]> => {
+  /** Bulk-resolve Tag ids (e.g. Call.labels entries) to their `{ id, tag, method }` rows. */
+  getTagsByIds: async (ids: string[]): Promise<{ id: string; tag: string; method: string }[]> => {
     if (ids.length === 0) return [];
-    const res = await apiInstance.get<{ tags: { id: string; tag: string }[] }>('/tags/by-ids', {
-      params: { ids: ids.join(',') },
-    });
+    const res = await apiInstance.get<{ tags: { id: string; tag: string; method: string }[] }>(
+      '/tags/by-ids',
+      {
+        params: { ids: ids.join(',') },
+      },
+    );
     return res.data.tags;
+  },
+
+  /** Confirm an AI-suggested tag (flips its method from `llm` to `manual` in place, same id). */
+  confirmTag: async (tagId: string): Promise<{ id: string; tag: string; method: string }> => {
+    const res = await apiInstance.patch<{ tag: { id: string; tag: string; method: string } }>(
+      '/tags/confirm',
+      {
+        tagId,
+      },
+    );
+    return res.data.tag;
   },
 
   // ─── Generic entity endpoints ──────────────────────────────────────────────
