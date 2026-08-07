@@ -3927,6 +3927,13 @@ const spacesCreateCanvas: ToolDef = {
 
 // ── spaces-emails ──────────────────────────────────────────────────
 
+const GMAIL_QUOTE_START = /<(?:div|blockquote)[^>]*\bclass=["']?[^"'>]*\b(?:gmail_attr|gmail_quote)\b/i;
+
+function stripGmailQuote(body: string): string {
+  const quoteStart = body.search(GMAIL_QUOTE_START);
+  return quoteStart === -1 ? body : body.slice(0, quoteStart);
+}
+
 const spacesEmails: ToolDef = {
   name: "spaces-emails",
   description:
@@ -3968,10 +3975,11 @@ const spacesEmails: ToolDef = {
         if (e.cc && e.cc.length > 0) parts.push(`  CC: ${e.cc.join(", ")}`);
         if (e.bcc && e.bcc.length > 0) parts.push(`  BCC: ${e.bcc.join(", ")}`);
         parts.push(`  Date: ${toIST(e.createdAt)}`);
-        // Full body — strip HTML / collapse whitespace for readability, but no
-        // length cap (claw's promoteIfOversized() handles oversized results).
         const body = e.body
-          ? e.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+          ? stripGmailQuote(e.body)
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
           : "(no body)";
         parts.push(`  Body: ${body}`);
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
