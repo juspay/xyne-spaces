@@ -7,35 +7,92 @@
 
 // ----- User Types -----
 
+/**
+ * A workspace member.
+ *
+ * Field names match the `users` table. Note `picture` rather than `avatarUrl`,
+ * and that departure is expressed by `status` plus a `leftAt` timestamp — there
+ * is no `isDeleted` flag.
+ *
+ * Several presence fields are denormalised onto this row so the directory can be
+ * rendered without a second read; `user_presence` remains the source of truth.
+ */
 export interface User {
   id: string;
-  email: string;
   name: string;
+  email: string;
+  picture: string | null;
   displayName: string | null;
-  avatarUrl: string | null;
   workspaceId: string;
-  isDeleted: boolean;
+  /** Workspace role: OWNER, ADMIN, MEMBER, GUEST. */
+  role: string;
+  /** Links to the org membership row; some operations need this id. */
+  orgMemberId: string;
+  authProvider: string;
+  providerUserId: string;
+  /** Account state, e.g. ACTIVE or INACTIVE. */
+  status: string;
+  /** Distinguishes humans from bots and app users. */
+  userType: string;
+  /** Set when the member left the workspace. */
+  leftAt: number | null;
+  calendarVisibility: string;
+  // Denormalised presence, dual-written from user_presence.
+  statusEmoji: string | null;
+  statusContent: string | null;
+  statusExpiryAt: number | null;
+  lastActiveAt: number | null;
+  notificationsPausedUntil: number | null;
+  assignmentUnavailableUntil: number | null;
+  metadata: unknown;
   createdAt: number;
   updatedAt: number;
 }
 
+/**
+ * The optional profile card a user fills in.
+ *
+ * Separate from `User`: this is self-authored detail, not account state.
+ */
 export interface UserProfile {
   id: string;
   userId: string;
-  bio: string | null;
-  title: string | null;
+  workspaceId: string;
+  displayName: string | null;
+  /** Job title or role description, free text. */
+  role: string | null;
+  team: string | null;
+  /** Manager's user id. */
+  manager: string | null;
   phoneNumber: string | null;
-  timezone: string | null;
-  location: string | null;
+  /** How to say the person's name. */
+  pronunciation: string | null;
+  /** Date of birth, epoch milliseconds. */
+  dob: number | null;
+  /** When they joined, epoch milliseconds. */
+  joinedOn: number | null;
+  hasVoiceSignature: boolean | null;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface UserPresence {
+  id: string;
   userId: string;
-  status: 'online' | 'away' | 'dnd' | 'offline';
-  statusText: string | null;
+  workspaceId: string;
+  /** Presence state, e.g. ONLINE, AWAY, OFFLINE. */
+  status: string;
+  lastActiveAt: number;
   lastSeenAt: number;
+  /** True when the user set this status themselves rather than it being inferred. */
+  isManual: boolean;
+  deviceInfo: string | null;
+  statusEmoji: string | null;
+  statusContent: string | null;
+  statusExpiryAt: number | null;
+  assignmentUnavailableUntil: number | null;
+  notificationsPausedUntil: number | null;
+  createdAt: number;
   updatedAt: number;
 }
 
