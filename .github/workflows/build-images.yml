@@ -1,0 +1,176 @@
+name: Build Images
+
+# Build-only, MANUAL-only. Builds the production container images to validate the
+# Dockerfiles build end to end for every supported architecture. It intentionally
+# does NOT push anywhere yet — `push: false`. A destination is decided later; the
+# push wiring is sketched at the bottom of this file.
+#
+# Inputs (chosen in the "Run workflow" dialog):
+#   - branch/tag: GitHub's built-in picker — build from ANY ref you select.
+#   - image: which image to build (all / backend / dashboard / xyne-claw).
+#
+# Access control (only specific team members may build):
+#   Trigger is manual-only, so nothing runs on merges — no approvals pile up.
+#   A run is allowed only if the person who launched it is listed in the
+#   `IMAGE_BUILDERS` Actions variable (comma-separated GitHub usernames). Anyone
+#   else fails instantly — no pending-approval queue, no extra clicks. Edit the
+#   allowed list in Settings → Secrets and variables → Actions → Variables, no
+#   code change needed. (When publishing is enabled later, add an `environment:`
+#   approval gate on top of this — a human "yes" is worth it before pushing.)
+#
+# Multi-arch: images build for linux/amd64 AND linux/arm64 (arm64 via QEMU
+# emulation), so the open-source images run on any system/architecture. A
+# multi-platform build is validated without exporting while push is false.
+#
+# Build context is the REPO ROOT (`.`) for every image — each Dockerfile COPYs
+# the root package.json / pnpm-lock.yaml / workspace packages, so `-f
+# apps/<app>/Dockerfile` with `context: .` is required, not the app dir.
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Which image to build
+        type: choice
+        default: all
+        options:
+          - all
+          - backend
+          - dashboard
+          - xyne-claw
+
+permissions:
+  contents: read
+
+# One image build at a time.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # Cheap gate job: checks the launcher is allowed AND resolves the matrix from
+  # the chosen `image` input, BEFORE spinning up the heavy multi-arch builds.
+  prepare:
+    name: Authorize + resolve images
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Restrict to allowed image builders
+        env:
+          ALLOWED: ${{ vars.IMAGE_BUILDERS }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "${ALLOWED}" ]; then
+            echo "::error::vars.IMAGE_BUILDERS is not set. Add a repo/org Actions variable listing the comma-separated GitHub usernames allowed to build images."
+            exit 1
+          fi
+          # Case-insensitive membership check; tolerant of comma/space separators.
+          actor_lc="$(printf '%s' "${ACTOR}" | tr 'A-Z' 'a-z')"
+          match=0
+          IFS=', ' read -r -a list <<< "${ALLOWED}"
+          for u in "${list[@]}"; do
+            [ -z "$u" ] && continue
+            if [ "$(printf '%s' "$u" | tr 'A-Z' 'a-z')" = "${actor_lc}" ]; then
+              match=1; break
+            fi
+          done
+          if [ "$match" -ne 1 ]; then
+            echo "::error::${ACTOR} is not authorized to build images. Allowed: ${ALLOWED}"
+            exit 1
+          fi
+          echo "Authorized: ${ACTOR}"
+
+      - name: Resolve build matrix from input
+        id: set
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          # "all" fans out to every image; a specific choice builds just that one.
+          case "${IMAGE}" in
+            all)                          names='["backend","dashboard","xyne-claw"]' ;;
+            backend|dashboard|xyne-claw)  names="[\"${IMAGE}\"]" ;;
+            *) echo "::error::Unknown image '${IMAGE}'"; exit 1 ;;
+          esac
+          echo "matrix={\"name\":${names}}" >> "$GITHUB_OUTPUT"
+          echo "Building: ${names}"
+
+  build:
+    name: Build ${{ matrix.name }} image
+    needs: prepare
+    runs-on: ubuntu-latest
+    # tsc / vite inside the builder stages need a larger V8 heap (mirrors ci.yml).
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
+    strategy:
+      # Build every selected image even if one fails, so one broken Dockerfile
+      # doesn't hide the status of the others.
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # QEMU registers emulators so linux/arm64 can be built on an amd64 runner.
+      - uses: docker/setup-qemu-action@v3
+
+      # buildx enables multi-platform builds + layer caching (type=gha).
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image (multi-arch, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # All three Dockerfiles live at apps/<name>/Dockerfile.
+          file: apps/${{ matrix.name }}/Dockerfile
+          # BUILD ONLY — do not push. Multi-platform builds cannot be loaded into
+          # the local docker daemon, so nothing is exported; the build itself is
+          # the validation. Flip to true (+ registry login + tags) when a
+          # destination is chosen.
+          push: false
+          # Open-source images: build for every supported architecture.
+          platforms: linux/amd64,linux/arm64
+          # dashboard bakes the commit into the client bundle; others need no args.
+          build-args: ${{ matrix.name == 'dashboard' && format('SOURCE_COMMIT={0}', github.sha) || '' }}
+          # Speed up reruns by caching layers in the Actions cache, scoped per image.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Build ${{ matrix.name }} image"
+            echo ""
+            echo "- **Dockerfile:** \`apps/${{ matrix.name }}/Dockerfile\`"
+            echo "- **Context:** repo root (\`.\`)"
+            echo "- **Platforms:** linux/amd64, linux/arm64"
+            echo "- **Pushed:** no (build-only)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+# ---------------------------------------------------------------------------
+# When you decide WHERE to publish (e.g. ghcr.io), the push wiring is:
+#
+#   permissions:
+#     contents: read
+#     packages: write          # for GHCR
+#
+#   build:
+#     environment: release-publish   # ADD an approval gate for publishing
+#     steps:
+#       - uses: docker/login-action@v3
+#         with:
+#           registry: ghcr.io
+#           username: ${{ github.actor }}
+#           password: ${{ secrets.GITHUB_TOKEN }}
+#       - uses: docker/metadata-action@v5   # generates release-*/sha-*/latest tags
+#         id: meta
+#         with:
+#           images: ghcr.io/${{ github.repository_owner }}/xyne-spaces-${{ matrix.name }}
+#       - uses: docker/build-push-action@v6
+#         with:
+#           push: true
+#           tags: ${{ steps.meta.outputs.tags }}
+#           platforms: linux/amd64,linux/arm64
+#           ...
+# The IMAGE_BUILDERS gate still restricts WHO can run it; the environment adds a
+# human approval step specifically for the push.
+# ---------------------------------------------------------------------------
