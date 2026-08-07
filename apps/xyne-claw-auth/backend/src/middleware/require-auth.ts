@@ -372,3 +372,46 @@ export function requireNoAccessToken(_req: Request, res: Response, next: NextFun
   }
   next();
 }
+
+/**
+ * Scope-aware variant of the barrier for routers that have READ endpoints the
+ * CLI legitimately needs. Browser sessions and S2S pass untouched (no token in
+ * the registry). An access token passes ONLY when BOTH hold:
+ *   1. the request is a read (GET/HEAD) — token callers can never reach the
+ *      router's write handlers through this mount, and
+ *   2. the token carries `scope`.
+ *
+ * WHY THIS EXISTS: the #81 barrier closed the scope-enforcement gap by
+ * blanket-rejecting access tokens everywhere except /run — which also broke
+ * the CLI's own read paths (GET /runs/light, /runs/search, /runs/:id,
+ * GET /agents). Device-flow CLI tokens are MINTED with agents:read/runs:read
+ * (routes/cli-auth.ts SCOPES) but no route honored them; the barrier's own
+ * error text ("they carry no scopes here") described the mount, not the token.
+ * This middleware makes those minted read scopes mean something while keeping
+ * the write surface exactly as locked as requireNoAccessToken left it.
+ */
+export function allowReadAccessToken(scope: string) {
+  return function allowReadAccessTokenMw(req: Request, res: Response, next: NextFunction): void {
+    const token = accessTokenRegistry.get(res);
+    if (!token) {
+      next();
+      return;
+    }
+    const isRead = req.method === "GET" || req.method === "HEAD";
+    if (isRead && token.scopes.includes(scope)) {
+      next();
+      return;
+    }
+    log.warn(
+      `[require-auth] access-token (${token.client ?? "unknown"}) rejected: ` +
+        `${req.method} needs ${isRead ? `scope ${scope}` : "a browser session (writes are session-only)"} userId=${token.userId}`,
+    );
+    res.status(403).json({
+      success: false,
+      error: isRead
+        ? `This token does not have the ${scope} scope.`
+        : "CLI/service access tokens are read-only here; sign in with a browser session for writes.",
+      code: "ACCESS_TOKEN_NOT_ALLOWED",
+    });
+  };
+}

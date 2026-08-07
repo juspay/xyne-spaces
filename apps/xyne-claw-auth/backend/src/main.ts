@@ -97,7 +97,7 @@ import {
   stopBitbucketStatsBackgroundRefresh,
 } from "./services/bitbucket-stats.js";
 
-import { requireAuth, requireNoAccessToken, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
 import { connectDb } from "./db.js";
@@ -173,7 +173,10 @@ app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
 // access-token barrier to apply; add the guard inside the router instead.
 app.use(`${BASE}/sessions`, mcpRouter);
 app.use(`${BASE}/gateways`, requireAuth, requireNoAccessToken, requireClawAdmin, gatewaysRouter);
-app.use(`${BASE}/agents`, requireAuth, requireNoAccessToken, agentsRouter);
+// allowReadAccessToken (NOT the hard barrier): device-flow CLI tokens are
+// minted with agents:read (routes/cli-auth.ts) so the CLI can list agents.
+// Reads (GET/HEAD) pass with that scope; token writes are still rejected.
+app.use(`${BASE}/agents`, requireAuth, allowReadAccessToken("agents:read"), agentsRouter);
 // NOT behind requireAuth (so requireNoAccessToken never runs here): the device
 // -flow endpoints must be reachable pre-authentication, and each route carries
 // its own guard (requireCliTokensEnabled / requireApproveAuth — routes/cli-auth.ts).
@@ -274,7 +277,10 @@ app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJo
 // flow-action consumes them through the module's atomic Redis helper.
 app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
 app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
-app.use(`${BASE}/runs`, requireAuth, requireNoAccessToken, runsRouter);
+// allowReadAccessToken (NOT the hard barrier): CLI tokens carry runs:read so
+// the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
+// /runs/:id). Reads pass with the scope; token writes are still rejected.
+app.use(`${BASE}/runs`, requireAuth, allowReadAccessToken("runs:read"), runsRouter);
 app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
 // Mount-level baseline auth (defense-in-depth): every memory route also has
 // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a

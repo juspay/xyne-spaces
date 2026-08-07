@@ -173,6 +173,9 @@ function findRequireAuthMountsMissingBarrier(mounts: string[]): string[] {
   return mounts.filter((mount) =>
     mount.includes("requireAuth")
     && !mount.includes("requireNoAccessToken")
+    // Scope-aware read barrier counts too: it rejects token WRITES outright
+    // and token READS without the named scope (see allowReadAccessToken).
+    && !mount.includes("allowReadAccessToken(")
     && !mount.includes("runRouter")
   );
 }
@@ -304,6 +307,93 @@ describe("requireNoAccessToken barrier", () => {
     const next: NextFunction = vi.fn();
 
     requireNoAccessToken(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+});
+
+describe("allowReadAccessToken scope barrier", () => {
+  beforeEach(() => {
+    state.rawToken = "";
+    state.verifyCalls = 0;
+    state.config.cliTokensEnabled = true;
+  });
+
+  /** requireAuth with the mock CLI token (scopes: ["agents:read"]), returning
+   *  the res whose WeakMap entry the barrier will consult. */
+  async function authedTokenRes(method: string): Promise<{ req: Request; res: Response }> {
+    const { requireAuth } = await import("./require-auth.js");
+    const req = {
+      method,
+      headers: { authorization: "Bearer xyne_cli_real" },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const authNext: NextFunction = vi.fn();
+    await requireAuth(req, res, authNext);
+    expect(authNext).toHaveBeenCalledOnce();
+    return { req, res };
+  }
+
+  it("passes a GET when the token carries the required scope", async () => {
+    const { allowReadAccessToken } = await import("./require-auth.js");
+    const { req, res } = await authedTokenRes("GET");
+    const next: NextFunction = vi.fn();
+
+    allowReadAccessToken("agents:read")(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("rejects a GET when the token lacks the required scope", async () => {
+    const { allowReadAccessToken } = await import("./require-auth.js");
+    const { req, res } = await authedTokenRes("GET");
+    const next: NextFunction = vi.fn();
+
+    allowReadAccessToken("runs:read")(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        code: "ACCESS_TOKEN_NOT_ALLOWED",
+        error: expect.stringContaining("runs:read"),
+      }),
+    );
+  });
+
+  it("rejects token WRITES even when the read scope is present", async () => {
+    const { allowReadAccessToken } = await import("./require-auth.js");
+    const { req, res } = await authedTokenRes("POST");
+    const next: NextFunction = vi.fn();
+
+    allowReadAccessToken("agents:read")(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "ACCESS_TOKEN_NOT_ALLOWED" }),
+    );
+  });
+
+  it("passes non-token callers (browser session / S2S) untouched, any method", async () => {
+    const { allowReadAccessToken } = await import("./require-auth.js");
+    const req = {
+      method: "POST",
+      headers: { "x-s2s-key": "s2s-secret", "x-user-id": "service-account" },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const next: NextFunction = vi.fn();
+
+    allowReadAccessToken("agents:read")(req, res, next);
 
     expect(next).toHaveBeenCalledOnce();
     expect(res.status).not.toHaveBeenCalled();
