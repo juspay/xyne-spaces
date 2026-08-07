@@ -224,36 +224,125 @@ export interface Activity {
 
 // ----- Ticket Types -----
 
+export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type TicketStatusV2 = 'TODO' | 'STARTED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
+
+/**
+ * A ticket. Note the stage is referenced by `stageName`, not a stage id, and
+ * assignment is `assignedTo` — both match the underlying table.
+ */
 export interface Ticket {
   id: string;
-  workspaceId: string;
+  /** Human-readable key, e.g. `PLAT-1234`. */
+  xyneId: string;
+  title: string;
+  description: string;
+  status: string;
+  statusV2: TicketStatusV2;
+  priority: TicketPriority;
+  stageName: string;
   boardId: string;
-  stageId: string;
+  projectId: string;
+  workspaceId: string;
+  userGroupId: string;
+  channelId: string;
+  conversationId: string;
+  assignedTo: string | null;
+  createdBy: string;
+  updatedBy: string;
+  ticketType: string | null;
+  merchantId: string | null;
+  eta: number | null;
+  isArchived: boolean;
+  kanbanPosition: string | null;
+  closedAt: number | null;
+  closedBy: string | null;
+  statusUpdatedAt: number;
+  metadata: unknown;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SubTicket {
+  id: string;
   title: string;
   description: string | null;
-  priority: 'low' | 'medium' | 'high' | 'urgent' | null;
-  status: string;
-  assigneeId: string | null;
-  reporterId: string | null;
-  dueDate: number | null;
+  workspaceId: string;
+  mappedTicketId: string | null;
+  conversationId: string | null;
+  assignedTo: string | null;
+  stageProgression: string | null;
+  createdBy: string;
+  updatedBy: string;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface Board {
   id: string;
-  workspaceId: string;
   name: string;
   description: string | null;
+  boardType: string;
+  projectId: string;
+  workspaceId: string;
+  createdBy: string;
+  updatedBy: string | null;
+  vcsProvider: string | null;
+  releaseTrackingMode: string | null;
+  metadata: unknown;
   createdAt: number;
-  updatedAt: number;
+  updatedAt: number | null;
 }
 
+/**
+ * A stage on a board. Ordering comes from `sequenceNumber`, and tickets point at
+ * stages by `name` rather than by id.
+ */
 export interface Stage {
   id: string;
-  boardId: string;
   name: string;
-  position: number;
+  boardId: string;
+  workspaceId: string;
+  sequenceNumber: number;
+  eta: number | null;
+  defaultTicketStatus: string | null;
+  defaultTicketStatusV2: TicketStatusV2;
+  requestApprovalOnEntry: boolean | null;
+  createdBy: string;
+  updatedBy: string | null;
+  createdAt: number;
+  updatedAt: number | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  /** Short prefix used in ticket keys, e.g. `PLAT`. */
+  code: string;
+  description: string | null;
+  type: string;
+  workspaceId: string;
+  ticketSequence: number;
+  createdBy: string;
+  updatedBy: string | null;
+  createdAt: number;
+  updatedAt: number | null;
+}
+
+export type StageRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+/** A request to move a ticket into a stage that requires approval. */
+export interface TicketStageRequest {
+  id: string;
+  ticketId: string;
+  stageId: string;
+  workspaceId: string;
+  formId: string | null;
+  status: StageRequestStatus;
+  submittedBy: string;
+  reviewedBy: string | null;
+  reviewerCommentMessageId: string | null;
+  updatedBy: string;
   createdAt: number;
   updatedAt: number;
 }
