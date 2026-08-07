@@ -32,7 +32,7 @@ const deriveScope = (server: McpServer): string => {
 const ScopeBadge = ({ scope }: { scope: string }): ReactElement => (
   <span
     className={cn(
-      'shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize',
+      'shrink-0 rounded-full border px-2 py-0.5 text-body-sm font-medium capitalize',
       scope === 'global'
         ? 'border-border bg-muted text-status-scheduled'
         : scope === 'built-in'
@@ -88,11 +88,11 @@ const Field = ({
   subtleValue?: boolean;
 }): ReactElement => (
   <div className='flex min-w-0 flex-col gap-1.5'>
-    <span className='text-[15px] font-medium leading-tight text-foreground'>{label}</span>
+    <span className='text-body-md font-medium text-foreground'>{label}</span>
     <div className='flex items-center gap-2 rounded-xl border border-border px-3 py-2.5'>
       <span
         className={cn(
-          'min-w-0 flex-1 truncate text-[15px] leading-normal',
+          'min-w-0 flex-1 truncate text-body-md',
           subtleValue ? 'text-foreground/60' : 'text-foreground/80',
         )}
       >
@@ -129,11 +129,9 @@ const McpDetailBody = ({ server }: { server: McpServer }): ReactElement => {
 
       {config && (
         <div className='flex min-w-0 flex-col gap-1.5'>
-          <span className='text-[15px] font-medium leading-tight text-foreground'>
-            Advanced Configuration
-          </span>
+          <span className='text-body-md font-medium text-foreground'>Advanced Configuration</span>
           <div className='flex items-start gap-2 rounded-xl border border-border px-3 py-2.5'>
-            <pre className='min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all font-sans text-[15px] leading-normal text-foreground/80'>
+            <pre className='min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all font-sans text-body-md text-foreground/80'>
               {config}
             </pre>
             <CopyButton value={config} label='Copy configuration' />
@@ -142,10 +140,10 @@ const McpDetailBody = ({ server }: { server: McpServer }): ReactElement => {
       )}
 
       <div className='rounded-xl bg-muted/50 px-4 py-3 text-center'>
-        <div className='mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+        <div className='mb-1 text-body-sm font-semibold uppercase tracking-wide text-muted-foreground'>
           Built by {author}
         </div>
-        <p className='text-[13px] leading-tight text-foreground/60'>
+        <p className='text-body-sm text-foreground/60'>
           Only connect tools you trust. Connectors are created by third-party developers and may
           change over time.
         </p>
@@ -168,7 +166,7 @@ const McpDetailV2 = (): ReactElement => {
       <Link
         to={backTo}
         aria-label='Back to MCPs'
-        className='inline-flex items-center gap-1.5 text-[15px] leading-tight text-foreground transition-opacity hover:opacity-70'
+        className='inline-flex items-center gap-1.5 text-body-md text-foreground transition-opacity hover:opacity-70'
       >
         <ChevronLeft className='size-4' />
         MCP
@@ -177,14 +175,14 @@ const McpDetailV2 = (): ReactElement => {
       <header className='mt-8 flex flex-col gap-3'>
         {server && <McpServerIcon server={server} size='md' />}
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
-          <h1 className='min-w-0 truncate text-[18px] font-semibold leading-tight text-foreground'>
+          <h1 className='min-w-0 truncate text-heading-sm font-semibold text-foreground'>
             {title}
           </h1>
           {server && (
             <>
               <span
                 className={cn(
-                  'rounded-md px-2 py-0.5 text-[13px] leading-tight',
+                  'rounded-md px-2 py-0.5 text-body-sm',
                   connected
                     ? 'bg-stage-completed text-status-success'
                     : 'bg-muted text-muted-foreground',
@@ -197,7 +195,7 @@ const McpDetailV2 = (): ReactElement => {
           )}
         </div>
         {server?.description && (
-          <p className='text-[15px] leading-snug text-foreground/60'>{server.description}</p>
+          <p className='text-body-md text-foreground/60'>{server.description}</p>
         )}
       </header>
 
