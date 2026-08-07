@@ -795,7 +795,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             // server confirms the write. Failed sends stay queued and surface a
             // retry/delete affordance instead of being restored to the composer.
             const channelRef: ConversationRef = { kind: 'channel', channelId };
-            sendMessage(zero, channelRef, {
+            sendMessage(zero as Parameters<typeof sendMessage>[0], channelRef, {
               content: processedHtml,
               type: MessageType.USER,
               conversationId: newConversationId,

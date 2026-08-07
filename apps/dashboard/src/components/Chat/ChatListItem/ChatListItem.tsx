@@ -122,18 +122,22 @@ const ChatListItemComponent = ({
         {...(linkedConversationId !== null && { linkedConversationId })}
       />
       {pendingStatus === 'failed' && pendingEntry && (
-        <div className="flex items-center gap-3 pl-12 pt-1 text-xs text-red-500">
+        <div className='flex items-center gap-3 pl-12 pt-1 text-xs text-red-500'>
           <span>Failed to send.</span>
           <button
-            type="button"
-            className="font-medium underline hover:opacity-80"
+            type='button'
+            data-track-category='PENDING_MESSAGE'
+            data-track-name='retry_failed_send'
+            className='font-medium underline hover:opacity-80'
             onClick={() => firePendingMutator(zero, pendingEntry)}
           >
             Retry
           </button>
           <button
-            type="button"
-            className="font-medium underline hover:opacity-80"
+            type='button'
+            data-track-category='PENDING_MESSAGE'
+            data-track-name='delete_failed_send'
+            className='font-medium underline hover:opacity-80'
             onClick={() => removePending(pendingEntry.messageId)}
           >
             Delete
