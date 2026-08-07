@@ -4268,6 +4268,7 @@ export const mutators = defineMutators({
         name: z.string().optional(),
         alias: z.string().optional(),
         description: z.string().optional(),
+        reassignOnUnavailable: z.boolean().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4277,13 +4278,23 @@ export const mutators = defineMutators({
       async ({
         tx,
         ctx,
-        args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp },
+        args: {
+          userGroupId,
+          name,
+          alias,
+          description,
+          reassignOnUnavailable,
+          userResponsibilityUpdates,
+          userRoleUpdates,
+          timestamp,
+        },
       }) => {
         await tx.mutate.user_groups.update({
           id: userGroupId,
           ...(name !== undefined && { name }),
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
+          ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
           updatedAt: timestamp,
         });
 
