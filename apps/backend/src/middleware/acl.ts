@@ -21,35 +21,6 @@ declare global {
 }
 
 /**
- * This middleware answers "may this user act on this KIND of thing?" — the grant is keyed on the
- * first URL segment and the HTTP method. It never looks at the object named later in the path, so
- * a request carrying an identifier is authorised without anyone confirming that object belongs to
- * the caller's workspace; whether it does is left to the handler.
- *
- * The routes below are the ones where that distinction can matter. Reporting them, deduplicated by
- * shape, gives the inventory needed to decide which handlers already re-check and which do not.
- * Reports only — nothing is refused here.
- */
-const resourceOnlySeen = new Set<string>();
-
-// Path segments that look like an identifier rather than a route name.
-const LOOKS_LIKE_ID = /^(?:[0-9]+|c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9_-]{21,})$/;
-
-function reportResourceLevelOnlyGrant(req: Request): void {
-  const path = req.originalUrl.split('?')[0] ?? '';
-  const segments = path.split('/').filter(Boolean);
-  if (!segments.some(s => LOOKS_LIKE_ID.test(s))) return;
-
-  // Collapse identifiers so one route reports once rather than once per object.
-  const shape = '/' + segments.map(s => (LOOKS_LIKE_ID.test(s) ? ':id' : s)).join('/');
-  const key = `${req.method} ${shape}`;
-  if (resourceOnlySeen.has(key) || resourceOnlySeen.size >= 500) return;
-  resourceOnlySeen.add(key);
-
-  logger.warn('[acl] granted on resource level only', { method: req.method, route: shape });
-}
-
-/**
  * ACL Middleware for API access control
  */
 export class ACLMiddleware {
@@ -169,8 +140,6 @@ export class ACLMiddleware {
           });
           return;
         }
-
-        reportResourceLevelOnlyGrant(req);
       }
 
       const duration = Date.now() - startTime;
