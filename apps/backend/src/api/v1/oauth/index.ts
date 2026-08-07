@@ -21,12 +21,43 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { oauthConfig } from './config';
 import { getPublicJwks, mintAccessToken, type SdkPrincipalClaims } from './tokens';
-import { issueRefreshToken, consumeRefreshToken, revokeAllForUser } from './refresh';
+import { issueRefreshToken, consumeRefreshToken, revokeRefreshToken } from './refresh';
 import { issueAuthorizationCode, consumeAuthorizationCode } from './authorization';
 import { renderAuthorizePage, renderErrorPage, renderSuccessPage } from './pages';
 
 const log = logger.child({ module: 'sdk-oauth' });
 const router = Router();
+
+// OAuth consent pages are intentionally served over plain HTTP in local
+// development. Helmet's default `upgrade-insecure-requests` directive rewrites
+// the form POST to HTTPS, which changes its origin and then conflicts with
+// `form-action 'self'`. Override only this router with a tighter page policy
+// that permits same-origin form submissions without upgrading localhost.
+function oauthContentSecurityPolicy(): string {
+  // Chromium applies `form-action` across the redirect chain. The consent
+  // form posts to this origin, then redirects to the client's callback, so the
+  // exact registered callback origins must be permitted as form destinations.
+  const callbackOrigins = new Set<string>();
+  for (const redirectUris of Object.values(oauthConfig.clients)) {
+    for (const redirectUri of redirectUris) {
+      callbackOrigins.add(new URL(redirectUri).origin);
+    }
+  }
+
+  const formAction = ["'self'", ...callbackOrigins].join(' ');
+  return [
+    "default-src 'none'",
+    "base-uri 'none'",
+    `form-action ${formAction}`,
+    "frame-ancestors 'none'",
+    "style-src 'unsafe-inline'",
+  ].join('; ');
+}
+
+router.use((_req, res, next) => {
+  res.setHeader('Content-Security-Policy', oauthContentSecurityPolicy());
+  next();
+});
 
 /** Check if OAuth is enabled and configured. */
 function requireEnabled(_req: Request, res: Response, next: () => void): void {
@@ -84,9 +115,11 @@ router.get('/authorize', authMiddleware.authenticate, async (req: Request, res: 
     const redirectUri = req.query['redirect_uri'] as string | undefined;
     const scope = req.query['scope'] as string | undefined;
     const state = req.query['state'] as string | undefined;
+    const codeChallenge = req.query['code_challenge'] as string | undefined;
+    const codeChallengeMethod = req.query['code_challenge_method'] as string | undefined;
 
     // Validate client_id
-    if (!clientId || !oauthConfig.knownClients.has(clientId)) {
+    if (!clientId || !oauthConfig.isKnownClient(clientId)) {
       res.status(400).send(renderErrorPage('Invalid Client', 'Unknown or invalid client_id.'));
       return;
     }
@@ -97,11 +130,20 @@ router.get('/authorize', authMiddleware.authenticate, async (req: Request, res: 
       return;
     }
 
-    // For security, only allow localhost redirects for first-party SDK
-    const redirectUrl = new URL(redirectUri);
-    if (redirectUrl.hostname !== 'localhost' && redirectUrl.hostname !== '127.0.0.1') {
+    if (!oauthConfig.isRedirectAllowed(clientId, redirectUri)) {
       res.status(400).send(
-        renderErrorPage('Invalid Redirect URI', 'Only localhost redirect URIs are allowed.'),
+        renderErrorPage('Invalid Redirect URI', 'This redirect URI is not registered for the client.'),
+      );
+      return;
+    }
+
+    if (
+      codeChallengeMethod !== 'S256' ||
+      !codeChallenge ||
+      !/^[A-Za-z0-9_-]{43,128}$/.test(codeChallenge)
+    ) {
+      res.status(400).send(
+        renderErrorPage('PKCE Required', 'A valid S256 code challenge is required.'),
       );
       return;
     }
@@ -121,6 +163,7 @@ router.get('/authorize', authMiddleware.authenticate, async (req: Request, res: 
         clientId,
         redirectUri,
         state,
+        codeChallenge,
         scopes: requestedScopes,
         scopeDescriptions,
         user: {
@@ -140,7 +183,38 @@ router.get('/authorize', authMiddleware.authenticate, async (req: Request, res: 
  */
 router.post('/authorize', authMiddleware.authenticate, async (req: Request, res: Response) => {
   try {
-    const { client_id, redirect_uri, scope, state, action } = req.body;
+    const {
+      client_id,
+      redirect_uri,
+      scope,
+      state,
+      action,
+      code_challenge,
+      code_challenge_method,
+    } = req.body;
+
+    if (!client_id || !oauthConfig.isKnownClient(client_id)) {
+      res.status(400).send(renderErrorPage('Invalid Client', 'Unknown or invalid client_id.'));
+      return;
+    }
+
+    if (!redirect_uri || !oauthConfig.isRedirectAllowed(client_id, redirect_uri)) {
+      res.status(400).send(
+        renderErrorPage('Invalid Redirect URI', 'This redirect URI is not registered for the client.'),
+      );
+      return;
+    }
+
+    if (
+      code_challenge_method !== 'S256' ||
+      typeof code_challenge !== 'string' ||
+      !/^[A-Za-z0-9_-]{43,128}$/.test(code_challenge)
+    ) {
+      res.status(400).send(
+        renderErrorPage('PKCE Required', 'A valid S256 code challenge is required.'),
+      );
+      return;
+    }
 
     // Handle deny action
     if (action === 'deny') {
@@ -152,25 +226,7 @@ router.post('/authorize', authMiddleware.authenticate, async (req: Request, res:
       return;
     }
 
-    // Validate client_id
-    if (!client_id || !oauthConfig.knownClients.has(client_id)) {
-      res.status(400).send(renderErrorPage('Invalid Client', 'Unknown or invalid client_id.'));
-      return;
-    }
-
-    // Validate redirect_uri
-    if (!redirect_uri) {
-      res.status(400).send(renderErrorPage('Missing Redirect URI', 'redirect_uri is required.'));
-      return;
-    }
-
     const redirectUrl = new URL(redirect_uri);
-    if (redirectUrl.hostname !== 'localhost' && redirectUrl.hostname !== '127.0.0.1') {
-      res.status(400).send(
-        renderErrorPage('Invalid Redirect URI', 'Only localhost redirect URIs are allowed.'),
-      );
-      return;
-    }
 
     // Parse scopes
     const requestedScopes: Scope[] = scope
@@ -187,6 +243,7 @@ router.post('/authorize', authMiddleware.authenticate, async (req: Request, res:
       clientId: client_id,
       scopes: requestedScopes,
       redirectUri: redirect_uri,
+      codeChallenge: code_challenge,
     });
 
     // Redirect with code
@@ -207,7 +264,7 @@ router.post('/token', async (req: Request, res: Response) => {
   const grantType = typeof body['grant_type'] === 'string' ? body['grant_type'] : '';
   const clientId = typeof body['client_id'] === 'string' ? body['client_id'] : '';
 
-  if (!oauthConfig.knownClients.has(clientId)) {
+  if (!oauthConfig.isKnownClient(clientId)) {
     res.status(400).json({ error: 'invalid_client' });
     return;
   }
@@ -235,13 +292,14 @@ async function handleAuthorizationCodeGrant(
 ): Promise<void> {
   const code = typeof body['code'] === 'string' ? body['code'] : '';
   const redirectUri = typeof body['redirect_uri'] === 'string' ? body['redirect_uri'] : undefined;
+  const codeVerifier = typeof body['code_verifier'] === 'string' ? body['code_verifier'] : undefined;
 
   if (!code) {
     res.status(400).json({ error: 'invalid_request', error_description: 'code is required.' });
     return;
   }
 
-  const consumed = await consumeAuthorizationCode(code, clientId, redirectUri);
+  const consumed = await consumeAuthorizationCode(code, clientId, redirectUri, codeVerifier);
   if (!consumed.ok) {
     const descriptions: Record<string, string> = {
       invalid: 'Authorization code is invalid.',
@@ -249,6 +307,7 @@ async function handleAuthorizationCodeGrant(
       already_used: 'Authorization code has already been used.',
       client_mismatch: 'Client ID does not match the authorization.',
       redirect_mismatch: 'Redirect URI does not match the authorization.',
+      pkce_mismatch: 'PKCE code verifier is missing or invalid.',
     };
     res.status(400).json({
       error: 'invalid_grant',
@@ -260,7 +319,7 @@ async function handleAuthorizationCodeGrant(
   // Get user info for token claims
   const user = await db.user.findUnique({
     where: { id: consumed.userId },
-    select: { id: true, email: true, name: true, displayName: true },
+    select: { id: true, email: true, name: true, displayName: true, orgMemberId: true },
   });
 
   if (!user) {
@@ -341,7 +400,7 @@ async function handleRefreshTokenGrant(
   // Get user info for token claims
   const user = await db.user.findUnique({
     where: { id: consumed.userId },
-    select: { id: true, email: true, name: true, displayName: true },
+    select: { id: true, email: true, name: true, displayName: true, orgMemberId: true },
   });
 
   if (!user) {
@@ -357,17 +416,8 @@ async function handleRefreshTokenGrant(
     email: user.email,
     name: user.displayName || user.name,
     workspaceId: consumed.workspaceId,
-    memberId: consumed.userId, // Will be looked up from orgMember
+    memberId: user.orgMemberId,
   };
-
-  // Get memberId from orgMember
-  const orgMember = await db.orgMember.findFirst({
-    where: { orgId: consumed.workspaceId },
-    select: { memberId: true },
-  });
-  if (orgMember) {
-    (principal as { memberId: string }).memberId = orgMember.memberId;
-  }
 
   const access = await mintAccessToken(principal, consumed.scopes as Scope[], clientId);
 
@@ -389,18 +439,19 @@ async function handleRefreshTokenGrant(
   });
 }
 
-/**
- * Revoke all SDK sessions for the authenticated user.
- */
-router.post('/revoke', authMiddleware.authenticate, async (req: Request, res: Response) => {
+/** Revoke a refresh token without requiring the user's browser session. */
+router.post('/revoke', async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'unauthorized' });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const token = typeof body['token'] === 'string' ? body['token'] : '';
+    const clientId = typeof body['client_id'] === 'string' ? body['client_id'] : '';
+    if (!token || !oauthConfig.isKnownClient(clientId)) {
+      // RFC 7009 deliberately avoids revealing whether a token exists.
+      res.status(200).end();
       return;
     }
-    const count = await revokeAllForUser(userId);
-    res.json({ success: true, revoked: count });
+    await revokeRefreshToken(token, clientId);
+    res.status(200).end();
   } catch (err) {
     log.error({ msg: 'revoke endpoint error', err });
     res.status(500).json({ error: 'server_error' });

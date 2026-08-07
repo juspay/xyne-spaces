@@ -41,7 +41,7 @@ import { v1Config } from '../config';
 
 export interface CallMutatorInput {
   readonly name: string;
-  readonly args: Record<string, unknown>;
+  readonly args: unknown;
   readonly authData: AuthData;
   readonly ctx: Context;
   /** Endpoint identity, so the same key on a different route is a distinct record. */

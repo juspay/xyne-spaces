@@ -121,6 +121,15 @@ export async function revokeFamily(familyId: string): Promise<number> {
   return result.count;
 }
 
+/** Revoke one refresh token. Unknown tokens are intentionally a no-op. */
+export async function revokeRefreshToken(raw: string, clientId: string): Promise<void> {
+  const tokenHash = hashToken(raw);
+  await db.sdkRefreshToken.updateMany({
+    where: { tokenHash, clientId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
+
 export async function revokeAllForUser(userId: string, clientId?: string): Promise<number> {
   const result = await db.sdkRefreshToken.updateMany({
     where: { userId, revokedAt: null, ...(clientId ? { clientId } : {}) },

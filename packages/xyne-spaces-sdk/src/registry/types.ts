@@ -3,8 +3,8 @@
  *
  * Defines the types for mapping SDK methods to backend operations.
  * Operations can be:
- * - Zero queries (via /zero/query-fallback)
- * - Zero mutators (via /zero/push-fallback)
+ * - Zero queries (via /api/v1/catalog/query)
+ * - Zero mutators (via /api/v1/catalog/mutate)
  * - Direct API calls (via /api/v1/*)
  */
 
@@ -12,7 +12,7 @@ export type OperationType = 'query' | 'mutator' | 'api';
 
 /**
  * A Zero query operation.
- * Executed via POST /zero/query-fallback
+ * Executed via POST /api/v1/catalog/query
  */
 export interface QueryOperation<TArgs = unknown, TResult = unknown> {
   readonly type: 'query';
@@ -26,7 +26,7 @@ export interface QueryOperation<TArgs = unknown, TResult = unknown> {
 
 /**
  * A Zero mutator operation.
- * Executed via POST /zero/push-fallback
+ * Executed via POST /api/v1/catalog/mutate
  */
 export interface MutatorOperation<TArgs = unknown, TResult = unknown> {
   readonly type: 'mutator';
