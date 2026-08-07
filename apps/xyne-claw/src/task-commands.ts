@@ -19,6 +19,11 @@ export interface TaskCommand {
   /** Built-in skill directories loaded only for this command. Paths are
    * resolved from the xyne-claw package working directory. */
   skillPaths?: string[];
+  /** REPO_CONFIGS key to pin auto-provisioned sandboxes to when the agent has
+   * no explicit sandboxRepo pin. "/design" pins "browser" so design runs claim
+   * from the agent-workspace-browser warm pool (seconds) instead of cold-
+   * booting the default kata template (~80s, prod 2026-08-08). */
+  sandboxProfile?: string;
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
@@ -91,6 +96,7 @@ const TASK_COMMANDS: TaskCommand[] = [
       "visualize",
     ],
     skillPaths: ["design-skills"],
+    sandboxProfile: "browser",
     instruction:
       "This is a Xyne Design Studio run. The /design prefix is an internal command, not part of the user's brief. " +
       "Use the Xyne-native design skills loaded for this run. Create or revise a polished, responsive, self-contained " +

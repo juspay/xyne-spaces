@@ -1767,6 +1767,10 @@ async function processTask(
     // `sandbox-repo-setup`. Without this the pin was invisible to those tools, so a
     // pinned agent's bare create silently fell back to the Kata default template.
     if (agentConfig?.["sandboxRepo"]) meta["sandboxRepo"] = String(agentConfig["sandboxRepo"]);
+    // Task-command sandbox profile (e.g. /design → "browser"): a DEFAULT, so an
+    // agent's explicit pin above always wins. Routes bare sandbox-create onto a
+    // warm-pooled template instead of the cold kata default.
+    else if (taskCommand?.sandboxProfile) meta["sandboxRepo"] = taskCommand.sandboxProfile;
     // Per-agent opt-in (e.g. reviewer agents): ALWAYS use the shared read-only
     // sbx-git sandbox, even for interactive runs. The sandbox tool ORs this with
     // isReadOnlyJob (see sandboxRepoSetup → resolveSbxGit). Reviewers only

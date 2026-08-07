@@ -7,6 +7,7 @@ import path from "node:path";
 import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
+import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
@@ -2111,6 +2112,51 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
 // mid-run is covered by an initial Postgres snapshot, since Redis pub/sub has no
 // replay. ACL matches /messages: scoped by agentSlug; non-admins only get events
 // for runs they triggered; tool results are redacted for admins viewing others.
+
+/**
+ * Real cancel for an in-flight chat run. The input-bar Stop button previously
+ * only aborted the CLIENT fetch — the run kept burning sandbox + LLM server-
+ * side by design (req close ≠ cancel). This endpoint kills the run itself:
+ * recovery first (so the watchdog can't resurrect it), then the runtime's
+ * per-session cancel. Ownership: the AgentRun row must belong to the caller.
+ */
+router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
+  try {
+    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const sessionId = typeof (req.body as { sessionId?: unknown }).sessionId === "string"
+      ? ((req.body as { sessionId: string }).sessionId).trim()
+      : "";
+    if (!userId || !sessionId || sessionId.length > 200) {
+      res.status(400).json({ success: false, error: "userId and sessionId are required" });
+      return;
+    }
+    const run = await prisma.agentRun.findFirst({
+      where: { sessionId, userId },
+      select: { sessionId: true, status: true },
+    });
+    if (!run) {
+      res.status(404).json({ success: false, error: "Run not found" });
+      return;
+    }
+    await cancelRunRecovery(sessionId).catch(() => {});
+    const cancelRes = await fetch(
+      `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          "x-user-id": userId,
+        },
+      },
+    ).catch(() => null);
+    res.json({ success: true, data: { cancelled: cancelRes?.ok ?? false } });
+  } catch (err) {
+    log.error("[agent-chat] cancel failed", err);
+    res.status(500).json({ success: false, error: "Failed to cancel run" });
+  }
+});
+
 router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   if (!CONFIG.liveToolCallsEnabled) {
     res.status(404).json({ success: false, error: "Live streaming disabled" });
