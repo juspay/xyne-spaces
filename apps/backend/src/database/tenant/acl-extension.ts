@@ -47,10 +47,10 @@ function isWorkspaceOnly(where: Record<string, unknown>, ws: string): boolean {
   return keys.length === 1 && keys[0] === 'workspaceId' && where.workspaceId === ws;
 }
 
-/** Whether a check refuses or only reports. Read once; echoed at startup. */
-const ENFORCE = { noContext: config.aclEnforcement.noContext } as const;
-
-logger.info('[acl] enforcement mode', ENFORCE);
+logger.info('[acl] enforcement mode', {
+  workspaceImmutable: config.aclEnforcement.workspaceImmutable,
+  noContext: config.aclEnforcement.noContext,
+});
 
 const SEEN_CAP = 1000;
 const seen = new Set<string>();
@@ -166,7 +166,13 @@ function scopeTransactionArgs(
   args: unknown,
   workspaceId: string,
 ): unknown {
-  let scoped = stampArgsForWorkspace(model, operation, args, workspaceId, true);
+  let scoped = stampArgsForWorkspace(
+    model,
+    operation,
+    args,
+    workspaceId,
+    config.aclEnforcement.workspaceImmutable,
+  );
   if (!isWorkspaceScopedModel(model)) return scoped;
 
   const op = operation;
@@ -432,7 +438,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               // Background jobs open runAsServiceActor with their parent entity's workspace;
               // intentional cross-workspace maintenance uses runAsSystem. Refused only where
               // ACL_ENFORCE_NO_CONTEXT is on, so the log above can name the callers first.
-              if (ENFORCE.noContext && model && isWorkspaceScopedModel(model) && ctx?.actor !== 'system') {
+              if (config.aclEnforcement.noContext && model && isWorkspaceScopedModel(model) && ctx?.actor !== 'system') {
                 throw new Error(
                   `workspaceId required for ${model}.${operation} inside an interactive transaction`,
                 );
@@ -513,9 +519,14 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
         if (Array.isArray(args[0])) {
           const ctx = getContextOrNull();
           if (!currentWorkspaceId() && ctx?.actor !== 'system') {
-            throw new Error(
-              'workspaceId required for a batch Prisma transaction; use runAsSystem for intentional global work',
-            );
+            warnLogOnce('[acl] query ran with no tenant scope', undefined, '$transaction', {
+              reason: 'batch-transaction-no-workspace',
+            });
+            if (config.aclEnforcement.noContext) {
+              throw new Error(
+                'workspaceId required for a batch Prisma transaction; use runAsSystem for intentional global work',
+              );
+            }
           }
         }
         return runTransaction(...args);

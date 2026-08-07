@@ -34,6 +34,10 @@ jest.mock('@/database/tenant/context', () => ({
 const getACL = jest.fn();
 jest.mock('@/database/acl', () => ({ ACLFactory: { getACL: () => getACL() } }));
 
+// The real env.ts validates the whole schema on import and needs JWT_SECRET.
+const enforce = { noContext: false, workspaceImmutable: false };
+jest.mock('@/config/env', () => ({ config: { aclEnforcement: enforce } }));
+
 const warn = jest.fn();
 jest.mock('@/utils/logger', () => ({ logger: { warn: (...a: unknown[]) => warn(...a), info: jest.fn() } }));
 
@@ -71,6 +75,8 @@ function asUser(role = 'MEMBER') {
 
 beforeEach(() => {
   warn.mockReset();
+  enforce.noContext = false;
+  enforce.workspaceImmutable = false;
   getACL.mockReset();
   ctxState.ctx = null;
   ctxState.ws = null;
@@ -81,20 +87,89 @@ beforeEach(() => {
 const tags = (): string[] => warn.mock.calls.map((c) => c[0] as string);
 
 describe('gates before any scoping', () => {
-  it('passes through untouched inside an interactive transaction', async () => {
+  /** Run an operation from inside the transaction wrapper, as $transaction(fn) would. */
+  const inTransaction = (txWrapper: unknown, fn: () => unknown) =>
+    (txWrapper as (f: unknown) => Promise<unknown>).call({}, fn);
+
+  it('bounds the query by workspace inside an interactive transaction', async () => {
     asUser();
     const { hook, txWrapper } = build();
     const query = jest.fn().mockResolvedValue('row');
 
-    // Run the operation from inside the transaction wrapper, as $transaction(fn) would.
-    const result = await (txWrapper as (fn: unknown) => Promise<unknown>).call(
-      { }, // `this` is unused
-      () => hook({ model: 'Message', operation: 'findMany', args: { where: { id: 'm' } }, query }),
+    const result = await inTransaction(txWrapper, () =>
+      hook({ model: 'Message', operation: 'findMany', args: { where: { id: 'm' } }, query }),
     );
 
-    expect(query).toHaveBeenCalledWith({ where: { id: 'm' } });
+    // The normal path's pre-query reads would escape the transaction, so the boundary is
+    // applied to the arguments instead.
+    expect(query).toHaveBeenCalledWith({ where: { AND: [{ id: 'm' }, { workspaceId: WS }] } });
     expect(result).toBe('row');
     expect(tags()).toContain('[acl] ran inside a transaction');
+  });
+
+  it('passes through in a transaction with no workspace while enforcement is off', async () => {
+    ctxState.ctx = { actor: 'user', userId: 'u-1', workspaceId: null };
+    ctxState.ws = null;
+    enforce.noContext = false;
+    const { hook, txWrapper } = build();
+    const query = jest.fn().mockResolvedValue(null);
+
+    await inTransaction(txWrapper, () =>
+      hook({ model: 'Message', operation: 'findMany', args: {}, query }),
+    );
+
+    expect(query).toHaveBeenCalledWith({});
+    expect(tags()).toContain('[acl] query ran with no tenant scope');
+  });
+
+  it('refuses a tenant table in a transaction with no workspace once enforcement is on', async () => {
+    ctxState.ctx = { actor: 'user', userId: 'u-1', workspaceId: null };
+    ctxState.ws = null;
+    enforce.noContext = true;
+    const { hook, txWrapper } = build();
+    const query = jest.fn();
+
+    await expect(
+      inTransaction(txWrapper, () =>
+        hook({ model: 'Message', operation: 'findMany', args: {}, query }),
+      ),
+    ).rejects.toThrow(/workspaceId required for Message.findMany/);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('lets a model with no workspaceId column through even with enforcement on', async () => {
+    ctxState.ctx = { actor: 'user', userId: 'u-1', workspaceId: null };
+    ctxState.ws = null;
+    enforce.noContext = true;
+    const { hook, txWrapper } = build();
+    const query = jest.fn().mockResolvedValue([]);
+
+    await inTransaction(txWrapper, () =>
+      hook({ model: 'Workspace', operation: 'findMany', args: {}, query }),
+    );
+
+    expect(query).toHaveBeenCalledWith({});
+  });
+
+  // Authentication resolves the session before it knows a workspace, and UserSession is a
+  // workspace-scoped table. It runs outside a transaction, so the switch must not reach it —
+  // enforcing here would make it impossible to log in.
+  it('lets a workspace-scoped read through outside a transaction even with enforcement on', async () => {
+    ctxState.ctx = { actor: 'user', userId: 'u-1', workspaceId: null };
+    ctxState.ws = null;
+    enforce.noContext = true;
+    const { hook } = build();
+    const query = jest.fn().mockResolvedValue({ id: 's-1' });
+
+    const row = await hook({
+      model: 'UserSession',
+      operation: 'findUnique',
+      args: { where: { id: 's-1' } },
+      query,
+    });
+
+    expect(query).toHaveBeenCalledWith({ where: { id: 's-1' } });
+    expect(row).toEqual({ id: 's-1' });
   });
 
   it('passes through when no workspace is resolved, and says why', async () => {

@@ -123,6 +123,23 @@ function stampField(entry: Row, key: string, stamp: (row: Row) => Row): Row {
 
 // ── recursive stamping ───────────────────────────────────────────────────────
 
+/** Every occurrence: a repeat is itself the signal, and the count decides when to enforce. */
+function logForeignWorkspace(
+  model: string,
+  op: string,
+  given: string,
+  ws: string,
+  refused: boolean,
+): void {
+  logger.warn('[acl] create names a different workspace', {
+    model,
+    operation: op,
+    given,
+    enforced: ws,
+    refused,
+  });
+}
+
 /**
  * Stamp one write payload for `model`.
  *  - isInsert=true  → the row is being INSERTED: add its own workspaceId (if stampable),
@@ -142,27 +159,46 @@ function stampPayload(
 ): Row {
   if (!isObject(row)) return row;
 
-  if (rejectForeignWorkspace && STAMPABLE.has(model)) {
-    if (row.workspaceId !== undefined && row.workspaceId !== ws) {
-      throw new Error(
-        `Cannot write ${model} for a different workspace inside a scoped transaction`,
-      );
-    }
-    if (isObject(row.workspace)) {
-      const connect = row.workspace.connect;
-      if (isObject(connect) && connect.id !== undefined && connect.id !== ws) {
-        throw new Error(
-          `Cannot connect ${model} to a different workspace inside a scoped transaction`,
-        );
-      }
-    }
-  }
-  let out = isInsert && STAMPABLE.has(model)
-    ? addWorkspaceId(row, ws, model, op)
-    : row;
+  let out: Row = row;
   const copyBeforeEdit = (): void => {
     if (out === row) out = { ...row };
   };
+
+  // A payload naming another workspace. Reported every time in both positions: refused when
+  // the switch is on, corrected to the enforced workspace when it is off — so the boundary
+  // holds either way, and the log says how much is relying on the correction.
+  if (STAMPABLE.has(model)) {
+    const given = row.workspaceId;
+    if (typeof given === 'string' && given !== ws) {
+      logForeignWorkspace(model, op, given, ws, rejectForeignWorkspace);
+      if (rejectForeignWorkspace) {
+        throw new Error(
+          `Cannot write ${model} for a different workspace inside a scoped transaction`,
+        );
+      }
+      copyBeforeEdit();
+      out.workspaceId = ws;
+    }
+    const relation = row.workspace;
+    if (isObject(relation)) {
+      const connect = relation.connect;
+      if (isObject(connect) && typeof connect.id === 'string' && connect.id !== ws) {
+        logForeignWorkspace(model, op, connect.id, ws, rejectForeignWorkspace);
+        if (rejectForeignWorkspace) {
+          throw new Error(
+            `Cannot connect ${model} to a different workspace inside a scoped transaction`,
+          );
+        }
+        copyBeforeEdit();
+        out.workspace = { ...relation, connect: { ...connect, id: ws } };
+      }
+    }
+  }
+
+  if (isInsert && STAMPABLE.has(model)) {
+    // Fills only when absent, so a value corrected above is left alone.
+    out = addWorkspaceId(out, ws, model, op);
+  }
 
   for (const { field, child, isList } of RELATIONS.get(model) ?? []) {
     const nestedWrite = row[field];
