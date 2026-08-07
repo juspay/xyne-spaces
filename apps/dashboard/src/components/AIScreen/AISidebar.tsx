@@ -10,10 +10,13 @@ import {
   Piechart01,
   Settings01,
   ThreeDotsMenuVertical,
+  UserShield,
   UserTwo,
 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
+import { useAuth } from '../../hooks/useAuth';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -51,6 +54,7 @@ interface AINavItem {
   label: string;
   icon: NavIcon;
   to: string;
+  adminOnly?: boolean;
 }
 
 const NAV_ITEMS: AINavItem[] = [
@@ -59,6 +63,7 @@ const NAV_ITEMS: AINavItem[] = [
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
   { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
+  { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -310,6 +315,10 @@ export function AISidebar({
   const [recentsOpen, setRecentsOpen] = useState(true);
 
   const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.to));
+
+  const { user } = useAuth();
+  const { isAdmin } = useClawAdminAccessQuery(user?.id);
+  const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin);
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
   const { selectedAgentSlug } = useSelectedAgent();
@@ -351,7 +360,7 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {NAV_ITEMS.map(({ key, label, icon: Icon, to }) => {
+            {visibleNavItems.map(({ key, label, icon: Icon, to }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
