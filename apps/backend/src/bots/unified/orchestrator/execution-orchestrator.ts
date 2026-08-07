@@ -111,7 +111,7 @@ class ExecutionOrchestrator {
     const context = await this.buildContext(request, entry);
 
     // 3. Update conversation activity
-    await this.updateConversationActivity(request);
+    await this.updateConversationActivity(request, context.triggerMessage);
 
     // 4. Delegate to appropriate runtime
     if (isInternalBot(entry.definition)) {
@@ -366,8 +366,16 @@ class ExecutionOrchestrator {
   /**
    * Update conversation activity counts
    */
-  private async updateConversationActivity(request: ExecutionRequest): Promise<void> {
-    await conversationRepository.incrementReplyCount(request.conversationId);
+  private async updateConversationActivity(
+    request: ExecutionRequest,
+    triggerMessage: BotExecutionContext['triggerMessage'],
+  ): Promise<void> {
+    const conversation = await conversationRepository.findById(request.conversationId);
+    const replyCreatedAt =
+      triggerMessage && triggerMessage.messageId !== conversation?.initialMessageId
+        ? triggerMessage.createdAt
+        : null;
+    await conversationRepository.incrementReplyCount(request.conversationId, replyCreatedAt);
     await channelRepository.updateLastActivity(request.channelId);
   }
 

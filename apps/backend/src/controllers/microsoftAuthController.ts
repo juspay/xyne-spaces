@@ -1079,7 +1079,7 @@ export class MicrosoftAuthController {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
           ...cookieOptions,
-          maxAge: 24 * 60 * 60 * 1000,
+          maxAge: config.jwt.expirationSeconds * 1000,
         });
 
         if (sessionId) {

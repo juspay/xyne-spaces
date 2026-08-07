@@ -5,7 +5,7 @@ import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/ty
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { VespaInsertionStatus } from '@xyne/shared';
 
@@ -190,6 +190,20 @@ export class VespaWorker {
 				}
 				logger.info(`[VESPA_WORKER] Using pre-transformed data for SAM transcript ${docId}`);
 				mappedData = preTransformedData as InsertDocument;
+			} else if (jobType === 'update' && job.data.fields?.length) {
+				// Field-scoped update: build the full document the same way a 'feed' would,
+				// then only keep the requested fields for the partial Vespa update.
+				logger.info(`[VESPA_WORKER] Fetching data from database for field-scoped update ${schema}/${docId}: [${job.data.fields.join(', ')}]`);
+				const rawData = await fetchDataBySchema(schema, docId, app);
+				if (!rawData) {
+					throw new Error(`Data not found for ${schema}/${docId}`);
+				}
+				const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId);
+				mappedData = Object.fromEntries(
+					job.data.fields
+						.filter((field) => field in fullDoc)
+						.map((field) => [field, (fullDoc as Record<string, unknown>)[field]])
+				) as Partial<InsertDocument>;
 			} else {
 				logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
 				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app, job.data.workspaceId, job.data.orgId);

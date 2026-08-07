@@ -52,6 +52,7 @@ import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
 import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, hasPendingRecommendations } from '@/services/threadSummaryService';
+import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -247,11 +248,43 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         conversationId: true,
         msgType: true,
         hasAttachment: true,
-        createdAt: true
+        createdAt: true,
+        isDeleted: true,
       },
     });
 
-    if (!message || message.msgType === "SYSTEM" ) {
+    if (!message) {
+      return;
+    }
+
+    if (message.msgType === MessageType.SYSTEM) {
+      const conversation = await db.conversation.findUnique({
+        where: { conversationId: message.conversationId },
+        select: { initialMessageId: true },
+      });
+      const isReply =
+        !message.isDeleted &&
+        conversation?.initialMessageId != null &&
+        conversation.initialMessageId !== message.messageId;
+      if (isReply) {
+        try {
+          await db.conversationParticipant.updateMany({
+            where: {
+              conversationId: message.conversationId,
+              OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: message.createdAt } }],
+            },
+            data: { lastReplyAt: message.createdAt },
+          });
+          logger.info('[MessagesSideEffect] Updated lastReplyAt for SYSTEM reply', {
+            conversationId: message.conversationId,
+          });
+        } catch (error) {
+          logger.error('[MessagesSideEffect] Failed to update lastReplyAt for SYSTEM reply:', {
+            conversationId: message.conversationId,
+            error,
+          });
+        }
+      }
       return;
     }
 
@@ -334,6 +367,37 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       select: { id: true, email: true, name: true, displayName: true, userType: true, status: true }
     });
     const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
+
+    // Top-level user message with a Bitbucket PR link in a regular channel:
+    // post the "Run PR Check" button in this thread (gated on the Varys bot
+    // being a channel participant, checked inside the service). Lets devs
+    // trigger PR checks in -merge channels without duplicating the ticket.
+    // Only the FIRST PR link in a message gets a button — one PR per post is
+    // the expected flow; post additional PRs as separate messages.
+    if (
+      conversation.initialMessageId === message.messageId &&
+      message.msgType === 'USER' &&
+      sender != null &&
+      sender.userType !== UserType.APP &&
+      channel?.scopeType === ChannelScopeType.DEFAULT &&
+      content?.includes('/pull-requests/')
+    ) {
+      prCheckApprovalService
+        .postApprovalButtonForPrLinkMessage({
+          messageId: message.messageId,
+          conversationId,
+          channelId,
+          senderId,
+          content,
+          workspaceId: this.ctx.workspaceId,
+        })
+        .catch(error => {
+          logger.error('[MessagesSideEffect] Failed to post PR check button for PR link message:', {
+            messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
     const inactiveUserIds = new Set(users.filter(u => u.status !== UserStatus.ACTIVE).map(u => u.id));
 
     const userMap = new Map(users.map(u => [u.id, u]));
@@ -1953,7 +2017,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       activityService.deleteActivitiesBySource('message', messageId),
     ]);
 
-    if (!previousValue?.conversationId || previousValue.msgType === MessageType.SYSTEM) {
+    if (!previousValue?.conversationId) {
       return;
     }
 
@@ -1962,7 +2026,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       select: { initialMessageId: true, channelId: true },
     });
 
-    if (!conversation?.initialMessageId || !conversation.channelId) {
+    if (!conversation?.initialMessageId) {
       return;
     }
 
@@ -1998,6 +2062,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       logger.error('[MessagesSideEffectHandler] Failed to roll back lastReplyAt on delete', {
         error: error
       });
+    }
+
+    if (previousValue.msgType === MessageType.SYSTEM) {
+      return;
+    }
+
+    if (!conversation.channelId) {
+      return;
     }
 
     let repliers: string[] = [];
@@ -2145,9 +2217,20 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload,
     userIds: string[],
   ): Promise<void> {
+    // App event delivery happens asynchronously and therefore cannot rely on
+    // the sender's browser cookie. Stamp the trusted workspace from the Zero
+    // context; retain every legacy payload field unchanged.
+    const sender = await db.user.findUnique({
+      where: { id: payload.userId },
+      select: { orgMemberId: true },
+    });
     const event: BaseAppEvent = {
       eventType,
-      payload,
+      payload: {
+        ...payload,
+        workspaceId: payload.workspaceId ?? this.ctx.workspaceId,
+        ...(sender?.orgMemberId ? { orgMemberId: sender.orgMemberId } : {}),
+      },
       timestamp: new Date().toISOString(),
     };
 

@@ -15,6 +15,7 @@ import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as 
 import '../types/express';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -103,6 +104,19 @@ export class AuthV2Controller {
       return this.googleClientNew;
     }
     return this.googleClient;
+  }
+
+  private clearAuthCookies(req: Request, res: Response): void {
+    res.clearCookie('google_access_token', { path: '/' });
+    res.clearCookie('user_session_id', { path: '/' });
+
+    for (const cookieName of Object.keys(req.cookies || {})) {
+      if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
+        res.clearCookie(cookieName, { path: '/' });
+      }
+    }
+
+    res.clearCookie('xyne_last_workspace', { path: '/' });
   }
 
   private async ensureSelfDmForUser(
@@ -624,7 +638,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: 24 * 60 * 60 * 1000,
+          maxAge: config.jwt.expirationSeconds * 1000,
         });
 
         // Legacy cookie for backward compatibility with older dashboards
@@ -695,6 +709,7 @@ export class AuthV2Controller {
 
       if (!sessionId) {
         logger.warn(`[${requestId}] No session ID cookie found`);
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'No session found',
           message: 'Session ID cookie is missing',
@@ -708,6 +723,7 @@ export class AuthV2Controller {
 
       if (!session || !session.user) {
         logger.warn(`[${requestId}] Session not found in database`);
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
@@ -719,6 +735,7 @@ export class AuthV2Controller {
 
       if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
         logger.warn(`[${requestId}] Session expired or inactive`);
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
@@ -977,7 +994,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: 24 * 60 * 60 * 1000,
+          maxAge: config.jwt.expirationSeconds * 1000,
         });
 
         res.cookie('user_session_id', sessionId, {
@@ -1068,6 +1085,10 @@ export class AuthV2Controller {
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
+      if (statusCode === 401) {
+        this.clearAuthCookies(req, res);
+      }
+
       if (isMobileNative) {
         res.status(statusCode).json({
           success: false,
@@ -1260,7 +1281,7 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: 24 * 60 * 60 * 1000,
+          maxAge: config.jwt.expirationSeconds * 1000,
         });
 
         if (sessionId) {
@@ -1415,6 +1436,7 @@ export class AuthV2Controller {
       if (pendingAuthCookie) {
         const parsed = await this.parsePendingAuthCookie(pendingAuthCookie);
         if (!parsed) {
+          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'Pending auth data is corrupted or expired'
@@ -1431,6 +1453,7 @@ export class AuthV2Controller {
           pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
           pendingTokenKey = parsed.pendingTokenKey;
         } else {
+          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'Pending auth data is missing provider identity'
@@ -1446,6 +1469,7 @@ export class AuthV2Controller {
         
         const session = await this.userSessionService.getSessionById(existingSessionId);
         if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid session',
             message: 'Session not found or expired'
@@ -1464,6 +1488,7 @@ export class AuthV2Controller {
         pendingAccessToken = session.accessToken || undefined;
         pendingAccessTokenExpiry = session.accessTokenExpiry || undefined;
       } else {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1472,6 +1497,7 @@ export class AuthV2Controller {
       }
 
       if (!oauthUserData?.email) {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'User data missing from pending auth'
@@ -1493,7 +1519,7 @@ export class AuthV2Controller {
 
       if (isNewUser) {
         try {
-          await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+          await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
         } catch (error) {
           logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
             userId: workspaceUser.id,
@@ -1650,6 +1676,7 @@ export class AuthV2Controller {
       // Get pending auth data from cookie
       const pendingAuthCookie = req.cookies?.google_access_token;
       if (!pendingAuthCookie) {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1659,6 +1686,7 @@ export class AuthV2Controller {
 
       const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'Pending auth data is corrupted or expired'
@@ -1668,6 +1696,7 @@ export class AuthV2Controller {
       const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
 
       if (!oauthUserData?.email) {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'User data missing from pending auth'
@@ -1879,77 +1908,85 @@ export class AuthV2Controller {
 
       const currentUser = req.user!;
 
-      // Find the User record scoped to the target workspace
-      const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
-      if (!targetUser) {
-        res.status(403).json({
-          error: 'Forbidden',
-          message: 'You do not have access to this workspace',
-        });
-        return;
-      }
-
-      await this.userService.ensureUserPresence(targetUser.id, workspaceId);
-      const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
-
-      const workspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { landingChannelId: true },
-      });
-
-      // Get existing session from global session cookie
-      // We reuse the same session across workspaces (session belongs to user, not workspace)
-      const sessionId = req.cookies?.user_session_id;
-      
-      // Verify session exists and is valid
-      let validSessionId: string | null = null;
-      if (sessionId) {
-        const currentSession = await this.userSessionService.getSessionById(sessionId);
-        if (currentSession && currentSession.status === 'ACTIVE') {
-          validSessionId = currentSession.id;
-          logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+      // Switching workspaces is inherently cross-tenant: everything below acts on the
+      // TARGET workspace while the ambient session context is still the caller's current
+      // (old) one — the per-model ACLs' "must match your current workspace" rule can never
+      // be satisfied by definition. Safe to bypass because every lookup here is keyed off
+      // `currentUser.email` (the caller's own verified session), never attacker-supplied —
+      // this can only ever act on the caller's own identity in the target workspace.
+      await runAsSystem(async () => {
+        // Find the User record scoped to the target workspace
+        const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
+        if (!targetUser) {
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'You do not have access to this workspace',
+          });
+          return;
         }
-      }
-      
-      if (!validSessionId) {
-        logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
-      }
 
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId ?? undefined,
-        memberId: targetUser.orgMemberId,
-      });
+        await this.userService.ensureUserPresence(targetUser.id, workspaceId);
+        const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
 
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+        const workspace = await this.prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { landingChannelId: true },
+        });
 
-      // Set workspace-specific cookies
-      res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
-      res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      
-      // Set global session cookie (reusing existing session)
-      if (validSessionId) {
-        res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      }
+        // Get existing session from global session cookie
+        // We reuse the same session across workspaces (session belongs to user, not workspace)
+        const sessionId = req.cookies?.user_session_id;
 
-      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+        // Verify session exists and is valid
+        let validSessionId: string | null = null;
+        if (sessionId) {
+          const currentSession = await this.userSessionService.getSessionById(sessionId);
+          if (currentSession && currentSession.status === 'ACTIVE') {
+            validSessionId = currentSession.id;
+            logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+          }
+        }
 
-      res.status(200).json({
-        user: {
-          id: targetUser.id,
+        if (!validSessionId) {
+          logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
+        }
+
+        const token = jwtService.generateToken({
+          sub: targetUser.id,
           email: targetUser.email,
           name: targetUser.name,
-          picture: targetUser.picture,
-          workspaceId: targetUser.workspaceId,
-          role: targetUser.role,
+          picture: targetUser.picture || undefined,
+          workspaceId: targetUser.workspaceId ?? undefined,
           memberId: targetUser.orgMemberId,
-        },
-        selfDmChannelId,
-        landingChannelId: workspace?.landingChannelId ?? null,
+        });
+
+        const isProduction = process.env.NODE_ENV === 'production';
+        const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+
+        // Set workspace-specific cookies
+        res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+
+        // Set global session cookie (reusing existing session)
+        if (validSessionId) {
+          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        }
+
+        logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+
+        res.status(200).json({
+          user: {
+            id: targetUser.id,
+            email: targetUser.email,
+            name: targetUser.name,
+            picture: targetUser.picture,
+            workspaceId: targetUser.workspaceId,
+            role: targetUser.role,
+            memberId: targetUser.orgMemberId,
+          },
+          selfDmChannelId,
+          landingChannelId: workspace?.landingChannelId ?? null,
+        });
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);
@@ -1968,6 +2005,7 @@ export class AuthV2Controller {
     try {
       const pendingAuthCookie = req.cookies?.google_access_token;
       if (!pendingAuthCookie) {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1977,6 +2015,7 @@ export class AuthV2Controller {
 
       const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
+        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'Pending auth data is corrupted or expired'
@@ -1985,6 +2024,7 @@ export class AuthV2Controller {
       }
       const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
         if (!oauthUserData?.email) {
+          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'User data missing from pending auth'

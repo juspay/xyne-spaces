@@ -1213,57 +1213,68 @@ export class CallDocumentService {
       // PRIVATE — note-taker recordings are shared per-user/group/channel via
       // entity_access, and the recording sharing API updates canvas_participants
       // in the same transaction.
-      await prisma.canvas.create({
-        data: {
-          id: canvasId,
-          title,
-          content: [],
-          channelId,
-          workspaceId,
-          createdBy: createdByUserId,
-          visibility: CanvasVisibility.PRIVATE,
-          isTemplate: false,
-          isCollaborative: true,
-          lastEditedBy: createdByUserId,
-          lastEditedAt: now,
-          createdAt: now,
-          updatedAt: now,
-          metadata: {
-            source: 'call_detailed_summary',
-            callId,
-            conversationId,
-            isAiGenerated: true,
-            generatedAt: now.toISOString(),
-            mentionedUserIds, // Store mentioned users for side effect handler
-            version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+      //
+      // Bootstrapping the canvas + its two initial owners (Xyne Automatic bot,
+      // call creator) is a trusted system sequence, not the acting requester
+      // adding arbitrary participants — that requester may just be someone the
+      // recording was shared with, who isn't yet a participant on this
+      // brand-new canvas. Run it as an interactive transaction so it bypasses
+      // the per-request tenant ACL (CanvasParticipantsACL.canCreate would
+      // otherwise deny the second insert since the requester isn't a
+      // participant yet); regular canvas access after this stays ACL-gated.
+      await prisma.$transaction(async (tx) => {
+        await tx.canvas.create({
+          data: {
+            id: canvasId,
+            title,
+            content: [],
+            channelId,
+            workspaceId,
+            createdBy: createdByUserId,
+            visibility: CanvasVisibility.PRIVATE,
+            isTemplate: false,
+            isCollaborative: true,
+            lastEditedBy: createdByUserId,
+            lastEditedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            metadata: {
+              source: 'call_detailed_summary',
+              callId,
+              conversationId,
+              isAiGenerated: true,
+              generatedAt: now.toISOString(),
+              mentionedUserIds, // Store mentioned users for side effect handler
+              version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+            },
           },
-        },
-      });
+        });
 
-      // Add Xyne Automatic bot as OWNER
-      await prisma.canvasParticipant.create({
-        data: {
-          id: participantId,
-          canvasId,
-          workspaceId,
-          userId: createdByUserId,
-          role: CanvasRole.OWNER,
-          joinedAt: now,
-          updatedAt: now,
-        },
-      });
+        // Add Xyne Automatic bot as OWNER
+        await tx.canvasParticipant.create({
+          data: {
+            id: participantId,
+            canvasId,
+            workspaceId,
+            userId: createdByUserId,
+            role: CanvasRole.OWNER,
+            joinedAt: now,
+            updatedAt: now,
+          },
+        });
 
-      // Add call creator as OWNER
-      await prisma.canvasParticipant.create({
-        data: {
-          id: uuidv4(),
-          canvasId,
-          workspaceId,
-          userId: callCreatorUserId,
-          role: CanvasRole.OWNER,
-          joinedAt: now,
-          updatedAt: now,
-        },
+        // Add call creator as OWNER
+        await tx.canvasParticipant.create({
+          data: {
+            id: uuidv4(),
+            canvasId,
+            workspaceId,
+            userId: callCreatorUserId,
+            role: CanvasRole.OWNER,
+            joinedAt: now,
+            updatedAt: now,
+          },
+        });
       });
 
       // Initialize Y-Sweet for collaborative editing

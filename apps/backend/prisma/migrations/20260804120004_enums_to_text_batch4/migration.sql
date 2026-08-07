@@ -2,7 +2,9 @@
 ALTER TABLE "non_zero"."call_recordings" ALTER COLUMN "recordingType" TYPE text USING "recordingType"::text;
 
 -- non_zero.call_recordings.status (enum RecordingStatus)
+DROP INDEX IF EXISTS "non_zero"."call_recordings_one_active";
 ALTER TABLE "non_zero"."call_recordings" ALTER COLUMN "status" TYPE text USING "status"::text;
+CREATE UNIQUE INDEX IF NOT EXISTS "call_recordings_one_active" ON "non_zero"."call_recordings"("callId") WHERE "status" = 'RECORDING_ACTIVE';
 
 -- non_zero.dynamic_dashboard_queries.queryType (enum QueryType, default internal)
 ALTER TABLE "non_zero"."dynamic_dashboard_queries" ALTER COLUMN "queryType" DROP DEFAULT;
