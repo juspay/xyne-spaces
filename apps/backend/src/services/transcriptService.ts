@@ -22,6 +22,7 @@ import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1931,18 +1932,19 @@ Output ONLY the processed transcript, nothing else.`;
             // Serialize with first-chunk Canvas URL attachment. Both operations
             // merge message metadata, so the row lock prevents either concurrent
             // writer from replacing the other's newly-added keys.
-            await db.$transaction(async (tx) => {
+            await runAsServiceActor('transcript-summary', callMessage.workspaceId, () => db.$transaction(async (tx) => {
               const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
                 SELECT "content", "metadata"
                 FROM "messages"
                 WHERE "messageId" = ${messageId}
+                  AND "workspaceId" = ${callMessage.workspaceId}
                 FOR UPDATE
               `;
 
               if (message) {
                 // Swap storage: message.content = AI description, metadata.callEndedText = original call text
                 await tx.message.update({
-                  where: { messageId },
+                  where: { messageId, workspaceId: callMessage.workspaceId },
                   data: {
                     content: title,
                     metadata: {
@@ -1957,7 +1959,7 @@ Output ONLY the processed transcript, nothing else.`;
               } else {
                 logger.warn(`Call message ${messageId} not found for title update`);
               }
-            });
+            }));
           } catch (error) {
             logger.error(`Failed to update call message with title:`, error);
             // Don't fail the whole process if message update fails

@@ -174,7 +174,7 @@ export async function createTicketWithConversation(
     // Generate xyneId and create ticket in a transaction
     const ticket = await prisma.$transaction(async (tx) => {
       // Generate xyneId using project-scoped format
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId, workspaceId);
       // Create ticket using repository
       const createdTicket = await ticketRepository.createTicket({
         title,

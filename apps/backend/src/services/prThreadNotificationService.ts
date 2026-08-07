@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Prisma } from '@prisma/client';
 import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { parseBitbucketPrUrl } from '@/utils/repoUrlParser';
 
@@ -52,43 +53,47 @@ async function broadcastPRUpdate(params: BroadcastPRUpdateParams): Promise<void>
     // concurrently; within one conversation the message and the reply-count
     // bump commit atomically so a failure can't leave a phantom message.
     const results = await Promise.all(
-      links.map(async ({ conversationId, workspaceId }): Promise<boolean> => {
+      links.map(async (
+        { conversationId, workspaceId }: { conversationId: string; workspaceId: string },
+      ): Promise<boolean> => {
         try {
           const now = new Date();
-          await db.$transaction([
-            db.message.create({
-              data: {
-                messageId: uuidv4(),
-                conversationId,
-                workspaceId,
-                senderId: params.senderId,
-                content: params.content,
-                msgType: MessageType.SYSTEM,
-                hasAttachment: false,
-                edited: false,
-                isDeleted: false,
-                isSent: true,
-                showInChannel: false,
-                createdAt: now,
-                ...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
-              },
+          await runAsServiceActor('pr-thread-notification', workspaceId, () =>
+            db.$transaction(async (tx) => {
+              await tx.message.create({
+                data: {
+                  messageId: uuidv4(),
+                  conversationId,
+                  workspaceId,
+                  senderId: params.senderId,
+                  content: params.content,
+                  msgType: MessageType.SYSTEM,
+                  hasAttachment: false,
+                  edited: false,
+                  isDeleted: false,
+                  isSent: true,
+                  showInChannel: false,
+                  createdAt: now,
+                  ...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
+                },
+              });
+              // Surface the update in the thread: bump reply count / activity so
+              // the merge-channel thread visibly moves when the PR progresses.
+              await tx.conversation.update({
+                where: { conversationId, workspaceId },
+                data: {
+                  replyCount: { increment: 1 },
+                  lastActivityAt: now,
+                },
+              });
+              // Bump each participant's lastReplyAt so the thread rises in the
+              // sidebar — userConversationsPaginatedV2 orders by this field.
+              await tx.conversationParticipant.updateMany({
+                where: { conversationId, workspaceId },
+                data: { lastReplyAt: now },
+              });
             }),
-            // Surface the update in the thread: bump reply count / activity so
-            // the merge-channel thread visibly moves when the PR progresses.
-            db.conversation.update({
-              where: { conversationId },
-              data: {
-                replyCount: { increment: 1 },
-                lastActivityAt: now,
-              },
-            }),
-            // Bump each participant's lastReplyAt so the thread rises in the
-            // sidebar — userConversationsPaginatedV2 orders by this field.
-            db.conversationParticipant.updateMany({
-              where: { conversationId },
-              data: { lastReplyAt: now },
-            }),
-          ]);
+          );
           return true;
         } catch (error) {
           logger.error(

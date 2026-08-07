@@ -16,6 +16,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { ReleaseReportCanvasService } from './releaseReportCanvas';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 interface ReleaseReportTicketMetadata {
   releaseReportCanvasId?: string;
@@ -283,12 +284,14 @@ export class ReleaseReportService {
   }: PublishReleaseReportInput): Promise<PublishReleaseReportResponse> {
     const report = await this.gatherReleaseReport(ticketId);
 
-    return db.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'release-report:' + ticketId}))`;
-        return this.publishLocked(ticketId, publisher, report);
-      },
-      { maxWait: 10_000, timeout: 60_000 }
+    return runAsServiceActor('release-report', report.release.workspaceId, () =>
+      db.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'release-report:' + ticketId}))`;
+          return this.publishLocked(ticketId, publisher, report);
+        },
+        { maxWait: 10_000, timeout: 60_000 },
+      ),
     );
   }
 

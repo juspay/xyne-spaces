@@ -5,6 +5,7 @@
  */
 
 import { DatabaseClient } from '@/database/client';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { WorkflowExecution } from '@/types/database';
 
 const prisma = DatabaseClient.getInstance();
@@ -230,7 +231,7 @@ export async function markAutomationFailed(
     chain: existingMeta.chain ?? [],
   };
 
-  await prisma.$transaction([
+  await runAsServiceActor('workflow-execution-state', execution.workspaceId, () => prisma.$transaction([
     prisma.workflowExecution.update({
       where: { id: workflowExecutionId },
       data: { status: 'FAILED' },
@@ -240,7 +241,7 @@ export async function markAutomationFailed(
       create: { workflowExecutionId, workspaceId: execution.workspaceId, context: JSON.stringify(mergedContext) },
       update: { context: JSON.stringify(mergedContext) },
     }),
-  ]);
+  ]));
   return 'marked';
 }
 

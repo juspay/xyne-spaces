@@ -12,6 +12,8 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { getContextOrNull, currentWorkspaceId, isRequestContext } from './context';
 import { ACLFactory } from '@/database/acl';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
+import { stampArgsForWorkspace } from './stamp';
 
 const txStorage = new AsyncLocalStorage<boolean>();
 
@@ -44,6 +46,11 @@ function isWorkspaceOnly(where: Record<string, unknown>, ws: string): boolean {
   const keys = Object.keys(where);
   return keys.length === 1 && keys[0] === 'workspaceId' && where.workspaceId === ws;
 }
+
+/** Whether a check refuses or only reports. Read once; echoed at startup. */
+const ENFORCE = { noContext: config.aclEnforcement.noContext } as const;
+
+logger.info('[acl] enforcement mode', ENFORCE);
 
 const SEEN_CAP = 1000;
 const seen = new Set<string>();
@@ -141,6 +148,49 @@ const WHERE_OPS = new Set(['findFirst', 'findFirstOrThrow', 'findMany', 'count',
 const UNIQUE_OPS = new Set(['findUnique', 'findUniqueOrThrow']);
 const BULK_MUTATE_OPS = new Set(['updateMany', 'updateManyAndReturn', 'deleteMany']);
 const UNIQUE_MUTATE_OPS = new Set(['update', 'delete']);
+
+/**
+ * Transaction-safe tenant boundary.
+ *
+ * Prisma gives an interactive transaction callback a transaction client rather than the
+ * fully extended application client. The normal ACL implementation below cannot safely do
+ * its authorization pre-queries through `base`, because those queries would run outside the
+ * transaction. Inside an interactive transaction we therefore enforce the non-negotiable
+ * workspace boundary directly in the operation arguments. This layer prevents an id from
+ * another workspace being read or mutated inside it; per-user/table policies continue to be
+ * enforced by the normal path outside interactive transactions.
+ */
+function scopeTransactionArgs(
+  model: string,
+  operation: string,
+  args: unknown,
+  workspaceId: string,
+): unknown {
+  let scoped = stampArgsForWorkspace(model, operation, args, workspaceId, true);
+  if (!isWorkspaceScopedModel(model)) return scoped;
+
+  const op = operation;
+  const isRead = WHERE_OPS.has(op) || UNIQUE_OPS.has(op);
+  const isBulkMutate = BULK_MUTATE_OPS.has(op);
+  const isUniqueMutate = UNIQUE_MUTATE_OPS.has(op);
+  const isUpsert = op === 'upsert';
+  if (!isRead && !isBulkMutate && !isUniqueMutate && !isUpsert) return scoped;
+
+  const a = (scoped ?? {}) as Record<string, unknown> & {
+    where?: Record<string, unknown>;
+  };
+  const workspaceWhere = { workspaceId };
+  // Prisma 5's extended WhereUniqueInput permits additional non-unique fields, but still
+  // requires its unique selector at the top level (putting it only inside AND is invalid).
+  // Bulk/read operations accept an arbitrary WhereInput, so compose those with AND.
+  const where = UNIQUE_OPS.has(op) || isUniqueMutate || isUpsert
+    ? { ...(a.where ?? {}), workspaceId }
+    : a.where
+      ? { AND: [a.where, workspaceWhere] }
+      : workspaceWhere;
+  scoped = { ...a, where };
+  return scoped;
+}
 
 /**
  * Per-model set of compound unique/PK accessor names (e.g. 'channelId_userId'). Their value is
@@ -366,9 +416,31 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
           if (txStorage.getStore() === true) {
-            // Interactive transactions run on the base client; record what goes through.
+            // The normal path's pre-query reads go through `base` and would escape the
+            // transaction, so the workspace boundary is enforced in the operation arguments
+            // instead. Per-table and per-user policy still only applies outside a transaction.
             warnLogOnce('[acl] ran inside a transaction', model, operation);
-            return query(args);
+            const ctx = getContextOrNull();
+            const ws = currentWorkspaceId();
+            if (!ws || !model) {
+              if (ctx?.actor !== 'system') {
+                warnLogOnce('[acl] query ran with no tenant scope', model, operation, {
+                  reason: ctx ? 'transaction-no-workspace' : 'transaction-no-context',
+                });
+              }
+              // A typed operation on a tenant table must never silently become cross-workspace.
+              // Background jobs open runAsServiceActor with their parent entity's workspace;
+              // intentional cross-workspace maintenance uses runAsSystem. Refused only where
+              // ACL_ENFORCE_NO_CONTEXT is on, so the log above can name the callers first.
+              if (ENFORCE.noContext && model && isWorkspaceScopedModel(model) && ctx?.actor !== 'system') {
+                throw new Error(
+                  `workspaceId required for ${model}.${operation} inside an interactive transaction`,
+                );
+              }
+              return query(args);
+            }
+            const scoped = scopeTransactionArgs(model, operation, args, ws);
+            return scoped === args ? query(args) : query(scoped as typeof args);
           }
           const ctx = getContextOrNull();
           const ws = currentWorkspaceId();
@@ -437,6 +509,14 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
         if (typeof args[0] === 'function') {
           const fn = args[0] as (tx: unknown) => unknown;
           return runTransaction((tx: unknown) => txStorage.run(true, () => fn(tx)), ...args.slice(1));
+        }
+        if (Array.isArray(args[0])) {
+          const ctx = getContextOrNull();
+          if (!currentWorkspaceId() && ctx?.actor !== 'system') {
+            throw new Error(
+              'workspaceId required for a batch Prisma transaction; use runAsSystem for intentional global work',
+            );
+          }
         }
         return runTransaction(...args);
       },
