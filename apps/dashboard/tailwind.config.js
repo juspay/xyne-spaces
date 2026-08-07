@@ -30,6 +30,18 @@ export default {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
       },
+      // Xyne Foundation type scale, derived from the same token file the colors
+      // come from so the two can't drift. Exposes text-body-*, text-heading-*,
+      // text-display-* and text-code-*, each carrying the design system's line
+      // height. Additive: Tailwind's own text-xs/sm/base/lg still resolve.
+      fontSize: Object.fromEntries(
+        ['body', 'heading', 'display', 'code'].flatMap(group =>
+          Object.entries(XYNE_FOUNDATION_TOKENS.font.size[group]).map(([step, token]) => [
+            `${group}-${step}`,
+            [`${token.fontSize}px`, `${token.lineHeight}px`],
+          ]),
+        ),
+      ),
       colors: {
         // Xyne Foundation Theme Colors
         'xyne-gray': XYNE_FOUNDATION_TOKENS.colors.gray,
