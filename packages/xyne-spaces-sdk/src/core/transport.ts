@@ -23,6 +23,16 @@ export class Transport {
   constructor(private http: HttpClient) {}
 
   /**
+   * The access token currently in use.
+   *
+   * Exposed so a resource can read the caller's own identity out of its token —
+   * see `core/token.ts`. Not for authorization decisions.
+   */
+  getToken(): string | undefined {
+    return this.http.getToken();
+  }
+
+  /**
    * Execute an operation against the appropriate backend.
    */
   async execute<TArgs, TResult>(

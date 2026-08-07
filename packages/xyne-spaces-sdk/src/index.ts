@@ -26,6 +26,9 @@ export { createClient, SpacesClient } from './client.js';
 export type { SpacesClientOptions } from './client.js';
 
 // ----- Error Types -----
+export { decodeAccessToken, isTokenExpired } from './core/token.js';
+export type { CurrentUser } from './core/token.js';
+
 export {
   SdkError,
   AuthError,
