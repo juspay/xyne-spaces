@@ -1,0 +1,67 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  applyStoredOpacity,
+  clearStoredOpacity,
+  currentTheme,
+  getEffectiveOpacity,
+  hasStoredOpacity,
+  setStoredOpacity,
+  subscribeGlassScrim,
+} from '../stores/glassScrimStore';
+
+export function useApplyGlassScrimOpacity(): void {
+  useEffect(() => {
+    applyStoredOpacity(currentTheme());
+
+    const observer = new MutationObserver(() => applyStoredOpacity(currentTheme()));
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return (): void => observer.disconnect();
+  }, []);
+}
+
+export function useGlassScrimOpacity(): {
+  theme: string;
+  value: number;
+  isCustom: boolean;
+  setValue: (next: number) => void;
+  reset: () => void;
+} {
+  const [theme, setTheme] = useState(currentTheme);
+  const [value, setValueState] = useState(() => getEffectiveOpacity(currentTheme()));
+  const [isCustom, setIsCustom] = useState(() => hasStoredOpacity(currentTheme()));
+
+  useEffect(() => {
+    const sync = (): void => {
+      const next = currentTheme();
+      setTheme(next);
+      setValueState(getEffectiveOpacity(next));
+      setIsCustom(hasStoredOpacity(next));
+    };
+    sync();
+
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    const unsubscribe = subscribeGlassScrim(sync);
+    return (): void => {
+      observer.disconnect();
+      unsubscribe();
+    };
+  }, []);
+
+  const setValue = useCallback((next: number) => {
+    const active = currentTheme();
+    setStoredOpacity(active, next);
+  }, []);
+
+  const reset = useCallback(() => {
+    clearStoredOpacity(currentTheme());
+  }, []);
+
+  return { theme, value, isCustom, setValue, reset };
+}

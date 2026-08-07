@@ -2,6 +2,7 @@ import React, { ReactNode, RefObject, useEffect } from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
 import { cn } from '../../../utils/classNames';
 import { useNativeDrawerBridge } from '../../../hooks/useNativeDrawerBridge';
+import { useGlassActive } from '../../../hooks/useGlassMode';
 
 export interface DrawerProps {
   trigger?: ReactNode;
@@ -40,6 +41,7 @@ export const Drawer = ({
   focusRef,
 }: DrawerProps): React.ReactElement => {
   useNativeDrawerBridge({ open, onOpenChange });
+  const glassActive = useGlassActive();
 
   useEffect(() => {
     if (focusRef && open) {
@@ -61,7 +63,10 @@ export const Drawer = ({
 
       <DrawerPrimitive.Portal>
         <DrawerPrimitive.Overlay
-          className={cn('fixed inset-0 bg-black/50 backdrop-blur-sm z-50')}
+          className={cn(
+            'fixed inset-0 z-50 transition-[background-color,backdrop-filter]',
+            glassActive ? 'bg-black/85 backdrop-blur-[1px]' : 'bg-black/50 backdrop-blur-sm',
+          )}
         />
 
         <DrawerPrimitive.Content

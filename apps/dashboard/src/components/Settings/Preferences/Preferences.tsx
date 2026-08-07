@@ -45,7 +45,7 @@ import {
 import { Tooltip } from '../../ui/Tooltip';
 
 import { usePlatform } from '../../../hooks/usePlatform';
-import type { Theme } from '../../../hooks/useTheme';
+import { THEME_LABELS, type Theme } from '../../../hooks/useTheme';
 
 import { cn } from '../../../utils/classNames';
 import { isElectronApp } from '../../../utils/electronApp';
@@ -59,7 +59,7 @@ import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
-import { GlassEffectToggle } from '../GlassEffectToggle';
+import { GlassSettings } from '../GlassSettings';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -107,9 +107,8 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const THEMES: Array<{ id: Theme; label: string; bg: string }> = [
-  { id: 'classic', label: 'Classic', bg: 'var(--theme-preview-classic)' },
-  { id: 'summer_breeze', label: 'Summer Breeze', bg: 'var(--theme-preview-summer_breeze)' },
-  { id: 'midnight', label: 'Midnight', bg: 'var(--theme-preview-midnight)' },
+  { id: 'classic', label: THEME_LABELS.classic, bg: 'var(--theme-preview-classic)' },
+  { id: 'midnight', label: THEME_LABELS.midnight, bg: 'var(--theme-preview-midnight)' },
 ];
 
 const SectionHeader: FC<{ title: string; subtitle: string }> = ({ title, subtitle }) => (
@@ -235,7 +234,7 @@ const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
         </button>
       ))}
     </div>
-    <GlassEffectToggle />
+    <GlassSettings />
   </div>
 );
 
