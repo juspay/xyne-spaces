@@ -15,6 +15,7 @@ import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as 
 import '../types/express';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
+import { getEncryptionProvider, isEncryptionCapabilityEnabled } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -1342,6 +1343,14 @@ export class AuthV2Controller {
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
         await this.userSessionService.revokeSession(sessionId);
+      }
+
+      if (
+        req.user &&
+        sessionId &&
+        (isEncryptionCapabilityEnabled('clientEncryption') || isEncryptionCapabilityEnabled('apiTransitEncryption'))
+      ) {
+        await getEncryptionProvider().revokeSessionKey(sessionId);
       }
 
       // Clear global session cookie

@@ -92,6 +92,17 @@ export {
 } from './ZeroFallbackContext.js';
 export type { ZeroFallbackConfig, FallbackPlatformServices } from './ZeroFallbackContext.js';
 
+export { useEncryptionConfig } from './useEncryptionConfig.js';
+export type { EncryptionConfig, EncryptionContextData } from './useEncryptionConfig.js';
+export {
+  useEncryptionBootstrap,
+  useEncryptionBootstrapInit,
+  EncryptionBootstrapProvider,
+  resetGlobalEncryptionBootstrap,
+} from './useEncryptionBootstrap.js';
+export type { EncryptionBootstrapState, EncryptionBootstrapContextValue } from './useEncryptionBootstrap.js';
+export { setCryptoLogger } from '../crypto/crypto-logger.js';
+
 export { useFallbackQuery, FallbackExecutorProvider, useFallbackExecutor } from './useFallbackQuery.js';
 export type { FallbackQueryExecutor } from './useFallbackQuery.js';
 

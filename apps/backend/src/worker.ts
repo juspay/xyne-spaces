@@ -42,6 +42,7 @@ import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, e
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
+import { initializeEncryptionProvider } from '@/services/encryption';
 config()
 
 class WorkerService {
@@ -52,6 +53,8 @@ class WorkerService {
     try {
       // Initialize metrics
       initializeOpenTelemetry();
+
+      await initializeEncryptionProvider();
 
       await DatabaseClient.connect()
       const isCommonDatabaseConnected = await CommonDatabaseClient.connect()

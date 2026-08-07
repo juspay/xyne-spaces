@@ -6,6 +6,7 @@ import {
   QueryOptions,
 } from '@/types/database';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { getEncryptionProvider, isEncryptionCapabilityEnabled } from '@/services/encryption';
 
 export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspaceInput, UpdateWorkspaceInput> {
   constructor() {
@@ -13,12 +14,22 @@ export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspa
   }
 
   async create(data: CreateWorkspaceInput): Promise<Workspace> {
-    return await this.db.workspace.create({
-      data: {
-        ...data,
-        workspaceType: (data as any).workspaceType ?? WorkspaceType.ENTERPRISE,
-        joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
-      },
+    return await this.db.$transaction(async (tx) => {
+      const workspace = await tx.workspace.create({
+        data: {
+          ...data,
+          workspaceType: (data as any).workspaceType ?? WorkspaceType.ENTERPRISE,
+          joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
+        },
+      });
+      if (isEncryptionCapabilityEnabled('provisioning')) {
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
+        });
+      }
+      return workspace;
     });
   }
 

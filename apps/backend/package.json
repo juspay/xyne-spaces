@@ -114,6 +114,7 @@
     "hdbscan-ts": "^1.0.17",
     "helmet": "^7.1.0",
     "html-to-text": "^9.0.5",
+    "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.8.2",
     "isomorphic-dompurify": "^2.34.0",
     "joi": "^17.13.4",

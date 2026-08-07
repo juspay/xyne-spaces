@@ -78,6 +78,8 @@ import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
+import encryptionRoutes from '@/routes/encryption';
+import { initializeEncryptionProvider } from '@/services/encryption';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
 import draftAttachmentRoutes from '@/routes/draftAttachments';
@@ -205,6 +207,7 @@ import { ReactionController } from '@/controllers/reactionController';
 import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
 import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
+import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
 
@@ -338,6 +341,8 @@ export class App {
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    this.app.use(decryptRequestBodyMiddleware);
+    this.app.use(encryptResponseBodyMiddleware);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -542,6 +547,7 @@ export class App {
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
     this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
+    this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
@@ -806,6 +812,9 @@ export class App {
   public async listen(): Promise<void> {
     // Initialize metrics
     initializeOpenTelemetry();
+
+    // Negotiate encryption before any database access so configured deployments fail closed.
+    await initializeEncryptionProvider();
 
     // Phase 2 Optimization: Parallelize initialization in TEST environment only
     const isTestEnv = config.isTestEnv || process.env.NODE_ENV === 'test';
