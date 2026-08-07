@@ -849,6 +849,88 @@ export const sandboxWriteFile: ToolDefinition = {
 };
 
 /**
+ * Surgical string-replace edit — the revision fast path. Without it every
+ * design/code revision re-emits the ENTIRE file through sandbox-write-file
+ * (tens of thousands of tokens for one changed line, minutes of decode).
+ * Same contract as claw's own Edit tool: oldString must match exactly once
+ * unless replaceAll, so a bad match can never silently corrupt the file.
+ */
+export const sandboxEditFile: ToolDefinition = {
+  slug: "sandbox-edit-file",
+  name: "Sandbox Edit File",
+  description:
+    "Edit an existing text file in the sandbox by exact string replacement — MUCH faster than rewriting the whole file with sandbox-write-file. " +
+    "oldString must appear exactly once in the file (or pass replaceAll: true). Include enough surrounding context to make it unique.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Session ID returned by sandbox-create",
+      },
+      path: {
+        type: "string",
+        description: "Absolute path inside the sandbox (e.g. /workspace/design.html)",
+      },
+      oldString: {
+        type: "string",
+        description: "Exact text to replace, including whitespace/indentation. Must match exactly once unless replaceAll.",
+      },
+      newString: {
+        type: "string",
+        description: "Replacement text.",
+      },
+      replaceAll: {
+        type: "boolean",
+        description: "Replace every occurrence instead of requiring a unique match. Default false.",
+      },
+    },
+    required: ["sessionId", "path", "oldString", "newString"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const path = params["path"] as string;
+    const oldString = params["oldString"] as string;
+    const newString = params["newString"] as string;
+    const replaceAll = params["replaceAll"] === true;
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
+    if (!oldString) return "Error: oldString must be non-empty.";
+    if (oldString === newString) return "Error: oldString and newString are identical.";
+
+    try {
+      const current = (await session.files.read(path)).toString("utf8");
+      const count = current.split(oldString).length - 1;
+      if (count === 0) {
+        return `Error: oldString not found in ${path}. Read the file and copy the exact text (including whitespace).`;
+      }
+      if (count > 1 && !replaceAll) {
+        return `Error: oldString matches ${count} times in ${path}. Add surrounding context to make it unique, or pass replaceAll: true.`;
+      }
+      const next = replaceAll ? current.split(oldString).join(newString) : current.replace(oldString, newString);
+      await session.files.write(path, Buffer.from(next, "utf8"));
+      return JSON.stringify({ path, replaced: replaceAll ? count : 1 });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
+/**
  * Copy a companion file from THIS run's materialized skill directory directly
  * into the sandbox — server-side, so the bytes never round-trip through the
  * model's context (no token cost, no base64 corruption of binaries, no

@@ -3627,8 +3627,11 @@ function withDesignInspector(html: string): string {
 function htmlFromMessage(message: ChatMsg): string | null {
   // Accept a closing fence or the still-streaming remainder. This lets the
   // preview update while the model is emitting a long HTML document.
-  const match = /```html\s*([\s\S]*?)(?:```|$)/i.exec(message.content);
-  const html = match?.[1]?.trim();
+  // LAST fence wins: the /design contract drafts the document in an early
+  // fence (live WIP preview) and may emit a corrected fence after browser QA —
+  // the later one is the truth.
+  const matches = [...message.content.matchAll(/```html\s*([\s\S]*?)(?:```|$)/gi)];
+  const html = matches.length ? matches[matches.length - 1]?.[1]?.trim() : undefined;
   if (!html || (!/<html[\s>]/i.test(html) && !/<!doctype\s+html/i.test(html))) return null;
   return html;
 }

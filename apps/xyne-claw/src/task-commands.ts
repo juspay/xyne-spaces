@@ -79,6 +79,7 @@ const TASK_COMMANDS: TaskCommand[] = [
       "sandbox-run-detached",
       "sandbox-poll-job",
       "sandbox-write-file",
+      "sandbox-edit-file",
       "sandbox-read-file",
       "sandbox-deliver-files",
       "sandbox-pw-navigate",
@@ -99,9 +100,12 @@ const TASK_COMMANDS: TaskCommand[] = [
     sandboxProfile: "browser",
     instruction:
       "This is a Xyne Design Studio run. The /design prefix is an internal command, not part of the user's brief. " +
-      "Use the Xyne-native design skills loaded for this run. Create or revise a polished, responsive, self-contained " +
-      "HTML document in the writable sandbox. When revising, preserve the useful parts of the current artifact and " +
-      "apply the user's requested changes. Inspect the result in the sandbox browser at desktop and mobile widths, " +
+      "Use the Xyne-native design skills loaded for this run. Author the complete, responsive, self-contained HTML " +
+      "document in ONE fenced ```html block in your streaming response FIRST — Design Studio live-previews that block " +
+      "as you write it, so the user watches the design form instead of a spinner. Then write the same document into " +
+      "the writable sandbox. When revising an existing artifact, do NOT rewrite the whole file: use sandbox-edit-file " +
+      "for surgical changes, and emit an updated full fenced ```html block after edits are done. " +
+      "Inspect the result in the sandbox browser at desktop and mobile widths, " +
       "fix visible layout, accessibility, console, and network issues, then call sandbox-deliver-files with the final " +
       ".html file. For app-like designs needing real state or heavy interactivity, follow the react-artifact skill: " +
       "author in React/JSX, bundle in-sandbox into the same single self-contained HTML, and also deliver a source archive. The command is approval to " +
