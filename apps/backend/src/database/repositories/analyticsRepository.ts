@@ -116,13 +116,20 @@ type FilteredMessage = {
   conversationId: string;
   createdAt: Date;
 };
+const MINUTE_MS = 60 * 1000;
+/**
+ * Quantizes "now" to a whole minute so the ~8 panels of one dashboard resolve and share identical [gte, lte]
+ */
+function floorToMinute(date: Date): Date {
+  return new Date(Math.floor(date.getTime() / MINUTE_MS) * MINUTE_MS);
+}
 
 /**
  * Helper method to get date filter SQL condition
  * ALL DATE OPERATIONS USE UTC TO AVOID TIMEZONE ISSUES
  */
 export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lte?: Date } {
-  const now = new Date();
+  const now = floorToMinute(new Date());
 
   // Handle custom date range
   if (filters.timeRange === 'custom' && filters.startDate) {
@@ -204,10 +211,13 @@ export class AnalyticsRepository {
    * helper with the same (workspace, range) key, and the dashboard fires all
    * of them in parallel on mount and on every refetch — without this, one
    * dashboard render issues ~8 copies of the same scan against the replica.
+   *
+   * Relies on ranges being minute-quantized (see floorToMinute) so that panels
+   * resolving their range moments apart still produce the same key.
    */
   private static readonly inFlightMessageQueries = new Map<string, Promise<FilteredMessage[]>>();
 
-  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<FilteredMessage[]> {
+  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<readonly FilteredMessage[]> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     const gte = dateCondition.gte ? dateCondition.gte.toISOString() : null;
     const lte = dateCondition.lte ? dateCondition.lte.toISOString() : null;
@@ -2169,8 +2179,9 @@ export class AnalyticsRepository {
    */
   async getMessagesToday(workspaceId?: string): Promise<number> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30)
-    const now = new Date();
+    // Get current time in IST (UTC+5:30), quantized so this range matches the
+    // one getMessagesTodayTimeSeries resolves and the two can share a scan.
+    const now = floorToMinute(new Date());
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
     
     // Get start of today in IST
@@ -2193,8 +2204,9 @@ export class AnalyticsRepository {
    */
   async getMessagesTodayTimeSeries(workspaceId?: string): Promise<{ date: string; value: number }[]> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30)
-    const now = new Date();
+    // Get current time in IST (UTC+5:30), quantized so this range matches the
+    // one getMessagesToday resolves and the two can share a scan.
+    const now = floorToMinute(new Date());
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
 
     // Get start of today in IST
