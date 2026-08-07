@@ -127,11 +127,34 @@ function approvalToolFailureMessage(errMsg: string): string {
 }
 
 const AGENT_CALL_CONSUMED_TTL_SEC = 24 * 60 * 60;
+const GOAL_ACTION_TTL_SEC = 24 * 60 * 60;
+const LEGACY_WRITE_CARD_TTL_SEC = 24 * 60 * 60;
+const LEGACY_GOAL_CARD_TTL_SEC = 24 * 60 * 60;
 
 async function consumeAgentCallAction(messageId: string): Promise<boolean> {
   if (!messageId) return true;
   const key = `flow-action:agent-call:${messageId}`;
   const result = await redisService.getConnection().set(key, "1", "EX", AGENT_CALL_CONSUMED_TTL_SEC, "NX");
+  return result === "OK";
+}
+
+async function consumeGoalAction(actionNonce: string): Promise<boolean> {
+  const key = `flow-action:start-goal:${actionNonce}`;
+  const result = await redisService.getConnection().set(key, "1", "EX", GOAL_ACTION_TTL_SEC, "NX");
+  return result === "OK";
+}
+
+async function consumeLegacyWriteCard(messageId: string, actionId: string): Promise<boolean> {
+  if (!messageId || !actionId) return false;
+  const key = `flow-action:legacy-write:${messageId}:${actionId}`;
+  const result = await redisService.getConnection().set(key, "1", "EX", LEGACY_WRITE_CARD_TTL_SEC, "NX");
+  return result === "OK";
+}
+
+async function consumeLegacyGoalCard(messageId: string): Promise<boolean> {
+  if (!messageId) return false;
+  const key = `flow-action:legacy-goal:${messageId}`;
+  const result = await redisService.getConnection().set(key, "1", "EX", LEGACY_GOAL_CARD_TTL_SEC, "NX");
   return result === "OK";
 }
 
@@ -224,7 +247,7 @@ type AppActionResponse =
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: string): Promise<{
+async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: string, orgId?: string): Promise<{
   id: string;
   orgId: string;
   slug: string;
@@ -233,13 +256,21 @@ async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: str
   spacesAppId: string | null;
   config?: unknown;
 } | null> {
-  if (spacesAppId) return prisma.agent.findFirst({ where: { spacesAppId } });
+  if (spacesAppId) {
+    return prisma.agent.findFirst({
+      where: {
+        spacesAppId,
+        ...(orgId ? { orgId } : {}),
+        ...(agentSlug ? { slug: agentSlug } : {}),
+      },
+    });
+  }
   if (!agentSlug) {
     log.error(`[flow-action] org/app context is required; refusing global default-agent lookup spacesAppId=${spacesAppId ?? "none"} agentSlug=default`);
     return null;
   }
   const matches = await prisma.agent.findMany({
-    where: { slug: agentSlug },
+    where: { slug: agentSlug, ...(orgId ? { orgId } : {}) },
     take: 2,
   });
   if (matches.length > 1) {
@@ -377,23 +408,23 @@ async function dispatchContinuationRun(opts: {
 }): Promise<void> {
   try {
     const { setSession } = await import("./webhook.js");
-    const agent = await findAgentForFlow(opts.agentSlug, opts.spacesAppId);
-    const appToken = agent?.spacesAppToken
-      ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
-      : "";
     const orgId =
-      agent?.orgId ??
       (await prisma.user.findUnique({ where: { id: opts.writeUserId }, select: { orgId: true } }))?.orgId;
     if (!orgId) {
       log.error(`[flow-action] continuation: no orgId for user=${opts.writeUserId} agent=${opts.agentSlug ?? "(default)"}`);
       return;
     }
+    const agent = await findAgentForFlow(opts.agentSlug, opts.spacesAppId, orgId);
+    const appToken = agent?.spacesAppToken
+      ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
+      : "";
     const trimmed = trimForPrompt(opts.resultText);
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        "x-user-id": opts.writeUserId,
       },
       body: JSON.stringify({
         userId: opts.writeUserId,
@@ -533,6 +564,43 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
+      const params = JSON.parse(paramsStr) as Record<string, unknown>;
+
+      // Verify the complete card identity before any approve/decline side
+      // effect. Empty strings give absent routing fields one canonical form.
+      const { verifyActionSignatureAny } = await import("./mcp.js");
+      const actionPayload = {
+        serverType,
+        tool,
+        params,
+        userId: writeUserId,
+        agentSlug: agentSlug ?? "",
+        spacesAppId: spacesAppId ?? "",
+      };
+      const legacyActionPayload = {
+        serverType,
+        tool,
+        params,
+        userId: writeUserId,
+      };
+      const signatureOk = verifyActionSignatureAny([actionPayload, legacyActionPayload], signature);
+      if (!signatureOk) {
+        log.error("[flow-action] HMAC verification failed");
+        res.json({ type: "error", message: "HMAC verification failed — action may have been tampered with" } satisfies AppActionResponse);
+        return;
+      }
+      const legacyWriteCard = !verifyActionSignatureAny([actionPayload], signature);
+
+      const writeUser = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
+      if (!writeUser?.orgId) {
+        res.status(403).json({ type: "error", message: "Unable to resolve approving user's organization" } satisfies AppActionResponse);
+        return;
+      }
+      if (legacyWriteCard && !(await consumeLegacyWriteCard(messageId, actionId))) {
+        res.status(409).json({ type: "error", message: "This approval card was already used" } satisfies AppActionResponse);
+        return;
+      }
+
       if (actionId === "decline-write") {
         resp = { type: "close_screen", finalMessage: "❌ Action declined." };
         res.json(resp);
@@ -540,21 +608,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // actionId === "approve-write"
-      const params = JSON.parse(paramsStr) as Record<string, unknown>;
-
-      // Verify HMAC signature
-      const { verifyActionSignature } = await import("./mcp.js");
-      const actionPayload = { serverType, tool, params, userId: writeUserId };
-      if (!verifyActionSignature(actionPayload, signature)) {
-        log.error("[flow-action] HMAC verification failed");
-        res.json({ type: "error", message: "HMAC verification failed — action may have been tampered with" } satisfies AppActionResponse);
-        return;
-      }
-
       // Execute the tool
       if (serverType === "xyne-spaces" && tool === "spaces-send-message") {
-        const agent = await findAgentForFlow(agentSlug, spacesAppId);
+        const agent = await findAgentForFlow(agentSlug, spacesAppId, writeUser.orgId);
         if (!agent?.spacesAppToken) {
           res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
           return;
@@ -1426,14 +1482,27 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     }
 
     if (actionType === "start-goal") {
-      const condition = data["condition"] as string | undefined;
+      const rawCondition = data["condition"];
       const goalAgentSlug = data["agentSlug"] as string | undefined;
       const goalSpacesAppId = data["spacesAppId"] as string | undefined;
       const goalChannelId = data["channelId"] as string | undefined;
       const goalConversationId = data["conversationId"] as string | undefined;
       const goalUserId = data["userId"] as string | undefined;
+      const actionNonce = data["actionNonce"] as string | undefined;
+      const issuedAt = data["issuedAt"] as number | undefined;
+      const signature = data["signature"] as string | undefined;
 
-      if (!condition || !goalAgentSlug || !goalChannelId || !goalConversationId || !goalUserId) {
+      const { normalizeGoalCondition } = await import("../services/goalRelooper.js");
+      const condition = normalizeGoalCondition(rawCondition);
+
+      if (
+        actionId !== "start-goal"
+        || !condition
+        || !goalAgentSlug
+        || !goalChannelId
+        || !goalConversationId
+        || !goalUserId
+      ) {
         res.status(400).json({ type: "error", message: "Missing start-goal fields in flowJSON.data" } satisfies AppActionResponse);
         return;
       }
@@ -1444,6 +1513,57 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (!callerUserId || callerUserId !== goalUserId) {
         log.error(`[flow-action] start-goal: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${goalUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      const goalUser = await prisma.user.findUnique({ where: { id: goalUserId }, select: { orgId: true } });
+      if (!goalUser?.orgId) {
+        res.status(403).json({ type: "error", message: "Unable to resolve goal user's organization" } satisfies AppActionResponse);
+        return;
+      }
+      const agent = await findAgentForFlow(goalAgentSlug, goalSpacesAppId, goalUser.orgId);
+      if (!agent) {
+        log.error(`[flow-action] start-goal: scoped agent ${goalAgentSlug} not found`);
+        res.status(403).json({ type: "error", message: "Agent is not available in the user's organization" } satisfies AppActionResponse);
+        return;
+      }
+      const hasSignedGoalEnvelope =
+        condition === rawCondition
+        && !!actionNonce
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actionNonce)
+        && typeof issuedAt === "number"
+        && Number.isSafeInteger(issuedAt)
+        && !!signature;
+      if (hasSignedGoalEnvelope) {
+        const now = Date.now();
+        if (issuedAt > now + 5 * 60_000 || now - issuedAt > GOAL_ACTION_TTL_SEC * 1_000) {
+          res.status(400).json({ type: "error", message: "Goal suggestion has expired" } satisfies AppActionResponse);
+          return;
+        }
+        const { verifyActionSignatureAny } = await import("./mcp.js");
+        const goalActionPayload = {
+          actionType: "start-goal",
+          actionId,
+          condition,
+          agentSlug: goalAgentSlug,
+          spacesAppId: goalSpacesAppId ?? "",
+          channelId: goalChannelId,
+          conversationId: goalConversationId,
+          userId: goalUserId,
+          actionNonce,
+          issuedAt,
+        };
+        if (!verifyActionSignatureAny([goalActionPayload], signature)) {
+          log.error("[flow-action] start-goal: HMAC verification failed");
+          res.status(400).json({ type: "error", message: "Invalid goal suggestion signature" } satisfies AppActionResponse);
+          return;
+        }
+        if (!(await consumeGoalAction(actionNonce))) {
+          res.status(409).json({ type: "error", message: "Goal suggestion was already used" } satisfies AppActionResponse);
+          return;
+        }
+      } else if (!(await consumeLegacyGoalCard(messageId))) {
+        res.status(409).json({ type: "error", message: "Goal suggestion was already used" } satisfies AppActionResponse);
         return;
       }
 
@@ -1466,11 +1586,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a stuck dispatch is recoverable; a broken UI promise is not.
       (async () => {
         try {
-          const agent = await findAgentForFlow(goalAgentSlug, goalSpacesAppId);
-          if (!agent) {
-            log.error(`[flow-action] start-goal: agent ${goalAgentSlug} not found`);
-            return;
-          }
           const appToken = agent.spacesAppToken
             ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
             : "";
@@ -1507,6 +1622,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             headers: {
               "Content-Type": "application/json",
               ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              "x-user-id": goalUserId,
             },
             body: JSON.stringify(dispatchPayload),
           });

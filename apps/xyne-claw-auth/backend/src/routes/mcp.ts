@@ -360,7 +360,11 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
 }
 
 export function signAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.encryptionKey).update(JSON.stringify(action)).digest("hex");
+  return crypto.createHmac("sha256", CONFIG.actionSigningKey).update(JSON.stringify(action)).digest("hex");
+}
+
+function signLegacyAction(action: Record<string, unknown>): string {
+  return crypto.createHmac("sha256", CONFIG.legacyActionSigningKey).update(JSON.stringify(action)).digest("hex");
 }
 
 /**
@@ -690,6 +694,23 @@ export function verifyActionSignature(action: Record<string, unknown>, signature
   const expected = signAction(action);
   try {
     return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+export function verifyActionSignatureAny(
+  actions: readonly Record<string, unknown>[],
+  signature: string,
+): boolean {
+  try {
+    const given = Buffer.from(signature, "hex");
+    return actions.some((action) => {
+      const current = Buffer.from(signAction(action), "hex");
+      if (current.length === given.length && crypto.timingSafeEqual(current, given)) return true;
+      const legacy = Buffer.from(signLegacyAction(action), "hex");
+      return legacy.length === given.length && crypto.timingSafeEqual(legacy, given);
+    });
   } catch {
     return false;
   }
