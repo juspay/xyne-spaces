@@ -2,7 +2,6 @@ import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 
 import { ArrowLeft, X } from 'lucide-react';
 import { BoardType } from '@xyne/shared';
 import { toast } from 'sonner';
-import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
@@ -56,8 +55,6 @@ const BoardConfigCopyScreen = ({
   onClose,
   onDone,
 }: BoardConfigCopyScreenProps): ReactElement | null => {
-  const zero = useZero();
-  void zero; // reserved: this screen only talks to the backend via REST, not Zero mutators
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const [projectBoards] = useCachedQuery(
@@ -82,7 +79,6 @@ const BoardConfigCopyScreen = ({
   const [remapOverrides, setRemapOverrides] = useState<Record<string, string>>({});
 
   const [executing, setExecuting] = useState(false);
-  const [, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
   const [summary, setSummary] = useState<ExecuteCopySummary | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
@@ -120,7 +116,6 @@ const BoardConfigCopyScreen = ({
     setPlanError(null);
     setRemapOverrides({});
     setExecuting(false);
-    setJobId(null);
     setJobStatus(null);
     setSummary(null);
     setResultError(null);
@@ -297,7 +292,6 @@ const BoardConfigCopyScreen = ({
 
       const result = response.data.data;
       if (result?.jobId) {
-        setJobId(result.jobId);
         setStep('progress');
         startPolling(result.jobId);
       } else if (result?.summary) {
@@ -332,7 +326,6 @@ const BoardConfigCopyScreen = ({
       const status = response.data.data;
       if (!status) return;
       if (status.state === 'active' || status.state === 'waiting') {
-        setJobId(targetBoardId);
         setJobStatus(status);
         setStep('progress');
         startPolling(targetBoardId);

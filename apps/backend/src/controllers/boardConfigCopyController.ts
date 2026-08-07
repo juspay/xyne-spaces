@@ -60,7 +60,7 @@ export class BoardConfigCopyController {
       res.status(200).json({ success: true, data: result, timestamp: new Date().toISOString() });
     } catch (error) {
       logger.error(`${TAG} plan failed`, error);
-      res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to plan board config copy', timestamp: new Date().toISOString() });
+      res.status(500).json({ success: false, error: 'Failed to plan board config copy', timestamp: new Date().toISOString() });
     }
   }
 
@@ -112,7 +112,7 @@ export class BoardConfigCopyController {
         return;
       }
       logger.error(`${TAG} execute failed`, error);
-      res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to execute board config copy', timestamp: new Date().toISOString() });
+      res.status(500).json({ success: false, error: 'Failed to execute board config copy', timestamp: new Date().toISOString() });
     }
   }
 
@@ -154,7 +154,7 @@ export class BoardConfigCopyController {
       });
     } catch (error) {
       logger.error(`${TAG} status failed`, error);
-      res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to fetch job status', timestamp: new Date().toISOString() });
+      res.status(500).json({ success: false, error: 'Failed to fetch job status', timestamp: new Date().toISOString() });
     }
   }
 }

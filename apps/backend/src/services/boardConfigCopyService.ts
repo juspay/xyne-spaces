@@ -360,6 +360,49 @@ export class BoardConfigCopyService {
 
   // ─── Custom fields & roles (fast, synchronous) ─────────────────────────
 
+  private parseFieldOptions(raw: string): Array<{ id: string; value: string }> | undefined {
+    try {
+      return JSON.parse(raw) as Array<{ id: string; value: string }>;
+    } catch (error) {
+      logger.warn(`${TAG} Failed to parse fieldOptions JSON — dropping options for this field`, { error });
+      return undefined;
+    }
+  }
+
+  /**
+   * `fieldOrder` entries are `{fieldId, fieldType: 'core'|'custom'}`. Core entries are keyed
+   * by field NAME (stable, safe to copy as-is). Custom entries are keyed by a resolved field
+   * id that only means something on the form it was resolved from — rewritten through
+   * `idMap` (old field id -> new field id on the cloned form), or dropped if unresolvable.
+   */
+  private remapFieldOrder(raw: unknown, idMap: Map<string, string>): unknown {
+    if (!Array.isArray(raw)) return raw;
+    const result: Array<{ fieldId: string; fieldType: string }> = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as { fieldId?: unknown; fieldType?: unknown };
+      if (typeof e.fieldId !== 'string' || typeof e.fieldType !== 'string') continue;
+      if (e.fieldType !== 'custom') {
+        result.push({ fieldId: e.fieldId, fieldType: e.fieldType });
+        continue;
+      }
+      const newId = idMap.get(e.fieldId);
+      if (newId) result.push({ fieldId: newId, fieldType: 'custom' });
+    }
+    return result;
+  }
+
+  /** Rewrites a Record<fieldId, T> (e.g. customFieldVisibility) through idMap, dropping keys with no match. */
+  private remapFieldKeyedRecord(raw: unknown, idMap: Map<string, string>): unknown {
+    if (!raw || typeof raw !== 'object') return raw;
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const newKey = idMap.get(key);
+      if (newKey) result[newKey] = value;
+    }
+    return result;
+  }
+
   private async copyCustomFieldsAndRoles(
     sourceBoard: { id: string; projectId: string; workspaceId: string },
     targetBoard: { id: string; metadata: Prisma.JsonValue },
@@ -370,32 +413,73 @@ export class BoardConfigCopyService {
     let customFieldsCopied = false;
     let rolesCopied = false;
 
-    await db.$transaction(async tx => {
-      if (categories.customFields) {
-        const sourceMapping = await tx.formContextMapping.findFirst({
-          where: { contextId: sourceBoard.id, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
-        });
+    // Cloning the source form (if any) happens OUTSIDE the transaction below on purpose:
+    // formsRepository.createWithFields runs its own db.$transaction internally, and Prisma
+    // doesn't nest/join $transaction calls made on the same client — it's a second,
+    // independent transaction that commits as soon as createWithFields returns, regardless
+    // of what happens afterward. Pretending it was part of the outer transaction was
+    // misleading; instead we create it first and explicitly clean it up in the catch below
+    // if the rest of the operation fails.
+    let clonedFormId: string | null = null;
+    const oldToNewFieldId = new Map<string, string>();
 
-        if (sourceMapping) {
-          const sourceForm = await repositories.forms.findFormWithFields(sourceMapping.formId);
-          if (sourceForm) {
-            const newForm = await repositories.forms.createWithFields({
-              formName: `${sourceForm.formName} Copy`,
-              ...(sourceForm.formDescription ? { formDescription: sourceForm.formDescription } : {}),
-              contextType: FormContextType.BOARD,
-              entityType: FormEntityType.TICKET,
-              workspaceId: sourceBoard.workspaceId,
-              createdBy: actorUserId,
-              projectId: sourceBoard.projectId,
-              fields: sourceForm.fields.map(f => ({
+    if (categories.customFields) {
+      const sourceMapping = await db.formContextMapping.findFirst({
+        where: { contextId: sourceBoard.id, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
+      });
+
+      if (sourceMapping) {
+        const sourceForm = await repositories.forms.findFormWithFields(sourceMapping.formId);
+        if (sourceForm) {
+          const newForm = await repositories.forms.createWithFields({
+            formName: `${sourceForm.formName} Copy`,
+            ...(sourceForm.formDescription ? { formDescription: sourceForm.formDescription } : {}),
+            contextType: FormContextType.BOARD,
+            entityType: FormEntityType.TICKET,
+            workspaceId: sourceBoard.workspaceId,
+            createdBy: actorUserId,
+            projectId: sourceBoard.projectId,
+            fields: sourceForm.fields.map(f => {
+              const parsedOptions = f.fieldOptions ? this.parseFieldOptions(f.fieldOptions) : undefined;
+              return {
                 fieldName: f.fieldName,
                 fieldType: f.fieldType,
-                ...(f.fieldOptions ? { fieldOptions: JSON.parse(f.fieldOptions) } : {}),
+                ...(parsedOptions !== undefined ? { fieldOptions: parsedOptions } : {}),
                 isOptional: f.isOptional,
                 ...(f.parentOptionId !== undefined ? { parentOptionId: f.parentOptionId } : {}),
-              })),
-            });
+              };
+            }),
+          });
+          clonedFormId = newForm.id;
 
+          // createWithFields is never given an explicit fieldId, so a cloned field lands on
+          // whichever GlobalField already exists for (projectId, fieldName, fieldType) —
+          // normally the SAME id the source used (same project), but a fresh id when the
+          // source field predates the global-field system (a "legacy" field). Resolve the
+          // real mapping from what was actually created, rather than assuming ids survived.
+          const newFormWithFields = await repositories.forms.findFormWithFields(newForm.id);
+          if (newFormWithFields) {
+            for (const oldField of sourceForm.fields) {
+              const match = newFormWithFields.fields.find(
+                nf => nf.fieldName === oldField.fieldName && nf.fieldType === oldField.fieldType,
+              );
+              if (match) oldToNewFieldId.set(oldField.id, match.id);
+            }
+          }
+        }
+      }
+    }
+
+    try {
+      await db.$transaction(async tx => {
+        const sourceBoardRow =
+          categories.customFields || categories.roles
+            ? await tx.board.findUnique({ where: { id: sourceBoard.id } })
+            : null;
+        const sourceMetadata = (sourceBoardRow?.metadata as Record<string, unknown> | null) ?? {};
+
+        if (categories.customFields) {
+          if (clonedFormId) {
             // FormContextMapping has @@unique([contextId, entityType]) — a stale target
             // mapping must go before the new one can be inserted.
             await tx.formContextMapping.deleteMany({
@@ -404,45 +488,53 @@ export class BoardConfigCopyService {
             await tx.formContextMapping.create({
               data: {
                 id: randomUUID(),
-                formId: newForm.id,
+                formId: clonedFormId,
                 contextId: targetBoard.id,
                 contextType: FormContextType.BOARD,
                 entityType: FormEntityType.TICKET,
                 workspaceId: sourceBoard.workspaceId,
               },
             });
-            targetMetadata['customFieldsFormId'] = newForm.id;
+            targetMetadata['customFieldsFormId'] = clonedFormId;
           }
+
+          targetMetadata['fieldOrder'] = this.remapFieldOrder(sourceMetadata['fieldOrder'], oldToNewFieldId);
+          targetMetadata['ticketFormConfig'] = sourceMetadata['ticketFormConfig'];
+          targetMetadata['customFieldVisibility'] = this.remapFieldKeyedRecord(
+            sourceMetadata['customFieldVisibility'],
+            oldToNewFieldId,
+          );
+          customFieldsCopied = true;
         }
 
-        const sourceBoardRow = await tx.board.findUnique({ where: { id: sourceBoard.id } });
-        const sourceMetadata = (sourceBoardRow?.metadata as Record<string, unknown> | null) ?? {};
-        targetMetadata['fieldOrder'] = sourceMetadata['fieldOrder'];
-        targetMetadata['ticketFormConfig'] = sourceMetadata['ticketFormConfig'];
-        targetMetadata['customFieldVisibility'] = sourceMetadata['customFieldVisibility'];
-        customFieldsCopied = true;
-      }
+        if (categories.roles) {
+          targetMetadata['assignmentRoles'] = sourceMetadata['assignmentRoles'] ?? [];
+          targetMetadata['ticketControlRoleIds'] = sourceMetadata['ticketControlRoleIds'] ?? [];
+          targetMetadata['bitbucketEventRoles'] = sourceMetadata['bitbucketEventRoles'] ?? {};
+          rolesCopied = true;
+        }
 
-      if (categories.roles) {
-        const sourceBoardRow = await tx.board.findUnique({ where: { id: sourceBoard.id } });
-        const sourceMetadata = (sourceBoardRow?.metadata as Record<string, unknown> | null) ?? {};
-        targetMetadata['assignmentRoles'] = sourceMetadata['assignmentRoles'] ?? [];
-        targetMetadata['ticketControlRoleIds'] = sourceMetadata['ticketControlRoleIds'] ?? [];
-        targetMetadata['bitbucketEventRoles'] = sourceMetadata['bitbucketEventRoles'] ?? {};
-        rolesCopied = true;
-      }
-
-      if (customFieldsCopied || rolesCopied) {
-        await tx.board.update({
-          where: { id: targetBoard.id },
-          data: {
-            metadata: targetMetadata as Prisma.InputJsonValue,
-            updatedBy: actorUserId,
-            updatedAt: new Date(),
-          },
+        if (customFieldsCopied || rolesCopied) {
+          await tx.board.update({
+            where: { id: targetBoard.id },
+            data: {
+              metadata: targetMetadata as Prisma.InputJsonValue,
+              updatedBy: actorUserId,
+              updatedAt: new Date(),
+            },
+          });
+        }
+      });
+    } catch (error) {
+      // The form clone above already committed independently of this transaction — clean
+      // it up rather than leaving an orphaned Form/FormFields nothing references.
+      if (clonedFormId) {
+        await db.form.delete({ where: { id: clonedFormId } }).catch(cleanupError => {
+          logger.error(`${TAG} Failed to clean up orphaned form ${clonedFormId} after a failed copy`, cleanupError);
         });
       }
-    });
+      throw error;
+    }
 
     return { customFieldsCopied, rolesCopied };
   }
