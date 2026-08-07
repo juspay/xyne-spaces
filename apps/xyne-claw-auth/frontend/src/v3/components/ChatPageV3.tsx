@@ -3364,7 +3364,9 @@ export function applyManualEdits(html: string, edits: DesignManualEdit[]): Appli
       return { ...edit, stale: true };
     }
     if (edit.styles) {
-      if (!(element instanceof HTMLElement)) return { ...edit, stale: true };
+      if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
+        return { ...edit, stale: true };
+      }
       for (const [property, value] of Object.entries(edit.styles)) {
         element.style.setProperty(property, value);
       }
@@ -3483,7 +3485,7 @@ function withDesignInspector(html: string): string {
   function describe(element) {
     var style = getComputedStyle(element);
     var rect = element.getBoundingClientRect();
-    var styleNames = ['display','position','font-family','font-size','font-weight','line-height','color','background-color','border-radius','border','padding','margin','gap','width','height','max-width','justify-content','align-items','grid-template-columns'];
+    var styleNames = ['display','position','font-family','font-size','font-weight','line-height','color','background-color','fill','stroke','border-radius','border','padding','margin','gap','width','height','max-width','justify-content','align-items','grid-template-columns'];
     var styles = {};
     styleNames.forEach(function (name) {
       var value = style.getPropertyValue(name);
@@ -3700,6 +3702,7 @@ function DesignStyleInspector({
   onApply: (property: string, value: string) => void;
   onClose: () => void;
 }) {
+  const isSvg = selection.tagName === "svg" || selection.tagName === "path" || selection.tagName === "circle" || selection.tagName === "rect";
   const [fontSize, setFontSize] = useState(cssNumber(selection.styles["font-size"], "16"));
   const [radius, setRadius] = useState(cssNumber(selection.styles["border-radius"]));
   const [padding, setPadding] = useState(selection.styles["padding"] ?? "0px");
@@ -3708,6 +3711,13 @@ function DesignStyleInspector({
   const commitPixels = (property: string, value: string) => {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) onApply(property, `${Math.max(0, parsed)}px`);
+  };
+
+  const applyForeground = (value: string) => {
+    onApply("color", value);
+    if (!isSvg) return;
+    if (selection.styles["fill"] && selection.styles["fill"] !== "none") onApply("fill", value);
+    if (selection.styles["stroke"] && selection.styles["stroke"] !== "none") onApply("stroke", value);
   };
 
   return (
@@ -3728,20 +3738,20 @@ function DesignStyleInspector({
       </div>
       <div className="grid grid-cols-2 gap-2 p-3 text-[10px] text-xyne-fg-muted">
         <label className="flex flex-col gap-1">
-          Text color
+          {isSvg ? "Icon color" : "Text color"}
           <input
             type="color"
             defaultValue={cssColorToHex(selection.styles["color"], "#111827")}
-            onChange={(event) => onApply("color", event.target.value)}
+            onChange={(event) => applyForeground(event.target.value)}
             className="h-8 w-full cursor-pointer rounded border border-xyne-border-subtle bg-transparent p-0.5"
           />
         </label>
         <label className="flex flex-col gap-1">
-          Background
+          {isSvg ? "Fill" : "Background"}
           <input
             type="color"
-            defaultValue={cssColorToHex(selection.styles["background-color"], "#ffffff")}
-            onChange={(event) => onApply("background-color", event.target.value)}
+            defaultValue={cssColorToHex(isSvg ? selection.styles["fill"] : selection.styles["background-color"], "#ffffff")}
+            onChange={(event) => onApply(isSvg ? "fill" : "background-color", event.target.value)}
             className="h-8 w-full cursor-pointer rounded border border-xyne-border-subtle bg-transparent p-0.5"
           />
         </label>
@@ -4056,7 +4066,9 @@ function DesignPreviewPanel({
   const applyVisualStyle = useCallback((property: string, value: string) => {
     if (!selection) return;
     onManualEditsChange((current) => [
-      ...current,
+      ...current.filter((edit) => !(
+        edit.selector === selection.selector && edit.styles && Object.hasOwn(edit.styles, property)
+      )),
       { selector: selection.selector, styles: { [property]: value }, stale: false },
     ]);
   }, [onManualEditsChange, selection]);
