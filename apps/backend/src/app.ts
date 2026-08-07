@@ -996,6 +996,19 @@ export class App {
     // Initialize unified bot framework
     logger.info('Initializing unified bot framework...');
     initializeBotRegistry(); // Register all bots (internal + external) with unified catalog
+
+    // Vespa queue MUST be initialized before syncing bot users below: each bot User
+    // upsert transparently fires the setupUserVespaSync Prisma middleware, which enqueues
+    // a user-index job on vespaQueue. If the queue isn't ready the enqueue is swallowed and
+    // logged ("Vespa queue not initialized Properly") — sync still succeeds, but the first
+    // bots' index jobs are silently dropped. The dependency is invisible at the sync call
+    // site (it lives in a Prisma $use hook), so keep these ordered explicitly.
+    logger.info('Initializing Vespa queue...');
+    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
+    await vespaQueue.initialize();
+    // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
+    await vespaBackfillQueue.initialize();
+
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();
     const workspaces = await dbClient.workspace.findMany({ select: { id: true } });
@@ -1004,12 +1017,6 @@ export class App {
     }
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
-
-    logger.info('Initializing Vespa queue...');
-    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
-    await vespaQueue.initialize();
-    // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
-    await vespaBackfillQueue.initialize();
 
     logger.info('Initializing conversation ingest queue (producer)...');
     await conversationIngestQueue.initialize();

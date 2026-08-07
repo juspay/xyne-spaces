@@ -67,10 +67,21 @@ class UnifiedBotUserService {
    * Also ensures bot is added to the workspace's org as a member.
    */
   async ensureBotUserExists(definition: BotDefinition, workspaceId: string): Promise<User> {
-    // First, ensure bot is in org_member table
+    // First, ensure bot is in org_member table (idempotent: creates only when missing)
     await this.ensureBotInOrgMember(definition.email, workspaceId);
 
-    // Fetch the orgMember for the bot
+    // Read the current row first and only write when the code-defined bot has actually
+    // drifted from the DB. Skipping no-op writes avoids re-triggering the setupUserVespaSync
+    // Prisma middleware (a user-index enqueue) on every restart for unchanged bots.
+    const existing = await db.user.findUnique({
+      where: { email_workspaceId: { email: definition.email, workspaceId } },
+    });
+
+    if (existing && !this.botUserNeedsUpdate(existing, definition)) {
+      return existing;
+    }
+
+    // Fetch the orgMember for the bot (memberId is the FK the create branch needs)
     const orgMember = await db.orgMember.findUnique({
       where: { email: definition.email },
       select: { memberId: true }
@@ -82,6 +93,8 @@ class UnifiedBotUserService {
 
     const user = await db.user.upsert({
       where: { email_workspaceId: { email: definition.email, workspaceId } },
+      // Identity/FK fields in `create` (authProvider, providerUserId, orgMemberId) are set
+      // once and excluded from botUserNeedsUpdate; won't self-heal if a bot's id changes.
       create: {
         name: definition.name,
         email: definition.email,
@@ -110,6 +123,25 @@ class UnifiedBotUserService {
     });
 
     return user;
+  }
+
+  /**
+   * True when the DB row differs from the code-defined bot on any field the sync writes
+   * (name, picture, status, userType, and the metadata we own: botId + description).
+   * Only these fields are compared, so unrelated metadata keys don't force a rewrite.
+   */
+  private botUserNeedsUpdate(existing: User, definition: BotDefinition): boolean {
+    const desiredPicture = definition.picture || null;
+    const metadata = (existing.metadata as Record<string, unknown> | null) ?? {};
+
+    return (
+      existing.name !== definition.name ||
+      existing.picture !== desiredPicture ||
+      existing.status !== UserStatus.ACTIVE ||
+      existing.userType !== UserType.BOT ||
+      metadata.botId !== definition.id ||
+      metadata.description !== definition.description
+    );
   }
 
   /**

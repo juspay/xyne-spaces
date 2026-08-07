@@ -1,26 +1,51 @@
 import { spawnSync } from "node:child_process";
-import { createServer } from "node:net";
+import { createConnection } from "node:net";
 
-export function isPortFree(port) {
-  return new Promise((resolvePromise) => {
-    const probe = createServer();
-    probe.unref();
-    probe.once("error", () => resolvePromise(false));
-    probe.listen({ port, host: "127.0.0.1" }, () => {
-      probe.close(() => resolvePromise(true));
-    });
-  });
+function lsofListening(port) {
+  if (process.platform === "win32") return null;
+  try {
+    const result = spawnSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8", timeout: 3000 },
+    );
+    if (result.error) return null;
+    if (result.status === 0) return result.stdout.trim().length > 0;
+    return false;
+  } catch {
+    return null;
+  }
 }
 
-export function describePortOwner(port) {
-  if (process.platform === "win32") return null;
+const connectAccepted = (port) =>
+  new Promise((resolvePromise) => {
+    const socket = createConnection({ port, host: "127.0.0.1" });
+    socket.setTimeout(700);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolvePromise(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolvePromise(false);
+    });
+    socket.once("error", () => resolvePromise(false));
+  });
+
+export async function isPortFree(port) {
+  const listening = lsofListening(port);
+  if (listening !== null) return !listening;
+  return !(await connectAccepted(port));
+}
+
+function ownerFromLsof(port) {
   try {
     const result = spawnSync(
       "lsof",
       ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fcp"],
       { encoding: "utf8", timeout: 3000 },
     );
-    if (result.status !== 0 || !result.stdout) return null;
+    if (result.error || result.status !== 0 || !result.stdout) return null;
     let pid = null;
     let command = null;
     for (const line of result.stdout.split("\n")) {
@@ -33,6 +58,60 @@ export function describePortOwner(port) {
   } catch {
     return null;
   }
+}
+
+function ownerFromSs(port) {
+  try {
+    const result = spawnSync("ss", ["-ltnpH", `sport = :${port}`], {
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    if (result.error || result.status !== 0 || !result.stdout) return null;
+    const match = result.stdout.match(/users:\(\("([^"]+)",pid=(\d+)/);
+    if (!match) return null;
+    return { pid: Number(match[2]), command: match[1] };
+  } catch {
+    return null;
+  }
+}
+
+function ownerFromNetstat(port) {
+  try {
+    const result = spawnSync("netstat", ["-ano", "-p", "TCP"], {
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (result.error || result.status !== 0 || !result.stdout) return null;
+    const line = result.stdout
+      .split(/\r?\n/)
+      .find(
+        (entry) =>
+          /LISTENING/i.test(entry) &&
+          new RegExp(`[:.]${port}\\s`).test(entry.trim().split(/\s+/)[1] + " "),
+      );
+    if (!line) return null;
+    const pid = Number(line.trim().split(/\s+/).pop());
+    if (!Number.isFinite(pid) || pid <= 0) return null;
+
+    let command = "unknown";
+    const tasklist = spawnSync(
+      "tasklist",
+      ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    if (!tasklist.error && tasklist.status === 0 && tasklist.stdout) {
+      const name = tasklist.stdout.match(/^"([^"]+)"/);
+      if (name) command = name[1];
+    }
+    return { pid, command };
+  } catch {
+    return null;
+  }
+}
+
+export function describePortOwner(port) {
+  if (process.platform === "win32") return ownerFromNetstat(port);
+  return ownerFromLsof(port) ?? ownerFromSs(port);
 }
 
 export async function findBusyPorts(entries) {
