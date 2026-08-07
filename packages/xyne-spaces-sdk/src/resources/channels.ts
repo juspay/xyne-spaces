@@ -283,4 +283,30 @@ export class ChannelsResource extends Resource {
   setShowTicketsInChat(channelId: string, show: boolean): Promise<void> {
     return this.call(channelsOperations.setShowTicketsInChat, { channelId, show });
   }
+
+  /** Get stats for several channels at once. */
+  getStatsForChannels(channelIds: string[]): Promise<unknown[]> {
+    return this.call(channelsOperations.getStatsForChannels, { channelIds });
+  }
+
+  /** List a channel's participants a page at a time. */
+  listParticipantsPaginated(
+    channelId: string,
+    options?: { limit?: number; start?: { role: string; userId: string } }
+  ): Promise<ChannelParticipant[]> {
+    return this.call(channelsOperations.listParticipantsPaginated, {
+      channelId,
+      ...options,
+    });
+  }
+
+  /** List every user's status row for a channel — who has it open, starred, muted. */
+  listUserStatuses(channelId: string): Promise<ChannelUserStatus[]> {
+    return this.call(channelsOperations.listUserStatuses, { channelId });
+  }
+
+  /** List channels the current user has an active conversation in. */
+  listWithMyConversations(): Promise<Channel[]> {
+    return this.call(channelsOperations.listWithMyConversations, undefined);
+  }
 }

@@ -93,4 +93,17 @@ export class ActivitiesResource extends Resource {
   actOnNudge(nudgeId: string, actionResult?: unknown): Promise<void> {
     return this.call(activitiesOperations.actOnNudge, { nudgeId, actionResult });
   }
+
+  /**
+   * Mark every activity matching a filter as read.
+   *
+   * @example
+   * await sdk.activities.markAsReadByFilter({ actorAction: 'REACTION' });
+   */
+  markAsReadByFilter(filter: {
+    actorAction?: string;
+    classification?: string;
+  }): Promise<void> {
+    return this.call(activitiesOperations.markAsReadByFilter, filter);
+  }
 }

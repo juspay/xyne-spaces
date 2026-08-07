@@ -82,4 +82,21 @@ export class ProjectsResource extends Resource {
   delete(projectId: string): Promise<void> {
     return this.call(projectsOperations.delete, { projectId });
   }
+
+  /**
+   * Configure release tracking for a project.
+   *
+   * The `applications` array is provider-specific and passed through unchanged.
+   */
+  saveReleaseBoardConfig(data: {
+    projectId: string;
+    mainBoardId: string;
+    mainBoardName: string;
+    vcsProvider: string;
+    releaseTrackingMode: string;
+    channelId: string;
+    applications: unknown[];
+  }): Promise<void> {
+    return this.call(projectsOperations.saveReleaseBoardConfig, data);
+  }
 }

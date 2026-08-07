@@ -196,4 +196,67 @@ export class MessagesResource extends Resource {
   scheduledToDraft(id: string): Promise<void> {
     return this.call(messagesOperations.scheduledToDraft, { id });
   }
+
+  /** Get attachments by id. */
+  getAttachments(attachmentIds: string[]): Promise<unknown[]> {
+    return this.call(messagesOperations.getAttachments, { attachmentIds });
+  }
+
+  /** List attachments on the message that started a thread. */
+  listAttachmentsForThread(initialMessageId: string): Promise<unknown[]> {
+    return this.call(messagesOperations.listAttachmentsForThread, { initialMessageId });
+  }
+
+  /** List every attachment shared in a channel, newest first. */
+  listChannelAttachments(
+    channelId: string,
+    options?: { limit?: number; start?: { attachementId: string; createdAt: number } }
+  ): Promise<unknown[]> {
+    return this.call(messagesOperations.listChannelAttachments, { channelId, ...options });
+  }
+
+  /** List scheduled messages a page at a time, optionally filtered by status. */
+  listScheduledPaginated(options?: {
+    limit?: number;
+    statuses?: string[];
+    start?: { id: string; scheduledFor: number };
+  }): Promise<unknown[]> {
+    return this.call(messagesOperations.listScheduledPaginated, options ?? {});
+  }
+
+  /** Attach files to a draft. */
+  addDraftAttachments(data: {
+    draftMessageId: string;
+    channelId: string;
+    attachments: Array<{
+      attachmentId: string;
+      originalFilename: string;
+      mimetype: string;
+      size: number;
+      width?: number;
+      height?: number;
+    }>;
+    conversationId?: string;
+  }): Promise<void> {
+    return this.call(messagesOperations.addDraftAttachments, data);
+  }
+
+  /** Clear a channel or thread draft's content. */
+  clearDraft(channelId: string, options?: { conversationId?: string }): Promise<void> {
+    return this.call(messagesOperations.clearDraft, { channelId, ...options });
+  }
+
+  /**
+   * Resolve a mention of someone who is not in the channel.
+   *
+   * @param action - `add` or `add_all` to admit them, `ignore` or `ignore_all` to dismiss
+   */
+  handleNonParticipants(data: {
+    messageId: string;
+    channelId: string;
+    userIds: string[];
+    action: 'add' | 'add_all' | 'ignore' | 'ignore_all';
+  }): Promise<void> {
+    return this.call(messagesOperations.handleNonParticipants, data);
+  }
 }

@@ -177,4 +177,38 @@ export class ConversationsResource extends Resource {
   markUnreadFrom(conversationId: string, messageId: string): Promise<void> {
     return this.call(conversationsOperations.markUnreadFrom, { conversationId, messageId });
   }
+
+  /**
+   * Find the thread nearest a point in time — used to jump to a date.
+   *
+   * @param timestamp - Epoch milliseconds
+   */
+  getByTimestamp(
+    channelId: string,
+    timestamp: number,
+    options?: { isMember?: boolean }
+  ): Promise<Conversation | null> {
+    return this.call(conversationsOperations.getByTimestamp, {
+      channelId,
+      timestamp,
+      ...options,
+    });
+  }
+
+  /** List threads a user takes part in across every channel. */
+  listForUser(
+    userId: string,
+    options?: { limit?: number; start?: { lastReplyAt: number; id: string } }
+  ): Promise<Conversation[]> {
+    return this.call(conversationsOperations.listForUser, { userId, ...options });
+  }
+
+  /**
+   * Set the tag types on a thread.
+   *
+   * Free-form — projects define their own vocabulary beyond the built-in one.
+   */
+  setTagTypes(conversationId: string, types: string[]): Promise<void> {
+    return this.call(conversationsOperations.setTagTypes, { conversationId, types });
+  }
 }

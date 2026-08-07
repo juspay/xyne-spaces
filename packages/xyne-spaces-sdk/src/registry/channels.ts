@@ -394,4 +394,38 @@ export const channelsOperations = {
   setShowTicketsInChat: mutator<{ channelId: string; show: boolean }, void>(
     'channel.updateShowTicketsTabTicketsInChat'
   ),
+  /**
+   * Stats for several channels at once.
+   * Maps to: Zero query 'channelStatsByIds'
+   */
+  getStatsForChannels: query<{ channelIds: string[] }, unknown[]>('channelStatsByIds'),
+
+  /**
+   * Participants of a channel, a page at a time.
+   * Maps to: Zero query 'channelParticipantsPaginated'
+   */
+  listParticipantsPaginated: query<
+    { channelId: string; limit?: number; start?: { role: string; userId: string } },
+    ChannelParticipant[]
+  >('channelParticipantsPaginated', {
+    mapArgs: (args) => ({
+      channelId: args.channelId,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+    }),
+  }),
+
+  /**
+   * Every user's status row for one channel — who has it open, muted, starred.
+   * Maps to: Zero query 'getAllChannelsUserStatus'
+   */
+  listUserStatuses: query<{ channelId: string }, ChannelUserStatus[]>(
+    'getAllChannelsUserStatus'
+  ),
+
+  /**
+   * Channels the current user has an active conversation in.
+   * Maps to: Zero query 'conversationOfUserChannels'
+   */
+  listWithMyConversations: query<void, Channel[]>('conversationOfUserChannels'),
 } as const;
