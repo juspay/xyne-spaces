@@ -1360,6 +1360,15 @@ model McpServer {
   /// and is unaffected. Admin-toggleable; surfaced via the resolved connector
   /// definition so the runner reads it without a per-tool catalog query.
   forwardFiles         Boolean                   @default(false)
+  /// When true, the xyne-claw runtime is allowed to expand a `{{file:<path>}}`
+  /// marker in this server's outbound tool arguments into the base64 of a
+  /// workspace file BEFORE the MCP call leaves the pod (inbound file → MCP).
+  /// Server-level admin toggle, mirroring forwardFiles (which governs the
+  /// reverse, MCP → user direction). Off by default; surfaced via the resolved
+  /// connector definition and the /mcp/tools payload so the pod reads it
+  /// without a per-tool catalog query. Replaces the CLAW_FILE_INPUT_FORWARDING_SERVERS
+  /// env allowlist (kept only as a deprecated rollout fallback in the pod).
+  forwardFileInputs    Boolean                   @default(false)
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
   connections          UserMcpConnection[]
