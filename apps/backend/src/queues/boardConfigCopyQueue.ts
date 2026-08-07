@@ -52,6 +52,11 @@ export interface BoardConfigCopyJobData {
   oldStages: BoardConfigCopyOldStage[];
   // keyed by oldStageId
   ticketRemapByOldStageId: Record<string, BoardConfigCopyTicketRemapTarget>;
+  // Whether customFields/roles were already copied synchronously in executeCopy before
+  // this job was enqueued — carried through so the worker's returned summary reflects
+  // what actually happened instead of hardcoding false for the async (stages) leg.
+  customFieldsCopied: boolean;
+  rolesCopied: boolean;
 }
 
 export interface BoardConfigCopySummary {

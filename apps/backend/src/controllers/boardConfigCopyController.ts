@@ -123,10 +123,20 @@ export class BoardConfigCopyController {
       return;
     }
 
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) {
+      res.status(401).json({ success: false, error: 'Authenticated workspace required', timestamp: new Date().toISOString() });
+      return;
+    }
+
     try {
       const queue = boardConfigCopyQueue.getQueue();
       const job = await queue.getJob(jobId);
-      if (!job) {
+      // jobId is the target board id, guessable/enumerable by any TICKET-MIGRATION admin —
+      // authorize() only checks resource-level access, not workspace, so this job must be
+      // scoped to the caller's own workspace explicitly. Respond 404 (not 403) so a caller
+      // in another workspace can't distinguish "no job" from "job exists, not yours".
+      if (!job || job.data.workspaceId !== workspaceId) {
         res.status(404).json({ success: false, error: 'Job not found', timestamp: new Date().toISOString() });
         return;
       }

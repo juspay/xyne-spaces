@@ -149,8 +149,8 @@ class BoardConfigCopyWorker {
     logger.info(`${TAG} Completed copy job for targetBoardId=${data.targetBoardId}`, summary);
 
     return {
-      customFieldsCopied: false,
-      rolesCopied: false,
+      customFieldsCopied: data.customFieldsCopied,
+      rolesCopied: data.rolesCopied,
       stages: summary,
       warnings: [],
     };

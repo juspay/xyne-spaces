@@ -566,6 +566,8 @@ export class BoardConfigCopyService {
       // tickets need an entry in ticketRemapByOldStageId.
       oldStages: oldStages.map(o => ({ id: o.id, name: o.name })),
       ticketRemapByOldStageId,
+      customFieldsCopied,
+      rolesCopied,
     };
 
     const { enqueued, reason } = await boardConfigCopyQueue.addJob(jobData);
