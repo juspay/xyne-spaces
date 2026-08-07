@@ -1410,11 +1410,9 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       return;
     }
 
-    const body = (req.body ?? {}) as { filename?: string; content?: string; source?: string };
+    const body = (req.body ?? {}) as { filename?: string; content?: string };
     const filename = (body.filename ?? "").trim();
     const content = (body.content ?? "").trim();
-    const rawSource = (body.source ?? "claude").trim().toLowerCase();
-    const source = ["claude", "opencode", "codex"].includes(rawSource) ? rawSource : "claude";
     if (!filename || !content) {
       res.status(400).json({ success: false, error: "filename and content are required" });
       return;

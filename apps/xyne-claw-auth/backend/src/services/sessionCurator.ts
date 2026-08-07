@@ -213,7 +213,7 @@ export async function parseSessionFile(
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
-      body: JSON.stringify({ ...args, source: args.source, parseOnly: true }),
+      body: JSON.stringify({ ...args, parseOnly: true }),
       signal: AbortSignal.timeout(CURATE_TIMEOUT_MS),
     });
     if (!res.ok) {

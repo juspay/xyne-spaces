@@ -2622,6 +2622,9 @@ function UploadSessionModal({
 }) {
   const sourceLabel = source === "opencode" ? "OpenCode" : source === "codex" ? "Codex" : "Claude";
   const acceptedExts = source === "opencode" ? /\.(json|zip)$/i : /\.(jsonl|json|zip)$/i;
+  // Zip MEMBERS must be session files, never nested archives: a zip-inside-zip
+  // would be decoded as garbled binary-as-UTF-8 and uploaded as a "session".
+  const acceptedMemberExts = source === "opencode" ? /\.(json)$/i : /\.(jsonl|json)$/i;
   const acceptAttr = source === "opencode" ? ".json,.zip" : ".jsonl,.json,.zip";
   const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
   const [sessions, setSessions] = useState<Array<{ name: string; content: string }>>([]);
@@ -2649,7 +2652,7 @@ function UploadSessionModal({
             if (entry.dir) continue;
             const base = entry.name.split("/").pop() ?? entry.name;
             if (entry.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
-            if (!acceptedExts.test(base)) continue;
+            if (!acceptedMemberExts.test(base)) continue;
             const content = await entry.async("string");
             if (content.length > MAX_SESSION_BYTES) { skip.push(`${base} (over 20MB)`); continue; }
             if (!content.trim()) { skip.push(`${base} (empty)`); continue; }
