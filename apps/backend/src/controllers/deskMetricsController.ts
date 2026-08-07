@@ -75,7 +75,7 @@ export class DeskMetricsController {
         return { ok: false, error: 'Invalid time range' };
       }
       if (toMs - fromMs > MAX_CUSTOM_RANGE_MS) {
-        return { ok: false, error: 'Custom time range cannot exceed 90 days' };
+        return { ok: false, error: 'Custom time range cannot exceed 30 days' };
       }
       const timeRange = rawTimeRange;
 

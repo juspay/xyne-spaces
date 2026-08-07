@@ -53,7 +53,7 @@ export class DeskMetricsRepository {
   }
 
   /**
-   * Extends the shared analytics presets ('today'/'7d'/'30d'/'90d'/custom)
+   * Extends the shared analytics presets ('today'/'7d'/'30d'/custom)
    * with the ranges the reused dashboard TimeRangePicker emits
    * ('1h'/'24h'/'1y'/'all').
    */

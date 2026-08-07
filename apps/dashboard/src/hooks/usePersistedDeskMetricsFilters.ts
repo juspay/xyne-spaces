@@ -2,13 +2,7 @@ import { useState, useCallback } from 'react';
 import { type DateRangeValue } from '../components/ui/DateRangeFilter';
 import { TicketPriority } from '@xyne/shared';
 
-type RangeLabel =
-  | 'Today'
-  | 'Yesterday'
-  | 'Last 7 days'
-  | 'Last 30 days'
-  | 'Last 90 days'
-  | 'custom';
+type RangeLabel = 'Today' | 'Yesterday' | 'Last 7 days' | 'Last 30 days' | 'custom';
 
 const startOfDay = (d: Date): Date => {
   const r = new Date(d);
@@ -33,13 +27,10 @@ const detectLabel = (dr: DateRangeValue): RangeLabel => {
   s7.setDate(s7.getDate() - 6);
   const s30 = new Date(today);
   s30.setDate(s30.getDate() - 29);
-  const s90 = new Date(today);
-  s90.setDate(s90.getDate() - 89);
   if (isSameDay(dr.startDate, today) && isSameDay(dr.endDate, today)) return 'Today';
   if (isSameDay(dr.startDate, yest) && isSameDay(dr.endDate, yest)) return 'Yesterday';
   if (isSameDay(dr.startDate, s7) && isSameDay(dr.endDate, today)) return 'Last 7 days';
   if (isSameDay(dr.startDate, s30) && isSameDay(dr.endDate, today)) return 'Last 30 days';
-  if (isSameDay(dr.startDate, s90) && isSameDay(dr.endDate, today)) return 'Last 90 days';
   return 'custom';
 };
 
@@ -65,11 +56,6 @@ const rangeFromLabel = (
     case 'Last 30 days': {
       const s = new Date(today);
       s.setDate(s.getDate() - 29);
-      return { startDate: startOfDay(s), endDate: endOfDay(today) };
-    }
-    case 'Last 90 days': {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 89);
       return { startDate: startOfDay(s), endDate: endOfDay(today) };
     }
     case 'custom':
@@ -127,7 +113,6 @@ const readStorage = (key: string): StoredFilters => {
       'Yesterday',
       'Last 7 days',
       'Last 30 days',
-      'Last 90 days',
       'custom',
     ];
     const result: StoredFilters = {
