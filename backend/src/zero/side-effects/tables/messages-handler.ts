@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, NotificationDeliveryMethod, NotificationType, UserStatus, UserType } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, MessageType, NotificationDeliveryMethod, NotificationType, UserStatus, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
