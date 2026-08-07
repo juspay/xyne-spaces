@@ -18,6 +18,7 @@ import {
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './hooks/useTheme';
 import { useGlassMode } from './hooks/useGlassMode';
+import { useApplyGlassScrimOpacity } from './hooks/useGlassScrimOpacity';
 import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
 import Wallpaper from './components/Wallpaper/Wallpaper';
@@ -44,6 +45,7 @@ const App = (): ReactElement => {
   // data-theme>` itself rather than taking it from this component's useTheme()
   // instance — see the note in useGlassMode. No-ops on the web.
   useGlassMode();
+  useApplyGlassScrimOpacity();
 
   // Listen for Electron logs
   useEffect(() => {

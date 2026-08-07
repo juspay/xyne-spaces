@@ -5,7 +5,17 @@ export type Theme = 'classic' | 'midnight' | 'summer_breeze';
 const THEME_STORAGE_KEY = 'xyne-theme';
 const DEFAULT_THEME: Theme = 'classic';
 const THEME_QUERY_PARAM = 'theme';
-const VALID_THEMES: readonly Theme[] = ['classic', 'midnight', 'summer_breeze'];
+const VALID_THEMES: readonly Theme[] = ['classic', 'midnight'];
+
+export const THEME_LABELS: Record<Theme, string> = {
+  classic: 'Classic',
+  midnight: 'Midnight',
+  summer_breeze: 'Summer Breeze',
+};
+
+export function themeLabel(theme: string): string {
+  return THEME_LABELS[theme as Theme] ?? theme;
+}
 
 const isValidTheme = (value: string | null): value is Theme =>
   value !== null && (VALID_THEMES as readonly string[]).includes(value);

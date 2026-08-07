@@ -61,7 +61,7 @@ import log from 'electron-log/main';
 type VibrancyMaterial = NonNullable<Parameters<BrowserWindow['setVibrancy']>[0]>;
 
 /** See the module doc above for why this is `under-window` and not `sidebar`. */
-const MACOS_VIBRANCY_MATERIAL: VibrancyMaterial = 'under-window';
+const MACOS_VIBRANCY_MATERIAL: VibrancyMaterial = 'fullscreen-ui';
 
 /**
  * ── THE NATIVE TINT KNOB ───────────────────────────────────────────────────
@@ -91,8 +91,8 @@ const MACOS_VIBRANCY_MATERIAL: VibrancyMaterial = 'under-window';
  * property the flat CSS scrim destroyed.
  */
 const VIBRANCY_MATERIAL_BY_APPEARANCE: Record<'light' | 'dark', VibrancyMaterial> = {
-  light: 'under-window',
-  dark: 'under-window',
+  light: 'fullscreen-ui',
+  dark: 'fullscreen-ui',
 };
 
 /**
@@ -223,7 +223,7 @@ export function resolveGlassWindowOptions(): BrowserWindowConstructorOptions {
       vibrancy: MACOS_VIBRANCY_MATERIAL,
       // `followWindow` lets the material go inert whenever the window loses
       // focus, which in an always-open workspace app reads as a rendering bug.
-      visualEffectState: 'followWindow',
+      visualEffectState: 'active',
     };
   }
 
@@ -270,9 +270,9 @@ export function isGlassSupported(): boolean {
   return resolved && glassSupported;
 }
 
-/** The persisted user preference. Defaults to on, matching the claw toggle. */
+/** The persisted user preference. Off until the user opts in. */
 export function isGlassEnabled(): boolean {
-  return glassStore.get(ENABLED_KEY, true) === true;
+  return glassStore.get(ENABLED_KEY, false) === true;
 }
 
 /**

@@ -3,6 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import Drawer from '../Drawer';
 import { cn } from '../../../utils/classNames';
 import { useOverlayEffect } from '../../../machines/stateMachine';
+import { useGlassActive } from '../../../hooks/useGlassMode';
 
 export interface DialogProps {
   trigger?: ReactNode;
@@ -71,6 +72,7 @@ export const Dialog = ({
   testId,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
+  const glassActive = useGlassActive();
   useOverlayEffect(open ?? false);
 
   // Detect screen size changes
@@ -114,7 +116,8 @@ export const Dialog = ({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 bg-black/50 backdrop-blur-sm',
+            'fixed inset-0 transition-[background-color,backdrop-filter]',
+            glassActive ? 'bg-black/85 backdrop-blur-[1px]' : 'bg-black/50 backdrop-blur-sm',
             zIndexClassName,
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
