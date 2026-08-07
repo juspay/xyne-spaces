@@ -19,7 +19,7 @@ export const heisenbergAdapter: StdioMcpAdapter = {
   type: "heisenberg",
   credentialFields: [],
   healthCheck: { name: "heisenberg_health", params: {} },
-  writeTools: [],
+  writeTools: ["heisenberg_start_pipeline", "heisenberg_index_logs"],
   staticTools: HEISENBERG_TOOL_NAMES,
   buildCommand(credentials) {
     const baseUrl = String(credentials["baseUrl"] ?? CONFIG.heisenbergBaseUrl).replace(/\/+$/, "");

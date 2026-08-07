@@ -526,7 +526,7 @@ const SERVERS = [
     transport: "stdio",
     credentialForm: { fields: [] },
     healthcheckSpec: { name: "heisenberg_health", params: {} },
-    writeToolPolicy: { mode: "allowlist", tools: [] },
+    writeToolPolicy: { mode: "allowlist", tools: ["heisenberg_start_pipeline", "heisenberg_index_logs"] },
   },
 ] as const;
 

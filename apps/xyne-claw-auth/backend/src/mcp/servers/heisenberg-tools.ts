@@ -383,7 +383,7 @@ const health: HeisenbergTool = {
 const startPipeline: HeisenbergTool = {
   name: "heisenberg_start_pipeline",
   description:
-    "Queue a Heisenberg pipeline for an explicit pull request. This creates a pipeline/Kubernetes job.",
+    "Queue a Heisenberg pipeline for an explicit pull request. This creates a pipeline/Kubernetes job and requires user approval.",
   inputSchema: {
     type: "object",
     properties: {
@@ -503,7 +503,7 @@ const getTestsuiteDetails: HeisenbergTool = {
 const indexLogs: HeisenbergTool = {
   name: "heisenberg_index_logs",
   description:
-    "Queue asynchronous Elasticsearch indexing for a completed Heisenberg log archive.",
+    "Queue asynchronous Elasticsearch indexing for a completed Heisenberg log archive. This requires user approval.",
   inputSchema: {
     type: "object",
     properties: { id: requestIdInputSchema },
