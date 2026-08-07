@@ -63,6 +63,13 @@ describe("/design task command", () => {
     expect(result.injection.content).toContain("# Brand\nUse #123456");
   });
 
+  it("injects the same design system contract for /dashboard runs", () => {
+    const result = buildDesignSystemPromptInjection(parseTaskCommand("/dashboard reliability"), {
+      designSystem: "# Operations brand",
+    });
+    expect(result.status).toBe("injected");
+  });
+
   it("skips the design system contract when absent or empty", () => {
     const command = parseTaskCommand("/design page");
     expect(buildDesignSystemPromptInjection(command, {}).status).toBe("absent");
@@ -82,6 +89,47 @@ describe("/design task command", () => {
     expect(result.status).toBe("oversized");
     if (result.status !== "oversized") throw new Error("expected oversized result");
     expect(result.length).toBe(DESIGN_SYSTEM_MAX_CHARS + 1);
+  });
+});
+
+describe("/dashboard task command", () => {
+  it("matches only the leading command token and runs immediately", () => {
+    expect(parseTaskCommand("/dashboard error rates")?.command).toBe("/dashboard");
+    expect(parseTaskCommand("  /DASHBOARD\nlatency by service")?.command).toBe("/dashboard");
+    expect(parseTaskCommand("please /dashboard latency")).toBeNull();
+    expect(parseTaskCommand("/dashboards latency")).toBeNull();
+    expect(resolveTaskCommandMode("/dashboard latency", "plan")).toBe("auto");
+  });
+
+  it("mounts the browser artifact workflow and real-data contract", () => {
+    const command = parseTaskCommand("/dashboard latency");
+    expect(command?.requiredTool).toBe("sandbox-deliver-files");
+    expect(command?.sandboxProfile).toBe("browser");
+    expect(command?.skillPaths).toEqual(["design-skills"]);
+    expect(command?.autoTools).toContain("sandbox-pw-screenshot");
+    expect(command?.autoTools).toContain("schedule-task");
+    expect(command?.instruction).toContain("Never invent");
+    expect(command?.instruction).toContain("Data as of");
+    expect(command?.instruction).toContain("Keep runtime credentials");
+    expect(command?.nudge).toContain("stop without delivering a fake dashboard");
+
+    const loaded = loadCustomTools(
+      { tools: { custom: [] } },
+      { userId: "u1", conversationId: "c1", agentSlug: "a1", taskCommand: "/dashboard" },
+      undefined,
+      undefined,
+      undefined,
+      "session-1",
+      "s2s-key",
+      "session-token",
+      undefined,
+      undefined,
+      undefined,
+      command?.autoTools,
+    );
+    const names = loaded.tools.map((tool) => tool.name);
+    expect(names).toContain("sandbox-deliver-files");
+    expect(names).toContain("schedule-task");
   });
 });
 

@@ -90,7 +90,7 @@ export async function upsertDesignShare(params: {
   attachmentId: string;
   title: string;
   expiresAt: Date | null;
-}): Promise<{ id: string; sharePath: string }> {
+}): Promise<{ id: string; sharePath: string; linkChanged: boolean }> {
   const { ownerUserId, orgId, conversationId, attachmentId, expiresAt } = params;
   const title = params.title.slice(0, 160) || "Untitled design";
   const existing = await prisma.designArtifactShare.findUnique({
@@ -106,7 +106,7 @@ export async function upsertDesignShare(params: {
         where: { id: existing.id },
         data: { attachmentId, title, expiresAt },
       });
-      return { id: share.id, sharePath: sharePath(rawToken) };
+      return { id: share.id, sharePath: sharePath(rawToken), linkChanged: false };
     } catch {
       const token = makeToken();
       const share = await prisma.designArtifactShare.update({
@@ -122,7 +122,7 @@ export async function upsertDesignShare(params: {
           revokedAt: null,
         },
       });
-      return { id: share.id, sharePath: sharePath(token.raw) };
+      return { id: share.id, sharePath: sharePath(token.raw), linkChanged: true };
     }
   }
 
@@ -157,7 +157,7 @@ export async function upsertDesignShare(params: {
           expiresAt,
         },
       });
-  return { id: share.id, sharePath: sharePath(token.raw) };
+  return { id: share.id, sharePath: sharePath(token.raw), linkChanged: true };
 }
 
 /** Publish or update the stable share link for one Design Studio conversation. */

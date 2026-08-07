@@ -28,6 +28,7 @@ import {
   type ScheduledJobData,
 } from "../queue/scheduled-jobs-queue.js";
 import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
+import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -1127,6 +1128,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
 
   log.info(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
   res.json({ success: true });
+  let resultChatMessageId: string | null = null;
 
   if (payload.status === "handoff") {
     log.info(`[scheduled-jobs/result] Job ${id}: handoff callback session=${payload.sessionId ?? ""} lastTurn=${payload.lastTurn ?? "unknown"}`);
@@ -1158,18 +1160,22 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
     }).catch(() => {});
 
-    if (payload.result?.trim()) {
+    if (payload.result?.trim() || payload.attachments?.length) {
       const run = await agentRunRepository.findBySessionId(payload.sessionId).catch(() => null);
       if (run?.conversationId && run.agentSlug && run.userId) {
-        chatMessageRepository.create({
+        const message = await chatMessageRepository.create({
           conversationId: run.conversationId,
           agentSlug: run.agentSlug,
           userId: run.userId,
           role: "assistant",
-          content: payload.result,
+          content: payload.result ?? "",
           status: "completed",
           orgId: run.orgId ?? null,
-        }).catch(() => {});
+        }).catch((err) => {
+          log.warn(`[scheduled-jobs/result] Job ${id}: failed to persist assistant message:`, err instanceof Error ? err.message : err);
+          return null;
+        });
+        resultChatMessageId = message?.id ?? null;
       }
     }
   }
@@ -1219,6 +1225,32 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     return;
   }
 
+  let dashboardShareAnnouncement: string | null = null;
+  if (payload.status === "completed" && isDashboardTask(row.task) && resultChatMessageId) {
+    try {
+      const refreshed = await refreshScheduledDashboardShare({
+        task: row.task,
+        chatMessageId: resultChatMessageId,
+        ownerUserId: row.userId,
+        orgId: row.orgId,
+        conversationId: row.conversationId,
+        attachments: payload.attachments,
+      });
+      if (refreshed.share) {
+        const share = refreshed.share;
+        if (share.linkChanged) {
+          const link = `${CONFIG.frontendUrl.replace(/\/+$/, "")}${share.sharePath}`;
+          dashboardShareAnnouncement = `🔗 **Live dashboard:** ${link}\nThe same link updates after each successful refresh.`;
+        }
+        log.info(`[scheduled-jobs/result] Job ${id}: refreshed dashboard share=${share.id} conversation=${row.conversationId}`);
+      } else {
+        log.warn(`[scheduled-jobs/result] Job ${id}: /dashboard share not refreshed reason=${refreshed.reason}`);
+      }
+    } catch (err) {
+      log.warn(`[scheduled-jobs/result] Job ${id}: dashboard share refresh failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   if (payload.sessionId && payload.status === "completed") {
     await handleRunCompletion(payload.sessionId, "completed").catch((err) => {
       log.warn(`[scheduled-jobs/result] handleRunCompletion completed failed for ${payload.sessionId}:`, err instanceof Error ? err.message : err);
@@ -1254,7 +1286,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     });
     return;
   }
-  if (!payload.result) {
+  if (!payload.result && !payload.attachments?.length) {
     // Completed with nothing to deliver — not a failure; do not alarm the thread.
     log.info(`[scheduled-jobs/result] Job ${id}: completed with empty result — nothing to post`);
     return;
@@ -1294,7 +1326,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   // run acts on their behalf), then expand to the HTML span format. Both
   // steps degrade gracefully: no session → bracketed forms still expand;
   // lookup misses → text left as-is.
-  let resultText = payload.result;
+  let resultText = payload.result ?? "";
   try {
     const senderAuth = row.userId
       ? await getSpacesAuthForUser(row.userId, "scheduled-job").catch(() => null)
@@ -1319,6 +1351,11 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     log.warn(`[scheduled-jobs/result] Job ${id}: mention resolution failed, posting unresolved text:`, err instanceof Error ? err.message : err);
   }
   resultText = expandSpacesMentions(resultText);
+  if (dashboardShareAnnouncement) {
+    resultText = resultText.trim()
+      ? `${resultText.trim()}\n\n${dashboardShareAnnouncement}`
+      : dashboardShareAnnouncement;
+  }
 
   try {
     // Spaces' app API requires `workspaceId` on postMessage and openDm. We

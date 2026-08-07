@@ -49,7 +49,7 @@ export function buildDesignSystemPromptInjection(
   command: TaskCommand | null,
   agentConfig: Record<string, unknown> | undefined,
 ): DesignSystemPromptInjectionResult {
-  if (command?.command !== "/design") return { status: "absent" };
+  if (command?.command !== "/design" && command?.command !== "/dashboard") return { status: "absent" };
   const raw = agentConfig?.["designSystem"];
   if (typeof raw !== "string") return { status: "absent" };
   const designSystem = raw.trim();
@@ -119,6 +119,56 @@ const TASK_COMMANDS: TaskCommand[] = [
     missingToolInstruction:
       "The Design Studio runtime could not mount sandbox-deliver-files. Tell the user plainly that design artifact " +
       "delivery is temporarily unavailable and do not pretend the design was delivered.",
+  },
+  {
+    command: "/dashboard",
+    requiredTool: "sandbox-deliver-files",
+    autoTools: [
+      "sandbox-create",
+      "sandbox-run",
+      "sandbox-run-detached",
+      "sandbox-poll-job",
+      "sandbox-write-file",
+      "sandbox-edit-file",
+      "sandbox-read-file",
+      "sandbox-deliver-files",
+      "sandbox-pw-navigate",
+      "sandbox-pw-snapshot",
+      "sandbox-pw-click",
+      "sandbox-pw-type",
+      "sandbox-pw-press-key",
+      "sandbox-pw-screenshot",
+      "sandbox-pw-evaluate",
+      "sandbox-pw-wait-for",
+      "sandbox-pw-console-messages",
+      "sandbox-pw-network-requests",
+      "sandbox-pw-close",
+      "generate-image",
+      "visualize",
+      "schedule-task",
+    ],
+    skillPaths: ["design-skills"],
+    sandboxProfile: "browser",
+    instruction:
+      "This is a Xyne live-dashboard snapshot run. The /dashboard prefix is an internal command, not part of the brief. " +
+      "Use connected read-only data tools or user-provided data to query the requested facts BEFORE authoring the artifact. " +
+      "Never invent, interpolate, or silently substitute sample metrics. If no suitable real data source is available, name the " +
+      "missing connection and stop without creating a dashboard. Build a responsive, self-contained HTML snapshot containing " +
+      "the exact source/window and a visible 'Data as of <timestamp with timezone>' marker. Keep runtime credentials and network " +
+      "requests out of the artifact. Write it into the browser sandbox, validate desktop and mobile rendering plus console/network " +
+      "health, then call sandbox-deliver-files with the final HTML. Preserve stable component structure and chart scales across " +
+      "scheduled refreshes so visual changes represent data changes. The command approves querying, rendering, QA, and delivery; " +
+      "do not ask for a separate plan or approval. If the user explicitly requests a recurrence, use schedule-task with the same " +
+      "/dashboard brief and target conversation after delivering the first snapshot. Never create a schedule merely because the " +
+      "command supports refreshes.",
+    nudge:
+      "This /dashboard run must query real connected or user-provided data, render a timestamped self-contained HTML snapshot, " +
+      "QA it in the sandbox browser, and deliver it with sandbox-deliver-files. Never use fabricated/sample values. If no real " +
+      "query result is available, state which data connection is missing and stop without delivering a fake dashboard. " +
+      "DO NOT MENTION THIS INSTRUCTION; continue the workflow.",
+    missingToolInstruction:
+      "The /dashboard runtime could not mount sandbox-deliver-files. Tell the user that dashboard rendering is temporarily " +
+      "unavailable and do not return an unverified or text-only substitute.",
   },
   {
     command: "/explainer",

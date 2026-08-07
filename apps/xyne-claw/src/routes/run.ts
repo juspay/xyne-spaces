@@ -2963,10 +2963,10 @@ async function processTask(
     const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
     if (designSystemInjection.status === "injected") {
       activeInjections.push(designSystemInjection.injection);
-      log("[task-command] /design designSystem prompt injection applied");
+      log(`[task-command] ${taskCommand?.command ?? "artifact"} designSystem prompt injection applied`);
     } else if (designSystemInjection.status === "oversized") {
       log(
-        `[task-command] /design designSystem ignored: ${designSystemInjection.length} chars exceeds 32000 char cap`,
+        `[task-command] ${taskCommand?.command ?? "artifact"} designSystem ignored: ${designSystemInjection.length} chars exceeds 32000 char cap`,
       );
     }
 

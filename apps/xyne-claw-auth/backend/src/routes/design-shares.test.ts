@@ -151,6 +151,29 @@ describe("design artifact sharing", () => {
     expect(state.share?.["attachmentId"]).toBe("attachment-2");
   });
 
+  it("reports whether an upsert created or rotated the stable link", async () => {
+    const { upsertDesignShare } = await import("./design-shares.js");
+    const first = await upsertDesignShare({
+      ownerUserId: "user-1",
+      orgId: "org-1",
+      conversationId: "conv-1",
+      attachmentId: "attachment-1",
+      title: "Dashboard",
+      expiresAt: null,
+    });
+    const refreshed = await upsertDesignShare({
+      ownerUserId: "user-1",
+      orgId: "org-1",
+      conversationId: "conv-1",
+      attachmentId: "attachment-2",
+      title: "Dashboard",
+      expiresAt: null,
+    });
+    expect(first.linkChanged).toBe(true);
+    expect(refreshed.linkChanged).toBe(false);
+    expect(refreshed.sharePath).toBe(first.sharePath);
+  });
+
   it("serves metadata only for the bearer and fails closed after revocation", async () => {
     const published = await requestJson("owner", "POST", "/", {
       body: { attachmentId: "attachment-1", conversationId: "conv-1", title: "Checkout" },
