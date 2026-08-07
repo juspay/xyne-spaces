@@ -71,7 +71,7 @@ import {
 } from "../queue/run-recovery-worker.js";
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
-import { gcsService } from "../services/gcsService.js";
+import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
@@ -1489,7 +1489,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // tokens from the user's prose, so "@Bot how do I use /explainer" would lose
   // "how do I use" and force command mode on a question.
   const taskCommandText = stripLeadingAgentMention(userText, [agent.name, agent.slug]);
-  const immediateTaskCommand = /^\/(?:explainer|record-skill)(?:\s|$)/i.test(taskCommandText);
+  // KEEP IN SYNC with TASK_COMMANDS in apps/xyne-claw/src/task-commands.ts —
+  // a command missing here ships with the mention un-stripped, so claw never
+  // sees it at byte zero and the whole contract silently degrades (bit /design
+  // in prod 2026-08-08). Proper fix: shared registry in xyne-claw-shared.
+  const immediateTaskCommand = /^\/(?:explainer|record-skill|design)(?:\s|$)/i.test(taskCommandText);
   const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
@@ -3916,51 +3920,25 @@ async function persistCallbackAttachments(
   uploaderUserId: string,
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
 ): Promise<Array<{ id: string; originalFilename: string; mimeType: string }>> {
-  const created: Array<{ id: string; originalFilename: string; mimeType: string }> = [];
-  if (!attachments?.length) return created;
-  const now = new Date();
-  const year = String(now.getUTCFullYear());
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  for (const att of attachments) {
-    try {
-      const buffer = Buffer.from(att.data, "base64");
-      const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
-      const destPath = `chat-attachments/${uploaderUserId}/${year}/${month}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
-      await gcsService.uploadFile(buffer, destPath, att.mimeType);
-      const row = await prisma.chatAttachment.create({
-        data: {
-          chatMessageId,
-          uploaderUserId,
-          storageProvider: "gcs",
-          url: destPath,
-          originalFilename: att.fileName,
-          mimeType: att.mimeType,
-          size: buffer.length,
-        },
-      });
-      created.push({ id: row.id, originalFilename: row.originalFilename, mimeType: row.mimeType });
-    } catch (err) {
-      clog.warn(`[webhook/result] failed to persist attachment ${att.fileName}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  return created;
+  return persistBase64ChatAttachments(chatMessageId, uploaderUserId, attachments);
 }
 
 /**
- * Auto-publish for /design runs delivered into Spaces threads: the thread
+ * Auto-publish for /design and /dashboard runs delivered into Spaces threads: the thread
  * already holds the artifact file, so mint (or refresh) the conversation's
  * stable share link and post it — one click to the rendered design instead of
  * a download. Reuses the Studio share model: per (owner, conversation) row,
  * revocable from Studio, opaque-origin serving. Best-effort — a share failure
  * must never disturb the delivered result.
  */
-async function publishThreadDesignShare(
+async function publishThreadArtifactShare(
   ctx: SessionContext,
   runOwnerId: string,
   created: Array<{ id: string; originalFilename: string; mimeType: string }>,
 ): Promise<void> {
   try {
-    if (!ctx.task?.trimStart().toLowerCase().startsWith("/design")) return;
+    const command = ctx.task?.trimStart().toLowerCase().match(/^\/(design|dashboard)(?:\s|$)/)?.[1];
+    if (!command) return;
     if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
     const html = [...created].reverse().find((a) =>
       a.mimeType.toLowerCase().includes("html") || a.originalFilename.toLowerCase().endsWith(".html"),
@@ -3978,7 +3956,7 @@ async function publishThreadDesignShare(
     await spacesAppFetch("/chat/postMessage", {
       channelId: ctx.channelId,
       conversationId: ctx.conversationId,
-      markdownText: `🔗 **Live design:** ${link}\nOpens the rendered design in the browser — same link updates with future revisions in this thread.`,
+      markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
       userId: ctx.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, ctx.appToken);
@@ -4781,7 +4759,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // silently dropped them, so pipeline/automation runs never showed
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
         .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .then((created) => publishThreadDesignShare(ctx, runOwnerId, created))
+        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
         .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
@@ -4870,7 +4848,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // transcript row (Spaces gets them as posted files, but the claw chat
       // UI reads chat_attachments).
       .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .then((created) => publishThreadDesignShare(ctx, runOwnerId, created))
+        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
   }
 
