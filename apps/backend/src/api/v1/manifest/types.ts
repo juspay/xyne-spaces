@@ -14,7 +14,7 @@
  * than an API change.
  */
 
-import type { Request } from 'express';
+import type { Request, RequestHandler } from 'express';
 import type { Scope } from '@xyne/spaces-contract';
 import type { ZodTypeAny } from 'zod';
 import type { SdkAuth } from '../middleware/authn';
@@ -52,6 +52,9 @@ export interface RouteDefinition {
   readonly summary: string;
   readonly scope: Scope;
   readonly idempotency: IdempotencyPolicy;
+
+  /** Route-local parsing such as multipart/form-data handling. */
+  readonly middleware?: readonly RequestHandler[];
 
   /** Catalog query names this route reads from (for the coverage checker). */
   readonly queries?: readonly string[];

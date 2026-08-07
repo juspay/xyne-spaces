@@ -11,11 +11,13 @@
  * still applies and you get nothing back), so it defaults to `true`.
  */
 
-import { query, mutator } from './types.js';
+import { api, query, mutator } from './types.js';
 import { newId, now } from '../core/ids.js';
+import { appendFiles, appendOptional } from '../core/form-data.js';
 import type {
   Conversation,
   ConversationParticipant,
+  CreateConversationWithAttachmentsInput,
   Message,
   MessageType,
 } from '../types/index.js';
@@ -27,6 +29,43 @@ export interface ConversationCursor {
 }
 
 export const conversationsOperations = {
+  // ----- Direct API operations -----
+
+  /**
+   * Start a thread while uploading file bytes in the same request.
+   * Maps to: POST /api/v1/channels/:channelId/conversations
+   */
+  createWithAttachments: api<
+    CreateConversationWithAttachmentsInput,
+    { conversationId: string; messageId: string }
+  >(
+    'POST',
+    (args) => `/api/v1/channels/${encodeURIComponent(args.channelId)}/conversations`,
+    {
+      mapArgs: (args) => {
+        const form = new FormData();
+        appendOptional(form, 'content', args.content);
+        appendOptional(form, 'msgType', args.msgType);
+        appendOptional(form, 'visibleTo', args.visibleTo);
+        appendFiles(form, args.files, { includeThumbnails: true });
+        return form;
+      },
+      mapResult: (raw) => {
+        const result = raw as {
+          conversationId: string;
+          messageId?: string;
+          initialMessage?: { messageId: string };
+        };
+        const messageId = result.initialMessage?.messageId ?? result.messageId;
+        if (!messageId) throw new Error('Conversation response did not include a message id');
+        return {
+          conversationId: result.conversationId,
+          messageId,
+        };
+      },
+    }
+  ),
+
   // ----- Reads -----
 
   /**

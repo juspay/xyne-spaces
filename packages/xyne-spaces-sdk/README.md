@@ -1,6 +1,6 @@
 # @xyne/spaces-sdk
 
-TypeScript SDK for Xyne Spaces. **449 methods across 23 resources**, covering the
+TypeScript SDK for Xyne Spaces. **455 methods across 24 resources**, covering the
 complete operation catalog — every read and write the Spaces product itself
 performs.
 
@@ -15,8 +15,14 @@ const sdk = createClient({
 const me = await sdk.users.me();
 const channels = await sdk.channels.list();
 
+const { id: channelId } = await sdk.channels.create({
+  scopeType: 'DEFAULT',
+  projectId: 'project-1',
+  name: 'Deployments',
+});
+
 const { conversationId } = await sdk.conversations.create({
-  channelId: channels[0].channelId,
+  channelId,
   content: 'Deploy is green.',
 });
 
@@ -58,14 +64,15 @@ await sdk.dashboards.upsert({ name: 'Ops', createdBy: me.id });
 | Resource | Methods |
 |---|---|
 | `sdk.activities` | 14 |
+| `sdk.attachments` | 2 |
 | `sdk.admin` | 31 |
 | `sdk.automations` | 13 |
 | `sdk.boards` | 22 |
 | `sdk.calls` | 24 |
 | `sdk.canvases` | 38 |
-| `sdk.channels` | 39 |
+| `sdk.channels` | 41 |
 | `sdk.collections` | 11 |
-| `sdk.conversations` | 20 |
+| `sdk.conversations` | 21 |
 | `sdk.dashboards` | 8 |
 | `sdk.email` | 27 |
 | `sdk.forms` | 13 |
@@ -76,7 +83,7 @@ await sdk.dashboards.upsert({ name: 'Ops', createdBy: me.id });
 | `sdk.recaps` | 10 |
 | `sdk.search` | 2 |
 | `sdk.supportTickets` | 6 |
-| `sdk.tickets` | 40 |
+| `sdk.tickets` | 41 |
 | `sdk.userGroups` | 18 |
 | `sdk.users` | 6 |
 | `sdk.workspace` | 20 |
@@ -87,16 +94,37 @@ await sdk.dashboards.upsert({ name: 'Ops', createdBy: me.id });
 starts a thread; `sdk.messages.send` replies into one. Reaching for
 `messages.send` to start a conversation is the most common early mistake.
 
-**Ids come back from creates.** Mutations return nothing server-side, so the SDK
-generates the row ids, sends them, and returns them to you:
+**Ids come back from creates.** For catalog mutations, the SDK generates the row
+ids before sending; server-side creation workflows return their allocated ids:
 
 ```typescript
 const { conversationId, messageId } = await sdk.conversations.create({ ... });
 const { id } = await sdk.canvases.create({ title: 'Design notes' });
+const { id: channelId } = await sdk.channels.create({ ... });
+const { id: ticketId } = await sdk.tickets.create({ ... });
 ```
 
 You never construct these ids yourself, and you never see the participant ids,
 mapping ids, or timestamps the underlying operations also require.
+
+**File bytes use the API transport.** Pass browser `File` objects directly, or
+use `{ file: blob, filename: 'report.pdf' }` in Node. Draft uploads return ids
+that catalog-backed message and ticket methods can reference:
+
+```typescript
+const uploaded = await sdk.attachments.uploadDraft({
+  channelId,
+  files: [reportFile],
+});
+
+await sdk.messages.send({
+  conversationId,
+  content: 'Report attached.',
+  attachmentIds: uploaded.uploadedAttachments
+    .filter((item) => item.success)
+    .map((item) => item.attachmentId),
+});
+```
 
 **Some updates replace rather than patch.** These take the *complete* collection
 and delete anything you leave out. Read the current set first:
@@ -154,9 +182,9 @@ TypeScript can catch, since the registries reference operations by string.
 The 42 exclusions are superseded versions (`…V1` where `…V3` is exposed), plus one
 the backend itself marks deprecated.
 
-A handful of operations are absent because they are not in the catalog at all —
-creating channels and tickets, and uploading files, which go through Express
-routes. See [GAPS.md](./GAPS.md).
+Operations absent from the catalog—creating channels and tickets and uploading
+files—use the same direct API operation structure as search. See
+[GAPS.md](./GAPS.md).
 
 ## Architecture
 
@@ -182,8 +210,9 @@ join(channelId: string): Promise<void> {
 
 Operations route to one of three backends, chosen per operation and invisible to
 callers: Zero queries for reads, Zero mutators for writes, and direct API calls
-for anything outside the catalog (currently search). Moving an operation between
-them is a one-line registry change with no effect on calling code.
+for anything outside the catalog. Search established the direct API pattern;
+server-side channel/ticket creation and multipart uploads now use it too. Moving
+an operation between transports does not change the resource method callers use.
 
 ## Development
 

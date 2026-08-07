@@ -29,6 +29,7 @@ import { AutomationsResource } from './resources/automations.js';
 import { IncidentsResource } from './resources/incidents.js';
 import { PreferencesResource } from './resources/preferences.js';
 import { WorkspaceResource } from './resources/workspace.js';
+import { AttachmentsResource } from './resources/attachments.js';
 
 export interface SpacesClientOptions {
   /**
@@ -79,6 +80,9 @@ export class SpacesClient {
 
   /** Search operations */
   readonly search: SearchResource;
+
+  /** Direct multipart file uploads */
+  readonly attachments: AttachmentsResource;
 
   /** Channel membership, settings, participants, and sidebar sections */
   readonly channels: ChannelsResource;
@@ -155,6 +159,7 @@ export class SpacesClient {
     // Initialize resources
     this.users = new UsersResource(this.transport);
     this.search = new SearchResource(this.transport);
+    this.attachments = new AttachmentsResource(this.transport);
     this.channels = new ChannelsResource(this.transport);
     this.conversations = new ConversationsResource(this.transport);
     this.messages = new MessagesResource(this.transport);

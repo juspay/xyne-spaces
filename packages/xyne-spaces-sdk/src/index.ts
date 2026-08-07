@@ -44,6 +44,10 @@ export type {
   MessageType,
   ChannelRole,
   ChannelSortOrder,
+  ChannelScopeType,
+  ChannelVisibility,
+  ChannelType,
+  DeskType,
   // Users
   User,
   UserProfile,
@@ -53,13 +57,21 @@ export type {
   ChannelParticipant,
   ChannelUserStatus,
   ChannelSection,
+  CreateChannelInput,
+  CheckDuplicateChannelResponse,
   // Messages
   Message,
   MessageAttachment,
+  UploadFileInput,
+  UploadedAttachment,
+  AttachmentUploadResponse,
+  DraftAttachmentUploadResult,
+  DraftAttachmentUploadResponse,
   Reaction,
   // Conversations
   Conversation,
   ConversationParticipant,
+  CreateConversationWithAttachmentsInput,
   // Activities
   Activity,
   // Tickets
@@ -68,6 +80,8 @@ export type {
   TicketPriority,
   TicketStatusV2,
   TicketStageRequest,
+  CreateTicketInput,
+  CreateTicketResponse,
   StageRequestStatus,
   // Boards & projects
   Board,
@@ -124,6 +138,10 @@ export type { EmailCursor, EmailDraftCursor } from './registry/email.js';
 export type { AppCursor, RoleCursor } from './registry/admin.js';
 export type { WorkflowCursor } from './registry/automations.js';
 export type { RcaCursor } from './registry/incidents.js';
+export type {
+  UploadAttachmentsInput,
+  UploadDraftAttachmentsInput,
+} from './registry/attachments.js';
 
 // ----- Registry Types (for advanced usage) -----
 export type {

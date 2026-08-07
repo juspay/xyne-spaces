@@ -10,7 +10,7 @@
  * `mapArgs` so SDK callers never see them.
  */
 
-import { query, mutator } from './types.js';
+import { api, query, mutator } from './types.js';
 import { newId, newIdMap, now } from '../core/ids.js';
 import type {
   Channel,
@@ -18,9 +18,33 @@ import type {
   ChannelRole,
   ChannelSection,
   ChannelUserStatus,
+  CheckDuplicateChannelResponse,
+  CreateChannelInput,
 } from '../types/index.js';
 
 export const channelsOperations = {
+  // ----- Direct API operations -----
+
+  /**
+   * Create a channel and its associated server-owned rows atomically.
+   * Maps to: POST /api/v1/channels
+   */
+  create: api<CreateChannelInput, { id: string }>('POST', '/api/v1/channels', {
+    mapResult: (raw) => {
+      const result = raw as { id: string; channelId?: string };
+      return { id: result.channelId ?? result.id };
+    },
+  }),
+
+  /**
+   * Check channel-name uniqueness before presenting a create action.
+   * Maps to: POST /api/v1/channels/check-duplicate
+   */
+  checkDuplicate: api<
+    { name: string; projectId: string },
+    CheckDuplicateChannelResponse
+  >('POST', '/api/v1/channels/check-duplicate'),
+
   // ----- Reads -----
 
   /**
