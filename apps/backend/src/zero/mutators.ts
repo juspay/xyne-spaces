@@ -2628,6 +2628,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error("Conversation doesn't exist");
           }
 
+          // Pinning writes to a conversation, so it needs the same audience that
+          // reading one does: a public channel, or membership of a private one.
+          const channel = await tx.run(
+            zql.channels.where('id', conversation.channelId).one(),
+          );
+          if (!channel) {
+            throw new Error("Conversation doesn't exist");
+          }
+          if (channel.visibility !== ChannelVisibility.PUBLIC) {
+            const participant = await tx.run(
+              zql.channel_participants
+                .where('channelId', conversation.channelId)
+                .where('userId', authData.sub)
+                .one(),
+            );
+            if (!participant) {
+              throw new Error('You are not a participant of this channel');
+            }
+          }
+
           await tx.mutate.conversations.update({
             conversationId,
             pinned: !conversation.pinned,
