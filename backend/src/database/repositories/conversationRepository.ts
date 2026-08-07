@@ -146,6 +146,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
   async incrementReplyCount(
     conversationId: string,
     replyCreatedAt?: Date | null,
+    markParticipantsRead = false,
   ): Promise<Conversation> {
     const conversation = await this.findById(conversationId);
     if (!conversation) {
@@ -167,6 +168,16 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         },
         data: { lastReplyAt: effectiveReplyCreatedAt },
       });
+
+      if (markParticipantsRead) {
+        await this.db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: effectiveReplyCreatedAt } }],
+          },
+          data: { lastReadAt: effectiveReplyCreatedAt },
+        });
+      }
     }
 
     return result;
