@@ -344,30 +344,27 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       />
     ),
     children: (
-      <div className='flex items-center gap-2'>
+      <div className='flex items-center gap-2 min-w-0'>
         <Avatar
           userId={u.id}
           size={'sm'}
           showActiveStatus={false}
           className='rounded-md size-[18px] flex items-center justify-center bg-background'
         />
-        <div className='flex-1 w-full flex items-center gap-1.5'>
-          <span className={`text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : ''}`}>
-            {getUserDisplayName(u).split(' ')[0]}
-          </span>
-          {!isUserDeactivated(u) && (
-            <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-          )}
-          <span
-            className={`text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-gray-500'}`}
-          >
-            {getUserDisplayName(u)}
-          </span>
-          {isUserDeactivated(u) && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-              Deactivated
+        <div className='flex-1 min-w-0 text-left'>
+          <div className='flex items-center gap-1.5'>
+            <span
+              className={`truncate text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-foreground'}`}
+            >
+              {getUserDisplayName(u)}
             </span>
-          )}
+            {isUserDeactivated(u) && (
+              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                Deactivated
+              </span>
+            )}
+          </div>
+          {u.email && <div className='truncate text-xs text-muted-foreground'>{u.email}</div>}
         </div>
       </div>
     ),

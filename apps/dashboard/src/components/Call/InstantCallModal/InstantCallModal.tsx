@@ -7,7 +7,7 @@ import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import {
   parseParticipants,
   matchParticipants,
@@ -73,31 +73,28 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             />
           ),
           children: (
-            <div className='flex items-center gap-2'>
+            <div className='flex items-center gap-2 min-w-0'>
               <Avatar
                 userId={user.id}
                 size={'sm'}
                 showActiveStatus={false}
                 className='rounded-md size-[18px] flex items-center justify-center bg-background'
               />
-              <div className='flex-1 w-full flex items-center gap-1.5'>
-                <span
-                  className={`text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : ''}`}
-                >
-                  {user.name.split(' ')[0]}
-                </span>
-                {!isUserDeactivated(user) && (
-                  <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-                )}
-                <span
-                  className={`text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-muted-foreground'}`}
-                >
-                  {user.name}
-                </span>
-                {isUserDeactivated(user) && (
-                  <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                    Deactivated
+              <div className='flex-1 min-w-0 text-left'>
+                <div className='flex items-center gap-1.5'>
+                  <span
+                    className={`truncate text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
+                  >
+                    {getUserDisplayName(user)}
                   </span>
+                  {isUserDeactivated(user) && (
+                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                      Deactivated
+                    </span>
+                  )}
+                </div>
+                {user.email && (
+                  <div className='truncate text-xs text-muted-foreground'>{user.email}</div>
                 )}
               </div>
             </div>
