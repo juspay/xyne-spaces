@@ -58,20 +58,11 @@ import { queries } from '../../../zero/queries';
 import { useUsers } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useComposeSubjectAI } from '../../../hooks/useComposeSubjectAI';
-import { AutoDraftStatus } from '@xyne/shared';
-import {
-  useEmailDraft,
-  useEmailDraftOperations,
-  type EmailDraftRecord,
-} from '../../../hooks/useEmailDraft';
-import {
-  useComposeDraftOperations,
-  parseComposeDraftRow,
-  type ComposeDraftRecord,
-} from '../../../hooks/useComposeDraft';
+import { AutoDraftStatus, type EmailChannelPreference } from '@xyne/shared';
+import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
+import { useComposeDraftOperations, type ComposeDraftRecord } from '../../../hooks/useComposeDraft';
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
-import { useChannelConnectedEmail } from '../../../hooks/useChannelConnectedEmail';
 import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 
 import { DraftCard } from '../DraftCard/DraftCard';
@@ -183,6 +174,10 @@ const sameEmailList = (a: string[] | null | undefined, b: string[] | null | unde
 
 interface EmailComposerProps {
   conversationId?: string | null | undefined;
+  drafts?: readonly EmailDraftRecord[];
+  composeDrafts?: readonly ComposeDraftRecord[];
+  composeDraftsLoaded?: boolean;
+  channelConnectedEmail: string;
   emails?: ReadonlyArray<ComposerEmail> | undefined;
   onClose?: () => void;
   onDiscard?: () => void;
@@ -217,10 +212,16 @@ interface EmailComposerProps {
   showSeeSources?: boolean;
   /** Pre-fill the To field when the composer mounts (draft restoration takes precedence). */
   initialTo?: string[];
+  channelPreference: EmailChannelPreference | undefined;
+  channelPreferenceLoaded: boolean;
 }
 
 export const EmailComposer = ({
   conversationId,
+  drafts,
+  composeDrafts = [],
+  composeDraftsLoaded = false,
+  channelConnectedEmail,
   emails: propEmails,
   onClose,
   onDiscard,
@@ -243,6 +244,8 @@ export const EmailComposer = ({
   onSeeSources,
   showSeeSources = false,
   initialTo,
+  channelPreference,
+  channelPreferenceLoaded,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
@@ -252,30 +255,19 @@ export const EmailComposer = ({
   // One-shot AI helper for the wand button next to the Subject field.
   const subjectAI = useComposeSubjectAI(channelId ?? null);
   const emails = propEmails;
-  // Use the existing `useChannelConnectedEmail` API for the desk's mailbox
-  // address. Contacts still come from the desk-mailbox address book hook.
-  const channelConnectedEmail = useChannelConnectedEmail(channelId || null);
-  // Use the raw query so we get `details.type` to distinguish "not loaded yet"
-  // from "loaded but no preference row" — both return undefined for
-  // channelPreference otherwise, which would stall the default-CC seeding.
-  const [channelPreferenceList, channelPreferenceDetails] = useCachedQuery(
-    queries.getEmailChannelPreference({ channelId: channelId || '' }),
-    { enabled: !!channelId },
-  );
-  const channelPreference = channelPreferenceList?.[0];
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const clawAgents = useChannelClawAgents(channelId || null);
   const draftAgentName =
     clawAgents.find(a => a.slug === channelPreference?.autoDraftAgentSlug)?.name ?? 'Xyne AI';
   const deskContacts = useDeskContacts(channelId);
-  const draft: EmailDraftRecord | undefined = useEmailDraft(conversationId);
   const {
     saveDraft,
     saveRecipients,
     deleteDraft,
     draftId,
     draft: ownDraft,
-  } = useEmailDraftOperations(conversationId, channelId);
+    latestDraft: draft,
+  } = useEmailDraftOperations(conversationId, channelId, drafts);
   const isAutoDraftGenerating =
     !isComposeMode && draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
   const [emailContent, setEmailContent] = useState<string>('');
@@ -848,19 +840,10 @@ export const EmailComposer = ({
 
   const { saveComposeDraft, deleteComposeDraft: deleteComposeDraftRow } =
     useComposeDraftOperations(channelId);
-  const [composeRows, composeRowsDetails] = useCachedQuery(
-    queries.composeDraftsByChannel({ channelId: channelId || '' }),
-    { enabled: isComposeMode && !!channelId },
-  );
   const serverComposeDraft = useMemo<ComposeDraftRecord | undefined>(() => {
     if (!composeDraftServerId) return undefined;
-    // Direct query (bypasses useComposeDrafts), so the TEXT recipient columns must be
-    // parsed back to string[] here too before the hydration effect's Array.isArray gates.
-    const row = (composeRows as unknown as ComposeDraftRecord[] | undefined)?.find(
-      d => d.id === composeDraftServerId,
-    );
-    return row ? parseComposeDraftRow(row) : undefined;
-  }, [composeRows, composeDraftServerId]);
+    return composeDrafts.find(d => d.id === composeDraftServerId);
+  }, [composeDrafts, composeDraftServerId]);
 
   // Restore compose draft on mount
   const [composeDraftLoaded, setComposeDraftLoaded] = useState(false);
@@ -881,7 +864,7 @@ export const EmailComposer = ({
     if (!isComposeMode || composeDraftLoaded || !composeDraftServerId) return;
     // Wait until the compose-drafts query has settled, otherwise an as-yet-unloaded
     // row would be mistaken for "no draft" and we'd mark the composer loaded too early.
-    if (composeRowsDetails.type !== 'complete') return;
+    if (!composeDraftsLoaded) return;
     const okEmail = (s: unknown): s is string => typeof s === 'string' && s.includes('@');
     let snapshotTo: string[] = [];
     let snapshotCc: string[] = [];
@@ -965,7 +948,7 @@ export const EmailComposer = ({
     isComposeMode,
     composeDraftLoaded,
     composeDraftServerId,
-    composeRowsDetails.type,
+    composeDraftsLoaded,
     serverComposeDraft,
     composeMetaKey,
   ]);
@@ -982,7 +965,7 @@ export const EmailComposer = ({
     // Already seeded for this compose session.
     if (defaultCcSeededKeyRef.current === composeDraftServerId) return;
     // Preference query hasn't settled yet — wait for next render.
-    if (channelPreferenceDetails?.type !== 'complete') return;
+    if (!channelPreferenceLoaded) return;
     // Only seed when the user hasn't already entered CC (saved draft or manual).
     if (ccEmails.length > 0) {
       defaultCcSeededKeyRef.current = composeDraftServerId;
@@ -1001,7 +984,7 @@ export const EmailComposer = ({
     composeDraftLoaded,
     composeDraftServerId,
     channelPreference?.defaultCc,
-    channelPreferenceDetails?.type,
+    channelPreferenceLoaded,
     ccEmails.length,
   ]);
 
@@ -1112,7 +1095,7 @@ export const EmailComposer = ({
   useEffect(() => {
     // In compose mode there's no thread to derive recipients from — start blank.
     if (isComposeMode) return;
-    if (channelPreferenceDetails?.type !== 'complete') return;
+    if (!channelPreferenceLoaded) return;
     const replyModeChanged =
       lastDerivedReplyModeRef.current !== null && lastDerivedReplyModeRef.current !== replyMode;
     // Prefer recipients persisted on the draft in the DB (synced across devices). Fall
@@ -1299,7 +1282,7 @@ export const EmailComposer = ({
     recipientsStorageKey,
     isComposeMode,
     channelPreference?.defaultCc,
-    channelPreferenceDetails?.type,
+    channelPreferenceLoaded,
     ownDraft,
   ]);
 

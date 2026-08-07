@@ -400,7 +400,7 @@ export const EmailBodyRenderer = ({
     setShowRemoteImages(false);
   }, [emailId]);
 
-  const { rewrite: rewriteCidRefs, blobUrlToAttachmentId } = useCidImageResolver(attachments);
+  const { rewrite: rewriteCidRefs, blobUrlToAttachmentId } = useCidImageResolver(attachments, body);
 
   // Refs so the iframe's event handler always sees the latest values without
   // needing to re-register on every render.
