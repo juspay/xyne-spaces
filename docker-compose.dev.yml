@@ -221,7 +221,7 @@ services:
       # Mount source code for live development (no rebuild needed)
       - ./apps/backend/python-agent:/app
       # Persist HuggingFace model cache across container restarts
-      - transcription-agent-cache:/app/.cache/huggingface
+      - transcription-agent-cache:/models/huggingface
     depends_on:
       - livekit
       - redis

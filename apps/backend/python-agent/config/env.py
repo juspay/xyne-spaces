@@ -31,6 +31,14 @@ class Config:
 
     # STT Provider: 'azure' (default) or 'chutes'
     stt_provider: str
+
+    # STT routing: auto uses a configured API first and falls back to local.
+    stt_routing_mode: str
+    local_stt_enabled: bool
+    local_stt_model: str
+    local_stt_language: str
+    local_stt_device: str
+    local_stt_allow_download: bool
     
     # Chutes.ai STT Configuration 
     chutes_stt_base_url: Optional[str]
@@ -159,6 +167,17 @@ class Config:
 
             # STT Provider: 'azure' (default) or 'chutes'
             stt_provider=os.getenv("STT_PROVIDER", "azure").lower(),
+
+            # API/local STT routing
+            stt_routing_mode=os.getenv("STT_ROUTING_MODE", "auto").lower(),
+            local_stt_enabled=_get_bool_env("LOCAL_STT_ENABLED", True),
+            local_stt_model=os.getenv(
+                "LOCAL_STT_MODEL",
+                "nvidia/nemotron-3.5-asr-streaming-0.6b",
+            ),
+            local_stt_language=os.getenv("LOCAL_STT_LANGUAGE", "auto"),
+            local_stt_device=os.getenv("LOCAL_STT_DEVICE", "auto").lower(),
+            local_stt_allow_download=_get_bool_env("LOCAL_STT_ALLOW_DOWNLOAD", True),
             
             # Chutes.ai STT
             chutes_stt_base_url=os.getenv("CHUTES_STT_BASE_URL"),

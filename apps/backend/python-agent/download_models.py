@@ -20,27 +20,30 @@ def download_models():
         "Model download configuration: "
         f"DIARIZATION_ENABLED={diarization_enabled}"
     )
-    
-    # Download Turn Detector model files (ONNX model, tokenizer, languages.json)
-    # This uses LiveKit's official download mechanism
-    print("Downloading Turn Detector model...")
-    try:
-        from livekit.plugins.turn_detector.multilingual import _EUORunnerMultilingual
-        _EUORunnerMultilingual._download_files()
-        print("✓ Turn Detector model downloaded successfully")
-    except Exception as e:
-        print(f"⚠ Warning: Turn Detector download failed: {e}")
-        print("  Model will be downloaded at runtime")
-    
-    # Download Silero VAD model
-    print("Downloading Silero VAD model...")
-    try:
-        from livekit.plugins import silero
-        _ = silero.VAD.load()
-        print("✓ Silero VAD model downloaded successfully")
-    except Exception as e:
-        print(f"⚠ Warning: Silero VAD download failed: {e}")
-        print("  Model will be downloaded at runtime")
+
+    # Download the Transformers checkpoint but skip the duplicate NeMo archive.
+    # The Dockerfile separately invokes LiveKit's supported plugin downloader
+    # (`python -m livekit.agents download-files`) for Silero VAD + turn detector.
+    local_stt_enabled = _get_bool_env("LOCAL_STT_ENABLED", True)
+    if local_stt_enabled:
+        model_id = os.getenv(
+            "LOCAL_STT_MODEL",
+            "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        )
+        print(f"Downloading local STT model: {model_id}")
+        try:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(
+                repo_id=model_id,
+                allow_patterns=["*.json", "*.safetensors"],
+            )
+            print("✓ Local STT model downloaded successfully")
+        except Exception as e:
+            print(f"⚠ Warning: local STT model download failed: {e}")
+            print("  Model will be downloaded on first local transcription")
+    else:
+        print("Skipping local STT model download: LOCAL_STT_ENABLED=false")
 
     # Download WeSpeaker speaker embedding model only when diarization is enabled.
     if not diarization_enabled:

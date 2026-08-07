@@ -3,12 +3,14 @@ FROM mirror.gcr.io/library/python:3.11-slim
 WORKDIR /app
 
 ARG DIARIZATION_ENABLED=false
+ARG TORCH_VERSION=2.13.0+cpu
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 
-# Redirect all cache/config dirs to /app so the container never writes to / or /.cache
+# Keep the HF cache outside /app because development bind-mounts /app.
 ENV HOME=/app \
-    HF_HOME=/app/.cache/huggingface \
-    HF_HUB_CACHE=/app/.cache/huggingface \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
+    HF_HOME=/models/huggingface \
+    HF_HUB_CACHE=/models/huggingface/hub \
+    TRANSFORMERS_CACHE=/models/huggingface \
     TORCH_HOME=/app/.cache/torch \
     XDG_CACHE_HOME=/app/.cache \
     XDG_CONFIG_HOME=/app/.config \
@@ -25,13 +27,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create runtime-writable directories before pip/model imports touch caches
-RUN mkdir -p /app/transcriptions /app/.cache/huggingface /app/.cache/torch /app/.config/matplotlib \
-    && chmod -R 777 /app/transcriptions /app/.cache /app/.config
+RUN mkdir -p /app/transcriptions /models/huggingface/hub /app/.cache/torch /app/.config/matplotlib \
+    && chmod -R 777 /app/transcriptions /models /app/.cache /app/.config
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 COPY requirements-diarization.txt .
+COPY verify_livekit_stack.py .
+RUN pip install --no-cache-dir "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip check && python verify_livekit_stack.py
 RUN case "$DIARIZATION_ENABLED" in \
         true|True|TRUE|1|yes|Yes|YES|on|On|ON) \
             echo "Installing diarization dependencies"; \
@@ -42,11 +47,14 @@ RUN case "$DIARIZATION_ENABLED" in \
             ;; \
     esac
 
-# Copy application code
-COPY . .
-
 # Pre-download model files (ONNX model, tokenizer, languages.json)
-# Using dedicated script to avoid heavy main.py imports that need env vars
-RUN python download_models.py
+# Keep this layer independent from application code so source edits do not
+# invalidate the multi-gigabyte model download.
+COPY download_models.py .
+RUN python download_models.py \
+    && python -m livekit.agents download-files
+
+# Copy application code after stable dependency/model layers.
+COPY . .
 
 CMD ["python", "main.py", "start"]

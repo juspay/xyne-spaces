@@ -52,6 +52,10 @@ if _mp.current_process().name == "MainProcess":
     logger.info(f"Azure OpenAI STT Endpoint: {config.azure_stt_endpoint}")
     logger.info(f"Azure OpenAI STT Model: {config.azure_stt_model}")
     logger.info(f"STT Provider: {config.stt_provider}")
+    logger.info(
+        f"STT Routing: {config.stt_routing_mode} "
+        f"(local enabled: {config.local_stt_enabled})"
+    )
     logger.info(f"Diarization Enabled: {config.diarization_enabled}")
     logger.info(f"Environment: {config.node_env} (development mode: {config.is_development})")
 
@@ -184,6 +188,12 @@ async def entrypoint(ctx: JobContext):
         ctx=ctx,
         event_bus=event_bus,
         stt_provider=config.stt_provider,
+        stt_routing_mode=config.stt_routing_mode,
+        local_stt_enabled=config.local_stt_enabled,
+        local_stt_model=config.local_stt_model,
+        local_stt_language=config.local_stt_language,
+        local_stt_device=config.local_stt_device,
+        local_stt_allow_download=config.local_stt_allow_download,
         azure_endpoint=config.azure_stt_endpoint,
         azure_api_key=config.azure_stt_api_key,
         azure_api_version=config.azure_stt_api_version,

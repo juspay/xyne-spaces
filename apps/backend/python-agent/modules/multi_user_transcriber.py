@@ -39,6 +39,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from events import EventBus
 from config import get_logger
+from transcription.local_nemotron import LocalNemotronSTT
 
 logger = get_logger(__name__)
 
@@ -353,6 +354,12 @@ class MultiUserTranscriber:
         *,
         # STT Provider Selection ('azure' or 'chutes')
         stt_provider: str = "azure",
+        stt_routing_mode: str = "auto",
+        local_stt_enabled: bool = True,
+        local_stt_model: str = "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        local_stt_language: str = "auto",
+        local_stt_device: str = "auto",
+        local_stt_allow_download: bool = True,
         # Azure OpenAI STT Configuration
         azure_endpoint: str,
         azure_api_key: str,
@@ -407,6 +414,14 @@ class MultiUserTranscriber:
         self.bus = event_bus
         self.agent_session = agent_session
         self._stt_provider = stt_provider.lower()
+        self._stt_routing_mode = stt_routing_mode.lower()
+        if self._stt_routing_mode not in {"auto", "api", "local"}:
+            raise ValueError("STT_ROUTING_MODE must be one of: auto, api, local")
+        self._local_stt_enabled = local_stt_enabled
+        self._local_stt_model = local_stt_model
+        self._local_stt_language = local_stt_language
+        self._local_stt_device = local_stt_device
+        self._local_stt_allow_download = local_stt_allow_download
         self._azure_endpoint = azure_endpoint
         self._azure_api_key = azure_api_key
         self._azure_api_version = azure_api_version
@@ -461,7 +476,8 @@ class MultiUserTranscriber:
         asyncio.get_event_loop().set_default_executor(executor)
         
         # Shared resilient STT with retry logic
-        self._shared_stt: Optional[ResilientSTT] = None
+        self._shared_stt: Optional[stt.STT] = None
+        self._local_stt: Optional[LocalNemotronSTT] = None
         
         # Shared turn detector (loaded once, reused across all participants)
         self._turn_detector = None
@@ -477,6 +493,7 @@ class MultiUserTranscriber:
         logger.info(
             f"multi_user_transcriber_initialized | "
             f"stt_provider={self._stt_provider}, "
+            f"stt_routing_mode={self._stt_routing_mode}, local_stt_enabled={self._local_stt_enabled}, "
             f"vad_threshold={vad_activation_threshold}, min_speech={vad_min_speech_duration}s, "
             f"min_silence={vad_min_silence_duration}s, prefix_padding={vad_prefix_padding_duration}s, "
             f"session_pool_size={self._pool_size}, "
@@ -527,7 +544,64 @@ class MultiUserTranscriber:
             keywords=[(word, 10.0) for word in hot_words] if not multi_language else [],
         )
     
-    def _create_stt(self, call_type: Optional[str] = None) -> ResilientSTT:
+    def _api_provider_is_configured(self, provider: str) -> bool:
+        """Return whether the selected remote STT provider has usable credentials."""
+        if provider == "chutes":
+            return bool(self._chutes_stt_api_key)
+        if provider == "deepgram":
+            return bool(self._deepgram_api_key)
+        if provider == "google":
+            # Keep explicit support for ADC/service-account files as well as inline JSON.
+            return bool(
+                os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+                or self._google_voice_credentials_json
+            )
+        if provider == "azure":
+            return bool(
+                self._azure_endpoint
+                and self._azure_api_key
+                and self._azure_deployment
+            )
+        return False
+
+    def _resolve_stt_provider(self) -> str:
+        """Resolve routing policy to one concrete provider name."""
+        provider = (
+            "chutes"
+            if self._stt_provider == "chutes"
+            else (self._stt_model_override or self._stt_model)
+        )
+
+        if self._stt_routing_mode == "local":
+            if not self._local_stt_enabled:
+                raise ValueError(
+                    "STT_ROUTING_MODE=local requires LOCAL_STT_ENABLED=true"
+                )
+            resolved = "local"
+        elif self._stt_routing_mode == "api":
+            if not self._api_provider_is_configured(provider):
+                raise ValueError(
+                    f"STT_ROUTING_MODE=api but provider '{provider}' is not configured"
+                )
+            resolved = provider
+        elif self._api_provider_is_configured(provider):
+            resolved = provider
+        elif self._local_stt_enabled:
+            resolved = "local"
+        else:
+            raise ValueError(
+                f"No credentials configured for STT provider '{provider}' and local STT is disabled"
+            )
+
+        logger.info(
+            "stt_route_resolved | routing_mode=%s, requested_provider=%s, resolved_provider=%s",
+            self._stt_routing_mode,
+            provider,
+            resolved,
+        )
+        return resolved
+
+    def _create_stt(self, call_type: Optional[str] = None) -> stt.STT:
         """
         Create or reuse shared resilient STT instance.
         
@@ -537,7 +611,30 @@ class MultiUserTranscriber:
         
         For HEADLESS calls, bypass cache to allow per-call STT selection.
         """
-        if self._stt_provider == "chutes":
+        provider = self._resolve_stt_provider()
+
+        if provider == "local":
+            if self._shared_stt is None or call_type == "HEADLESS":
+                local_stt = LocalNemotronSTT(
+                    model_id=self._local_stt_model,
+                    language=self._local_stt_language,
+                    device=self._local_stt_device,
+                    allow_download=self._local_stt_allow_download,
+                )
+                logger.info(
+                    "local_stt_selected | model=%s, language=%s, device=%s, allow_download=%s",
+                    self._local_stt_model,
+                    self._local_stt_language,
+                    self._local_stt_device,
+                    self._local_stt_allow_download,
+                )
+                if call_type == "HEADLESS":
+                    return local_stt
+                self._local_stt = local_stt
+                self._shared_stt = local_stt
+            return self._shared_stt
+
+        if provider == "chutes":
             if self._shared_stt is None or call_type == 'HEADLESS':
                 chutes_api_key = os.getenv("CHUTES_STT_API_KEY")
                 chutes_base_url = os.getenv("CHUTES_STT_BASE_URL", "https://chutes-whisper-large-v3.chutes.ai")
@@ -562,11 +659,9 @@ class MultiUserTranscriber:
             return self._shared_stt
         
         # === Default provider: Azure (existing flow with Google/Deepgram sub-models) ===
-        selected_model = self._stt_model_override or self._stt_model
-        
         if self._shared_stt is None or call_type == 'HEADLESS':
             # Use Deepgram STT
-            if selected_model == "deepgram" and self._deepgram_api_key:
+            if provider == "deepgram" and self._deepgram_api_key:
                 # Domain-specific hot words shared with Google STT adaptation
                 hot_words = [
                     "Xyne Calls", "Juspay Euler", "Namma Cloud", "Xyne Chats",
@@ -602,7 +697,7 @@ class MultiUserTranscriber:
                     self._shared_stt = resilient_stt
                     
             # Use Google STT
-            elif selected_model == "google" and os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+            elif provider == "google" and os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
                 logger.info("[STT] Using Google Cloud Speech-to-Text")
                 inner_stt = self._create_google_stt_instance()
                 resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
@@ -661,14 +756,26 @@ class MultiUserTranscriber:
         return vad
     
     def _create_turn_detector(self):
-        """Create or reuse shared turn detector singleton."""
-        if not self._turn_detector_loaded:
-            self._turn_detector = _load_turn_detector_model()
+        """Create or reuse shared turn detector singleton.
+
+        Skipped entirely when STT routing resolves to the local Nemotron
+        provider: local transcription is VAD-only (no LLM / AI voice), so the
+        turn detector model would only add load time and memory. Semantic
+        end-of-turn detection is preserved for the API STT providers.
+        """
+        if self._turn_detector_loaded:
+            return self._turn_detector
+        if self._resolve_stt_provider() == "local":
+            logger.info("turn_detector_skipped | reason=local_stt_mode, fallback=vad_only")
+            self._turn_detector = None
             self._turn_detector_loaded = True
-            if self._turn_detector:
-                logger.info("turn_detector_loaded | shared_across_all_participants=True")
-            else:
-                logger.warning("turn_detector_unavailable | fallback=vad_only")
+            return None
+        self._turn_detector = _load_turn_detector_model()
+        self._turn_detector_loaded = True
+        if self._turn_detector:
+            logger.info("turn_detector_loaded | shared_across_all_participants=True")
+        else:
+            logger.warning("turn_detector_unavailable | fallback=vad_only")
         return self._turn_detector
     
     def _create_pooled_session(self) -> AgentSession:
@@ -687,6 +794,8 @@ class MultiUserTranscriber:
         # Pre-load shared models first so pool creation is fast
         self._init_vad_pool()
         self._create_stt(call_type=self._call_type)
+        if self._local_stt is not None:
+            await self._local_stt.warmup()
         self._create_turn_detector()
         
         for i in range(self._pool_size):
@@ -964,13 +1073,47 @@ class MultiUserTranscriber:
             on_identified_transcription=self._emit_identified_transcription if self._identifier is not None else None,
             identifier=self._identifier,
         )
-        
+
+        @session.on("user_state_changed")
+        def _on_user_state_changed(event):
+            logger.info(
+                "transcription_session_user_state_changed | participant_id=%s, old_state=%s, new_state=%s",
+                participant.identity,
+                event.old_state,
+                event.new_state,
+            )
+
+        @session.on("user_input_transcribed")
+        def _on_user_input_transcribed(event):
+            logger.info(
+                "transcription_session_input | participant_id=%s, final=%s, chars=%s, empty=%s",
+                participant.identity,
+                event.is_final,
+                len(event.transcript),
+                not bool(event.transcript),
+            )
+
+        @session.on("error")
+        def _on_session_error(event):
+            logger.error(
+                "transcription_session_error | participant_id=%s, source=%s, recoverable=%s, error=%s",
+                participant.identity,
+                event.source,
+                getattr(event.error, "recoverable", None),
+                event.error,
+            )
+
         # Start session with participant-specific options
         await session.start(
             agent=agent,
             room=self.ctx.room,
             room_options=room_io.RoomOptions(
-                audio_input=True,
+                audio_input=room_io.AudioInputOptions(
+                    sample_rate=16000,
+                    num_channels=1,
+                    frame_size_ms=20,
+                    auto_gain_control=False,
+                ),
                 text_output=True,  # Publish transcriptions to room
                 audio_output=False,  # Don't generate audio responses
                 participant_identity=participant.identity,  # Link to specific participant
@@ -978,6 +1121,17 @@ class MultiUserTranscriber:
                 text_input=False,
             ),
         )
+
+        # LiveKit Agents 1.6.x starts RoomIO asynchronously; wait until the
+        # participant is linked before treating this transcription session as ready.
+        if session._room_io is not None:
+            await session._room_io.wait_for_ready()
+            linked_participant = session._room_io.linked_participant
+            logger.info(
+                "transcription_session_ready | requested_participant_id=%s, linked_participant_id=%s",
+                participant.identity,
+                linked_participant.identity if linked_participant else None,
+            )
         
         return session
     
@@ -1113,4 +1267,3 @@ class MultiUserTranscriber:
         task = asyncio.create_task(self._close_session(session, participant.identity))
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._tasks.discard(t))
-

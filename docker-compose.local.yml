@@ -140,7 +140,7 @@ services:
     volumes:
       - ./backend/python-agent/transcriptions:/app/transcriptions
       - ./backend/python-agent:/app
-      - transcription-agent-cache:/app/.cache/huggingface
+      - transcription-agent-cache:/models/huggingface
       - ./docker/egress.yaml:/etc/egress.yaml
     extra_hosts:
       - "host.docker.internal:host-gateway"
