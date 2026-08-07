@@ -1,6 +1,7 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
@@ -15,6 +16,39 @@ import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("runner");
+
+/**
+ * Tolerant JSON Schema validator for MCP tool output schemas.
+ *
+ * Since SDK ~1.28, Client.listTools() eagerly compiles an Ajv validator for
+ * EVERY tool's outputSchema. A single non-self-contained schema — e.g. Google
+ * Stitch's `$ref: "#/$defs/ScreenInstance"` with the $defs block living
+ * outside the outputSchema document — makes Ajv throw MissingRefError
+ * ("can't resolve reference ... from id #"), which fails the whole listTools
+ * and bricks the entire connector, not just the one bad tool.
+ *
+ * One malformed third-party schema must degrade to "that tool's output isn't
+ * validated", never to "the connector doesn't work". Compile failures are
+ * logged once and replaced with a pass-through validator.
+ */
+const strictSchemaValidator = new AjvJsonSchemaValidator();
+const warnedSchemaCompileFailures = new Set<string>();
+const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
+  getValidator: (schema) => {
+    try {
+      return strictSchemaValidator.getValidator(schema);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!warnedSchemaCompileFailures.has(message)) {
+        warnedSchemaCompileFailures.add(message);
+        log.warn(
+          `[mcp/runner] tool outputSchema failed to compile — output validation disabled for this tool: ${message}`,
+        );
+      }
+      return (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined });
+    }
+  },
+};
 
 /**
  * Resolve the app token for an agent's app user. App users have no Spaces login
@@ -299,7 +333,10 @@ async function spawnSession(
     });
   }
 
-  const client = new Client({ name: "xyne-claw-auth", version: "0.1.0" });
+  const client = new Client(
+    { name: "xyne-claw-auth", version: "0.1.0" },
+    { jsonSchemaValidator: tolerantSchemaValidator },
+  );
   try {
     await client.connect(transport as Parameters<typeof client.connect>[0]);
   } catch (err) {
