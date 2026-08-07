@@ -26,7 +26,9 @@ import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
 import Avatar from '../../ui/Avatar/Avatar';
+import { ParticipantOptionContent } from '../ParticipantOptionContent';
 import { Controller, useForm } from 'react-hook-form';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
@@ -343,32 +345,19 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       />
     ),
     children: (
-      <div className='flex items-center gap-2'>
-        <Avatar
-          userId={u.id}
-          size={'sm'}
-          showActiveStatus={false}
-          className='rounded-md size-[18px] flex items-center justify-center bg-background'
-        />
-        <div className='flex-1 w-full flex items-center gap-1.5'>
-          <span className={`text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : ''}`}>
-            {getUserDisplayName(u).split(' ')[0]}
-          </span>
-          {!isUserDeactivated(u) && (
-            <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-          )}
-          <span
-            className={`text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-gray-500'}`}
-          >
-            {getUserDisplayName(u)}
-          </span>
-          {isUserDeactivated(u) && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-              Deactivated
-            </span>
-          )}
-        </div>
-      </div>
+      <ParticipantOptionContent
+        icon={
+          <Avatar
+            userId={u.id}
+            size='sm'
+            showActiveStatus={false}
+            className='rounded-md size-[18px] flex items-center justify-center bg-background'
+          />
+        }
+        label={getUserDisplayName(u)}
+        subtitle={u.email}
+        isDeactivated={isUserDeactivated(u)}
+      />
     ),
     type: 'user' as const,
   });
@@ -439,6 +428,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       value: `user_group:${group.id}`,
       icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
       subtitle: group.alias || group.description,
+      children: (
+        <ParticipantOptionContent
+          icon={<Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />}
+          label={group.name}
+          subtitle={group.alias || group.description}
+        />
+      ),
       type: 'user_group' as const,
     }));
 
@@ -507,6 +503,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     userGroups,
     fullUserList,
   ]);
+
+  const rankedParticipantOptions = useMemo(
+    () => rankParticipantOptions(inviteUserOrChannelOptions, searchQuery),
+    [inviteUserOrChannelOptions, searchQuery],
+  );
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -1806,7 +1807,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   control={control}
                   render={({ field }) => (
                     <SearchParticipants
-                      options={inviteUserOrChannelOptions}
+                      options={rankedParticipantOptions}
+                      disableClientFiltering
                       selectedValues={field.value}
                       onMultiSelect={async (values: string[]) => {
                         const expanded = await expandGroupSelections(values);
