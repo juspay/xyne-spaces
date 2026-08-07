@@ -129,6 +129,25 @@ export const auditEventLabel = (value: string): string =>
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 
+export const auditDescription = (value: string): string =>
+  value.replace(/("[^"]*")\s*\([^)]*\)/g, '$1');
+
+export type AuditEventTone = 'success' | 'warning' | 'error' | 'neutral';
+
+export const auditEventTone = (eventType: string): AuditEventTone => {
+  if (eventType.includes('PROMOTED') || eventType.includes('GRANTED')) return 'success';
+  if (eventType.includes('DEMOTED') || eventType.includes('REVOKED')) return 'warning';
+  if (eventType.includes('DELETED')) return 'error';
+  return 'neutral';
+};
+
+export const AUDIT_TONE_CLASS: Record<AuditEventTone, string> = {
+  success: 'bg-status-success text-background',
+  warning: 'bg-status-pending text-background',
+  error: 'bg-status-failure text-background',
+  neutral: 'bg-muted text-muted-foreground',
+};
+
 export interface WorkflowGlobalRequest {
   id: string;
   workflowId: string;
@@ -160,6 +179,30 @@ export interface McpPublishRequest {
   name: string;
   type: string;
   description: string | null;
+  transport?: string | null;
+  connectorMeta?: Record<string, unknown> | null;
+  credentialForm?: unknown;
+  launchConfigTemplate?: unknown;
+  httpConfigTemplate?: unknown;
+  healthcheckSpec?: unknown;
+  writeToolPolicy?: unknown;
   publishRequestedByUserId?: string | null;
   publishRequestedAt?: string | null;
+}
+
+export interface CredentialField {
+  name: string;
+  label: string;
+  type: 'text' | 'password';
+  placeholder: string;
+  optional?: boolean;
+}
+
+export interface McpGlobalCredsDetail {
+  type: string;
+  orgId: string | null;
+  hasCredentials: boolean;
+  credentialKeys?: string[];
+  updatedAt?: string;
+  setByUserId?: string | null;
 }

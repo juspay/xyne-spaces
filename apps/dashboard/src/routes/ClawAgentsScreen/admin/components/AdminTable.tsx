@@ -18,14 +18,14 @@ export function AdminTable({
             {headers.map(header => (
               <th
                 key={header.label}
-                className={cn('px-3 py-2 font-medium', header.align === 'right' && 'text-right')}
+                className={cn('px-4 py-2.5 font-medium', header.align === 'right' && 'text-right')}
               >
                 {header.label}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>{children}</tbody>
+        <tbody className='[&>tr:last-child]:border-b-0'>{children}</tbody>
       </table>
     </div>
   );
@@ -54,10 +54,22 @@ export function AdminPager({
         Showing {offset + 1}–{Math.min(offset + count, total)} of {total}
       </span>
       <div className='flex items-center gap-2'>
-        <Button type='button' variant='outline' onClick={onPrev} disabled={offset === 0}>
+        <Button
+          type='button'
+          variant='outline'
+          onClick={onPrev}
+          disabled={offset === 0}
+          className='disabled:pointer-events-auto'
+        >
           Prev
         </Button>
-        <Button type='button' variant='outline' onClick={onNext} disabled={offset + count >= total}>
+        <Button
+          type='button'
+          variant='outline'
+          onClick={onNext}
+          disabled={offset + count >= total}
+          className='disabled:pointer-events-auto'
+        >
           Next
         </Button>
       </div>

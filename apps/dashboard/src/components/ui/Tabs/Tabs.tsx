@@ -24,7 +24,10 @@ export function Tabs({
   className,
 }: TabsProps): ReactElement {
   return (
-    <div className={cn('flex items-start gap-1', className)} role='tablist'>
+    <div
+      className={cn('no-scrollbar flex items-start gap-1 overflow-x-auto', className)}
+      role='tablist'
+    >
       {items.map(tab => {
         const isActive = tab.id === activeId;
         return (
@@ -38,7 +41,7 @@ export function Tabs({
             {...(trackCategory ? { 'data-track-category': trackCategory } : {})}
             {...(trackPrefix ? { 'data-track-name': `${trackPrefix}: ${tab.label}` } : {})}
             className={cn(
-              'flex h-8 items-center justify-center rounded-lg px-3 py-1 text-sm transition-colors',
+              'flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1 text-sm transition-colors',
               isActive
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',

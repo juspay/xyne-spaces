@@ -1,4 +1,4 @@
-import type { AdminOrgScope, GrantableRole } from '@/services/claw/clawAdminTypes';
+import type { AdminDateRange, AdminOrgScope, GrantableRole } from '@/services/claw/clawAdminTypes';
 
 export const adminRolesKey = (role: GrantableRole): unknown[] => ['claw-admin-roles', role];
 
@@ -17,6 +17,27 @@ export const pendingRequestsPrefix = (): unknown[] => ['claw-admin-requests'];
 
 export const adminAgentsPrefix = (userId: string): unknown[] => ['claw-admin-agents', userId];
 
+export const adminUsageKey = (scope: AdminOrgScope, range: AdminDateRange): unknown[] => [
+  'claw-admin-usage',
+  scope,
+  range,
+];
+
+export const adminAuditKey = (
+  scope: AdminOrgScope,
+  filters: { eventType: string; agentId: string; range: string; offset: number },
+): unknown[] => ['claw-admin-audit', scope, filters];
+
+export const adminScheduledKey = (
+  scope: AdminOrgScope,
+  filters: { status: string; agentSlug: string; jobUserId: string; offset: number },
+): unknown[] => ['claw-admin-scheduled', scope, filters];
+
+export const auditAgentOptionsKey = (userId: string): unknown[] => [
+  'claw-admin-agent-options',
+  userId,
+];
+
 export const mcpPublishKey = (): unknown[] => ['claw-admin-mcp-publish'];
 
 export const workflowRequestsKey = (scope: AdminOrgScope): unknown[] => [
@@ -25,3 +46,5 @@ export const workflowRequestsKey = (scope: AdminOrgScope): unknown[] => [
 ];
 
 export const globalMcpKey = (): unknown[] => ['claw-admin-global-mcp'];
+
+export const credentialFieldsKey = (): unknown[] => ['claw-admin-credential-fields'];

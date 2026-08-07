@@ -9,7 +9,9 @@ import type {
   AdminMcpServerSummary,
   AgentUsageStat,
   AuditLogEntry,
+  CredentialField,
   GrantableRole,
+  McpGlobalCredsDetail,
   McpPublishRequest,
   WorkflowGlobalRequest,
 } from './clawAdminTypes';
@@ -226,8 +228,33 @@ export async function setMcpGlobalFallback(
   await clawApiRequest<unknown>(`/admin/mcp-servers/${encodeURIComponent(type)}/global-fallback`, {
     userId,
     method: 'PUT',
-    body: JSON.stringify({ allowGlobalFallback }),
+    body: JSON.stringify({ allow: allowGlobalFallback }),
   });
+}
+
+export async function listCredentialFields(): Promise<Record<string, CredentialField[]>> {
+  return clawApiRequest<Record<string, CredentialField[]>>('/servers/credential-fields');
+}
+
+export async function getMcpGlobalCredentials(
+  userId: string,
+  type: string,
+): Promise<McpGlobalCredsDetail> {
+  return clawApiRequest<McpGlobalCredsDetail>(
+    `/admin/mcp-servers/${encodeURIComponent(type)}/global-credentials`,
+    { userId },
+  );
+}
+
+export async function setMcpGlobalCredentials(
+  userId: string,
+  type: string,
+  credentials: Record<string, string>,
+): Promise<void> {
+  await clawApiRequest<unknown>(
+    `/admin/mcp-servers/${encodeURIComponent(type)}/global-credentials`,
+    { userId, method: 'PUT', body: JSON.stringify({ credentials }) },
+  );
 }
 
 export async function deleteMcpGlobalCredentials(userId: string, type: string): Promise<void> {
