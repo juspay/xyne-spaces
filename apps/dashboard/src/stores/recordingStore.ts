@@ -176,6 +176,10 @@ export const recordingStore = createStore({
             startTime: session.startTime,
             defaultLayout,
           });
+
+          if (recordingStore.getSnapshot().context.pendingStop) {
+            recordingStore.send({ type: 'stopRecording' });
+          }
         })
         .catch(error => {
           logger.error(Event.RECORDING_ERROR, {

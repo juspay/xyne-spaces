@@ -878,7 +878,7 @@ export class InvitationService {
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
 
     try {
-      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.id);
+      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.orgMemberId);
     } catch (error) {
       logger.error('[InvitationService] Failed to enqueue AI user provisioning', {
         userId: newWorkspaceUser.id,
