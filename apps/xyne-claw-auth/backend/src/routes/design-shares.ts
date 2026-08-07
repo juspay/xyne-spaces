@@ -40,7 +40,7 @@ function sharePath(rawToken: string): string {
   // The bearer lives in the URL fragment, which browsers never send to the
   // frontend server or access logs. The public viewer forwards it to the API
   // in a header; API request URLs therefore remain secret-free too.
-  return `/v3/design/shared#${encodeURIComponent(rawToken)}`;
+  return `/claw/v3/design/shared#${encodeURIComponent(rawToken)}`;
 }
 
 function ownerResponse(

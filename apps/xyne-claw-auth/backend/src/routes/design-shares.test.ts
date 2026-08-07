@@ -131,8 +131,8 @@ describe("design artifact sharing", () => {
 
     expect(published.status).toBe(200);
     const path = String(published.body["data"].sharePath);
-    expect(path).toMatch(/^\/v3\/design\/shared#[A-Za-z0-9_%~-]+$/);
-    expect(path.split("#")[0]).toBe("/v3/design/shared");
+    expect(path).toMatch(/^\/claw\/v3\/design\/shared#[A-Za-z0-9_%~-]+$/);
+    expect(path.split("#")[0]).toBe("/claw/v3/design/shared");
     expect(state.share?.["tokenHash"]).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(state.share)).not.toContain(decodeURIComponent(path.split("#")[1]!));
   });

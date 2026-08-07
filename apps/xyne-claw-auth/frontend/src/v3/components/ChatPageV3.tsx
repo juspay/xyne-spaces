@@ -3849,7 +3849,7 @@ function DesignPreviewPanel({
                           className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] outline-none hover:bg-xyne-surface-subtle data-[highlighted]:bg-xyne-surface-subtle"
                         >
                           <span className={index === displayedVersionIndex
-                            ? "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-brand px-1.5 text-[10px] font-semibold text-white"
+                            ? "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-brand px-1.5 text-[10px] font-semibold text-xyne-fg-inverse"
                             : "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-surface-subtle px-1.5 text-[10px] font-semibold text-xyne-fg-muted"
                           }>
                             {version.label}
@@ -3908,7 +3908,7 @@ function DesignPreviewPanel({
             disabled={!rawHtml}
             onClick={() => setViewSource((value) => !value)}
             className={viewSource
-              ? "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-xyne-brand text-white"
+              ? "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-xyne-brand text-xyne-fg-inverse"
               : "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
             }
           >
@@ -3921,7 +3921,7 @@ function DesignPreviewPanel({
             aria-pressed={inspecting}
             onClick={() => setInspecting((value) => !value)}
             className={inspecting
-              ? "inline-flex h-8 items-center gap-1.5 rounded-md bg-xyne-brand px-2.5 text-[11px] font-medium text-white"
+              ? "inline-flex h-8 items-center gap-1.5 rounded-md bg-xyne-brand px-2.5 text-[11px] font-medium text-xyne-fg-inverse"
               : "inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
             }
           >
@@ -5245,7 +5245,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                           aria-pressed={designEditScope === scope}
                           onClick={() => setDesignEditScope(scope)}
                           className={designEditScope === scope
-                            ? "rounded-md bg-xyne-brand px-2 py-1 text-[10px] font-medium text-white"
+                            ? "rounded-md bg-xyne-brand px-2 py-1 text-[10px] font-medium text-xyne-fg-inverse"
                             : "rounded-md bg-xyne-surface-subtle px-2 py-1 text-[10px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary"
                           }
                         >
