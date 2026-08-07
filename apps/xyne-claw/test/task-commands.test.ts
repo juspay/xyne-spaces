@@ -2,6 +2,43 @@ import { describe, expect, it } from "vitest";
 import { loadCustomTools } from "../src/custom-tools.js";
 import { parseTaskCommand, resolveTaskCommandMode } from "../src/task-commands.js";
 
+describe("/design task command", () => {
+  it("matches only the leading command token and runs immediately", () => {
+    expect(parseTaskCommand("/design build a billing page")?.command).toBe("/design");
+    expect(parseTaskCommand("  /DESIGN\nrevise the card")?.command).toBe("/design");
+    expect(parseTaskCommand("please /design a page")).toBeNull();
+    expect(parseTaskCommand("/designer page")).toBeNull();
+    expect(resolveTaskCommandMode("/design page", "plan")).toBe("auto");
+  });
+
+  it("loads the Xyne design pack and command-owned creation/inspection tools", () => {
+    const command = parseTaskCommand("/design page");
+    expect(command?.skillPaths).toEqual(["design-skills"]);
+    expect(command?.requiredTool).toBe("sandbox-deliver-files");
+
+    const loaded = loadCustomTools(
+      { tools: { custom: [] } },
+      { userId: "u1", conversationId: "c1", agentSlug: "ordinary-agent", taskCommand: "/design" },
+      undefined,
+      undefined,
+      undefined,
+      "session-1",
+      "s2s-key",
+      "session-token",
+      undefined,
+      undefined,
+      undefined,
+      command?.autoTools,
+    );
+    const names = loaded.tools.map((tool) => tool.name);
+    expect(names).toContain("sandbox-create");
+    expect(names).toContain("sandbox-write-file");
+    expect(names).toContain("sandbox-pw-screenshot");
+    expect(names).toContain("generate-image");
+    expect(names).toContain("sandbox-deliver-files");
+  });
+});
+
 describe("/explainer task command", () => {
   it("matches only the leading command token", () => {
     expect(parseTaskCommand("/explainer explain Redis")?.command).toBe("/explainer");

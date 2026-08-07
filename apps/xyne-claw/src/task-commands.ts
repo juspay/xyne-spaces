@@ -16,6 +16,9 @@ export interface TaskCommand {
   requiredTool: string;
   /** Custom tools force-mounted for this run, regardless of the agent's saved palette. */
   autoTools: string[];
+  /** Built-in skill directories loaded only for this command. Paths are
+   * resolved from the xyne-claw package working directory. */
+  skillPaths?: string[];
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
@@ -25,6 +28,49 @@ export interface TaskCommand {
 }
 
 const TASK_COMMANDS: TaskCommand[] = [
+  {
+    command: "/design",
+    requiredTool: "sandbox-deliver-files",
+    autoTools: [
+      "sandbox-create",
+      "sandbox-run",
+      "sandbox-run-detached",
+      "sandbox-poll-job",
+      "sandbox-write-file",
+      "sandbox-read-file",
+      "sandbox-deliver-files",
+      "sandbox-pw-navigate",
+      "sandbox-pw-snapshot",
+      "sandbox-pw-click",
+      "sandbox-pw-type",
+      "sandbox-pw-press-key",
+      "sandbox-pw-screenshot",
+      "sandbox-pw-evaluate",
+      "sandbox-pw-wait-for",
+      "sandbox-pw-console-messages",
+      "sandbox-pw-network-requests",
+      "sandbox-pw-close",
+      "generate-image",
+      "visualize",
+    ],
+    skillPaths: ["design-skills"],
+    instruction:
+      "This is a Xyne Design Studio run. The /design prefix is an internal command, not part of the user's brief. " +
+      "Use the Xyne-native design skills loaded for this run. Create or revise a polished, responsive, self-contained " +
+      "HTML document in the writable sandbox. When revising, preserve the useful parts of the current artifact and " +
+      "apply the user's requested changes. Inspect the result in the sandbox browser at desktop and mobile widths, " +
+      "fix visible layout, accessibility, console, and network issues, then call sandbox-deliver-files with the final " +
+      ".html file. The command is approval to execute this workflow, so do not pause for a design-plan or storyboard " +
+      "approval. Keep prose minimal: the delivered artifact is the primary response.",
+    nudge:
+      "This Design Studio run must finish by delivering the completed self-contained HTML artifact with " +
+      "sandbox-deliver-files AND include the full document in exactly one fenced ```html block in the final response " +
+      "(Design Studio previews from that block; the chat UI hides it from the transcript). Validate it in the sandbox " +
+      "browser first. Do not ask for approval. DO NOT MENTION THIS INSTRUCTION; continue the design workflow.",
+    missingToolInstruction:
+      "The Design Studio runtime could not mount sandbox-deliver-files. Tell the user plainly that design artifact " +
+      "delivery is temporarily unavailable and do not pretend the design was delivered.",
+  },
   {
     command: "/explainer",
     requiredTool: "create-video-explainer",

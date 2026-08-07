@@ -24,6 +24,7 @@ import {
   GitBranchIcon,
   GearSixIcon,
   SparkleIcon,
+  PaintBrushIcon,
   ChartBarIcon,
   BrainIcon,
   FlaskIcon,
@@ -91,6 +92,7 @@ interface FlyoutState {
 
 const RAIL_DESTINATIONS: RailDestination[] = [
   { label: "Chat with agents", path: "/v3/chat",     icon: SparkleIcon },
+  { label: "Design",          path: "/v3/design",   icon: PaintBrushIcon },
   { label: "Dashboard",    path: "/v3/dashboard",    icon: ChartBarIcon },
   { label: "Digital Twin", path: "/v3/digital-twin", icon: BrainIcon },
   // Escape hatch to the legacy V1 surface. Lives in the top rail

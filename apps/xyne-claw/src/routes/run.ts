@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
 import { publishHandoffSignal } from "../handoff-redis.js";
 import {
@@ -131,6 +132,7 @@ import { parseTaskCommand, resolveTaskCommandMode } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 
 const clog = createLogger("run");
+const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
 
 const router = Router();
 
@@ -3495,6 +3497,9 @@ async function processTask(
         fileAttachments:
           fileAttachments.length > 0 ? fileAttachments : undefined,
         skills: effectiveSkills,
+        ...(taskCommand?.skillPaths?.length
+          ? { extraSkillPaths: taskCommand.skillPaths.map((skillPath) => resolve(XYNE_CLAW_PACKAGE_DIR, skillPath)) }
+          : {}),
         skillTriggers:
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:

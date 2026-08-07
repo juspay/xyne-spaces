@@ -11,6 +11,24 @@ export interface SendOptions {
   disableTools?: boolean;
   /** Backend-only guidance that is not shown as user-facing chat text. */
   additionalInstructions?: string;
+  /** Activates the server-owned Design Studio command contract for this turn. */
+  studioMode?: "design";
+  /** Latest delivered HTML, rehydrated server-side so revisions survive a
+   * sandbox restart without relinking the historical attachment row. */
+  designArtifactAttachmentId?: string;
+  /** DOM node selected inside the isolated Design Studio preview. */
+  designSelection?: {
+    scope: "element" | "component" | "design-system";
+    selector: string;
+    tagName: string;
+    label: string;
+    id?: string;
+    classes: string[];
+    text: string;
+    ancestors: string[];
+    styles: Record<string, string>;
+    rect: { x: number; y: number; width: number; height: number };
+  };
   /** Per-chat LiteLLM model override — pins this model (off the agent's shared
    *  admin key) for this turn via the backend providerOverride. */
   modelOverride?: string;
@@ -546,6 +564,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           {
             ...(opts?.disableTools ? { disableTools: true } : {}),
             ...(opts?.additionalInstructions ? { additionalInstructions: opts.additionalInstructions } : {}),
+            ...(opts?.studioMode ? { studioMode: opts.studioMode } : {}),
+            ...(opts?.designArtifactAttachmentId ? { designArtifactAttachmentId: opts.designArtifactAttachmentId } : {}),
+            ...(opts?.designSelection ? { designSelection: opts.designSelection } : {}),
             ...(opts?.modelOverride ? { providerOverride: { provider: "litellm", model: opts.modelOverride } } : {}),
           },
         );
@@ -580,6 +601,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     content: result.reply.content || m.content,
                     status: "complete",
                     parentId: result.reply.parentId ?? m.parentId,
+                    // The final SSE event carries the durable GCS-backed
+                    // attachment metadata. Keep it on the message so artifact
+                    // surfaces (including Design) can render the generated
+                    // file immediately without polling the transcript again.
+                    attachments: result.reply.attachments ?? m.attachments,
                   }
                 : m,
             ),

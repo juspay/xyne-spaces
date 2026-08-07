@@ -859,6 +859,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       editedUserMessageId,
       disableTools,
       additionalInstructions,
+      studioMode,
+      designArtifactAttachmentId,
+      designSelection,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -879,6 +882,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       editedUserMessageId?: string;
       disableTools?: boolean;
       additionalInstructions?: string;
+      studioMode?: "design";
+      designArtifactAttachmentId?: string;
+      designSelection?: unknown;
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
 
@@ -890,6 +896,68 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
+    if (studioMode !== undefined && studioMode !== "design") {
+      res.status(400).json({ success: false, error: "Unknown studioMode" });
+      return;
+    }
+    if (
+      designArtifactAttachmentId !== undefined &&
+      (studioMode !== "design" || typeof designArtifactAttachmentId !== "string" || designArtifactAttachmentId.length > 200)
+    ) {
+      res.status(400).json({ success: false, error: "Invalid Design Studio artifact" });
+      return;
+    }
+
+    const normalizedDesignSelection = (() => {
+      if (studioMode !== "design" || !designSelection || typeof designSelection !== "object") return null;
+      const value = designSelection as Record<string, unknown>;
+      const scope = value["scope"];
+      const selector = value["selector"];
+      const tagName = value["tagName"];
+      if (
+        (scope !== "element" && scope !== "component" && scope !== "design-system") ||
+        typeof selector !== "string" || !selector.trim() || selector.length > 600 ||
+        typeof tagName !== "string" || !tagName.trim() || tagName.length > 80
+      ) return null;
+      const strings = (input: unknown, limit: number, itemLimit: number): string[] =>
+        Array.isArray(input)
+          ? input.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, itemLimit))
+          : [];
+      const styles = Object.fromEntries(
+        Object.entries(value["styles"] && typeof value["styles"] === "object" ? value["styles"] as Record<string, unknown> : {})
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+          .slice(0, 30)
+          .map(([key, styleValue]) => [key.slice(0, 80), styleValue.slice(0, 240)]),
+      );
+      return {
+        scope,
+        selector: selector.trim(),
+        tagName: tagName.trim(),
+        label: typeof value["label"] === "string" ? value["label"].slice(0, 240) : tagName.trim(),
+        id: typeof value["id"] === "string" ? value["id"].slice(0, 160) : undefined,
+        classes: strings(value["classes"], 16, 120),
+        text: typeof value["text"] === "string" ? value["text"].slice(0, 1200) : "",
+        ancestors: strings(value["ancestors"], 6, 600),
+        styles,
+      };
+    })();
+
+    const designSelectionInstruction = normalizedDesignSelection
+      ? [
+          "## Design Studio selection (captured by the preview inspector)",
+          `- Edit scope: ${normalizedDesignSelection.scope}`,
+          `- Stable selector: ${normalizedDesignSelection.selector}`,
+          `- Node: ${normalizedDesignSelection.tagName}`,
+          `- Label: ${normalizedDesignSelection.label}`,
+          ...(normalizedDesignSelection.id ? [`- ID: ${normalizedDesignSelection.id}`] : []),
+          ...(normalizedDesignSelection.classes.length ? [`- Classes: ${normalizedDesignSelection.classes.join(" ")}`] : []),
+          ...(normalizedDesignSelection.ancestors.length ? [`- Ancestors: ${normalizedDesignSelection.ancestors.join(" -> ")}`] : []),
+          ...(normalizedDesignSelection.text ? [`- Current text: ${normalizedDesignSelection.text}`] : []),
+          `- Computed styles: ${JSON.stringify(normalizedDesignSelection.styles)}`,
+          "Apply the user's instruction to this exact node. For component scope, update the reusable component/pattern behind it. " +
+            "For design-system scope, update shared tokens/rules and every semantically matching instance; do not merely patch one inline style.",
+        ].join("\n")
+      : "";
 
     const agent = await agentRepository.findBySlug(slug, getOrgId(req));
     if (!agent) {
@@ -960,6 +1028,25 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     let cloneSourcePiConversationId: string | null = null;
     let cloneBranchMode: "lastUser" | "beforeLastUser" = "lastUser";
     let hydratedAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    let designArtifactAttachment: { fileName: string; mimeType: string; data: string } | null = null;
+
+    if (studioMode === "design" && designArtifactAttachmentId) {
+      const [artifact] = await chatAttachmentRepository.findManyByIdsForUser([designArtifactAttachmentId], userId);
+      if (!artifact || (!artifact.mimeType.toLowerCase().includes("html") && !artifact.originalFilename.toLowerCase().endsWith(".html"))) {
+        res.status(400).json({ success: false, error: "Design Studio artifact is unavailable" });
+        return;
+      }
+      if (artifact.size > 10 * 1024 * 1024) {
+        res.status(400).json({ success: false, error: "Design Studio artifact exceeds the 10 MB HTML limit" });
+        return;
+      }
+      const buf = await gcsService.getFileBuffer(artifact.url);
+      designArtifactAttachment = {
+        fileName: artifact.originalFilename,
+        mimeType: "text/html",
+        data: buf.toString("base64"),
+      };
+    }
 
     if (isRegenerate && parentUserMessageId) {
       const userMsgRow = existingMessages.find((m) => m.id === parentUserMessageId && m.role === "user");
@@ -1041,6 +1128,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           return { fileName: r.originalFilename, mimeType: r.mimeType, data: buf.toString("base64") };
         }));
       }
+    }
+
+    // A delivered design belongs to the previous assistant message, so never
+    // relink it to this new user turn. Rehydrate a user-owned HTML copy only
+    // for the run input; this keeps revisions working after sandbox expiry.
+    if (
+      designArtifactAttachment &&
+      !hydratedAttachments.some((attachment) => attachment.fileName === designArtifactAttachment.fileName)
+    ) {
+      hydratedAttachments.push(designArtifactAttachment);
     }
 
     // Pre-create the running assistant placeholder. Its id powers PI session
@@ -1276,7 +1373,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       userName: user?.name,
       userEmail: user?.email,
-      task: message.trim(),
+      task: studioMode === "design" ? `/design ${message.trim()}` : message.trim(),
       conversationId,
       orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
@@ -1295,6 +1392,13 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       ...(hydratedAttachments.length ? { attachments: hydratedAttachments } : {}),
       ...(additionalInstructions && additionalInstructions.trim()
         ? { additionalInstructions: additionalInstructions.trim() }
+        : {}),
+      ...(designSelectionInstruction
+        ? {
+            additionalInstructions: [additionalInstructions?.trim(), designSelectionInstruction]
+              .filter(Boolean)
+              .join("\n\n"),
+          }
         : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled, toolPermissions,

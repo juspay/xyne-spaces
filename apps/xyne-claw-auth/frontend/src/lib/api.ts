@@ -2722,6 +2722,20 @@ export async function sendChatMessage(
   requestOptions?: {
     disableTools?: boolean;
     additionalInstructions?: string;
+    studioMode?: "design";
+    designArtifactAttachmentId?: string;
+    designSelection?: {
+      scope: "element" | "component" | "design-system";
+      selector: string;
+      tagName: string;
+      label: string;
+      id?: string;
+      classes: string[];
+      text: string;
+      ancestors: string[];
+      styles: Record<string, string>;
+      rect: { x: number; y: number; width: number; height: number };
+    };
     /** Per-request model/provider override. Used by the in-chat model switcher
      *  to pin a LiteLLM model off the agent's shared key for this turn. */
     providerOverride?: { provider: string; model?: string };
@@ -2764,6 +2778,11 @@ export async function sendChatMessage(
       ...(requestOptions?.additionalInstructions?.trim()
         ? { additionalInstructions: requestOptions.additionalInstructions.trim() }
         : {}),
+      ...(requestOptions?.studioMode ? { studioMode: requestOptions.studioMode } : {}),
+      ...(requestOptions?.designArtifactAttachmentId
+        ? { designArtifactAttachmentId: requestOptions.designArtifactAttachmentId }
+        : {}),
+      ...(requestOptions?.designSelection ? { designSelection: requestOptions.designSelection } : {}),
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),

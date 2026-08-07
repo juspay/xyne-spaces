@@ -60,6 +60,7 @@ COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw/tsconfig.json apps/xyne-claw/
 COPY apps/xyne-claw/src           apps/xyne-claw/src
 COPY apps/xyne-claw/skills        apps/xyne-claw/skills
+COPY apps/xyne-claw/design-skills apps/xyne-claw/design-skills
 COPY apps/xyne-claw/scripts       apps/xyne-claw/scripts
 RUN pnpm --filter @xyne/litellm-client run build && \
     pnpm --filter xyne-claw run typecheck

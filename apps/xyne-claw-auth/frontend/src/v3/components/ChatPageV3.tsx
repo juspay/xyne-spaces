@@ -33,6 +33,7 @@ import {
   SparkleIcon,
   BrainIcon,
   ArrowsClockwiseIcon,
+  CursorClickIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
@@ -50,7 +51,9 @@ import {
   setUserAgentConfig,
   approveChatAction,
   uploadChatAttachments,
+  chatAttachmentDownloadUrl,
   type AttachedContextRef,
+  type ChatAttachmentMeta,
   type ContextItem,
   type ContextSearchType,
   type ConversationSummary,
@@ -1319,6 +1322,7 @@ function MessageThread({
   userId,
   runByMsgId,
   onRated,
+  hideHtmlSource = false,
 }: {
   messages: ChatMsg[];
   sending: boolean;
@@ -1349,6 +1353,9 @@ function MessageThread({
   userId: string;
   runByMsgId: Map<string, RunRatingInfo>;
   onRated: (msgId: string, rating: "up" | "down", comment?: string) => void;
+  /** Design consumes fenced HTML in the preview, so do not duplicate the
+   *  entire source document inside the adjacent conversation panel. */
+  hideHtmlSource?: boolean;
 }) {
   // Inline edit state for the latest visible user message. Older messages are
   // intentionally not editable — see comment in useChat.editLatestUserMessage.
@@ -1546,7 +1553,8 @@ function MessageThread({
         const hasInvocations = msgInvocations.length > 0;
         const hasPlan = isStream && livePlanTodos.length > 0;
         const hasReasoning = !!msgReasoning && msgReasoning.length > 0;
-        const hasText = msg.content.length > 0;
+        const displayContent = hideHtmlSource ? designChatContent(msg.content) : msg.content;
+        const hasText = displayContent.length > 0;
         const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText;
 
         return (
@@ -1600,7 +1608,7 @@ function MessageThread({
                 >
                   <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2">
                     <CitationMarkdown
-                      content={msg.content}
+                      content={displayContent}
                       invocations={allConversationInvocations}
                       selectedCitationKey={selectedCitationKey}
                       onOpenCitation={onOpenCitation}
@@ -3208,7 +3216,416 @@ function AgentPickerModal({
 
 /* ── main component ──────────────────────────────────────────────── */
 
-export function ChatPageV3() {
+type DesignPreviewSource =
+  | { kind: "attachment"; attachment: ChatAttachmentMeta }
+  | { kind: "inline"; html: string; fileName: string };
+
+export interface DesignNodeSelection {
+  selector: string;
+  tagName: string;
+  label: string;
+  id?: string;
+  classes: string[];
+  text: string;
+  ancestors: string[];
+  styles: Record<string, string>;
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+export type DesignEditScope = "element" | "component" | "design-system";
+
+const DESIGN_INSPECTOR_EVENT = "xyne-design-node-selected";
+const DESIGN_INSPECTOR_MODE_EVENT = "xyne-design-inspector-mode";
+
+function normalizeDesignNodeSelection(input: unknown): DesignNodeSelection | null {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  if (typeof value["selector"] !== "string" || typeof value["tagName"] !== "string") return null;
+  const strings = (candidate: unknown, limit: number, itemLimit: number): string[] =>
+    Array.isArray(candidate)
+      ? candidate.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, itemLimit))
+      : [];
+  const styles = Object.fromEntries(
+    Object.entries(value["styles"] && typeof value["styles"] === "object" ? value["styles"] as Record<string, unknown> : {})
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .slice(0, 30)
+      .map(([key, styleValue]) => [key.slice(0, 80), styleValue.slice(0, 240)]),
+  );
+  const rawRect = value["rect"] && typeof value["rect"] === "object"
+    ? value["rect"] as Record<string, unknown>
+    : {};
+  const number = (candidate: unknown): number =>
+    typeof candidate === "number" && Number.isFinite(candidate) ? Math.round(candidate) : 0;
+  const selector = value["selector"].slice(0, 600);
+  const tagName = value["tagName"].slice(0, 80);
+  return {
+    selector,
+    tagName,
+    label: typeof value["label"] === "string" ? value["label"].slice(0, 240) : tagName,
+    ...(typeof value["id"] === "string" ? { id: value["id"].slice(0, 160) } : {}),
+    classes: strings(value["classes"], 16, 120),
+    text: typeof value["text"] === "string" ? value["text"].slice(0, 1200) : "",
+    ancestors: strings(value["ancestors"], 6, 600),
+    styles,
+    rect: {
+      x: number(rawRect["x"]),
+      y: number(rawRect["y"]),
+      width: number(rawRect["width"]),
+      height: number(rawRect["height"]),
+    },
+  };
+}
+
+/** Inject a tiny, isolated selection bridge into the generated artifact. It
+ * never mutates the design itself; it only draws a hover outline and sends a
+ * bounded description of the clicked node to the parent Design Studio. */
+function withDesignInspector(html: string): string {
+  const inspector = String.raw`
+(function () {
+  if (window.__xyneDesignInspector) return;
+  window.__xyneDesignInspector = true;
+  var enabled = false;
+  var overlay = document.createElement('div');
+  overlay.setAttribute('data-xyne-design-inspector', 'true');
+  overlay.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:2147483647;border:2px solid #7657ff;background:rgba(118,87,255,.09);box-shadow:0 0 0 1px rgba(255,255,255,.7) inset;border-radius:3px;transition:all 60ms linear';
+
+  function mount() {
+    if (!overlay.isConnected && document.body) document.body.appendChild(overlay);
+  }
+  function esc(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+  function selectorFor(element) {
+    if (element.id) return '#' + esc(element.id);
+    var dataId = element.getAttribute('data-id');
+    if (dataId) return '[data-id="' + String(dataId).replace(/"/g, '\\"') + '"]';
+    var parts = [];
+    var current = element;
+    while (current && current.nodeType === 1 && current !== document.documentElement && parts.length < 6) {
+      var part = current.tagName.toLowerCase();
+      var classes = Array.prototype.slice.call(current.classList || []).filter(function (name) {
+        return name && name.length < 48 && !/^active$|^hover$|^focus$/.test(name);
+      }).slice(0, 2);
+      if (classes.length) part += '.' + classes.map(esc).join('.');
+      var parent = current.parentElement;
+      if (parent) {
+        var siblings = Array.prototype.filter.call(parent.children, function (node) { return node.tagName === current.tagName; });
+        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return parts.join(' > ');
+  }
+  function shortName(element) {
+    var value = element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '';
+    value = value.replace(/\s+/g, ' ').trim().slice(0, 80);
+    return element.tagName.toLowerCase() + (value ? ' · ' + value : '');
+  }
+  function moveOverlay(element) {
+    mount();
+    var rect = element.getBoundingClientRect();
+    overlay.style.display = 'block';
+    overlay.style.left = rect.left + 'px';
+    overlay.style.top = rect.top + 'px';
+    overlay.style.width = Math.max(0, rect.width) + 'px';
+    overlay.style.height = Math.max(0, rect.height) + 'px';
+  }
+  function describe(element) {
+    var style = getComputedStyle(element);
+    var rect = element.getBoundingClientRect();
+    var styleNames = ['display','position','font-family','font-size','font-weight','line-height','color','background-color','border-radius','border','padding','margin','gap','width','height','max-width','justify-content','align-items','grid-template-columns'];
+    var styles = {};
+    styleNames.forEach(function (name) {
+      var value = style.getPropertyValue(name);
+      if (value) styles[name] = value.trim();
+    });
+    var ancestors = [];
+    var parent = element.parentElement;
+    while (parent && parent !== document.documentElement && ancestors.length < 4) {
+      ancestors.unshift(selectorFor(parent));
+      parent = parent.parentElement;
+    }
+    return {
+      selector: selectorFor(element),
+      tagName: element.tagName.toLowerCase(),
+      label: shortName(element),
+      id: element.id || undefined,
+      classes: Array.prototype.slice.call(element.classList || []).slice(0, 12),
+      text: String(element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+      ancestors: ancestors,
+      styles: styles,
+      rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+    };
+  }
+  window.addEventListener('message', function (event) {
+    if (!event.data || event.data.type !== '${DESIGN_INSPECTOR_MODE_EVENT}') return;
+    enabled = event.data.enabled === true;
+    document.documentElement.style.cursor = enabled ? 'crosshair' : '';
+    if (!enabled) overlay.style.display = 'none';
+  });
+  document.addEventListener('mousemove', function (event) {
+    if (!enabled) return;
+    var target = event.target;
+    if (!(target instanceof Element) || target === overlay) return;
+    moveOverlay(target);
+  }, true);
+  document.addEventListener('click', function (event) {
+    if (!enabled) return;
+    var target = event.target;
+    if (!(target instanceof Element) || target === overlay) return;
+    event.preventDefault();
+    event.stopPropagation();
+    moveOverlay(target);
+    window.parent.postMessage({ type: '${DESIGN_INSPECTOR_EVENT}', selection: describe(target) }, '*');
+  }, true);
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      enabled = false;
+      overlay.style.display = 'none';
+      document.documentElement.style.cursor = '';
+      window.parent.postMessage({ type: '${DESIGN_INSPECTOR_MODE_EVENT}', enabled: false }, '*');
+    }
+  }, true);
+  mount();
+})();`;
+  const tag = `<script data-xyne-design-inspector>${inspector}<\/script>`;
+  return /<\/body\s*>/i.test(html)
+    ? html.replace(/<\/body\s*>/i, `${tag}</body>`)
+    : `${html}${tag}`;
+}
+
+function htmlFromMessage(message: ChatMsg): string | null {
+  // Accept a closing fence or the still-streaming remainder. This lets the
+  // preview update while the model is emitting a long HTML document.
+  const match = /```html\s*([\s\S]*?)(?:```|$)/i.exec(message.content);
+  const html = match?.[1]?.trim();
+  if (!html || (!/<html[\s>]/i.test(html) && !/<!doctype\s+html/i.test(html))) return null;
+  return html;
+}
+
+function designChatContent(content: string): string {
+  const hadHtml = /```html\s*/i.test(content);
+  const withoutHtml = content.replace(/```html\s*[\s\S]*?(?:```|$)/gi, "").trim();
+  return withoutHtml || (hadHtml ? "Design updated in preview." : content);
+}
+
+function latestDesignPreview(messages: ChatMsg[]): DesignPreviewSource | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!message || message.role !== "assistant") continue;
+    const attachment = [...(message.attachments ?? [])].reverse().find((item) =>
+      item.mimeType.toLowerCase().includes("text/html") || item.originalFilename.toLowerCase().endsWith(".html"),
+    );
+    if (attachment) return { kind: "attachment", attachment };
+    const html = htmlFromMessage(message);
+    if (html) return { kind: "inline", html, fileName: "xyne-design.html" };
+  }
+  return null;
+}
+
+function DesignPreviewPanel({
+  source,
+  userId,
+  sending,
+  selection,
+  onSelectionChange,
+}: {
+  source: DesignPreviewSource | null;
+  userId: string;
+  sending: boolean;
+  selection: DesignNodeSelection | null;
+  onSelectionChange: (selection: DesignNodeSelection | null) => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [rawHtml, setRawHtml] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [inspecting, setInspecting] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (!source) {
+        setPreviewUrl(null);
+        setRawHtml(null);
+        setError(null);
+        return;
+      }
+
+      const load = async () => {
+        try {
+          let html: string;
+          if (source.kind === "inline") {
+            html = source.html;
+          } else {
+            const response = await fetch(chatAttachmentDownloadUrl(source.attachment.id), {
+              credentials: "include",
+              headers: { "x-user-id": userId },
+              signal: controller.signal,
+            });
+            if (!response.ok) throw new Error(`Preview failed: HTTP ${response.status}`);
+            html = await response.text();
+          }
+          if (cancelled) return;
+          setRawHtml(html);
+          objectUrl = URL.createObjectURL(new Blob([withDesignInspector(html)], { type: "text/html" }));
+          setPreviewUrl(objectUrl);
+          setError(null);
+        } catch (err) {
+          if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
+          setPreviewUrl(null);
+          setRawHtml(null);
+          setError(err instanceof Error ? err.message : "Unable to load this design");
+        }
+      };
+      void load();
+    }, source?.kind === "inline" && sending ? 250 : 0);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [source, userId, reloadVersion, sending]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (event.data?.type === DESIGN_INSPECTOR_MODE_EVENT && event.data.enabled === false) {
+        setInspecting(false);
+        return;
+      }
+      if (event.data?.type !== DESIGN_INSPECTOR_EVENT) return;
+      const candidate = normalizeDesignNodeSelection(event.data.selection);
+      if (candidate) onSelectionChange(candidate);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onSelectionChange]);
+
+  const syncInspectorMode = useCallback(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: DESIGN_INSPECTOR_MODE_EVENT, enabled: inspecting }, "*");
+  }, [inspecting]);
+
+  useEffect(() => {
+    syncInspectorMode();
+  }, [syncInspectorMode, previewUrl, reloadVersion]);
+
+  const fileName = source?.kind === "attachment"
+    ? source.attachment.originalFilename
+    : source?.fileName ?? "Design preview";
+
+  const download = () => {
+    if (!rawHtml) return;
+    const downloadUrl = URL.createObjectURL(new Blob([rawHtml], { type: "text/html" }));
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = fileName;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+  };
+
+  return (
+    <section data-id="design-preview-panel" className="flex min-w-0 flex-1 flex-col bg-xyne-surface-subtle">
+      <header className="flex h-[54px] shrink-0 items-center justify-between border-b border-xyne-border-subtle bg-xyne-surface px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <AppWindowIcon size={17} className="shrink-0 text-xyne-brand" />
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold text-xyne-fg-primary">{fileName}</p>
+            <p className="text-[10px] uppercase tracking-[0.08em] text-xyne-fg-muted">
+              {sending ? "Updating preview" : source ? "Live design" : "Preview"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={!previewUrl}
+            aria-pressed={inspecting}
+            onClick={() => setInspecting((value) => !value)}
+            className={inspecting
+              ? "inline-flex h-8 items-center gap-1.5 rounded-md bg-xyne-brand px-2.5 text-[11px] font-medium text-white"
+              : "inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+            }
+          >
+            <CursorClickIcon size={13} /> {inspecting ? "Inspecting" : "Select"}
+          </button>
+          <button
+            type="button"
+            disabled={!source}
+            onClick={() => setReloadVersion((value) => value + 1)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowsClockwiseIcon size={12} /> Refresh
+          </button>
+          <button
+            type="button"
+            disabled={!rawHtml}
+            onClick={download}
+            className="inline-flex h-8 items-center rounded-md bg-xyne-fg-primary px-3 text-[11px] font-medium text-xyne-fg-inverse transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Download HTML
+          </button>
+        </div>
+      </header>
+
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#e9eaec] p-4 dark:bg-[#111214]">
+        {previewUrl ? (
+          <iframe
+            ref={iframeRef}
+            key={`${previewUrl}:${reloadVersion}`}
+            src={previewUrl}
+            onLoad={syncInspectorMode}
+            title="Design preview"
+            // Deliberately omit allow-same-origin: generated scripts execute
+            // in an opaque origin and cannot access Claw's cookies or DOM.
+            sandbox="allow-scripts allow-forms allow-modals"
+            referrerPolicy="no-referrer"
+            className="h-full w-full rounded-lg border border-black/10 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.16)]"
+          />
+        ) : error ? (
+          <div className="max-w-sm rounded-xl border border-xyne-error/25 bg-xyne-surface p-5 text-center shadow-sm">
+            <p className="text-[13px] font-semibold text-xyne-error">Preview unavailable</p>
+            <p className="mt-1 text-[12px] text-xyne-fg-muted">{error}</p>
+          </div>
+        ) : (
+          <div className="max-w-md text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-xyne-surface shadow-sm ring-1 ring-xyne-border-subtle">
+              <AppWindowIcon size={27} className="text-xyne-brand" />
+            </div>
+            <h2 className="mt-4 text-[18px] font-semibold text-xyne-fg-primary">Create your first design</h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-xyne-fg-muted">
+              Pick an agent, describe the interface, website, diagram, or visual you need, and the generated HTML will appear here.
+            </p>
+          </div>
+        )}
+        {sending && (
+          <div className="absolute bottom-7 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-xyne-border-subtle bg-xyne-surface/95 px-3 py-1.5 text-[11px] text-xyne-fg-secondary shadow-md backdrop-blur">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-xyne-brand" />
+            Agent is updating the design
+          </div>
+        )}
+        {selection && !sending && (
+          <div className="pointer-events-none absolute bottom-7 left-1/2 max-w-[70%] -translate-x-1/2 truncate rounded-full border border-xyne-brand/30 bg-xyne-surface/95 px-3 py-1.5 text-[11px] font-medium text-xyne-fg-primary shadow-md backdrop-blur">
+            Selected: {selection.label}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export interface ChatPageV3Props {
+  mode?: "chat" | "design";
+}
+
+export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const navigate = useNavigate();
   const auth = useAuth();
   const userId = auth.status === "authenticated" ? auth.user.id : "";
@@ -3280,6 +3697,8 @@ export function ChatPageV3() {
   const [conversations, setConversations]     = useState<ConversationWithAgent[]>([]);
   const [convLoading, setConvLoading]         = useState(false);
   const [inputValue, setInputValue]           = useState("");
+  const [designSelection, setDesignSelection] = useState<DesignNodeSelection | null>(null);
+  const [designEditScope, setDesignEditScope] = useState<DesignEditScope>("element");
   const [showModal, setShowModal]             = useState(false);
   const [showDebugger, setShowDebugger]       = useState(false);
   const [debugTurnIndex, setDebugTurnIndex]   = useState<number | null>(null);
@@ -3899,6 +4318,23 @@ export function ChatPageV3() {
     return null;
   }, [messages]);
 
+  const designPreviewSource = useMemo(
+    () => mode === "design" ? latestDesignPreview(messages) : null,
+    [messages, mode],
+  );
+
+  const handleDesignSelection = useCallback((selection: DesignNodeSelection | null) => {
+    setDesignSelection(selection);
+    if (selection) {
+      setDesignEditScope("element");
+      window.setTimeout(() => inputAreaRef.current?.focus(), 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    setDesignSelection(null);
+  }, [designPreviewSource]);
+
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
     void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined);
@@ -3930,6 +4366,12 @@ export function ChatPageV3() {
         ? { threadId: item.meta["conversationId"].trim() }
         : {}),
     }));
+    const designSelectionSnapshot = mode === "design" && designSelection
+      ? { ...designSelection, scope: designEditScope }
+      : undefined;
+    const designArtifactAttachmentId = mode === "design" && designPreviewSource?.kind === "attachment"
+      ? designPreviewSource.attachment.id
+      : undefined;
     const placeholderText =
       text ||
       (hasFiles
@@ -3970,9 +4412,13 @@ export function ChatPageV3() {
         await send(activeAgentSlug, userId, placeholderText, {
           attachmentIds: uploadedIds.length > 0 ? uploadedIds : undefined,
           attachedContext: contextSnapshot.length > 0 ? contextSnapshot : undefined,
+          ...(mode === "design" ? { studioMode: "design" as const } : {}),
+          ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),
+          ...(designSelectionSnapshot ? { designSelection: designSelectionSnapshot } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
         });
+        if (designSelectionSnapshot) setDesignSelection(null);
         listChatConversations(activeAgentSlug, userId)
           .then((convs) => setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug }))))
           .catch(() => {});
@@ -3987,7 +4433,7 @@ export function ChatPageV3() {
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -4090,7 +4536,19 @@ export function ChatPageV3() {
 
         {activeAgent ? (
           <>
-            <div className="flex flex-1 min-w-0 overflow-hidden">
+            {mode === "design" && (
+              <DesignPreviewPanel
+                source={designPreviewSource}
+                userId={userId}
+                sending={sending}
+                selection={designSelection}
+                onSelectionChange={handleDesignSelection}
+              />
+            )}
+            <div className={mode === "design"
+              ? "flex w-[min(560px,44%)] min-w-[360px] shrink-0 overflow-hidden border-l border-xyne-border-subtle"
+              : "flex flex-1 min-w-0 overflow-hidden"
+            }>
               <div
                 data-id="chat-center-panel"
                 className="flex min-w-0 flex-1 flex-col overflow-hidden bg-xyne-surface-subtle"
@@ -4167,7 +4625,50 @@ export function ChatPageV3() {
                     onApproveAction={handleApproveAction}
                     onApproveAndContinueAction={handleApproveAndContinueAction}
                     onDeclineAction={handleDeclineAction}
+                    hideHtmlSource={mode === "design"}
                   />
+                )}
+
+                {mode === "design" && designSelection && (
+                  <div className="mx-3 mb-2 rounded-lg border border-xyne-brand/25 bg-xyne-surface px-3 py-2 shadow-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <CursorClickIcon size={13} className="shrink-0 text-xyne-brand" />
+                          <p className="truncate text-[11px] font-semibold text-xyne-fg-primary">{designSelection.label}</p>
+                        </div>
+                        <p className="mt-0.5 truncate font-mono text-[10px] text-xyne-fg-muted">{designSelection.selector}</p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Clear selected design element"
+                        onClick={() => setDesignSelection(null)}
+                        className="rounded p-0.5 text-xyne-fg-muted hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                      >
+                        <XIcon size={13} />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex gap-1" aria-label="Design edit scope">
+                      {([
+                        ["element", "This element"],
+                        ["component", "Component"],
+                        ["design-system", "Design system"],
+                      ] as const).map(([scope, label]) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          aria-pressed={designEditScope === scope}
+                          onClick={() => setDesignEditScope(scope)}
+                          className={designEditScope === scope
+                            ? "rounded-md bg-xyne-brand px-2 py-1 text-[10px] font-medium text-white"
+                            : "rounded-md bg-xyne-surface-subtle px-2 py-1 text-[10px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 <InputArea

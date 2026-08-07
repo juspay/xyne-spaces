@@ -1296,6 +1296,9 @@ export interface RunTaskOptions {
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
   skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
+  /** Trusted, package-owned skill roots for a built-in run mode. Unlike
+   * session skills these are not user supplied and are not deleted at exit. */
+  extraSkillPaths?: string[] | undefined;
   skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
   promptInjections?: PromptInjection[] | undefined;
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
@@ -1421,6 +1424,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     images,
     fileAttachments,
     skills,
+    extraSkillPaths,
     skillTriggers,
     promptInjections,
     requiredTool,
@@ -1552,7 +1556,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   // If skills provided, materialize them to disk and add their directory as
   // an additional skill path so pi's DefaultResourceLoader picks them up.
-  const additionalSkillPaths: string[] = [];
+  const additionalSkillPaths: string[] = [...(extraSkillPaths ?? [])];
   if (skills && skills.length > 0 && sessionId) {
     const skillsDir = await writeSessionSkills(sessionId, skills);
     if (skillsDir) {

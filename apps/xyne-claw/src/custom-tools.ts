@@ -158,6 +158,7 @@ export function loadCustomTools(
     ...(toolsConfig?.custom ?? []),
     ...forcedCustomSlugs,
   ]);
+  const forcedCustom = new Set(forcedCustomSlugs);
   // Google + Microsoft are no longer loaded as in-process custom tools — they
   // run as claw-auth-hosted stdio MCP connectors (type "google"/"microsoft"),
   // resolved through the normal MCP credential path. See mcp/servers/google-server.ts
@@ -188,7 +189,7 @@ export function loadCustomTools(
     else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
-    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
+    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
     else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
 
     return allowed;
