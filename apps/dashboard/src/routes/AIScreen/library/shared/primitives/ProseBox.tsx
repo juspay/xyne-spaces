@@ -32,7 +32,7 @@ export function ProseBox({
         ref={scrollRef}
         onScroll={sync}
         className={cn(
-          'h-full w-full overflow-y-auto rounded-2xl border border-border bg-card p-4',
+          'h-full w-full overflow-y-auto rounded-2xl border border-border bg-muted/30 p-4',
           className,
         )}
       >

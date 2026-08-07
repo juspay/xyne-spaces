@@ -195,7 +195,7 @@ export function SkillDetailPanel({
               </div>
 
               <div
-                className='min-w-0 flex-1 overflow-auto rounded-2xl border border-border bg-card p-4'
+                className='min-w-0 flex-1 overflow-auto rounded-2xl border border-border bg-muted/30 p-4'
                 style={{ height: PANE_HEIGHT }}
               >
                 {!isSkillMd && fileContent.loading ? (
