@@ -631,6 +631,13 @@ router.patch("/:slug/design-system", async (req: Request<{ slug: string }>, res:
       res.status(409).json({ success: false, error: "Agent settings changed while saving; please retry" });
       return;
     }
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "AGENT_UPDATED",
+      targetId: existing.id,
+      description: `Agent "${existing.name}" (${existing.slug}) design system updated`,
+      metadata: { changed: ["designSystem"], orgId: existing.orgId },
+    });
     res.json({ success: true, data: sanitizeAgent(updated as unknown as Record<string, unknown>) });
   } catch (err) {
     log.error("[agents] design-system update error:", err);
