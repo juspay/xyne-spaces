@@ -311,4 +311,87 @@ export const channelsOperations = {
   removeSection: mutator<{ id: string }, void>('channelSection.remove', {
     mapArgs: (args) => ({ id: args.id, timestamp: now() }),
   }),
+  /**
+   * Close a DM, hiding it from the sidebar without losing history.
+   * Maps to: Zero mutator 'channel.closeDm'
+   */
+  closeDm: mutator<{ channelId: string }, void>('channel.closeDm', {
+    mapArgs: (args) => ({ channelId: args.channelId, updatedAt: now() }),
+  }),
+
+  /**
+   * Reopen a closed DM.
+   * Maps to: Zero mutator 'channel.reopenDm'
+   */
+  reopenDm: mutator<{ channelId: string }, void>('channel.reopenDm', {
+    mapArgs: (args) => ({ channelId: args.channelId, updatedAt: now() }),
+  }),
+
+  /**
+   * Turn a group DM into a named channel. Posts a system message announcing it.
+   * Maps to: Zero mutator 'channel.promoteToChannel'
+   */
+  promoteToChannel: mutator<
+    {
+      channelId: string;
+      name: string;
+      projectId: string;
+      visibility: 'PUBLIC' | 'PRIVATE';
+      description?: string;
+    },
+    void
+  >('channel.promoteToChannel', {
+    mapArgs: (args) => ({
+      ...args,
+      conversationId: newId(),
+      messageId: newId(),
+      timestamp: now(),
+    }),
+  }),
+
+  /**
+   * Mark a channel unread starting at a given message.
+   * Maps to: Zero mutator 'channel.markChannelUnreadFrom'
+   */
+  markUnreadFrom: mutator<
+    { channelId: string; messageId: string; conversationId?: string },
+    void
+  >('channel.markChannelUnreadFrom', {
+    mapArgs: (args) => ({ ...args, timestamp: now() }),
+  }),
+
+  /**
+   * Set who may add people to the channel.
+   * Maps to: Zero mutator 'channel.updateAddUserPolicy'
+   */
+  setAddUserPolicy: mutator<{ channelId: string; policy: string }, void>(
+    'channel.updateAddUserPolicy'
+  ),
+
+  /**
+   * Set the prompt used to summarise calls held in this channel.
+   * Maps to: Zero mutator 'channel.updateCallSummaryPrompt'
+   */
+  setCallSummaryPrompt: mutator<{ channelId: string; prompt: string }, void>(
+    'channel.updateCallSummaryPrompt'
+  ),
+
+  /**
+   * Pin a board to the channel's tickets tab.
+   * Maps to: Zero mutator 'channel.updateSelectedBoardId'
+   */
+  setSelectedBoard: mutator<{ channelId: string; boardId: string | null }, void>(
+    'channel.updateSelectedBoardId',
+    {
+      mapArgs: (args) => ({ ...args, updatedAt: now() }),
+    }
+  ),
+
+  /**
+   * Show or hide ticket activity inline in the channel.
+   * Maps to: Zero mutator 'channel.updateShowTicketsTabTicketsInChat'
+   */
+  setShowTicketsInChat: mutator<{ channelId: string; show: boolean }, void>(
+    'channel.updateShowTicketsTabTicketsInChat'
+  ),
 } as const;

@@ -220,4 +220,67 @@ export class ChannelsResource extends Resource {
   removeSection(id: string): Promise<void> {
     return this.call(channelsOperations.removeSection, { id });
   }
+  // ----- DMs and channel settings -----
+
+  /** Close a DM, hiding it from the sidebar without losing its history. */
+  closeDm(channelId: string): Promise<void> {
+    return this.call(channelsOperations.closeDm, { channelId });
+  }
+
+  /** Reopen a closed DM. */
+  reopenDm(channelId: string): Promise<void> {
+    return this.call(channelsOperations.reopenDm, { channelId });
+  }
+
+  /**
+   * Turn a group DM into a named channel.
+   *
+   * Posts a system message announcing the change.
+   */
+  promoteToChannel(data: {
+    channelId: string;
+    name: string;
+    projectId: string;
+    visibility: 'PUBLIC' | 'PRIVATE';
+    description?: string;
+  }): Promise<void> {
+    return this.call(channelsOperations.promoteToChannel, data);
+  }
+
+  /** Mark a channel unread starting from a specific message. */
+  markUnreadFrom(
+    channelId: string,
+    messageId: string,
+    options?: { conversationId?: string }
+  ): Promise<void> {
+    return this.call(channelsOperations.markUnreadFrom, {
+      channelId,
+      messageId,
+      ...options,
+    });
+  }
+
+  /**
+   * Set who may add people to the channel.
+   *
+   * @param policy - `EVERYONE` or `ADMINS_ONLY`
+   */
+  setAddUserPolicy(channelId: string, policy: string): Promise<void> {
+    return this.call(channelsOperations.setAddUserPolicy, { channelId, policy });
+  }
+
+  /** Set the prompt used to summarise calls held in this channel. */
+  setCallSummaryPrompt(channelId: string, prompt: string): Promise<void> {
+    return this.call(channelsOperations.setCallSummaryPrompt, { channelId, prompt });
+  }
+
+  /** Pin a board to the channel's tickets tab, or pass `null` to unpin. */
+  setSelectedBoard(channelId: string, boardId: string | null): Promise<void> {
+    return this.call(channelsOperations.setSelectedBoard, { channelId, boardId });
+  }
+
+  /** Show or hide ticket activity inline in the channel. */
+  setShowTicketsInChat(channelId: string, show: boolean): Promise<void> {
+    return this.call(channelsOperations.setShowTicketsInChat, { channelId, show });
+  }
 }
