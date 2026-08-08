@@ -163,10 +163,6 @@ export function CallControls({
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
-  // Unified Smart Call Invite Link: when enabled, both audiences share ONE
-  // smart link, so the two-option share menu collapses to a single copy action.
-  const unifiedInviteEnabled =
-    import.meta.env.VITE_ENABLE_UNIFIED_CALL_INVITE_LINK === 'true';
   const reactionPickerRef = useRef<HTMLDivElement>(null);
   const shareMenuRef = useRef<HTMLDivElement>(null);
   const { isMobile, isMac } = usePlatform();
@@ -178,6 +174,13 @@ export function CallControls({
     staleTime: Infinity,
     enabled: !!callId,
   });
+  const inviteUrl = inviteUrlQuery.data?.url;
+  // The backend flag is authoritative so the share UI and invite router cannot
+  // drift when only the runtime/server environment is changed. The Vite flag
+  // remains a loading-time fallback for deployments that enable both together.
+  const unifiedInviteEnabled =
+    inviteUrlQuery.data?.unifiedCallInviteLinkEnabled ??
+    import.meta.env.VITE_ENABLE_UNIFIED_CALL_INVITE_LINK === 'true';
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
@@ -336,8 +339,8 @@ export function CallControls({
   };
 
   const handleCopyInviteLink = (): void => {
-    const webUrl = inviteUrlQuery.data ?? '';
-    void navigator.clipboard.writeText(webUrl).then(() => {
+    if (!inviteUrl) return;
+    void navigator.clipboard.writeText(inviteUrl).then(() => {
       setShowShareMenu(false);
       setShowCopied(true);
       setTimeout(() => setShowCopied(false), 2000);
@@ -864,9 +867,15 @@ export function CallControls({
         {isExternalUser ? (
           <button
             onClick={handleCopyInviteLink}
-            className={cn(buttonClasses, 'relative bg-gray-700 hover:bg-gray-600 text-white')}
+            disabled={!inviteUrl}
+            className={cn(
+              buttonClasses,
+              'relative bg-gray-700 text-white',
+              inviteUrl ? 'hover:bg-gray-600' : 'cursor-not-allowed opacity-50',
+            )}
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title='Copy call link'
+            title={inviteUrl ? 'Copy invite link' : 'Invite link unavailable'}
+            aria-label={inviteUrl ? 'Copy invite link' : 'Invite link unavailable'}
             data-track-category='CALLS'
             data-track-name='SHARE_CALL_LINK'
             data-track-metadata={JSON.stringify({ callId })}
@@ -886,19 +895,37 @@ export function CallControls({
         ) : (
           <div className='relative' ref={shareMenuRef}>
             <button
-              onClick={() =>
-                unifiedInviteEnabled
-                  ? handleCopyInviteLink()
-                  : setShowShareMenu(prev => !prev)
-              }
+              onClick={() => {
+                if (unifiedInviteEnabled) {
+                  handleCopyInviteLink();
+                  return;
+                }
+                setShowShareMenu(prev => !prev);
+              }}
+              disabled={unifiedInviteEnabled && !inviteUrl}
               className={cn(
                 buttonClasses,
-                showShareMenu
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                  : 'bg-gray-700 hover:bg-gray-600 text-white',
+                unifiedInviteEnabled && !inviteUrl
+                  ? 'cursor-not-allowed bg-gray-700 text-white opacity-50'
+                  : showShareMenu
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-gray-700 hover:bg-gray-600 text-white',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title='Share call link'
+              title={
+                unifiedInviteEnabled
+                  ? inviteUrl
+                    ? 'Copy invite link — works for teammates and guests'
+                    : 'Preparing invite link…'
+                  : 'Share call link'
+              }
+              aria-label={
+                unifiedInviteEnabled
+                  ? inviteUrl
+                    ? 'Copy invite link for teammates and guests'
+                    : 'Preparing invite link'
+                  : 'Share call link'
+              }
               data-track-category='CALLS'
               data-track-name='SHARE_CALL_LINK'
               data-track-metadata={JSON.stringify({ callId })}
@@ -923,7 +950,11 @@ export function CallControls({
                 </div>
                 <button
                   onClick={handleCopyInviteLink}
-                  className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors text-left'
+                  disabled={!inviteUrl}
+                  className={cn(
+                    'flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 transition-colors text-left',
+                    inviteUrl ? 'hover:bg-gray-700' : 'cursor-not-allowed opacity-50',
+                  )}
                   data-track-category='CALLS'
                   data-track-name='COPY_INVITE_LINK'
                 >

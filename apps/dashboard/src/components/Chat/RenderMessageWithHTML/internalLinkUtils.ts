@@ -6,6 +6,7 @@ export type InternalXyneLinkKind =
   | 'thread'
   | 'message'
   | 'ticket'
+  | 'call'
   | 'unknown';
 
 export interface ParsedInternalXyneLink {
@@ -16,6 +17,7 @@ export interface ParsedInternalXyneLink {
   ticketId?: string;
   messageId?: string;
   canvasId?: string;
+  callId?: string;
 }
 
 export type AnchorTargetProps = Pick<
@@ -27,6 +29,7 @@ const INTERNAL_XYNE_HOSTS = new Set([
   'spaces.xyne.juspay.net',
   'app.spaces.xyne.juspay.net',
   'spaces.sandbox.xyne.juspay.net',
+  'app.spaces.sandbox.xyne.juspay.net',
   'xyne-spaces.web.app',
   'localhost',
   '127.0.0.1',
@@ -55,6 +58,19 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     };
 
     const segments = url.pathname.split('/').filter(Boolean);
+    const callId =
+      segments[0] === 'external' && segments[1] === 'call'
+        ? segments[2]
+        : segments[0] === 'call'
+          ? segments[1]
+          : undefined;
+    if (callId) {
+      return {
+        kind: 'call',
+        href,
+        callId,
+      };
+    }
     if (segments[0] !== 'chat' && segments[1] === 'chat') {
       segments.shift();
     }
@@ -195,6 +211,8 @@ export const getInternalLinkLabel = (
       return channelLabel ? `Thread in ${channelLabel}` : 'Open thread';
     case 'channel':
       return channelLabel ? `Open ${channelLabel}` : 'Open channel';
+    case 'call':
+      return 'Join call';
     default:
       return 'Open link';
   }

@@ -13,7 +13,7 @@ const CALL_WS = 'ws_call_alpha';
 const OTHER_WS = 'ws_other_beta';
 const EXTERNAL_ID = 'call_ext_abc123';
 const FRONTEND_URL = 'https://app.xyne.test';
-const EXPECTED_REDIRECT = `${FRONTEND_URL}/call/${EXTERNAL_ID}`;
+const EXPECTED_REDIRECT = `${FRONTEND_URL}/call/${EXTERNAL_ID}?type=AUDIO`;
 
 // Mock config BEFORE anything imports it. The factory also plants JWT_SECRET so
 // the real jwtService constructor (which reads process.env at module load) is
@@ -38,6 +38,11 @@ jest.mock('@/utils/logger', () => {
 const getCallInviteRoutingInfo = jest.fn();
 jest.mock('@/database/repositories', () => ({
   repositories: { calls: { getCallInviteRoutingInfo: (...a: unknown[]) => getCallInviteRoutingInfo(...a) } },
+}));
+
+const findUser = jest.fn();
+jest.mock('@/database/client', () => ({
+  db: { user: { findUnique: (...a: unknown[]) => findUser(...a) } },
 }));
 
 // Mocked user-session service. The routing service does `new UserSessionService()`
@@ -69,7 +74,7 @@ function makeReqRes(cookies: Record<string, string>, headers: Record<string, str
 const routingInfo = {
   callId: 'call-internal-id',
   externalId: EXTERNAL_ID,
-  callType: 'INSTANT',
+  callType: 'AUDIO',
   status: 'ACTIVE',
   workspaceId: CALL_WS,
 };
@@ -79,6 +84,12 @@ beforeEach(() => {
   config.enableUnifiedCallInviteLink = true;
   config.jwt.forceLogoutBefore = 0;
   getCallInviteRoutingInfo.mockResolvedValue(routingInfo);
+  findUser.mockResolvedValue({
+    workspaceId: CALL_WS,
+    orgMemberId: 'm-1',
+    leftAt: null,
+    orgMember: { memberId: 'm-1', leftAt: null },
+  });
 });
 
 describe('callInviteRoutingService.detect — decision matrix', () => {
@@ -86,7 +97,7 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
     config.enableUnifiedCallInviteLink = false;
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: sign(validClaims()) });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
     expect(getCallInviteRoutingInfo).not.toHaveBeenCalled();
   });
 
@@ -94,20 +105,52 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
     getCallInviteRoutingInfo.mockResolvedValue(null);
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: sign(validClaims()) });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 3 — anonymous visitor (no workspace cookie) → external', async () => {
     const { req, res } = makeReqRes({});
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 4 — valid, unexpired token for the call workspace → internal + redirect', async () => {
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: sign(validClaims(), { expiresIn: 3600 }) });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: true, redirectUrl: EXPECTED_REDIRECT });
+    expect(out).toEqual({
+      result: 'internal',
+      workspaceId: CALL_WS,
+      redirectUrl: EXPECTED_REDIRECT,
+    });
     expect(res.cookie).not.toHaveBeenCalled(); // no refresh needed for a live token
+  });
+
+  it('returns external for an ended call even with a valid matching session', async () => {
+    getCallInviteRoutingInfo.mockResolvedValue({ ...routingInfo, status: 'ENDED' });
+    const { req, res } = makeReqRes({
+      [`xyne_ws_${CALL_WS}_token`]: sign(validClaims(), { expiresIn: 3600 }),
+    });
+
+    expect(await callInviteRoutingService.detect(req, res, EXTERNAL_ID)).toEqual({
+      result: 'external',
+    });
+    expect(findUser).not.toHaveBeenCalled();
+  });
+
+  it('returns external when a valid token belongs to a removed workspace user', async () => {
+    findUser.mockResolvedValue({
+      workspaceId: CALL_WS,
+      orgMemberId: 'm-1',
+      leftAt: new Date(),
+      orgMember: { memberId: 'm-1', leftAt: null },
+    });
+    const { req, res } = makeReqRes({
+      [`xyne_ws_${CALL_WS}_token`]: sign(validClaims(), { expiresIn: 3600 }),
+    });
+
+    expect(await callInviteRoutingService.detect(req, res, EXTERNAL_ID)).toEqual({
+      result: 'external',
+    });
   });
 
   it('Row 5 — cross-workspace: only a DIFFERENT workspace cookie present → external', async () => {
@@ -118,7 +161,7 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
       { 'x-workspace-id': OTHER_WS, 'xyne_last_workspace': OTHER_WS } as any,
     );
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 6 — token workspace claim mismatches the call workspace → external (defense in depth)', async () => {
@@ -126,14 +169,14 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
     // another workspace. Must be rejected.
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: sign(validClaims(OTHER_WS), { expiresIn: 3600 }) });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 7 — tampered token (bad signature) → external', async () => {
     const forged = sign(validClaims(), { expiresIn: 3600 }, 'attacker-key-attacker-key-attacker-key');
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: forged });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 8 — expired token + live session in SAME workspace → internal, mints fresh cookie, leaves xyne_last_workspace alone', async () => {
@@ -151,7 +194,11 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
       user_session_id: 'sess-1',
     });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: true, redirectUrl: EXPECTED_REDIRECT });
+    expect(out).toEqual({
+      result: 'internal',
+      workspaceId: CALL_WS,
+      redirectUrl: EXPECTED_REDIRECT,
+    });
 
     const cookieNames = res.cookie.mock.calls.map((c: unknown[]) => c[0]);
     expect(cookieNames).toContain(`xyne_ws_${CALL_WS}_token`); // fresh access token minted
@@ -170,7 +217,7 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
       user_session_id: 'sess-1',
     });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
     expect(res.cookie).not.toHaveBeenCalled();
   });
 
@@ -181,7 +228,7 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
       user_session_id: 'sess-1',
     });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 11 — expired token + session revoked (status !== ACTIVE) → external', async () => {
@@ -195,7 +242,7 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
       user_session_id: 'sess-1',
     });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 12 — expired token + user has left the workspace → external', async () => {
@@ -209,7 +256,7 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
       user_session_id: 'sess-1',
     });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 13 — force-logout watermark invalidates an otherwise-valid token → external', async () => {
@@ -217,12 +264,12 @@ describe('callInviteRoutingService.detect — decision matrix', () => {
     config.jwt.forceLogoutBefore = Math.floor(Date.now() / 1000) + 3600;
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: sign(validClaims(), { expiresIn: 3600 }) });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 
   it('Row 14 — garbage cookie value (not a JWT) → external', async () => {
     const { req, res } = makeReqRes({ [`xyne_ws_${CALL_WS}_token`]: 'not-a-jwt' });
     const out = await callInviteRoutingService.detect(req, res, EXTERNAL_ID);
-    expect(out).toEqual({ internal: false });
+    expect(out).toEqual({ result: 'external' });
   });
 });

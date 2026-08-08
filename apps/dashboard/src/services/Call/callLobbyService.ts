@@ -165,12 +165,18 @@ export const callLobbyService = {
   },
 
   /**
-   * Get the external call invite URL from the backend.
-   * Returns the full URL (backend base URL + /call/:externalId).
+   * Get the public call invite URL and the backend's authoritative rollout
+   * state for the single-link share UI.
    */
-  async getInviteUrl(externalId: string): Promise<string> {
-    const response = await apiInstance.get<{ url: string }>(`${BASE}/${externalId}/invite-url`);
-    return response.data.url;
+  async getInviteUrl(externalId: string): Promise<{
+    url: string;
+    unifiedCallInviteLinkEnabled: boolean;
+  }> {
+    const response = await apiInstance.get<{
+      url: string;
+      unifiedCallInviteLinkEnabled: boolean;
+    }>(`${BASE}/${externalId}/invite-url`);
+    return response.data;
   },
 
   /**
@@ -179,14 +185,14 @@ export const callLobbyService = {
    * external lobby page should redirect to `redirectUrl` instead of rendering.
    * Always resolves (fail-open to the external lobby); never reveals call state.
    */
-  async detectInternal(
-    externalId: string,
-  ): Promise<{ internal: boolean; redirectUrl?: string }> {
+  async detectInternal(externalId: string): Promise<{ internal: boolean; redirectUrl?: string }> {
     try {
-      const response = await apiInstance.get<{ internal: boolean; redirectUrl?: string }>(
-        `${BASE}/${externalId}/detect-internal`,
-      );
-      return response.data;
+      const response = await apiInstance.post<
+        { result: 'internal'; redirectUrl: string; workspaceId: string } | { result: 'external' }
+      >(`${BASE}/${externalId}/detect-internal`);
+      return response.data.result === 'internal'
+        ? { internal: true, redirectUrl: response.data.redirectUrl }
+        : { internal: false };
     } catch {
       return { internal: false };
     }

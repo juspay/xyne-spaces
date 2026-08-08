@@ -11,6 +11,7 @@ import {
   getHostControls,
 } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { db } from '@/database/client';
 import {
   externalCallTokenService,
@@ -437,7 +438,10 @@ export const callLobbyController = {
     try {
       const { externalId } = req.params;
       const url = buildCallInviteUrl(externalId);
-      res.json({ url });
+      res.json({
+        url,
+        unifiedCallInviteLinkEnabled: config.enableUnifiedCallInviteLink,
+      });
     } catch (err) {
       logger.error(`[call-lobby] getInviteUrl failed | error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
@@ -445,11 +449,12 @@ export const callLobbyController = {
   },
 
   /**
-   * GET /api/call-lobby/:externalId/detect-internal
+   * POST /api/call-lobby/:externalId/detect-internal
    *
    * Unified Smart Call Invite Link router. Public, unauthenticated, and
-   * INTENTIONALLY opaque: it ALWAYS returns HTTP 200 with `{ internal: boolean }`
-   * and never reveals whether the call exists, its workspace, or a denial reason.
+   * INTENTIONALLY opaque: expected outcomes return HTTP 200 with an
+   * internal/external result and never reveal whether the call exists, its
+   * workspace, or a denial reason. Unexpected failures return 500.
    *
    * When `internal` is true the response also carries `redirectUrl`, the internal
    * deep link the external page should bounce the browser to. Deliberately NOT
@@ -457,14 +462,14 @@ export const callLobbyController = {
    * key off the external-participant cookie).
    */
   detectInternal: async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
     try {
       const { externalId } = req.params;
       const result = await callInviteRoutingService.detect(req, res, externalId);
       res.json(result);
     } catch (err) {
       logger.error(`[call-lobby] detectInternal failed | error=${err}`);
-      // Fail closed to external lobby — never surface an error to the client.
-      res.json({ internal: false });
+      res.status(500).json({ result: 'external' });
     }
   },
 };

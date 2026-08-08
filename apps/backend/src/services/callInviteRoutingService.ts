@@ -4,8 +4,14 @@ import { UserSessionService } from './userSessionService';
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 import { logger as baseLogger } from '@/utils/logger';
+import { db } from '@/database/client';
 
 const logger = baseLogger.child({ module: 'CallInviteRoutingService' });
+const JOINABLE_CALL_STATUSES = new Set(['SCHEDULED', 'ACTIVE', 'IN_PROGRESS']);
+
+export type DetectInternalCallInviteResult =
+  | { result: 'internal'; redirectUrl: string; workspaceId: string }
+  | { result: 'external' };
 
 /**
  * Unified Smart Call Invite Link — server-side routing detector.
@@ -41,28 +47,32 @@ class CallInviteRoutingService {
   }
 
   /**
-   * Decide routing for a public invite link. Always resolves (never throws to
-   * the caller) and never leaks whether the call exists.
+   * Decide routing for a public invite link without leaking whether the call
+   * exists. Expected misses resolve to the same opaque external result;
+   * unexpected failures are handled by the controller as a generic 500.
    *
-   * @returns `{ internal: true, redirectUrl }` when the browser holds a live /
-   *          refreshable internal session in the call's workspace and the
-   *          feature flag is on; otherwise `{ internal: false }`.
+   * @returns an opaque external result unless the browser holds a live or
+   *          refreshable internal session in the call's workspace.
    */
   async detect(
     req: Request,
     res: Response,
     externalId: string,
-  ): Promise<{ internal: boolean; redirectUrl?: string }> {
+  ): Promise<DetectInternalCallInviteResult> {
     try {
       if (!config.enableUnifiedCallInviteLink) {
-        return { internal: false };
+        return { result: 'external' };
       }
 
       const routing = await repositories.calls.getCallInviteRoutingInfo(externalId);
       // Opaque: unknown call, or a call with no workspace, is indistinguishable
       // from "not internal".
-      if (!routing || !routing.workspaceId) {
-        return { internal: false };
+      if (
+        !routing ||
+        !routing.workspaceId ||
+        !JOINABLE_CALL_STATUSES.has(routing.status)
+      ) {
+        return { result: 'external' };
       }
 
       const callWorkspaceId = routing.workspaceId;
@@ -70,56 +80,113 @@ class CallInviteRoutingService {
       // Rule 2: read ONLY the workspace-scoped cookie for the CALL's workspace.
       const wsToken = req.cookies?.[`xyne_ws_${callWorkspaceId}_token`] as string | undefined;
       if (!wsToken) {
-        return { internal: false };
+        return { result: 'external' };
       }
 
       let tokenWorkspaceId: string | null = null;
+      let tokenUserId: string | null = null;
+      let tokenMemberId: string | null = null;
       let tokenExpired = false;
       try {
         // Fast path: fully valid (unexpired) token.
         const payload = jwtService.verifyToken(wsToken);
         tokenWorkspaceId = payload.workspaceId;
+        tokenUserId = payload.sub;
+        tokenMemberId = payload.memberId;
       } catch {
         // Slow path: signature/iss/aud still valid but past `exp`. A short access
         // token expiring is normal for an otherwise-live session.
         try {
           const payload = jwtService.verifyIgnoringExpiry(wsToken);
           tokenWorkspaceId = payload.workspaceId;
+          tokenUserId = payload.sub;
+          tokenMemberId = payload.memberId;
           tokenExpired = true;
         } catch {
           // Bad signature / wrong iss-aud / force-logged-out → not internal.
-          return { internal: false };
+          return { result: 'external' };
         }
       }
 
       // Defense in depth: the cookie name already encodes the workspace, but the
       // token's own claim MUST also match the call's workspace.
       if (tokenWorkspaceId !== callWorkspaceId) {
-        return { internal: false };
+        return { result: 'external' };
       }
 
-      // Unexpired, workspace-matched token → live internal session. Route in.
+      if (!tokenUserId || !tokenMemberId) {
+        return { result: 'external' };
+      }
+
+      // A signed token is not enough: membership may have been removed after
+      // it was minted. Re-check the active workspace user before routing in.
       if (!tokenExpired) {
-        return { internal: true, redirectUrl: this.buildInternalUrl(externalId) };
+        const active = await this.isActiveWorkspaceUser(
+          tokenUserId,
+          tokenMemberId,
+          callWorkspaceId,
+        );
+        if (!active) return { result: 'external' };
+        return {
+          result: 'internal',
+          workspaceId: callWorkspaceId,
+          redirectUrl: this.buildInternalUrl(externalId, routing.callType),
+        };
       }
 
       // Expired token: only route internal if the GLOBAL session is genuinely
       // still active for THIS workspace. Confirm before committing so we never
       // dump the user onto the internal app's login screen.
-      const refreshed = await this.confirmAndRefreshForWorkspace(req, res, callWorkspaceId);
+      const refreshed = await this.confirmAndRefreshForWorkspace(
+        req,
+        res,
+        callWorkspaceId,
+        tokenUserId,
+        tokenMemberId,
+      );
       if (!refreshed) {
-        return { internal: false };
+        return { result: 'external' };
       }
-      return { internal: true, redirectUrl: this.buildInternalUrl(externalId) };
+      return {
+        result: 'internal',
+        workspaceId: callWorkspaceId,
+        redirectUrl: this.buildInternalUrl(externalId, routing.callType),
+      };
     } catch (err) {
-      // Rule 3: any unexpected error fails closed to the external lobby.
-      logger.warn(`[call-invite] detect failed, falling back to external | error=${err}`);
-      return { internal: false };
+      // Expected misses return the opaque external result above. Unexpected
+      // failures are surfaced as 500 by the controller; the client still
+      // fails open into the external lobby without exposing the reason.
+      logger.error('[call-invite] unexpected detect failure');
+      throw err;
     }
   }
 
-  private buildInternalUrl(externalId: string): string {
-    return `${config.frontendUrl}/call/${externalId}`;
+  private buildInternalUrl(externalId: string, callType: string): string {
+    return `${config.frontendUrl}/call/${encodeURIComponent(externalId)}?type=${encodeURIComponent(callType)}`;
+  }
+
+  private async isActiveWorkspaceUser(
+    userId: string,
+    memberId: string,
+    workspaceId: string,
+  ): Promise<boolean> {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: {
+        workspaceId: true,
+        orgMemberId: true,
+        leftAt: true,
+        orgMember: { select: { memberId: true, leftAt: true } },
+      },
+    });
+    return !!(
+      user &&
+      user.workspaceId === workspaceId &&
+      user.orgMemberId === memberId &&
+      user.orgMember?.memberId === memberId &&
+      !user.leftAt &&
+      !user.orgMember.leftAt
+    );
   }
 
   /**
@@ -134,6 +201,8 @@ class CallInviteRoutingService {
     req: Request,
     res: Response,
     targetWorkspaceId: string,
+    expectedUserId: string,
+    expectedMemberId: string,
   ): Promise<boolean> {
     const sessionId = this.getSessionId(req);
     if (!sessionId) return false;
@@ -144,7 +213,11 @@ class CallInviteRoutingService {
     // The global session must belong to the SAME workspace as the call. A user
     // with a stale cookie for workspace A but whose live session is workspace B
     // must NOT be routed into A.
-    if (session.user.workspaceId !== targetWorkspaceId) return false;
+    if (
+      session.user.id !== expectedUserId ||
+      session.user.orgMemberId !== expectedMemberId ||
+      session.user.workspaceId !== targetWorkspaceId
+    ) return false;
 
     const now = new Date();
     if (session.status !== 'ACTIVE' || now >= session.refreshTokenExpiry) return false;
