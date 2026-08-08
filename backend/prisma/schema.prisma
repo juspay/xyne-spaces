@@ -797,6 +797,7 @@ enum WorkflowEventType {
   WEBHOOK
   MESSAGE_RECEIVED
   CALL_EVENT
+  TAG_GENERATED
 
   @@schema("public")
 }
@@ -3163,6 +3164,7 @@ enum NotificationType {
   STAGE_APPROVAL_REQUESTED
   STAGE_APPROVAL_APPROVED
   STAGE_APPROVAL_REJECTED
+  RECORDING_SHARED
   @@schema("public")
 }
 
