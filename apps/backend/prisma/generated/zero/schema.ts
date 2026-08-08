@@ -90,6 +90,7 @@ export const ticketTable = table("tickets")
     firstRespondedAt: number().optional(),
     priority: string(),
     metadata: json().optional(),
+    rootId: string().optional(),
     closedAt: number().optional(),
     closedBy: string().optional(),
     referenceTicket: json<string[]>(),
@@ -516,6 +517,7 @@ export const userPreferenceTable = table("user_preferences")
     channelSortOrder: string(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
+    showThreadTags: boolean(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
@@ -970,6 +972,7 @@ export const boardTable = table("boards")
     updatedBy: string().optional(),
     description: string().optional(),
     metadata: json().optional(),
+    flowPlan: string().optional(),
     vcsProvider: string().optional(),
     releaseTrackingMode: string().optional(),
     createdAt: number(),
@@ -1137,6 +1140,7 @@ export const conversationTable = table("conversations")
     parent_message_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
+    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
@@ -1342,6 +1346,7 @@ export const messageTable = table("messages")
     isSent: boolean(),
     reactions_md: string().optional(),
     link_preview_md: string().optional(),
+    messageActs: string().optional(),
   })
   .primaryKey("messageId");
 

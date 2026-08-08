@@ -8,6 +8,7 @@ import { isTestEnv } from '../../../config';
 import {
   AttachmentEntityType,
   BaseTicketType,
+  BoardType,
   ChannelScopeType,
   FormContextType,
   FormEntityType,
@@ -473,6 +474,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     () => boards?.find(b => b.id === formValues.boardId),
     [boards, formValues.boardId],
   );
+  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
 
@@ -530,12 +532,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (!selectedBoard) return;
 
-    const ticketType = isReleaseBoard(selectedBoard.boardType)
-      ? BaseTicketType.Release
-      : BaseTicketType.Fix;
+    const ticketType = isFlowRootTicket
+      ? BaseTicketType.Epic
+      : isReleaseBoard(selectedBoard.boardType)
+        ? BaseTicketType.Release
+        : BaseTicketType.Fix;
     form.setFieldValue('ticketType', ticketType);
     markAutoApplied({ ticketType });
-  }, [selectedBoard, form, markAutoApplied]);
+  }, [selectedBoard, isFlowRootTicket, form, markAutoApplied]);
 
   useEffect(() => {
     if (!isOpen || resolvedFormFields.length === 0) return;
@@ -872,12 +876,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       form.setFieldValue('title', generatedTitle);
       markAutoApplied({ title: generatedTitle.trim() });
     }
-    // Only set generated ticket type for non-release boards
-    if (generatedTicketType && !isReleaseBoard(selectedBoard?.boardType)) {
+    // FLOW root tickets are always Epic; AI classification only applies elsewhere.
+    if (generatedTicketType && !isFlowRootTicket && !isReleaseBoard(selectedBoard?.boardType)) {
       form.setFieldValue('ticketType', generatedTicketType);
       markAutoApplied({ ticketType: generatedTicketType });
     }
-  }, [form, generatedTitle, generatedTicketType, selectedBoard?.boardType, markAutoApplied]);
+  }, [
+    form,
+    generatedTitle,
+    generatedTicketType,
+    isFlowRootTicket,
+    selectedBoard?.boardType,
+    markAutoApplied,
+  ]);
 
   // File handling functions
   const handleModalDragOver = (e: DragEvent<HTMLDivElement>): void => {
@@ -2711,12 +2722,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           {showTicketType && (
             <form.Field name='ticketType'>
               {field => {
-                const typeOptions =
-                  ticketTypeOptions?.map(type => ({
-                    label: type.value,
-                    value: type.value,
-                    icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                  })) ?? [];
+                const typeOptions = isFlowRootTicket
+                  ? [
+                      {
+                        label: BaseTicketType.Epic,
+                        value: BaseTicketType.Epic,
+                        icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                      },
+                    ]
+                  : (ticketTypeOptions?.map(type => ({
+                      label: type.value,
+                      value: type.value,
+                      icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                    })) ?? []);
 
                 return (
                   <EntitySelector
@@ -2730,7 +2748,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7'
-                    showClearButton={true}
+                    showClearButton={!isFlowRootTicket}
                     showIndicator={false}
                   />
                 );

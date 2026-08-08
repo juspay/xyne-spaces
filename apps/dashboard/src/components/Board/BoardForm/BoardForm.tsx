@@ -572,10 +572,14 @@ export const BoardForm = ({
           placeholder='Select board type'
           items={[
             {
-              items: Object.values(BoardType).map(type => ({
-                label: type.charAt(0) + type.slice(1).toLowerCase(),
-                value: type,
-              })),
+              // FLOW boards have a dedicated creation path and cannot be
+              // converted to/from other types (enforced server-side too).
+              items: Object.values(BoardType)
+                .filter(type => type !== BoardType.FLOW)
+                .map(type => ({
+                  label: type.charAt(0) + type.slice(1).toLowerCase(),
+                  value: type,
+                })),
             },
           ]}
           selected={boardType}
