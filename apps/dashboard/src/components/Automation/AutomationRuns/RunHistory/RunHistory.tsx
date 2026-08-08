@@ -15,6 +15,16 @@ import { fetchAutomationRuns } from '../../../../api/automationsApi';
 import type { AutomationRun, AutomationRunStatus } from '../../Automation.types';
 import type { RunHistoryProps } from './RunHistory.types';
 
+function extractEmailId(run: AutomationRun): string | null {
+  const emailId = run.triggerData?.['emailId'];
+  return typeof emailId === 'string' && emailId.length > 0 ? emailId : null;
+}
+
+function extractTicketId(run: AutomationRun): string | null {
+  const ticketId = run.triggerData?.['ticketId'];
+  return typeof ticketId === 'string' && ticketId.length > 0 ? ticketId : null;
+}
+
 const PAGE_SIZE = 50;
 const SKELETON_ROWS = 6;
 
@@ -214,6 +224,8 @@ export function RunHistory({
 }
 
 function RunRow({ run, onClick }: { run: AutomationRun; onClick: () => void }): React.ReactElement {
+  const emailId = extractEmailId(run);
+  const ticketId = extractTicketId(run);
   const isComplete = run.status === 'COMPLETED' || run.status === 'FAILED';
   const duration =
     isComplete && run.completedAt
@@ -242,8 +254,18 @@ function RunRow({ run, onClick }: { run: AutomationRun; onClick: () => void }): 
         )}
       </div>
       <div className='flex flex-1 flex-col gap-0.5'>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-2 flex-wrap'>
           <span className='font-mono text-xs text-foreground'>{run.id}</span>
+          {emailId && (
+            <span className='font-mono text-[11px] text-muted-foreground' title='Trigger email id'>
+              {emailId}
+            </span>
+          )}
+          {ticketId && (
+            <span className='font-mono text-[11px] text-muted-foreground' title='Trigger ticket id'>
+              {ticketId}
+            </span>
+          )}
           <span
             className={cn(
               'rounded-full border px-2 py-0.5 text-[10px] font-medium',
