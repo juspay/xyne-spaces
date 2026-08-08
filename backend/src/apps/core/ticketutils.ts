@@ -13,6 +13,7 @@ import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tick
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { config } from '@/config/env';
 import { TicketIdService } from '@/services/ticketIdService';
+import { buildCreationFormFieldChanges } from '@/services/ticketCustomFieldService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/src/config';
@@ -43,6 +44,7 @@ const CreateTicketParamsSchema = z.object({
     contextId: z.string().min(1, 'Context ID is required').trim(),
     fieldValues: z.array(z.object({
       fieldId: z.string().min(1, 'Field ID is required').trim(),
+      fieldName: z.string().trim().optional(),
       fieldValue: z.string(),
       actualFieldValue: z.custom<Prisma.InputJsonValue>(() => true),
     })),
@@ -165,6 +167,20 @@ export async function createTicketWithConversation(
 
     const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
 
+    // Build the automation formFieldChanges record before the transaction so the
+    // repository's TICKET_CREATED emission can carry it (custom fields themselves
+    // are written in the same transaction below).
+    const formFieldChanges =
+      customFieldValues && customFieldValues.fieldValues.length > 0
+        ? buildCreationFormFieldChanges(
+            customFieldValues.fieldValues.map(fv => ({
+              fieldId: fv.fieldId,
+              fieldName: 'fieldName' in fv && typeof fv.fieldName === 'string' ? fv.fieldName : fv.fieldId,
+              actualFieldValue: fv.actualFieldValue,
+            })),
+          )
+        : undefined;
+
     // Generate xyneId and create ticket in a transaction
     const ticket = await prisma.$transaction(async (tx) => {
       // Generate xyneId using project-scoped format
@@ -187,6 +203,7 @@ export async function createTicketWithConversation(
         stageName,
         eta,
         ticketType,
+        formFieldChanges,
       }, tx);
 
       pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {

@@ -13,6 +13,8 @@ import type { MessageType, CallType } from '@prisma/client';
 
 export interface TicketCreatedEventPayload {
   ticketId: string;
+  formFieldChanges?: FormFieldChanges;
+  performedBy?: { id: string | null };
 }
 
 export interface TicketUpdatedEventPayload {
