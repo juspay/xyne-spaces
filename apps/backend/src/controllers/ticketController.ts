@@ -29,6 +29,8 @@ import {
   syncCustomFieldValues,
   type CustomFieldWritePayload,
 } from '../services/ticketCustomFieldService';
+import { buildCreationFormFieldChanges } from '../services/ticketCustomFieldService';
+import type { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
@@ -713,6 +715,37 @@ export class TicketController {
         }
       }
 
+      let formMapping: Awaited<ReturnType<typeof prisma.formContextMapping.findFirst>> | null = null;
+      let formFields: Awaited<ReturnType<typeof prisma.formFields.findMany>> = [];
+      if (Object.keys(dynamicFields as Record<string, string>).length > 0) {
+        try {
+          formMapping = await prisma.formContextMapping.findFirst({
+            where: { contextId: boardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
+          });
+          if (formMapping) {
+            formFields = await prisma.formFields.findMany({
+              where: { formId: formMapping.formId },
+            });
+          }
+        } catch (err) {
+          logger.error('[Ticket Creation] Error resolving form mapping/fields:', err);
+        }
+      }
+
+      let formFieldChangesForEmit: FormFieldChanges | undefined;
+      if (formFields.length > 0) {
+        const fieldsWithValues = formFields
+          .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
+          .map((f: any) => ({
+            fieldId: f.id,
+            fieldName: f.fieldName,
+            actualFieldValue: dynamicFields[f.fieldName],
+          }));
+        if (fieldsWithValues.length > 0) {
+          formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
+        }
+      }
+
       // Wrap all database operations in a transaction for data integrity
       const { ticket } = await prisma.$transaction(async (tx) => {
         // Generate xyneId using project-scoped format
@@ -752,6 +785,7 @@ export class TicketController {
             ticketType,
             stageName,
             dynamicFields: dynamicFields as Record<string, string>,
+            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           const ticketMd = serializeTicketMd({
@@ -885,7 +919,7 @@ export class TicketController {
             xyneId,
             ticketType,
             stageName,
-            dynamicFields: dynamicFields as Record<string, string>,
+            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           await this.messageRepository.createWithExecutionId({
@@ -1094,54 +1128,36 @@ export class TicketController {
 
 
       // Create FormEntityValues records for dynamic fields
-      if (Object.keys(dynamicFields).length > 0) {
+      if (Object.keys(dynamicFields).length > 0 && formMapping && formFields.length > 0) {
         try {
-          // Fetch form mapping for the board to get form ID
-          const formMapping = await prisma.formContextMapping.findFirst({
-            where: {
-              contextId: boardId,
-              contextType: FormContextType.BOARD,
-              entityType: FormEntityType.TICKET,
-            },
-          });
-
-          if (formMapping) {
-            // Fetch form fields separately
-            const formFields = await prisma.formFields.findMany({
-              where: {
+          // Create FormEntityValues for each dynamic field
+          const formEntityValuesData = formFields
+            .filter((field: any) => dynamicFields[field.fieldName] !== undefined)
+            .map((field: any) => {
+              const value = dynamicFields[field.fieldName];
+              // Provide both fields for backward compatibility
+              return {
                 formId: formMapping.formId,
-              },
+                entityId: ticket.id,
+                entityType: FormEntityType.TICKET,
+                fieldId: field.id,
+                contextId: boardId,
+                workspaceId: ticket.workspaceId,
+                fieldValue: '', // Empty string for backward compatibility (not used anymore)
+                actualFieldValue: value, // Actual value stored in JSON field
+              };
             });
 
-            // Create FormEntityValues for each dynamic field
-            const formEntityValuesData = formFields
-              .filter((field: any) => dynamicFields[field.fieldName] !== undefined)
-              .map((field: any) => {
-                const value = dynamicFields[field.fieldName];
-                // Provide both fields for backward compatibility
-                return {
-                  formId: formMapping.formId,
-                  entityId: ticket.id,
-                  entityType: FormEntityType.TICKET,
-                  fieldId: field.id,
-                  contextId: boardId,
-                  workspaceId: ticket.workspaceId,
-                  fieldValue: '', // Empty string for backward compatibility (not used anymore)
-                  actualFieldValue: value, // Actual value stored in JSON field
-                };
-              });
-
-            if (formEntityValuesData.length > 0) {
-              await prisma.formEntityValues.createMany({
-                data: formEntityValuesData,
-              });
-              logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
-              if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
+          if (formEntityValuesData.length > 0) {
+            await prisma.formEntityValues.createMany({
+              data: formEntityValuesData,
+            });
+            logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
+            if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
                 versionReleaseMappingService.syncTicketById(ticket.id).catch(error => {
                   logger.error(`[Ticket Creation] Version release mapping failed for ticket ${ticket.xyneId}:`, error);
                 });
               }
-            }
           }
         } catch (error) {
           logger.error('[Ticket Creation] Error creating form entity values:', error);
