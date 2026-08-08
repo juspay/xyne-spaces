@@ -15,7 +15,7 @@ export interface TicketReassignmentJobData {
   userGroupId: string;
 }
 
-const OPEN_STATUSES: string[] = [TicketStatusV2.TODO, TicketStatusV2.STARTED];
+const OPEN_STATUSES: TicketStatusV2[] = [TicketStatusV2.TODO, TicketStatusV2.STARTED];
 const BATCH_SIZE = 50;
 
 class TicketReassignmentQueue {

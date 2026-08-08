@@ -274,6 +274,7 @@ export async function syncResourceAdminAccess(
           row.id,
           `Revoked ADMIN access from user ${row.user?.email} for resource ${row.resource.name}`,
           actorUserId,
+          row.workspaceId,
         );
       }
       logger.debug(`${logPrefix} Revoked ADMIN access to ${resourceName} for user ${userId}.`);

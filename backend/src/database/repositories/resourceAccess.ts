@@ -225,7 +225,7 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
     // Log audit events for each revoked access
     for (const access of accessRecords) {
       const description = `Revoked ${access.accessType} access from user ${access.user?.email} for resource ${access.resource.name}`;
-      await aclAuditService.logPermissionRevoked(access.id, description, actorUserId);
+      await aclAuditService.logPermissionRevoked(access.id, description, actorUserId, access.workspaceId);
     }
   }
 
@@ -246,7 +246,7 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
     // Log audit events for each revoked access
     for (const access of accessRecords) {
       const description = `Revoked ${access.accessType} access from group ${access.userGroup?.name} for resource ${access.resource.name}`;
-      await aclAuditService.logPermissionRevoked(access.id, description, actorUserId);
+      await aclAuditService.logPermissionRevoked(access.id, description, actorUserId, access.workspaceId);
     }
   }
 
@@ -306,7 +306,7 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
       : resourceAccess.userGroup?.name;
     const description = `Granted ${data.accessType} access to ${targetType} ${targetName} for resource ${resourceAccess.resource.name}`;
 
-    await aclAuditService.logPermissionGranted(resourceAccess.id, description, actorUserId);
+    await aclAuditService.logPermissionGranted(resourceAccess.id, description, actorUserId, resourceAccess.workspaceId);
 
     return resourceAccess;
   }

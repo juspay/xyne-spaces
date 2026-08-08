@@ -41,7 +41,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
 
     // Log audit event
-    await aclAuditService.logUserGroupCreated(userGroup.id, userGroup.name, actorUserId);
+    await aclAuditService.logUserGroupCreated(userGroup.id, userGroup.name, actorUserId, userGroup.workspaceId);
 
     return userGroup;
   }
@@ -95,7 +95,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
       }
 
       // Log audit event
-      await aclAuditService.logUserGroupCreated(userGroup.id, userGroup.name, actorUserId);
+      await aclAuditService.logUserGroupCreated(userGroup.id, userGroup.name, actorUserId, userGroup.workspaceId);
 
       return userGroup;
     });
@@ -162,7 +162,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
 
     // Log audit event
-    await aclAuditService.logUserGroupUpdated(userGroup.id, userGroup.name, actorUserId);
+    await aclAuditService.logUserGroupUpdated(userGroup.id, userGroup.name, actorUserId, userGroup.workspaceId);
 
     return userGroup;
   }
@@ -177,7 +177,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
 
     // Log audit event
     if (userGroup) {
-      await aclAuditService.logUserGroupDeleted(userGroup.id, userGroup.name, actorUserId);
+      await aclAuditService.logUserGroupDeleted(userGroup.id, userGroup.name, actorUserId, userGroup.workspaceId);
     }
 
     return deletedUserGroup;
@@ -194,7 +194,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
       data: { isActive: false },
     });
 
-    await aclAuditService.logUserGroupDeactivated(userGroup.id, userGroup.name, actorUserId);
+    await aclAuditService.logUserGroupDeactivated(userGroup.id, userGroup.name, actorUserId, userGroup.workspaceId);
 
     return updatedUserGroup;
   }
@@ -210,7 +210,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
       data: { isActive: true },
     });
 
-    await aclAuditService.logUserGroupReactivated(userGroup.id, userGroup.name, actorUserId);
+    await aclAuditService.logUserGroupReactivated(userGroup.id, userGroup.name, actorUserId, userGroup.workspaceId);
 
     return updatedUserGroup;
   }
