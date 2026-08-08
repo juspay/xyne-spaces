@@ -940,7 +940,7 @@ export const ThreadMessages = ({
     });
   };
 
-  // Early return for underTicketView mode - separate tab-based UI with Replies and Workflows
+  // Early return for underTicketView mode - separate tab-based UI with Messages and RCA
   if (underTicketView) {
     return (
       <div
