@@ -16,7 +16,7 @@ import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegra
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
-import { useUsers } from '../../../../hooks/useUsers';
+import { useUser, useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
@@ -70,8 +70,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const [ccInputValue, setCcInputValue] = useState('');
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
   const [ownerSearch, setOwnerSearch] = useState('');
+  const [ownerPickerOpen, setOwnerPickerOpen] = useState(false);
+  const selectedOwner = useUser(ownerId);
   const ownerSearchInputRef = useRef<HTMLInputElement>(null);
   const filteredOwnerUsers = useMemo(() => {
+    if (!ownerPickerOpen) return selectedOwner ? [selectedOwner] : [];
+
     const q = ownerSearch.trim().toLowerCase();
     const all = allUsers ?? [];
     const matches = q
@@ -84,7 +88,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       if (selected) return [selected, ...matches];
     }
     return matches;
-  }, [allUsers, ownerSearch, ownerId]);
+  }, [allUsers, ownerSearch, ownerId, ownerPickerOpen, selectedOwner]);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
   const [signatureAutoAppendEnabled, setSignatureAutoAppendEnabled] = useState(
@@ -130,6 +134,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           onValueChange={setOwner}
           disabled={!canManage}
           onOpenChange={open => {
+            setOwnerPickerOpen(open);
             if (!open) setOwnerSearch('');
           }}
         >
