@@ -27,6 +27,7 @@ type ThreadListProps = {
   initialScrollOffset?: number;
   onScrollPositionChange?: (position: number) => void;
   isTicketThread?: boolean;
+  isFlowStep?: boolean;
   messagesWithSeparators?: ThreadListItemWithSeparator[] | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
@@ -54,6 +55,7 @@ const ThreadList = ({
   initialScrollOffset,
   onScrollPositionChange,
   isTicketThread = false,
+  isFlowStep = false,
   messagesWithSeparators,
   channelScopeType,
   conversation,
@@ -488,6 +490,7 @@ const ThreadList = ({
                       context='thread'
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
+                      isFlowStep={isFlowStep}
                       isThreadTicketSubTicket={isThreadTicketSubTicket}
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
@@ -586,6 +589,7 @@ const ThreadList = ({
                     context='thread'
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
+                    isFlowStep={isFlowStep}
                     isThreadTicketSubTicket={isThreadTicketSubTicket}
                     channelScopeType={channelScopeType}
                     allThreadAttachments={allThreadAttachments}

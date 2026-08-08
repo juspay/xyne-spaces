@@ -2396,7 +2396,7 @@ const BoardStageConfigScreen = ({
                 <CreateFormSlideOut
                   isOpen={true}
                   onClose={handleCloseEdgeCreateForm}
-                  onSave={formData => void handleEdgeCreateFormSave(formData)}
+                  onSave={handleEdgeCreateFormSave}
                   projectId={projectId}
                 />
               </div>
@@ -2473,7 +2473,7 @@ const BoardStageConfigScreen = ({
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseCreateForm}
-                    onSave={formData => void handleCreateFormSave(formData)}
+                    onSave={handleCreateFormSave}
                     projectId={projectId}
                   />
                 </div>
@@ -2485,7 +2485,7 @@ const BoardStageConfigScreen = ({
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseDirectForm}
-                    onSave={formData => void handleDirectFormSave(formData)}
+                    onSave={handleDirectFormSave}
                     title='Configure Transition Form'
                     projectId={projectId}
                   />
@@ -2500,7 +2500,7 @@ const BoardStageConfigScreen = ({
                     isOpen={true}
                     onClose={handleCloseEditForm}
                     onSave={() => {}}
-                    onUpdate={formData => void handleEditFormSave(formData)}
+                    onUpdate={handleEditFormSave}
                     {...(editingFormId ? { formId: editingFormId } : {})}
                     initialData={editingFormData}
                     title='Edit Transition Form'
@@ -2514,7 +2514,7 @@ const BoardStageConfigScreen = ({
                 <CreateFormSlideOut
                   isOpen={true}
                   onClose={handleCloseEdgeForm}
-                  onSave={formData => void handleEdgeFormSave(formData)}
+                  onSave={handleEdgeFormSave}
                   projectId={projectId}
                   {...(edgeEditFormId ? { formId: edgeEditFormId } : {})}
                   {...(edgeEditFormData

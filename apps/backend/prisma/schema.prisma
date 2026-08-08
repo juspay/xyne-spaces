@@ -131,6 +131,7 @@ model Ticket {
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
   priority         String            @default("LOW")
   metadata         Json?             // Additional metadata - external source tracking, domain-specific context
+  rootId           String?           // FLOW root ticket id for this materialized step ticket.
   closedAt         DateTime?         // When the reporter closed the ticket after verification
   closedBy         String?           // User who closed the ticket
   referenceTicket  String[]          // Array of ticket IDs for related tickets (duplicates, related incidents, etc.)
@@ -1624,6 +1625,7 @@ model Board {
   updatedBy           String?              // User ID (no FK constraint)
   description         String?              // Board description
   metadata            Json?                // Board configuration including ticketFormConfig
+  flowPlan            String?              // Serialized design-time DAG for FLOW boards
   vcsProvider         String?               // Main release board VCS provider
   releaseTrackingMode String?              // Main release board tracking mode
   createdAt           DateTime             @default(now())

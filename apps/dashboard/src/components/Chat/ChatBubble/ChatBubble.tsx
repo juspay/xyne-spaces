@@ -118,6 +118,7 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
+  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
@@ -147,6 +148,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
+  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
@@ -289,6 +291,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
+
+  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
 
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
@@ -951,7 +955,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         !isFirstInThread && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
@@ -1390,7 +1394,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {conversation &&
         context === 'thread' &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         isSubTicketModalOpen && (
           <SubTicketModal
             isOpen

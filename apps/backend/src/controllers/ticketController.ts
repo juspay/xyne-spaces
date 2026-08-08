@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import { Ticket, MessageAttachment } from '@prisma/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
@@ -62,11 +62,17 @@ import {
   AttachmentEntityType,
   ChannelType,
   ActivityType,
-  TicketReferenceRelation, MessageType } from '@xyne/shared';
-import type { TicketCardSummary } from '@xyne/shared';
-import { CommitAnalysisController } from './commitAnalysisController';
-import { isReleaseTicket } from '@xyne/shared';
-import { mergeSdlcTicketMetadata } from '@/sdlc/sdlcTicketMetadata';
+  TicketReferenceRelation,
+  MessageType,
+  ConversationParticipation,
+  BoardType,
+} from \'@xyne/shared\';
+import type { TicketCardSummary } from \'@xyne/shared\';
+import { CommitAnalysisController } from \'./commitAnalysisController\';
+import { isReleaseTicket } from \'@xyne/shared\';
+import { mergeSdlcTicketMetadata } from \'@/sdlc/sdlcTicketMetadata\';
+import { backlogFlowGroup } from \'@/services/flowCascadeService\';
+import { AppError } from \'@/middleware/errorHandler\';
 
 import { z } from 'zod';
 
@@ -470,6 +476,7 @@ export class TicketController {
 
       // Handle both FormData (with files) and JSON requests
       const {
+        id: requestedTicketId,
         title,
         description,
         assignedTo,
@@ -536,22 +543,22 @@ export class TicketController {
         return;
       }
 
-      // Sub-ticket depth is limited to one level: reject before creating the backing ticket
-      // so a failed sub-ticket mapping cannot leave an orphan ticket behind
+      // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
+      // the existing one-level sub-ticket contract.
       if (parentTicketId) {
-        const parentAsSubTicket = await prisma.subTicket.findFirst({
-          where: { mappedTicketId: parentTicketId },
-          select: { id: true },
+        const parent = await prisma.ticket.findUnique({
+          where: { id: parentTicketId },
+          select: { board: { select: { boardType: true } } },
         });
-        if (parentAsSubTicket) {
-          logger.warn('[Ticket Creation] Rejected sub-ticket: parent is already a sub-ticket', {
-            parentTicketId,
-            userId: req.user?.id,
+        if (parent?.board.boardType !== BoardType.FLOW) {
+          const parentAsSubTicket = await prisma.subTicket.findFirst({
+            where: { mappedTicketId: parentTicketId },
+            select: { id: true },
           });
-          res.status(400).json({
-            error: `Cannot create a sub-ticket under a sub-ticket.`,
-          });
-          return;
+          if (parentAsSubTicket) {
+            res.status(400).json({ error: 'Cannot create a sub-ticket under a sub-ticket.' });
+            return;
+          }
         }
       }
 
@@ -642,6 +649,13 @@ export class TicketController {
       const sdlcConversationMetadata = sdlcRepo
         ? { surface: 'SDLC', repoId: sdlcRepo.id }
         : undefined;
+      const effectiveStatusV2 =
+        board?.boardType === BoardType.FLOW ? TicketStatusV2.TODO : (statusV2 as TicketStatusV2);
+      const effectiveStageName = board?.boardType === BoardType.FLOW ? 'TODO' : stageName;
+      const effectiveTicketType =
+        board?.boardType === BoardType.FLOW && !parentTicketId
+          ? BaseTicketType.Epic
+          : ticketType;
 
       // Process file uploads BEFORE transaction (external I/O operation)
       let uploadedFiles: UploadedFileResult[] = [];
@@ -724,6 +738,7 @@ export class TicketController {
           const existingConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelIdFromConversation);
 
           ticket = await this.ticketRepository.createTicket({
+            ...(requestedTicketId && { id: requestedTicketId }),
             title,
             description,
             createdBy: userId,
@@ -735,7 +750,7 @@ export class TicketController {
             workspaceId: existingConversationWorkspaceId,
             userGroupId,
             boardId,
-            statusV2: statusV2 as TicketStatusV2,
+            statusV2: effectiveStatusV2,
             priority,
             eta,
             metadata: resolvedMetadata,
@@ -743,8 +758,8 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
-            ticketType,
-            stageName,
+            ticketType: effectiveTicketType,
+            stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
           }, tx);
 
@@ -862,6 +877,7 @@ export class TicketController {
           const newConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelId!);
 
           ticket = await this.ticketRepository.createTicket({
+            ...(requestedTicketId && { id: requestedTicketId }),
             title,
             description,
             createdBy: userId,
@@ -873,7 +889,7 @@ export class TicketController {
             workspaceId: newConversationWorkspaceId,
             userGroupId,
             boardId,
-            statusV2: statusV2 as TicketStatusV2,
+            statusV2: effectiveStatusV2,
             priority,
             eta,
             metadata: resolvedMetadata,
@@ -881,9 +897,10 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
-            ticketType,
-            stageName,
+            ticketType: effectiveTicketType,
+            stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
+            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           await this.messageRepository.createWithExecutionId({
@@ -1358,7 +1375,7 @@ export class TicketController {
             currentTicketId: ticket.id,
             userName: req.user?.name,
             isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
-            workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId!,
+            workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId,
           }).then((result) => {
             if (result.success) {
               logger.info(`[Ticket Creation] Commit analysis completed for ticket ${ticket.xyneId}`);
@@ -1387,10 +1404,55 @@ export class TicketController {
             });
             return;
           }
+          // Client-supplied `id` (requestedTicketId) collided with an existing
+          // ticket. Signal 409 so the caller can retry with a new id.
+          if (!target || target.includes('id') || target.includes('PRIMARY')) {
+            res.status(409).json({
+              error: 'A ticket with this id already exists. Retry with a new id.',
+              code: 'DUPLICATE_TICKET_ID',
+            });
+            return;
+          }
         }
       }
 
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Move every live descendant of a Flow run group to backlog.
+   * POST /api/tickets/:ticketId/flow-groups/:groupId/backlog
+   */
+  backlogFlowGroup = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      next(new AppError('User not authenticated', 401));
+      return;
+    }
+
+    const rootTicketId = req.params.ticketId;
+    const groupId = req.params.groupId;
+    if (!rootTicketId || !groupId) {
+      next(new AppError('ticketId and groupId are required', 400));
+      return;
+    }
+
+    try {
+      const result = await backlogFlowGroup({
+        rootTicketId,
+        groupId,
+        actorUserId: userId,
+        workspaceId,
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
     }
   };
 

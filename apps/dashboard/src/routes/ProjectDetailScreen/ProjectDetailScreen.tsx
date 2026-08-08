@@ -1,6 +1,6 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { BoardType } from '@xyne/shared';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { BoardType, deserializeFlowPlan, type FlowPlan } from '@xyne/shared';
 import { ArrowLeft, Edit2, GitBranch, LayoutGrid, Rocket } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -9,6 +9,8 @@ import BoardEditScreen from '../../components/Board/BoardEditScreen/BoardEditScr
 import BoardStageConfigScreen from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen';
 import { BoardRolesConfigScreen } from '../../components/Board/BoardRolesConfigScreen';
 import BoardCreateScreen from '../../components/Board/BoardCreateScreen/BoardCreateScreen';
+import { BoardTypeChooserDialog } from '../../components/Board/BoardTypeChooserDialog/BoardTypeChooserDialog';
+import { FlowBoardCreateScreen } from '../../components/Board/FlowBoardCreateScreen/FlowBoardCreateScreen';
 import { ProjectForm } from '../../components/Project';
 import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizard/ReleaseConfigWizard';
 import { ReleasesSection } from './ReleasesSection';
@@ -58,6 +60,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const zero = useZero();
 
   // Initial tab can be overridden via `navigate(..., { state: { tab } })` —
@@ -73,6 +76,8 @@ const ProjectDetailScreen = (): ReactElement => {
   const [addingRepository, setAddingRepository] = useState(false);
   const [repositoryRefreshKey, setRepositoryRefreshKey] = useState(0);
   const [showCreateBoardModal, setShowCreateBoardModal] = useState(false);
+  const [showBoardTypeChooser, setShowBoardTypeChooser] = useState(false);
+  const [showFlowBoardCreate, setShowFlowBoardCreate] = useState(false);
   const [showBoardEditModal, setShowBoardEditModal] = useState(false);
   const [showReleaseConfigModal, setShowReleaseConfigModal] = useState(false);
   const [releaseBoardFlow, setReleaseBoardFlow] = useState<ReleaseBoardFlow>(null);
@@ -80,6 +85,8 @@ const ProjectDetailScreen = (): ReactElement => {
   const [createdBoardData, setCreatedBoardData] = useState<BoardData | null>(null);
   const [duplicatingBoard, setDuplicatingBoard] = useState<BoardWithStages | null>(null);
   const [editingBoard, setEditingBoard] = useState<BoardWithStages | null>(null);
+  const [editingFlowBoard, setEditingFlowBoard] = useState<BoardWithStages | null>(null);
+  const [cloningFlowBoard, setCloningFlowBoard] = useState<BoardWithStages | null>(null);
   const [configuringStagesForBoard, setConfiguringStagesForBoard] =
     useState<BoardWithStages | null>(null);
   const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
@@ -94,6 +101,29 @@ const ProjectDetailScreen = (): ReactElement => {
   const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
     enabled: !!projectId,
   });
+
+  // Consume the Ticket view's edit-board intent once.
+  const requestedEditBoardId = searchParams.get('editBoard');
+  useEffect(() => {
+    if (!requestedEditBoardId || !boards) return;
+
+    setActiveTab('boards');
+    const board = boards.find(candidate => candidate.id === requestedEditBoardId);
+    if (board?.boardType === BoardType.FLOW) {
+      setEditingFlowBoard(board);
+    } else if (board) {
+      setBoardIdToEdit(board.id);
+    }
+
+    setSearchParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.delete('editBoard');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [boards, requestedEditBoardId, setSearchParams]);
 
   // Fetch the project's applications to distinguish main release boards from
   // per-application release boards. Keyed on projectId (stable arg, no
@@ -118,6 +148,22 @@ const ProjectDetailScreen = (): ReactElement => {
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
     [boards],
   );
+
+  const editingFlowBoardPlan = useMemo<FlowPlan | null>(() => {
+    if (!editingFlowBoard) return null;
+    if (!editingFlowBoard.flowPlan) {
+      return { version: 2, nodes: [], groups: [], decisions: [], updatedAt: 0 };
+    }
+    return deserializeFlowPlan(editingFlowBoard.flowPlan);
+  }, [editingFlowBoard]);
+
+  const cloningFlowBoardPlan = useMemo<FlowPlan | null>(() => {
+    if (!cloningFlowBoard) return null;
+    if (!cloningFlowBoard.flowPlan) {
+      return { version: 2, nodes: [], groups: [], decisions: [], updatedAt: 0 };
+    }
+    return deserializeFlowPlan(cloningFlowBoard.flowPlan);
+  }, [cloningFlowBoard]);
 
   // Lazy load full board details (with prStatusMappings) when user clicks edit
   const [fullBoardDetails, fullBoardDetailsStatus] = useCachedQuery(
@@ -184,8 +230,13 @@ const ProjectDetailScreen = (): ReactElement => {
     );
   }
 
-  // Lazy load full board details when user clicks edit
+  // Lazy load full board details when user clicks edit. Flow boards skip the
+  // normal edit form — their only editable thing is the step plan.
   const handleEditBoard = (board: BoardWithStages): void => {
+    if (board.boardType === BoardType.FLOW) {
+      setEditingFlowBoard(board);
+      return;
+    }
     setBoardIdToEdit(board.id);
   };
 
@@ -267,6 +318,7 @@ const ProjectDetailScreen = (): ReactElement => {
         <div className='max-w-7xl mx-auto'>
           {/* Header with Back Button */}
           <button
+            type='button'
             onClick={() => void navigate('/listProjects')}
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
             data-track-category='ProjectDetail'
@@ -326,30 +378,15 @@ const ProjectDetailScreen = (): ReactElement => {
                       : 'Releases'}
                 </h2>
                 {activeTab === 'boards' && (
-                  <div className='flex items-center gap-2'>
-                    <Button
-                      variant='default'
-                      onClick={() => setShowCreateBoardModal(true)}
-                      data-track-category='ProjectDetail'
-                      data-track-name='CreateBoard'
-                      data-track-metadata={JSON.stringify({ projectId })}
-                    >
-                      Create Board
-                    </Button>
-                    <Button
-                      variant='secondary'
-                      onClick={() => {
-                        setReleaseBoardFlow({ kind: 'create', projectId });
-                        setShowReleaseConfigModal(true);
-                      }}
-                      data-track-category='ProjectDetail'
-                      data-track-name='CreateReleaseBoard'
-                      data-track-metadata={JSON.stringify({ projectId })}
-                    >
-                      <Rocket size={16} />
-                      Create Release Board
-                    </Button>
-                  </div>
+                  <Button
+                    variant='default'
+                    onClick={() => setShowBoardTypeChooser(true)}
+                    data-track-category='ProjectDetail'
+                    data-track-name='CreateBoard'
+                    data-track-metadata={JSON.stringify({ projectId })}
+                  >
+                    Create Board
+                  </Button>
                 )}
                 {activeTab === 'repos' && (
                   <Button onClick={() => setShowAddRepositoryModal(true)}>
@@ -363,6 +400,7 @@ const ProjectDetailScreen = (): ReactElement => {
                 <BoardsTable
                   boards={boards}
                   onEdit={handleEditBoard}
+                  onClone={board => setCloningFlowBoard(board)}
                   applicationBoardIds={applicationBoardIds}
                 />
               </Tabs.Content>
@@ -381,6 +419,68 @@ const ProjectDetailScreen = (): ReactElement => {
           </div>
         </div>
       </div>
+
+      {showBoardTypeChooser && projectId && (
+        <BoardTypeChooserDialog
+          isOpen={true}
+          onClose={() => setShowBoardTypeChooser(false)}
+          onChooseFlow={() => {
+            setShowBoardTypeChooser(false);
+            setShowFlowBoardCreate(true);
+          }}
+          onChooseStandard={() => {
+            setShowBoardTypeChooser(false);
+            setShowCreateBoardModal(true);
+          }}
+          onChooseRelease={() => {
+            setShowBoardTypeChooser(false);
+            setReleaseBoardFlow({ kind: 'create', projectId });
+            setShowReleaseConfigModal(true);
+          }}
+        />
+      )}
+
+      {showFlowBoardCreate && projectId && (
+        <FlowBoardCreateScreen
+          projectId={projectId}
+          isOpen={true}
+          onClose={() => setShowFlowBoardCreate(false)}
+        />
+      )}
+
+      {editingFlowBoardPlan && editingFlowBoard && projectId && (
+        <FlowBoardCreateScreen
+          projectId={projectId}
+          isOpen={true}
+          onClose={() => setEditingFlowBoard(null)}
+          editBoard={{
+            id: editingFlowBoard.id,
+            name: editingFlowBoard.name,
+            description: editingFlowBoard.description,
+            nodes: editingFlowBoardPlan.nodes,
+            groups: editingFlowBoardPlan.groups ?? [],
+            decisions: editingFlowBoardPlan.decisions ?? [],
+          }}
+        />
+      )}
+
+      {cloningFlowBoardPlan && cloningFlowBoard && projectId && (
+        <FlowBoardCreateScreen
+          projectId={projectId}
+          isOpen={true}
+          onClose={() => setCloningFlowBoard(null)}
+          cloneBoard={{
+            name: getNextClonedBoardName(
+              cloningFlowBoard.name,
+              (boards ?? []).map(board => board.name),
+            ),
+            description: cloningFlowBoard.description,
+            nodes: cloningFlowBoardPlan.nodes,
+            groups: cloningFlowBoardPlan.groups ?? [],
+            decisions: cloningFlowBoardPlan.decisions ?? [],
+          }}
+        />
+      )}
 
       {/* Create Board Modal (Template Selection) */}
       {showCreateBoardModal && projectId && (

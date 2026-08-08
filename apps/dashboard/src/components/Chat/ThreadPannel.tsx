@@ -213,6 +213,10 @@ export const ThreadMessages = ({
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
+  const [threadTicket] = useCachedQuery(queries.ticketRowById({ ticketId: derivedTicketId }), {
+    enabled: !!derivedTicketId,
+  });
+  const isFlowStep = !!threadTicket?.rootId;
 
   // Update derived values when props/params change OR when conversation loads
   useEffect(() => {
@@ -1180,6 +1184,7 @@ export const ThreadMessages = ({
                     messagesWithSeparators={messagesWithSeparators}
                     initialScrollOffset={0}
                     isTicketThread={true}
+                    isFlowStep={isFlowStep}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
                     enableCollapsing={previewCardMode}
