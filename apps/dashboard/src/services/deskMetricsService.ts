@@ -1,4 +1,8 @@
-import type { DeskMetricsAggregateResponse, DeskMetricsResponse } from '@xyne/shared';
+import type {
+  DeskMetricsAggregateResponse,
+  DeskMetricsResponse,
+  TicketPriority,
+} from '@xyne/shared';
 import { apiInstance } from './clients/apiClient';
 
 export type PerKeyFilter = { values?: string[]; textTerms?: string[] };
@@ -10,11 +14,18 @@ export type CustomFieldFilter = {
 export async function getDeskMetrics(
   channelId: string,
   timeRange: string,
-  assigneeId?: string | null,
+  assigneeIds?: string[],
   customFieldFilter?: CustomFieldFilter,
+  stageNames?: string[],
+  priorities?: TicketPriority[],
+  userGroupIds?: string[],
 ): Promise<DeskMetricsResponse> {
   const params: Record<string, string> = { timeRange };
-  if (assigneeId) params['assigneeId'] = assigneeId;
+  if (assigneeIds && assigneeIds.length > 0) params['assigneeIds'] = JSON.stringify(assigneeIds);
+  if (stageNames && stageNames.length > 0) params['stageNames'] = JSON.stringify(stageNames);
+  if (priorities && priorities.length > 0) params['priorities'] = JSON.stringify(priorities);
+  if (userGroupIds && userGroupIds.length > 0)
+    params['userGroupIds'] = JSON.stringify(userGroupIds);
   if (customFieldFilter && customFieldFilter.keys.length > 0) {
     params['customFieldKeys'] = JSON.stringify(customFieldFilter.keys);
     if (customFieldFilter.perKeyFilters)
@@ -29,14 +40,21 @@ export async function getDeskMetrics(
 export async function getAggregateDeskMetrics(
   channelIds: string[],
   timeRange: string,
-  assigneeId?: string | null,
+  assigneeIds?: string[],
   customFieldFilter?: CustomFieldFilter,
+  stageNames?: string[],
+  priorities?: TicketPriority[],
+  userGroupIds?: string[],
 ): Promise<DeskMetricsAggregateResponse> {
   const params: Record<string, string> = {
     timeRange,
     channelIds: channelIds.join(','),
   };
-  if (assigneeId) params['assigneeId'] = assigneeId;
+  if (assigneeIds && assigneeIds.length > 0) params['assigneeIds'] = JSON.stringify(assigneeIds);
+  if (stageNames && stageNames.length > 0) params['stageNames'] = JSON.stringify(stageNames);
+  if (priorities && priorities.length > 0) params['priorities'] = JSON.stringify(priorities);
+  if (userGroupIds && userGroupIds.length > 0)
+    params['userGroupIds'] = JSON.stringify(userGroupIds);
   if (customFieldFilter && customFieldFilter.keys.length > 0) {
     params['customFieldKeys'] = JSON.stringify(customFieldFilter.keys);
     if (customFieldFilter.perKeyFilters)
