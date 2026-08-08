@@ -27,12 +27,17 @@ export class ACLAuditService {
     targetType: ACLAuditTargetType,
     targetId: string,
     description: string,
-    actorUserId?: string
+    actorUserId?: string,
+    explicitWorkspaceId?: string | null
   ): Promise<ACLAuditLog> {
     try {
-      // System/no-context entry points (e.g. the ACL seed script) legitimately have no tenant.
+      // Prefer a workspaceId the caller already knows (e.g. permission grants during
+      // OAuth signup/invite/seed/webhook flows run before req.user.workspaceId is set,
+      // so the ambient tenant context is empty even though the operation IS tenanted).
+      // Fall back to the request-scoped context. Only truly system/no-context entry
+      // points (e.g. the ACL seed script over global `resources`) record a null tenant;
       // workspaceId is nullable, so record a tenant-less audit row rather than throwing.
-      const workspaceId = getContextOrNull()?.workspaceId ?? null;
+      const workspaceId = explicitWorkspaceId ?? getContextOrNull()?.workspaceId ?? null;
       const auditLog = await repositories.aclAuditLogs.create({
         eventType,
         targetType,
@@ -102,14 +107,16 @@ export class ACLAuditService {
   async logPermissionGranted(
     resourceAccessId: string,
     description: string,
-    actorUserId?: string
+    actorUserId?: string,
+    workspaceId?: string | null
   ): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.PERMISSION_GRANTED,
       ACLAuditTargetType.RESOURCE_ACCESS,
       resourceAccessId,
       description,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
@@ -119,14 +126,16 @@ export class ACLAuditService {
   async logPermissionRevoked(
     resourceAccessId: string,
     description: string,
-    actorUserId?: string
+    actorUserId?: string,
+    workspaceId?: string | null
   ): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.PERMISSION_REVOKED,
       ACLAuditTargetType.RESOURCE_ACCESS,
       resourceAccessId,
       description,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
@@ -136,79 +145,86 @@ export class ACLAuditService {
   async logPermissionUpdated(
     resourceAccessId: string,
     description: string,
-    actorUserId?: string
+    actorUserId?: string,
+    workspaceId?: string | null
   ): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.PERMISSION_UPDATED,
       ACLAuditTargetType.RESOURCE_ACCESS,
       resourceAccessId,
       description,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
   /**
    * Log user group creation
    */
-  async logUserGroupCreated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupCreated(groupId: string, groupName: string, actorUserId?: string, workspaceId?: string | null): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_CREATED,
       ACLAuditTargetType.USER_GROUP,
       groupId,
       `Created user group: ${groupName}`,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
   /**
    * Log user group update
    */
-  async logUserGroupUpdated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupUpdated(groupId: string, groupName: string, actorUserId?: string, workspaceId?: string | null): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_UPDATED,
       ACLAuditTargetType.USER_GROUP,
       groupId,
       `Updated user group: ${groupName}`,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
   /**
    * Log user group deletion
    */
-  async logUserGroupDeleted(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupDeleted(groupId: string, groupName: string, actorUserId?: string, workspaceId?: string | null): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_DELETED,
       ACLAuditTargetType.USER_GROUP,
       groupId,
       `Deleted user group: ${groupName}`,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
   /**
    * Log user group deactivation
    */
-  async logUserGroupDeactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupDeactivated(groupId: string, groupName: string, actorUserId?: string, workspaceId?: string | null): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_DEACTIVATED,
       ACLAuditTargetType.USER_GROUP,
       groupId,
       `Deactivated user group: ${groupName}`,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
   /**
    * Log user group reactivation
    */
-  async logUserGroupReactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+  async logUserGroupReactivated(groupId: string, groupName: string, actorUserId?: string, workspaceId?: string | null): Promise<ACLAuditLog> {
     return this.logEvent(
       ACLAuditEventType.USER_GROUP_REACTIVATED,
       ACLAuditTargetType.USER_GROUP,
       groupId,
       `Reactivated user group: ${groupName}`,
-      actorUserId
+      actorUserId,
+      workspaceId
     );
   }
 
