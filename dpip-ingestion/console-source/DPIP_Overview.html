@@ -48,23 +48,28 @@
   .dwm-row{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:34px;}
   .dwm-card{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--steel);
     border-radius:12px;padding:22px 24px;box-shadow:0 2px 6px rgba(20,30,60,.05);}
-  .dwm-card .label{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#6b7280;font-weight:700;margin-bottom:10px;}
-  .dwm-card .hero-num{font-size:38px;font-weight:700;color:var(--navy-deep);line-height:1;}
-  .dwm-card .hero-caption{font-size:11px;color:#8a8f98;margin-top:3px;}
-  .dwm-card .hero-delta{font-size:12.5px;font-weight:700;margin-top:6px;}
-  .dwm-card .sub-rows{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px;}
-  .dwm-card .sub-row{display:flex;align-items:baseline;justify-content:space-between;font-size:12.5px;}
+  .dwm-card .label{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#6b7280;font-weight:700;margin-bottom:12px;padding-bottom:7px;}
+  .dwm-card .hero-num{font-size:44px;font-weight:700;color:var(--navy-deep);line-height:1;}
+  .dwm-card .hero-caption{font-size:11px;color:#8a8f98;margin-top:6px;}
+  .dwm-card .hero-delta{font-size:14px;font-weight:700;margin-top:6px;}
+  .dwm-card .hero-delta-wrap{margin:10px 0 2px;}
+  .dwm-card .sub-rows{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:12px;}
+  .dwm-card .sub-row{display:flex;align-items:baseline;justify-content:space-between;font-size:13.5px;}
   .dwm-card .sub-row .sr-label{color:#6b7280;}
-  .dwm-card .sub-row .sr-val{font-weight:700;color:var(--grey);}
-  .dwm-card .sub-row .sr-delta{font-size:11.5px;font-weight:700;margin-left:8px;}
+  .dwm-card .sub-row .sr-val{font-weight:700;color:var(--grey);font-size:15px;}
+  .dwm-card .sub-row .sr-delta{font-size:12.5px;font-weight:700;margin-left:8px;}
   .up{color:var(--good);} .down{color:var(--bad);} .flat{color:#8a8f98;}
+  .delta-note{font-size:11px;color:#8a8f98;font-weight:400;}
+  .dwm-card.snapshot-combined{grid-column:1 / -1;}
+  .snap-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;}
+  .dwm-card .snap-cell .hero-num{font-size:36px;}
 
   section.block{margin-bottom:34px;}
   .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
   .grid-2col{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
   .grid-1{display:grid;grid-template-columns:1fr;gap:20px;}
   .chart-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;box-shadow:0 1px 3px rgba(20,30,60,.04);}
-  .chart-card h3{font-size:14px;margin:0 0 4px;color:var(--navy-deep);font-weight:700;}
+  .chart-card h3{font-size:14px;margin:0 0 14px;padding-bottom:7px;color:var(--navy-deep);font-weight:700;}
   .chart-card .chart-desc{font-size:11.5px;color:#8a8f98;margin:0 0 12px;}
   .chart-wrap{position:relative;height:270px;}
 
@@ -74,6 +79,10 @@
   table.leader td{padding:10px 8px;border-bottom:1px solid #EEF0F4;}
   table.leader tr:hover td{background:#FAFBFD;}
   table.leader td.num-cell{font-variant-numeric:tabular-nums;}
+  table.leader th .th-note{display:block;font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:#9aa0a8;margin-top:2px;}
+  table.leader td.rank-cell{font-weight:700;color:var(--navy);}
+  table.leader tr.total-row td{border-top:2px solid var(--line);border-bottom:none;font-weight:700;background:#FAFBFD;}
+  #leaderTableWrap{overflow-x:auto;}
 
   footer{padding:22px 40px;font-size:11px;color:#9aa0a8;text-align:center;}
 
@@ -127,16 +136,33 @@
   </div>
 
   <section class="block">
+    <p class="section-label">Screening by usecase</p>
+    <div class="chart-card">
+      <h3 class="has-tip" data-tip="Screening volume split by usecase, over the period shown.">Screening by usecase — <span id="usecaseScopeLabel">--</span></h3>
+      <p class="chart-desc">Unavailable in current DPIP payload: screening rows contain status totals, but no usecase dimension.</p>
+    </div>
+  </section>
+
+  <div class="dwm-row" id="snapshotRow">
+    <!-- combined registry snapshot tile injected by JS -->
+  </div>
+
+  <section class="block">
+    <div class="chart-card">
+      <h3 class="has-tip" data-tip="Which parties are active on each screening usecase in the period shown.">Active parties per usecase</h3>
+      <div id="usecasePartiesTableWrap"></div>
+    </div>
+  </section>
+
+  <section class="block">
     <p class="section-label">Trends — <span id="trendScopeLabel">--</span></p>
     <div class="grid-2">
       <div class="chart-card">
         <h3 class="has-tip" data-tip="Daily total reports submitted to the registry, over the period shown.">Reporting trend</h3>
-        <p class="chart-desc" id="reportTrendDesc">Daily reports submitted</p>
         <div class="chart-wrap"><canvas id="chartReportTrend"></canvas></div>
       </div>
       <div class="chart-card">
         <h3 class="has-tip" data-tip="Daily total screening calls made against the registry, over the period shown.">Screening trend</h3>
-        <p class="chart-desc" id="screenTrendDesc">Daily screenings performed</p>
         <div class="chart-wrap"><canvas id="chartScreenTrend"></canvas></div>
       </div>
     </div>
@@ -145,8 +171,7 @@
   <section class="block">
     <p class="section-label">Bank leaderboard</p>
     <div class="chart-card">
-      <h3 class="has-tip" data-tip="Every participating bank, ranked by reports submitted in the period shown. Week-on-week change is on reports specifically, since a weekly read is the most useful cadence for spotting a bank ramping up or dropping off.">Bank leaderboard — <span id="leaderScopeLabel">--</span></h3>
-      <p class="chart-desc" id="leaderScopeDesc">Reports, screenings and identifiers reported, with week-on-week movement on reports</p>
+      <h3 class="has-tip" data-tip="Every participating bank over the period shown, ranked by weighted growth: 60% screening growth, 40% reporting growth — month-on-month in month view, year-on-year in the cumulative view. Banks with no prior-period data rank after the scored banks, by a weighted volume rank: 60% screenings, 40% reports.">Bank leaderboard — <span id="leaderScopeLabel">--</span></h3>
       <div id="leaderTableWrap"></div>
     </div>
   </section>
@@ -154,14 +179,6 @@
   <section class="block">
     <p class="section-label">Composition — <span id="compositionScopeLabel">--</span></p>
     <div class="grid-2col">
-      <!-- Screening by usecase: the production payload has no per-usecase screening
-           table yet. Uncomment this card (and the matching block in the script below)
-           once that data is added.
-      <div class="chart-card">
-        <h3 class="has-tip" data-tip="Screening volume by usecase. Unclassified covers screening activity that isn't tagged to one of the five named usecases, so the total reconciles with overall screening volume.">Screening by usecase</h3>
-        <div class="chart-wrap"><canvas id="chartUsecase"></canvas></div>
-      </div>
-      -->
       <div class="chart-card">
         <h3 class="has-tip" data-tip="Reports by outcome status. Alert covers an initial flag; Suspect covers a flag confirmed on further review. Legacy data values ALERTED/CONFIRMED are mapped to ALERT/SUSPECT. Measured by the identifiers carried in reports, since the registry does not attribute a whole report to a single status.">Identifiers by status</h3>
         <div class="chart-wrap"><canvas id="chartReportStatus"></canvas></div>
@@ -173,23 +190,20 @@
     </div>
     <div class="grid-2col" style="margin-top:20px;">
       <div class="chart-card">
-        <h3 class="has-tip" data-tip="Identifiers reported by type. Others covers identifier types not individually tracked in this view, so the total reconciles with total identifiers reported. Hover the Others bar to see which types it contains.">Identifiers by type</h3>
-        <div class="chart-wrap"><canvas id="chartIdType"></canvas></div>
-        <p class="chart-desc" id="idTypeOthersNote" style="margin:8px 0 0;"></p>
+        <h3 class="has-tip" data-tip="Identifiers reported by type over the period shown — every identifier type on file is listed, with no Others bucket.">Identifiers by type</h3>
+        <div id="idTypeTableWrap"></div>
       </div>
       <div class="chart-card">
-        <h3 class="has-tip" data-tip="Total identifiers reported per bank in the period shown.">Identifiers by bank</h3>
-        <div class="chart-wrap"><canvas id="chartIdByBank"></canvas></div>
-        <p class="hl-bar-note" id="idByBankNote"></p>
+        <h3 class="has-tip" data-tip="Total identifiers reported per bank in the period shown. The selected bank is highlighted.">Identifiers by bank</h3>
+        <div id="idByBankTableWrap"></div>
       </div>
     </div>
   </section>
 
 </main>
 
-<footer>DPIP Overview — IDPIC. A read-only snapshot; for daily operational detail, see the DPIP Registry Intelligence report.</footer>
 
-<template id="dpip-overview-data"></template>
+<template id="dpip-overview-data">[]</template>
 <script>
 /* ============ palette / chart defaults ============ */
 const COLORS = { navy:'#1B3A6B', navyDeep:'#12294D', steel:'#2E5FA3', teal:'#17697A', amber:'#B8762E',
@@ -258,6 +272,9 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 const monthKeyOf = dateStr => dateStr.slice(0,7); // "YYYY-MM"
 const monthLabelOf = monthKey => { const [y,m] = monthKey.split('-').map(Number); return `${MONTH_NAMES[m-1]} ${y}`; };
 const esc = v => String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+const fmtDateIN = iso => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}/${y}`; }; // dd/mm/yyyy
+const fmtDateLong = iso => { const [y, m, d] = String(iso).split('-').map(Number); return `${MONTH_NAMES[m-1]} ${d}, ${y}`; };
+const bankLabel = b => String(b ?? '').toUpperCase();
 
 /* ============ real data payload (replaces the prototype's DEMO_DATA) ============ */
 const norm = v => String(v ?? '').trim().toLowerCase();
@@ -273,9 +290,12 @@ const SCREEN_STATUS = { alert: new Set(['alert','alerted','match','matched']),
 const TYPE_LABELS = new Map([
   ['aadhaar','Aadhaar'], ['pan','PAN'],
   ['bank_account','Bank Account'], ['bankaccount','Bank Account'], ['bank_account_number','Bank Account'],
-  ['mobile','Mobile'], ['email','Email'],
+  ['mobile','Mobile Number'], ['email','Email'],
   ['upi','UPI'], ['upi_id','UPI'],
 ]);
+/* Unknown types: underscores become spaces, Title Case; short tokens stay as acronyms */
+const typeLabelOf = t => TYPE_LABELS.get(t) || String(t).split(/[_\s]+/).filter(Boolean)
+  .map(w => w.length <= 3 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).join(' ');
 
 const tablePayload = JSON.parse(document.getElementById('dpip-overview-data').content.textContent || '[]');
 const rowsFor = name => {
@@ -284,22 +304,32 @@ const rowsFor = name => {
   const headers = block.data[0];
   return block.data.slice(1).map(values => Object.fromEntries(headers.map((field, i) => [field, values[i]])));
 };
-const REPORTS = rowsFor('reports')
+const REPORTS_RAW = rowsFor('reports')
   .filter(r => REPORT_METRICS.has(norm(r.metrics_type)))
   .map(r => ({ metric: norm(r.metrics_type), value: numOf(r.metrics_value),
                date: String(r.reported_date), bank: String(r.party_id),
                idType: norm(r.identifier_type), status: norm(r.status) }));
-const SCREENINGS = rowsFor('screenings')
+const SCREENINGS_RAW = rowsFor('screenings')
   .map(r => ({ value: numOf(r.count), date: String(r.screening_date),
                bank: String(r.party_id), status: norm(r.screening_status) }));
+
+/* T-1: the report always runs up to the latest date present in the payload minus one day,
+   regardless of the date it is viewed on (data till 5 Aug -> report till 4 Aug) */
+const RAW_DATE_MAX = [...REPORTS_RAW.map(r => r.date), ...SCREENINGS_RAW.map(r => r.date)]
+  .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().at(-1);
+const CUTOFF_ISO = RAW_DATE_MAX === undefined ? null : isoAdd(RAW_DATE_MAX, -1);
+const REPORTS = CUTOFF_ISO === null ? [] : REPORTS_RAW.filter(r => r.date <= CUTOFF_ISO);
+const SCREENINGS = CUTOFF_ISO === null ? [] : SCREENINGS_RAW.filter(r => r.date <= CUTOFF_ISO);
 
 /* Snapshot tables: point-in-time registry state keyed by last_updated_date
    (same source the daily Registry Intelligence report uses for its KPI cards) */
 const EXTERNAL_ENTITY_SNAPSHOTS = rowsFor('external_entity_identifiers')
   .map(r => ({ date: String(r.last_updated_date), bank: String(r.party_id),
-               entities: numOf(r.external_entity_count) }));
+               entities: numOf(r.external_entity_count) }))
+  .filter(r => CUTOFF_ISO !== null && r.date <= CUTOFF_ISO);
 const CLUSTER_SNAPSHOTS = rowsFor('cluster_external_entities')
-  .map(r => ({ date: String(r.last_updated_date), clusters: numOf(r.cluster_count) }));
+  .map(r => ({ date: String(r.last_updated_date), clusters: numOf(r.cluster_count) }))
+  .filter(r => CUTOFF_ISO !== null && r.date <= CUTOFF_ISO);
 
 /* Rows of the latest snapshot taken on or before `to` (bank-filtered when the table carries party_id) */
 function latestSnapshot(rows, to, bank){
@@ -388,7 +418,7 @@ function loadData(){
   const bankSel = document.getElementById('bankFilter');
   BANKS_ALL.forEach(b=>{
     const opt = document.createElement('option');
-    opt.value = b; opt.textContent = b;
+    opt.value = b; opt.textContent = bankLabel(b);
     bankSel.appendChild(opt);
   });
   bankSel.addEventListener('change', e=>{ state.selectedBank = e.target.value; renderAll(); });
@@ -416,16 +446,17 @@ function loadData(){
 function renderScopeCard(containerEl, label, tip, valueFn, windows){
   const vScope = valueFn(windows.scopeFrom, windows.scopeTo);
   const vWeek = valueFn(windows.weekFrom, windows.weekTo), vLastWeek = valueFn(windows.lastWeekFrom, windows.lastWeekTo);
+  const vDay = valueFn(windows.dayCurr, windows.dayCurr), vPrevDay = valueFn(windows.dayPrev, windows.dayPrev);
 
   const heroDelta = windows.monthMode
-    ? `<div class="hero-delta-wrap">${windows.haveMonthPrior ? deltaSpan(vScope, valueFn(windows.lastMonthFrom, windows.lastMonthTo), false) : '<span class="hero-delta flat">no prior data</span>'} <span style="font-size:11px;color:#8a8f98;">vs previous month</span></div>`
+    ? `<div class="hero-delta-wrap">${windows.haveMonthPrior ? deltaSpan(vScope, valueFn(windows.lastMonthFrom, windows.lastMonthTo), false) : '<span class="hero-delta flat">no prior data</span>'} <span style="font-size:11px;color:#8a8f98;">${windows.monthCompareLabel}</span></div>`
     : '';
 
   let trailingRow = '';
   if(!windows.monthMode){
     const vTrailing = valueFn(windows.monthFrom, windows.monthTo);
     const vPrevTrailing = valueFn(windows.lastMonthFrom, windows.lastMonthTo);
-    trailingRow = `<div class="sub-row"><span class="sr-label">Trailing 30 days</span><span><span class="sr-val">${fmtInt(vTrailing)}</span> ${windows.haveMonthPrior ? deltaSpan(vTrailing, vPrevTrailing, true) : '<span class="sr-delta flat">no prior data</span>'}</span></div>`;
+    trailingRow = `<div class="sub-row"><span class="sr-label">Last 30 days</span><span><span class="sr-val">${fmtInt(vTrailing)}</span> ${windows.haveMonthPrior ? deltaSpan(vTrailing, vPrevTrailing, true) + ' <span class="delta-note">over previous 30 days</span>' : '<span class="sr-delta flat">no prior data</span>'}</span></div>`;
   }
 
   const card = document.createElement('div');
@@ -436,7 +467,8 @@ function renderScopeCard(containerEl, label, tip, valueFn, windows){
     <div class="hero-caption">${windows.scopeCaption}</div>
     ${heroDelta}
     <div class="sub-rows">
-      <div class="sub-row"><span class="sr-label">This week</span><span><span class="sr-val">${fmtInt(vWeek)}</span> ${windows.haveWeekPrior ? deltaSpan(vWeek, vLastWeek, true) : '<span class="sr-delta flat">no prior data</span>'}</span></div>
+      <div class="sub-row"><span class="sr-label">${windows.dayLabel}</span><span><span class="sr-val">${fmtInt(vDay)}</span> ${windows.haveDayPrior ? deltaSpan(vDay, vPrevDay, true) + ' <span class="delta-note">over previous day</span>' : '<span class="sr-delta flat">no prior data</span>'}</span></div>
+      <div class="sub-row"><span class="sr-label">This week</span><span><span class="sr-val">${fmtInt(vWeek)}</span> ${windows.haveWeekPrior ? deltaSpan(vWeek, vLastWeek, true) + ' <span class="delta-note">over previous week</span>' : '<span class="sr-delta flat">no prior data</span>'}</span></div>
       ${trailingRow}
     </div>
   `;
@@ -470,20 +502,29 @@ function renderAll(){
     scopeFrom = mb.first; scopeTo = mb.last;
     scopeLabel = monthLabelOf(state.selectedMonth);
   }
+  const inProgress = anchor === DATE_MAX;
 
-  /* ---- comparison windows, anchored to `anchor` either way ---- */
+  /* ---- comparison windows: always same-span (comparable) comparisons ---- */
   const windows = {
     monthMode,
     scopeFrom, scopeTo,
-    scopeCaption: monthMode ? monthLabelOf(state.selectedMonth) + ' total' : 'All-time cumulative, as of ' + DATE_MAX,
+    scopeCaption: monthMode
+      ? (inProgress ? scopeLabel + ', till ' + fmtDateIN(anchor) : scopeLabel + ' total')
+      : 'All-time cumulative, as of ' + fmtDateIN(DATE_MAX),
+    monthCompareLabel: monthMode && inProgress ? 'vs same days last month' : 'vs previous month',
   };
-  /* Week windows: while the period is still in progress (the anchor is the latest day on
-     file), "this week" runs from Monday of the anchor's calendar week to the anchor, and is
-     compared against the whole previous calendar week (Mon-Sun). Completed months keep the
-     original trailing 7-day windows ending on the month's last day. */
-  if(anchor === DATE_MAX){
+  /* Day-on-day: completed months compare their last day vs the previous day;
+     the current month (and All) compares yesterday (latest T-1 day) vs the day before */
+  windows.dayCurr = anchor; windows.dayPrev = isoAdd(anchor, -1);
+  windows.haveDayPrior = windows.dayPrev >= DATE_MIN;
+  windows.dayLabel = (inProgress ? 'Latest day' : 'Last day') + ' (' + anchor.slice(8,10) + '/' + anchor.slice(5,7) + ')';
+  /* Week windows: while the period is in progress, "this week" runs Monday-to-anchor and is
+     compared against the SAME weekday span of the previous week (Mon-Wed vs Mon-Wed), not the
+     whole previous week. Completed months keep the original trailing 7-day windows ending on
+     the month's last day. */
+  if(inProgress){
     windows.weekFrom = mondayOf(anchor); windows.weekTo = anchor;
-    windows.lastWeekFrom = isoAdd(windows.weekFrom,-7); windows.lastWeekTo = isoAdd(windows.weekFrom,-1);
+    windows.lastWeekFrom = isoAdd(windows.weekFrom,-7); windows.lastWeekTo = isoAdd(anchor,-7);
   } else {
     windows.weekFrom = isoAdd(anchor,-6); windows.weekTo = anchor;
     windows.lastWeekFrom = isoAdd(anchor,-13); windows.lastWeekTo = isoAdd(anchor,-7);
@@ -497,100 +538,212 @@ function renderAll(){
     windows.monthFrom = scopeFrom; windows.monthTo = scopeTo;
     const pmk = prevMonthKey(state.selectedMonth);
     const pmb = monthBounds(pmk);
-    windows.lastMonthFrom = pmb.first; windows.lastMonthTo = pmb.last;
+    windows.lastMonthFrom = pmb.first;
+    if(inProgress){
+      /* month in progress: compare the elapsed days against the same day-span of the previous month */
+      const sameDay = isoAdd(pmb.first, Number(anchor.slice(8,10)) - 1);
+      windows.lastMonthTo = sameDay < pmb.last ? sameDay : pmb.last;
+    } else {
+      windows.lastMonthTo = pmb.last;
+    }
     windows.haveMonthPrior = monthHasData(pmk);
   }
 
-  /* ---- header "Viewing" label + bank-filtered note ---- */
+  /* ---- header "Viewing Till ..." label + bank-filtered note ---- */
   document.getElementById('viewingLabel').textContent =
-    (monthMode ? scopeLabel : 'All-time, as of ' + DATE_MAX) + (state.selectedBank !== 'ALL' ? ' · ' + state.selectedBank : '');
+    'Till ' + fmtDateLong(scopeTo) + (state.selectedBank !== 'ALL' ? ' · ' + bankLabel(state.selectedBank) : '');
   document.getElementById('trendScopeLabel').textContent = scopeLabel;
   document.getElementById('compositionScopeLabel').textContent = scopeLabel;
   document.getElementById('leaderScopeLabel').textContent = scopeLabel;
-  document.getElementById('leaderScopeDesc').textContent = monthMode
-    ? `Reports, screenings and identifiers reported in ${scopeLabel}, with week-on-week movement on reports`
-    : 'Reports, screenings and identifiers reported across all data on file, with week-on-week movement on reports';
-  document.getElementById('reportTrendDesc').textContent = monthMode ? `Daily reports submitted, ${scopeLabel}` : 'Daily reports submitted, full period on file';
-  document.getElementById('screenTrendDesc').textContent = monthMode ? `Daily screenings performed, ${scopeLabel}` : 'Daily screenings performed, full period on file';
+  document.getElementById('usecaseScopeLabel').textContent = scopeLabel;
 
   const note = document.getElementById('filteredNote');
   if(state.selectedBank === 'ALL'){ note.classList.remove('show'); }
-  else { note.classList.add('show'); document.getElementById('filteredBankName').textContent = state.selectedBank; }
+  else { note.classList.add('show'); document.getElementById('filteredBankName').textContent = bankLabel(state.selectedBank); }
 
-  /* ---- headline cards: month/cumulative volumes + latest registry snapshots ---- */
+  /* ---- headline cards: Reports, Identifiers, Screenings, then registry snapshots ---- */
   const dwmRow = document.getElementById('dwmRow');
   dwmRow.innerHTML = '';
-  renderScopeCard(dwmRow, 'Total Reports', 'Reports submitted to the registry. The top figure is the total for the period shown (the selected month, or everything on file when Month is All), compared to the previous calendar month where one exists.', totalReports, windows);
-  renderScopeCard(dwmRow, 'Total Screenings', 'Screening calls made against the registry. The top figure is the total for the period shown (the selected month, or everything on file when Month is All), compared to the previous calendar month where one exists.', totalScreenings, windows);
-  renderScopeCard(dwmRow, 'Total Identifiers Reported', 'Individual identifiers (account numbers, mobile numbers, PAN, Aadhaar, etc.) carried by reports submitted. The top figure is the total for the period shown (the selected month, or everything on file when Month is All), compared to the previous calendar month where one exists.', totalIdentifiers, windows);
+  renderScopeCard(dwmRow, 'Total Reports', 'Reports submitted to the registry. The top figure is the total for the period shown (the selected month, or everything on file when Month is All), compared against the same span of the previous month where one exists.', totalReports, windows);
+  renderScopeCard(dwmRow, 'Total Identifiers Reported', 'Individual identifiers (account numbers, mobile numbers, PAN, Aadhaar, etc.) carried by reports submitted. The top figure is the total for the period shown, compared against the same span of the previous month where one exists.', totalIdentifiers, windows);
+  renderScopeCard(dwmRow, 'Total Screenings', 'Screening calls made against the registry. The top figure is the total for the period shown, compared against the same span of the previous month where one exists.', totalScreenings, windows);
 
   const extSnap = latestSnapshot(EXTERNAL_ENTITY_SNAPSHOTS, scopeTo, state.selectedBank);
   const cluSnap = latestSnapshot(CLUSTER_SNAPSHOTS, scopeTo);
   const totalExternalEntities = extSnap.rows.reduce((a, r) => a + r.entities, 0);
   const totalClusters = cluSnap.rows.reduce((a, r) => a + r.clusters, 0);
-  const activeParties = new Set([
-    ...reportRows(scopeFrom, scopeTo, state.selectedBank).map(r => r.bank),
-    ...screeningRows(scopeFrom, scopeTo, state.selectedBank).map(r => r.bank),
-  ].filter(Boolean)).size;
-  renderSnapshotCard(dwmRow, 'External Entities',
-    'Distinct external entities known to the registry, from the latest external-entity snapshot taken on or before the end of the period shown. Respects the bank filter.',
-    totalExternalEntities, extSnap.date ? 'Latest snapshot: ' + extSnap.date : 'No snapshot on file for this period');
-  renderSnapshotCard(dwmRow, 'Clusters',
-    'Clusters known to the registry, from the latest cluster snapshot taken on or before the end of the period shown.',
-    totalClusters, cluSnap.date ? 'Latest snapshot: ' + cluSnap.date : 'No snapshot on file for this period');
-  renderSnapshotCard(dwmRow, 'Active Parties',
-    'Distinct banks with any reporting or screening activity in the period shown.',
-    activeParties, 'Distinct banks active in the period');
+  const screeningActiveParties = new Set(screeningRows(scopeFrom, scopeTo, state.selectedBank).map(r => r.bank).filter(Boolean)).size;
+  const registrationActiveParties = new Set(reportRows(scopeFrom, scopeTo, state.selectedBank).map(r => r.bank).filter(Boolean)).size;
+  const snapCell = (label, tip, value, caption) => `
+    <div class="snap-cell">
+      <div class="label has-tip" data-tip="${tip}">${label}</div>
+      <div class="hero-num">${fmtInt(value)}</div>
+      <div class="hero-caption">${caption}</div>
+    </div>`;
+  const snapCard = document.createElement('div');
+  snapCard.className = 'dwm-card snapshot-combined';
+  snapCard.innerHTML = '<div class="snap-grid">'
+    + snapCell('External Entities',
+        'Distinct external entities known to the registry, from the latest external-entity snapshot taken on or before the end of the period shown. Respects the bank filter.',
+        totalExternalEntities, extSnap.date ? 'Latest snapshot: ' + fmtDateIN(extSnap.date) : 'No snapshot on file for this period')
+    + snapCell('Clusters',
+        'Clusters known to the registry, from the latest cluster snapshot taken on or before the end of the period shown.',
+        totalClusters, cluSnap.date ? 'Latest snapshot: ' + fmtDateIN(cluSnap.date) : 'No snapshot on file for this period')
+    + snapCell('Screening Active Parties',
+        'Distinct banks with any screening activity in the period shown.',
+        screeningActiveParties, 'Distinct banks screening in the period')
+    + snapCell('Reporting Active Parties',
+        'Distinct banks with any reporting activity in the period shown.',
+        registrationActiveParties, 'Distinct banks reporting in the period')
+    + '</div>';
+  const snapshotRow = document.getElementById('snapshotRow');
+  snapshotRow.innerHTML = '';
+  snapshotRow.appendChild(snapCard);
 
-  /* ---- trends: scoped to the selected period (full history if All, that month if a month is picked) ---- */
+  /* ---- trends: scoped to the selected period; x-axis carries day numbers in month view
+     (full dates clutter the axis); the cumulative view labels only the first/last day (with year)
+     and each month-end in between (d/m); tooltips keep the full date ---- */
   const allDays = [];
   for(let d=scopeFrom; d<=scopeTo; d=isoAdd(d,1)) allDays.push(d);
   const reportSeries = allDays.map(d=>totalReports(d,d));
   const screenSeries = allDays.map(d=>totalScreenings(d,d));
+  const isMonthEnd = d => monthKeyOf(isoAdd(d,1)) !== monthKeyOf(d);
+  const axisLabel = (d, withYear) => {
+    const [y, m, dd] = d.split('-').map(Number);
+    return withYear ? `${dd}/${m}/${y}` : `${dd}/${m}`;
+  };
+  /* month-end ticks too close to the endpoint labels are dropped to avoid overlap */
+  const edgeGap = Math.max(10, Math.round(allDays.length * 0.05));
+  const dayTicks = monthMode
+    ? allDays.map(d => String(Number(d.slice(8,10))))
+    : allDays.map((d, i) => (i === 0 || i === allDays.length - 1) ? axisLabel(d, true)
+        : (isMonthEnd(d) && i >= edgeGap && i <= allDays.length - 1 - edgeGap ? axisLabel(d, false) : ''));
+  const trendXTicks = monthMode ? {maxTicksLimit: 11} : {autoSkip: false, maxRotation: 0};
+  const trendTooltip = () => ({ callbacks: { title: items => fmtDateIN(allDays[items[0].dataIndex]) } });
 
   upsertChart('chartReportTrend', {
     type:'line',
-    data:{ labels:allDays, datasets:[{ data:reportSeries, borderColor:COLORS.navy, backgroundColor:'rgba(27,58,107,0.08)', fill:true, tension:0.25, pointRadius:0, borderWidth:2 }] },
+    data:{ labels:dayTicks, datasets:[{ data:reportSeries, borderColor:COLORS.navy, backgroundColor:'rgba(27,58,107,0.08)', fill:true, tension:0.25, pointRadius:0, borderWidth:2 }] },
     options:{ responsive:true, maintainAspectRatio:false,
-      scales:{ x:{grid:{display:false}, ticks:{maxTicksLimit:8}}, y:{grid:{color:COLORS.grid}} },
-      plugins:{legend:{display:false}} }
+      scales:{ x:{grid:{display:false}, ticks:trendXTicks}, y:{grid:{color:COLORS.grid}} },
+      plugins:{legend:{display:false}, tooltip:trendTooltip()} }
   });
   upsertChart('chartScreenTrend', {
     type:'line',
-    data:{ labels:allDays, datasets:[{ data:screenSeries, borderColor:COLORS.teal, backgroundColor:'rgba(23,105,122,0.08)', fill:true, tension:0.25, pointRadius:0, borderWidth:2 }] },
+    data:{ labels:dayTicks, datasets:[{ data:screenSeries, borderColor:COLORS.teal, backgroundColor:'rgba(23,105,122,0.08)', fill:true, tension:0.25, pointRadius:0, borderWidth:2 }] },
     options:{ responsive:true, maintainAspectRatio:false,
-      scales:{ x:{grid:{display:false}, ticks:{maxTicksLimit:8}}, y:{grid:{color:COLORS.grid}} },
-      plugins:{legend:{display:false}} }
+      scales:{ x:{grid:{display:false}, ticks:trendXTicks}, y:{grid:{color:COLORS.grid}} },
+      plugins:{legend:{display:false}, tooltip:trendTooltip()} }
   });
 
-  /* ---- leaderboard + identifiers-by-bank always cover every bank, over the selected scope;
-     the bank filter highlights rather than narrows these two, so cross-bank comparison never disappears ---- */
-  const rows = BANKS_ALL.map(b=>{
+  /* ---- usecase split is unavailable in the current six-table payload ---- */
+  document.getElementById('usecasePartiesTableWrap').innerHTML =
+    '<p class="chart-desc">Unavailable in current DPIP payload: active parties cannot be grouped by usecase.</p>';
+
+  /* ---- leaderboard: every bank, ranked by weighted growth (60% screenings, 40% reports) —
+     month-on-month in month view, year-on-year (trailing 365 days vs the prior 365) in the
+     cumulative view. Banks without prior-period data fall back to a weighted volume rank
+     (60% screenings rank, 40% reports rank). The bank filter highlights rather than narrows,
+     so cross-bank comparison never disappears ---- */
+  const dailyStats = map => { const vals = [...map.values()].filter(v => v > 0); return { days: vals.length, peak: vals.length ? Math.max(...vals) : 0 }; };
+  const dailyReportMap = (from, to, bank) => {
+    const map = new Map();
+    for(const r of REPORTS){
+      if(r.metric !== 'reports_count' || !isAllVal(r.idType) || !isAllVal(r.status)) continue;
+      if(!inRange(r.date, from, to) || r.bank !== bank) continue;
+      map.set(r.date, (map.get(r.date) || 0) + r.value);
+    }
+    return map;
+  };
+  const dailyScreeningMap = (from, to, bank) => {
+    const byDate = new Map();
+    for(const r of SCREENINGS){
+      if(!inRange(r.date, from, to) || r.bank !== bank) continue;
+      const group = byDate.get(r.date);
+      if(group) group.push(r); else byDate.set(r.date, [r]);
+    }
+    const map = new Map();
+    for(const [d, group] of byDate) map.set(d, screeningsTotal(group));
+    return map;
+  };
+  const momPct = (curr, prev) => prev > 0 ? ((curr - prev) / prev) * 100 : null;
+
+  /* growth windows: month view compares MoM; cumulative view compares YoY */
+  const growFrom = monthMode ? windows.monthFrom : isoAdd(anchor, -364);
+  const growTo = monthMode ? windows.monthTo : anchor;
+  const growPrevFrom = monthMode ? windows.lastMonthFrom : isoAdd(anchor, -729);
+  const growPrevTo = monthMode ? windows.lastMonthTo : isoAdd(anchor, -365);
+  const haveGrowPrior = monthMode ? windows.haveMonthPrior : growPrevTo >= DATE_MIN;
+
+  const rows = BANKS_ALL.map(b => {
+    const rep = dailyStats(dailyReportMap(scopeFrom, scopeTo, b));
+    const scr = dailyStats(dailyScreeningMap(scopeFrom, scopeTo, b));
+    const repCurr = sumReportMetric(reportRows(growFrom, growTo, b), 'reports_count');
+    const repPrev = sumReportMetric(reportRows(growPrevFrom, growPrevTo, b), 'reports_count');
+    const scrCurr = screeningsTotal(screeningRows(growFrom, growTo, b));
+    const scrPrev = screeningsTotal(screeningRows(growPrevFrom, growPrevTo, b));
+    const repGrow = haveGrowPrior ? momPct(repCurr, repPrev) : null;
+    const scrGrow = haveGrowPrior ? momPct(scrCurr, scrPrev) : null;
+    /* a bank with prior data on at least one axis gets a score; a missing axis contributes 0 */
+    const score = (repGrow === null && scrGrow === null) ? null : 0.6 * (scrGrow ?? 0) + 0.4 * (repGrow ?? 0);
     return {
       bank: b,
       reports: sumReportMetric(reportRows(scopeFrom, scopeTo, b), 'reports_count'),
       screenings: screeningsTotal(screeningRows(scopeFrom, scopeTo, b)),
       identifiers: sumReportMetric(reportRows(scopeFrom, scopeTo, b), 'identifiers_count'),
-      repWeek: sumReportMetric(reportRows(windows.weekFrom, windows.weekTo, b), 'reports_count'),
-      repLastWeek: sumReportMetric(reportRows(windows.lastWeekFrom, windows.lastWeekTo, b), 'reports_count'),
+      reportDays: rep.days, screeningDays: scr.days,
+      peakReports: rep.peak, peakScreenings: scr.peak,
+      repCurr, repPrev, scrCurr, scrPrev, score,
     };
   });
+  /* fallback rank when growth is unavailable: 40% rank by report volume, 60% rank by screening volume */
+  const rankMapOf = key => {
+    const order = [...rows].sort((a, b) => b[key] - a[key]);
+    return new Map(order.map((r, i) => [r.bank, i + 1]));
+  };
+  const repRankMap = rankMapOf('reports'), scrRankMap = rankMapOf('screenings');
+  rows.forEach(r => { r.volumeRank = 0.4 * repRankMap.get(r.bank) + 0.6 * scrRankMap.get(r.bank); });
+  rows.sort((a, b) => {
+    if(a.score !== null && b.score !== null) return b.score - a.score;
+    if(a.score !== null) return -1;
+    if(b.score !== null) return 1;
+    return a.volumeRank - b.volumeRank;
+  });
 
+  const momCell = (curr, prev) => haveGrowPrior ? deltaSpan(curr, prev, true) : '<span class="sr-delta flat">no prior data</span>';
+  const growName = monthMode ? 'MoM' : 'YoY';
+  const momTip = monthMode
+    ? (inProgress ? 'vs the same day-span of the previous month' : 'vs the previous calendar month')
+    : 'trailing 365 days vs the prior 365 days';
   let html = `<table class="leader"><thead><tr>
+    <th class="has-tip" data-tip="Rank by weighted ${monthMode ? 'month-on-month' : 'year-on-year'} growth: 60% screenings ${growName}, 40% reports ${growName}. Banks with no prior-period data on either axis rank after the scored banks, by a weighted volume rank: 60% screenings, 40% reports.">Rank</th>
     <th class="has-tip" data-tip="Participating institution.">Bank</th>
     <th class="has-tip" data-tip="Reports submitted in the period shown.">Reports</th>
     <th class="has-tip" data-tip="Screening calls in the period shown.">Screenings</th>
     <th class="has-tip" data-tip="Identifiers reported in the period shown.">Identifiers Reported</th>
-    <th class="has-tip" data-tip="Change in this bank's weekly report volume vs the preceding week. For the period still in progress the week runs Monday to the latest day on file, compared with the whole previous calendar week; for completed months it is the trailing 7 days ending on the month's last day.">Reports, week-on-week</th>
+    <th class="has-tip" data-tip="Days in the period with at least one report from this bank.">Report Days</th>
+    <th class="has-tip" data-tip="Days in the period with at least one screening call from this bank.">Screening Days</th>
+    <th class="has-tip" data-tip="Highest single-day report volume in the period.">Peak Reporting</th>
+    <th class="has-tip" data-tip="Highest single-day screening volume in the period.">Peak Screening</th>
+    <th class="has-tip" data-tip="Change in this bank's report volume, ${momTip}.">Reports ${growName}</th>
+    <th class="has-tip" data-tip="Change in this bank's screening volume, ${momTip}.">Screenings ${growName}</th>
   </tr></thead><tbody>`;
-  rows.sort((a,b)=>b.reports-a.reports).forEach(r=>{
-    const hl = r.bank === state.selectedBank ? ' hl-row' : '';
-    html += `<tr class="${hl.trim()}">
-      <td><strong>${esc(r.bank)}</strong></td>
+  let rank = 0;
+  rows.forEach(r => {
+    const hl = r.bank === state.selectedBank ? ' class="hl-row"' : '';
+    const rankLabel = String(++rank);
+    html += `<tr${hl}>
+      <td class="num-cell rank-cell">${rankLabel}</td>
+      <td><strong>${esc(bankLabel(r.bank))}</strong></td>
       <td class="num-cell">${fmtInt(r.reports)}</td>
       <td class="num-cell">${fmtInt(r.screenings)}</td>
       <td class="num-cell">${fmtInt(r.identifiers)}</td>
-      <td class="num-cell">${windows.haveWeekPrior ? deltaSpan(r.repWeek, r.repLastWeek, true) : '<span class="sr-delta flat">no prior data</span>'}</td>
+      <td class="num-cell">${fmtInt(r.reportDays)}</td>
+      <td class="num-cell">${fmtInt(r.screeningDays)}</td>
+      <td class="num-cell">${fmtInt(r.peakReports)}</td>
+      <td class="num-cell">${fmtInt(r.peakScreenings)}</td>
+      <td class="num-cell">${momCell(r.repCurr, r.repPrev)}</td>
+      <td class="num-cell">${momCell(r.scrCurr, r.scrPrev)}</td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -599,24 +752,6 @@ function renderAll(){
   /* ---- composition charts respect the bank filter directly ---- */
   const scopedReports = reportRows(scopeFrom, scopeTo, state.selectedBank);
   const scopedScreenings = screeningRows(scopeFrom, scopeTo, state.selectedBank);
-
-  /* ---- Screening by usecase: no per-usecase screening table in the production payload yet.
-     Uncomment this block (and the matching card in the HTML above) once the payload carries
-     a table of screening counts by event type. ---- */
-  // const evtTypesNamed = ['ONBOARDING','P2P_TRANSACTION','P2M_TRANSACTION','BENEFICIARY_ADDITION','BULK_SCREENING'];
-  // const evtLabels = ['Onboarding','P2P Transaction','P2M Transaction','Beneficiary Addition','Bulk Screening'];
-  // const evtRows = rowsFor('screening_event_types'); // expected fields: screening_date, party_id, event_type, count
-  // const evtScoped = evtRows.filter(r => inRange(String(r.screening_date), scopeFrom, scopeTo)
-  //   && (state.selectedBank === 'ALL' || String(r.party_id) === state.selectedBank));
-  // const evtTotals = evtTypesNamed.map(e => evtScoped.filter(r => norm(r.event_type) === norm(e)).reduce((a,r) => a + numOf(r.count), 0));
-  // const namedEvtSum = evtTotals.reduce((a,b)=>a+b,0);
-  // const unclassifiedScreening = Math.max(0, screeningsTotal(scopedScreenings) - namedEvtSum);
-  // upsertChart('chartUsecase', {
-  //   type:'doughnut',
-  //   data:{ labels:[...evtLabels,'Unclassified'], datasets:[{ data:[...evtTotals, unclassifiedScreening],
-  //     backgroundColor:[COLORS.navy,COLORS.steel,COLORS.teal,COLORS.amber,'#7a8ba8',COLORS.grey] }] },
-  //   options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{boxWidth:10}}} }
-  // });
 
   /* ---- reports by status: Alerted / Suspected ----
      The production payload has no reports_count split by status (every reports_count row
@@ -646,53 +781,41 @@ function renderAll(){
       plugins:{legend:{display:false}} }
   });
 
-  /* ---- identifiers by type, Others reconciles to total ---- */
+  /* ---- identifiers by type: full table, every type on file, no Others bucket ---- */
   const idTypeRows = scopedReports.filter(r => r.metric === 'identifiers_count' && isAllVal(r.status) && !isAllVal(r.idType));
   const byType = new Map();
-  const otherTypes = new Map();
   for(const r of idTypeRows){
-    const label = TYPE_LABELS.get(r.idType);
-    if(label) byType.set(label, (byType.get(label) || 0) + r.value);
-    else otherTypes.set(r.idType, (otherTypes.get(r.idType) || 0) + r.value);
+    const label = typeLabelOf(r.idType);
+    byType.set(label, (byType.get(label) || 0) + r.value);
   }
-  const typeLabels = ['Aadhaar','PAN','Bank Account','Mobile','Email','UPI'];
-  const typeTotals = typeLabels.map(l => byType.get(l) || 0);
-  const namedTypeSum = typeTotals.reduce((a,b)=>a+b,0);
-  const otherIdentifiers = Math.max(0, totalIdentifiers(scopeFrom, scopeTo) - namedTypeSum);
-  upsertChart('chartIdType', {
-    type:'bar',
-    data:{ labels:[...typeLabels,'Others'], datasets:[{ data:[...typeTotals, otherIdentifiers],
-      backgroundColor:[COLORS.navy,COLORS.steel,COLORS.teal,COLORS.amber,'#C9975A','#7a8ba8',COLORS.grey] }] },
-    options:{ responsive:true, maintainAspectRatio:false, indexAxis:'y',
-      scales:{ x:{grid:{color:COLORS.grid}, grace:'15%'}, y:{grid:{display:false}} },
-      plugins:{legend:{display:false},
-        tooltip:{ callbacks:{ afterBody: items => {
-          if(!items.some(item => item.label === 'Others')) return [];
-          const parts = [...otherTypes.entries()].sort((a, b) => b[1] - a[1]);
-          if(parts.length === 0) return ['No unclassified identifier types in this period.'];
-          return ['', 'Includes:', ...parts.map(([type, value]) => type.toUpperCase() + ': ' + fmtInt(value))];
-        } } } } }
-  });
-  const otherTypeNames = [...otherTypes.entries()].sort((a, b) => b[1] - a[1]).map(([type]) => type.toUpperCase());
-  document.getElementById('idTypeOthersNote').textContent = otherIdentifiers > 0
-    ? (otherTypeNames.length
-        ? 'Others includes: ' + otherTypeNames.join(', ')
-        : 'Others covers identifiers not attributed to a tracked type in this period.')
-    : '';
+  const typeEntries = [...byType.entries()].sort((a, b) => b[1] - a[1]);
+  const typeSum = typeEntries.reduce((a, [, v]) => a + v, 0);
+  document.getElementById('idTypeTableWrap').innerHTML = typeEntries.length === 0
+    ? '<p class="chart-desc">No identifier data in this period.</p>'
+    : `<table class="leader"><thead><tr>
+        <th style="width:30%" class="has-tip" data-tip="Identifier type as reported to the registry.">Identifier Type</th>
+        <th style="width:34%" class="has-tip" data-tip="Identifiers of this type reported in the period shown.">Identifiers</th>
+        <th style="width:36%" class="has-tip" data-tip="Share of all typed identifiers in the period shown.">Share <span class="th-note">(out of total identifiers reported)</span></th>
+      </tr></thead><tbody>`
+      + typeEntries.map(([label, v]) => `<tr><td><strong>${esc(label)}</strong></td><td class="num-cell">${fmtInt(v)}</td><td class="num-cell">${typeSum > 0 ? fmtShare((v / typeSum) * 100) : '—'}</td></tr>`).join('')
+      + `<tr class="total-row"><td>Total</td><td class="num-cell">${fmtInt(typeSum)}</td><td class="num-cell">${typeSum > 0 ? '100%' : '—'}</td></tr>`
+      + '</tbody></table>';
 
-  /* ---- identifiers by bank: always all banks, selected one highlighted in amber ---- */
+  /* ---- identifiers by bank: full table, all banks, selected bank highlighted ---- */
   const bankOrder = BANKS_ALL
     .map(b => ({ b, v: sumReportMetric(reportRows(scopeFrom, scopeTo, b), 'identifiers_count') }))
-    .sort((a,b)=>b.v-a.v);
-  upsertChart('chartIdByBank', {
-    type:'bar',
-    data:{ labels:bankOrder.map(x=>x.b), datasets:[{ data:bankOrder.map(x=>x.v),
-      backgroundColor: bankOrder.map(x=> x.b === state.selectedBank ? COLORS.amber : COLORS.steel) }] },
-    options:{ responsive:true, maintainAspectRatio:false,
-      scales:{ x:{grid:{display:false}}, y:{grid:{color:COLORS.grid}, grace:'15%'} },
-      plugins:{legend:{display:false}} }
-  });
-  document.getElementById('idByBankNote').textContent = state.selectedBank === 'ALL' ? '' : `${state.selectedBank} highlighted for comparison against all banks.`;
+    .sort((a, b) => b.v - a.v);
+  const bankSum = bankOrder.reduce((a, x) => a + x.v, 0);
+  document.getElementById('idByBankTableWrap').innerHTML = bankOrder.length === 0
+    ? '<p class="chart-desc">No identifier data in this period.</p>'
+    : `<table class="leader"><thead><tr>
+        <th style="width:26%" class="has-tip" data-tip="Participating institution.">Bank</th>
+        <th style="width:34%" class="has-tip" data-tip="Identifiers reported by this bank in the period shown.">Identifiers</th>
+        <th style="width:40%" class="has-tip" data-tip="Share of all identifiers reported in the period shown.">Share <span class="th-note">(out of total identifiers reported)</span></th>
+      </tr></thead><tbody>`
+      + bankOrder.map(x => `<tr${x.b === state.selectedBank ? ' class="hl-row"' : ''}><td><strong>${esc(bankLabel(x.b))}</strong></td><td class="num-cell">${fmtInt(x.v)}</td><td class="num-cell">${bankSum > 0 ? fmtShare((x.v / bankSum) * 100) : '—'}</td></tr>`).join('')
+      + `<tr class="total-row"><td>Total</td><td class="num-cell">${fmtInt(bankSum)}</td><td class="num-cell">${bankSum > 0 ? '100%' : '—'}</td></tr>`
+      + '</tbody></table>';
 
 }
 

@@ -115,6 +115,27 @@ describe('DPIP HTML report', () => {
     assert.match(html, /"bank-1"/);
   });
 
+  it('keeps the production overview template compatible with the payload', async () => {
+    const tables = emptyTables();
+    tables.screenings.push({
+      screening_date: '2026-07-30',
+      party_id: 'bank-1',
+      screening_status: 'MATCH',
+      count: 3n,
+    });
+    const template = await readFile(
+      new URL('../DPIP_Overview.html', import.meta.url),
+      'utf8',
+    );
+
+    const html = generateDpipOverviewHtml(template, tables);
+
+    assert.match(html, /<template id="dpip-overview-data">\[{/);
+    assert.match(html, /"table":"screenings"/);
+    assert.match(html, /"bank-1"/);
+    assert.doesNotMatch(html, /\u0000/);
+  });
+
   it('ignores template-tag examples inside HTML comments', () => {
     const tables = emptyTables();
     const template = `<!--
