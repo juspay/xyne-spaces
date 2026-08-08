@@ -411,6 +411,8 @@ interface TicketDetailsProps {
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
   onFillRCA?: () => void;
+  /** Display the current stage without exposing manual lifecycle transitions. */
+  stageReadOnly?: boolean;
 }
 
 const TicketKeyValuePair = ({
@@ -524,6 +526,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   onNavigateToTicket,
   expandedView = false,
   onFillRCA,
+  stageReadOnly = false,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -3480,15 +3483,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     currentStatus: ticket.stageName,
                   })}
                 >
-                  <Selector
-                    items={selectorStages}
-                    selectedValue={ticket.stageName}
-                    onValueChange={handleStageChange}
-                    placeholder='Set Status'
-                    icon={<TicketStatusIcon size={14} />}
-                    noBorder={true}
-                    isItemDisabled={item => item.name === ticket.stageName}
-                  />
+                  {stageReadOnly ? (
+                    <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
+                      <TicketStatusIcon size={14} />
+                      {ticket.stageName || 'Not set'}
+                    </span>
+                  ) : (
+                    <Selector
+                      items={selectorStages}
+                      selectedValue={ticket.stageName}
+                      onValueChange={handleStageChange}
+                      placeholder='Set Status'
+                      icon={<TicketStatusIcon size={14} />}
+                      noBorder={true}
+                      isItemDisabled={item => item.name === ticket.stageName}
+                    />
+                  )}
                   {/* Show alert icon if there's a pending request for the next stage */}
                   {((): React.ReactElement | null => {
                     if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
@@ -3882,7 +3892,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             />
           ))}
 
-        {nextStageDetailsConfig &&
+        {!stageReadOnly &&
+          nextStageDetailsConfig &&
           (nextStageDetailsConfig.formId ? (
             <StageFormInlinePanel
               ticket={ticket}

@@ -83,6 +83,7 @@ import {
   type XyneAIContext,
   type AskAIInitialContextSelections,
   type SelectionInfo,
+  type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
@@ -131,8 +132,9 @@ interface XyneAISidebarProps {
   // Locks the sidebar to one Claw agent instead of the app-wide selected-agent store (for embedded/isolated instances).
   forcedAgentSlug?: string | null;
   // Seed text for the input box; bump autoSendNonce to submit it as a real message.
-  initialQuery?: string;
+  initialQuery?: string | undefined;
   autoSendNonce?: number;
+  researchContext?: XyneAIResearchContext | null;
   // Reports whether the active conversation is streaming, so an embedding caller can mute its own controls.
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
@@ -159,6 +161,7 @@ const XyneAISidebar = ({
   forcedAgentSlug,
   initialQuery,
   autoSendNonce,
+  researchContext,
   onStreamingChange,
   onFinalResponse,
 }: XyneAISidebarProps): ReactElement => {
@@ -592,6 +595,37 @@ const XyneAISidebar = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Repository-scoped SDLC chat is stricter than global Ask AI: entering the
+  // hub or switching its repository must replace the primary channel instead
+  // of preserving the channel chip from the previously-open global chat.
+  useEffect(() => {
+    if (researchContext?.type !== 'repository') return;
+    if (
+      !channelId ||
+      !channelName ||
+      scopeType === (ChannelScopeType.DM as string) ||
+      scopeType === (ChannelScopeType.GROUP_DM as string)
+    ) {
+      setSelectedChannels([]);
+      return;
+    }
+    const channel = allChannels.find(item => item.id === channelId);
+    const nextChannel: SelectedChannel = {
+      id: channelId,
+      name: channelName,
+      isPrivate: channel ? String(channel.visibility) === 'PRIVATE' : false,
+    };
+    setSelectedChannels(previous => {
+      const current = previous[0];
+      return previous.length === 1 &&
+        current?.id === nextChannel.id &&
+        current.name === nextChannel.name &&
+        current.isPrivate === nextChannel.isPrivate
+        ? previous
+        : [nextChannel];
+    });
+  }, [allChannels, channelId, channelName, researchContext, scopeType]);
+
   // Fetch web search configuration from backend
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -627,7 +661,6 @@ const XyneAISidebar = ({
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
-
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
   // the previous agent's key may not exist on the new one.
@@ -704,6 +737,7 @@ const XyneAISidebar = ({
     setDebugArtifactsReadyVersion,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
+    researchContext: researchContext ?? null,
     createCanvasEnabled,
     isV2,
     suppressCompletionToast: isAgentForced,
@@ -759,12 +793,21 @@ const XyneAISidebar = ({
             ...(channelId && { channelId }),
             ...(threadInfo && { threadInfo }),
             ...(canvasInfo && { canvasInfo }),
+            ...(researchContext && { researchContext }),
             startFreshChat: false,
           });
         }
       }
     }
-  }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen, isAgentForced]);
+  }, [
+    startFreshChat,
+    channelId,
+    threadInfo,
+    canvasInfo,
+    researchContext,
+    isFullscreen,
+    isAgentForced,
+  ]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {

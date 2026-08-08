@@ -2776,7 +2776,7 @@ img.inline-emoji,
 }
 
 /* ── XyneAI sidebar overrides — black text, blue links ── */
-.xyne-ai-markdown *:not(a):not(.mention-text):not(.mention-text *) {
+.xyne-ai-markdown *:not(a):not(.mention-text):not(.mention-text *):not(.hljs):not(.hljs *) {
   color: hsl(var(--foreground)) !important;
 }
 
@@ -3744,6 +3744,8 @@ img.inline-emoji,
 }
 
 .bot-markdown-content pre code {
+  display: block !important;
+  min-width: max-content;
   background: transparent !important;
   border: none !important;
   padding: 0 !important;
@@ -3753,7 +3755,7 @@ img.inline-emoji,
 }
 
 /* Inline code (single backticks) */
-.bot-markdown-content code {
+.bot-markdown-content :not(pre) > code {
   background-color: #f3f4f6 !important;
   border: 1px solid #e5e7eb !important;
   border-radius: 4px !important;
@@ -3771,7 +3773,7 @@ img.inline-emoji,
   color: #e5e7eb !important;
 }
 
-[data-theme="midnight"] .bot-markdown-content code {
+[data-theme="midnight"] .bot-markdown-content :not(pre) > code {
   background-color: #1f2937 !important;
   border-color: #374151 !important;
   color: #f472b6 !important;

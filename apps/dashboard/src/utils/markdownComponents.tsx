@@ -16,6 +16,7 @@ import {
   parseInternalXyneLink,
 } from '../components/Chat/RenderMessageWithHTML/internalLinkUtils';
 import type { ToolInvocation } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { isMarkdownCodeBlock, markdownCodeLanguage } from './markdownCodeBlock';
 
 /**
  * Optional claw-citation context. When passed, the `a` override intercepts the
@@ -38,6 +39,15 @@ interface CodeProps extends React.HTMLAttributes<HTMLElement> {
   node?: Element | undefined;
 }
 
+function reactNodeText(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeText).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return reactNodeText(node.props.children);
+  }
+  return '';
+}
+
 const CodeBlock = ({
   className,
   children,
@@ -46,14 +56,11 @@ const CodeBlock = ({
 }: CodeProps & { messageId: string }): React.ReactElement => {
   const [copied, setCopied] = useState(false);
 
-  const match = /language-(\w+)/.exec(String(className ?? ''));
-  const language = match ? match[1] : '';
-
-  const codeString = Array.isArray(children)
-    ? children.join('')
-    : typeof children === 'string'
-      ? children.replace(/\n$/, '')
-      : '';
+  const language = markdownCodeLanguage(className);
+  // rehype-highlight replaces parts of the source with nested token spans.
+  // Flatten recursively so Copy always receives the original text.
+  const source = reactNodeText(children);
+  const codeString = source.replace(/\n$/, '');
 
   // ── Mermaid ──
   if (language === 'mermaid') {
@@ -83,9 +90,8 @@ const CodeBlock = ({
     );
   }
 
-  // ── Inline code — no className means no language fence ──
-  // react-markdown passes inline <code> without a language- class
-  const isBlock = Boolean(className);
+  // ── Inline code ──
+  const isBlock = isMarkdownCodeBlock(className, source);
   if (!isBlock) {
     return (
       <code
@@ -106,9 +112,9 @@ const CodeBlock = ({
   };
 
   return (
-    <div className='xyne-code-block my-3 rounded-lg overflow-hidden border border-border max-w-full'>
+    <div className='xyne-code-block my-3 max-w-full overflow-hidden rounded-lg border border-border shadow-sm'>
       {/* Header bar */}
-      <div className='flex items-center justify-between px-4 py-2 bg-muted border-b border-border'>
+      <div className='flex items-center justify-between border-b border-border bg-muted px-3 py-1.5'>
         <span className='text-xs font-mono text-muted-foreground select-none'>
           {language || 'code'}
         </span>
@@ -132,8 +138,8 @@ const CodeBlock = ({
           )}
         </button>
       </div>
-      <pre className='overflow-x-auto p-4 bg-[#f6f8fa] m-0 text-sm leading-6 text-[#1d1e1f]'>
-        <code className={className} style={{ color: 'inherit' }} {...props}>
+      <pre className='m-0 overflow-x-auto rounded-none border-0 p-4 text-sm leading-6'>
+        <code className={className} {...props}>
           {children}
         </code>
       </pre>

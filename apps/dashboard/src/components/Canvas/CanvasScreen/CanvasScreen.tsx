@@ -105,6 +105,7 @@ interface CanvasScreenProps {
   canvasId?: string;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  showAskAiAction?: boolean;
 }
 
 const getCanvasRolePriority = (role: CanvasRole): number => {
@@ -130,6 +131,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
   isFullscreen = false,
   onToggleFullscreen,
+  showAskAiAction = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -1180,24 +1182,25 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
-                          {/* Ask AI */}
-                          <button
-                            type='button'
-                            onClick={handleAskAI}
-                            className={headerIconButtonClass}
-                            title='Ask AI'
-                            aria-label='Ask AI'
-                            data-track-category='CANVAS'
-                            data-track-name='Ask_AI_From_Canvas'
-                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                          >
-                            <img
-                              alt='AI'
-                              width='16'
-                              height='16'
-                              src='/svgs/icons/ai-bot-gradient-star.svg'
-                            />
-                          </button>
+                          {showAskAiAction && (
+                            <button
+                              type='button'
+                              onClick={handleAskAI}
+                              className={headerIconButtonClass}
+                              title='Ask AI'
+                              aria-label='Ask AI'
+                              data-track-category='CANVAS'
+                              data-track-name='Ask_AI_From_Canvas'
+                              data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                            >
+                              <img
+                                alt='AI'
+                                width='16'
+                                height='16'
+                                src='/svgs/icons/ai-bot-gradient-star.svg'
+                              />
+                            </button>
+                          )}
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
