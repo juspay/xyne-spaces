@@ -38,7 +38,10 @@ import {
   InvitationResponse,
   MeetingStatus,
   NotificationType,
-  RecordingType, AttachmentEntityType } from '@xyne/shared';
+  RecordingType,
+  AttachmentEntityType,
+  parseSlashCommandArtifactMessage,
+} from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
@@ -391,7 +394,15 @@ export class CallController {
     let stage = 'setup';
 
     try {
-      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
+      const {
+        callType = 'AUDIO',
+        channelId,
+        invitedUserIds,
+        isHeadless,
+        sttModel,
+        conversationId,
+        artifactMessageId,
+      } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -491,6 +502,29 @@ export class CallController {
       if (!['AUDIO', 'VIDEO'].includes(callType)) {
         res.status(400).json({ success: false, error: 'Invalid call type' });
         return;
+      }
+
+      if (artifactMessageId) {
+        if (typeof artifactMessageId !== 'string' || !conversationId) {
+          res.status(400).json({
+            success: false,
+            error: 'artifactMessageId requires a conversationId',
+          });
+          return;
+        }
+        const artifactMessage = await db.message.findFirst({
+          where: {
+            messageId: artifactMessageId,
+            conversationId,
+            isDeleted: false,
+            conversation: { channelId: finalChannelId },
+          },
+          select: { content: true },
+        });
+        if (!parseSlashCommandArtifactMessage(artifactMessage?.content)) {
+          res.status(400).json({ success: false, error: 'Invalid slash-command artifact' });
+          return;
+        }
       }
 
       // For headless recordings, always create a new recording session
@@ -632,6 +666,7 @@ export class CallController {
         sttModel: sttModel || 'azure',
         createdBy: userId,
         ...(conversationId && { conversationId }),
+        ...(artifactMessageId && { artifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
       });
 

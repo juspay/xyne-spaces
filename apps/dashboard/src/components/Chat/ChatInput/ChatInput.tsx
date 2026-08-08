@@ -70,6 +70,12 @@ import { setThreadLastRead } from '../../../machines/stateMachine';
 import { BlockNoteEditor } from '@blocknote/core';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import type { TwinEditSession } from '../TwinReplyDraft/twinReplyDraftApi';
+import {
+  SEV2_COMMAND,
+  buildSev2SlashCommandArtifactFlowMessage,
+  stripSev2SlashCommandFromHtml,
+  type SlashCommandArtifactType,
+} from '../SlashCommandArtifacts';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -190,7 +196,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const conversationId = conversation?.conversationId;
 
     // Slash commands for this channel — filtered by context (thread vs chat)
-    const [channelCommands, setChannelCommands] = useState<CommandItem[]>([]);
+    const [channelCommands, setChannelCommands] = useState<CommandItem[]>([SEV2_COMMAND]);
+    const [activeSlashCommandArtifact, setActiveSlashCommandArtifact] =
+      useState<SlashCommandArtifactType | null>(null);
     // Global shortcuts for this channel
     const [globalShortcuts, setGlobalShortcuts] = useState<AppShortcutWithApp[]>([]);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
@@ -202,12 +210,20 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       appsService
         .getChannelCommands(channelId, filter)
         .then(cmds =>
-          setChannelCommands(
-            cmds.map(c => ({ id: c.id, name: c.commandName, description: c.description })),
-          ),
+          setChannelCommands([
+            SEV2_COMMAND,
+            ...cmds
+              .filter(c => c.commandName.toLowerCase() !== SEV2_COMMAND.name)
+              .map(c => ({
+                id: c.id,
+                name: c.commandName,
+                description: c.description,
+                kind: 'app' as const,
+              })),
+          ]),
         )
         .catch(() => {
-          // silently ignore — channel may simply have no apps
+          setChannelCommands([SEV2_COMMAND]);
         });
       // Fetch global shortcuts (not filtered by thread/chat)
       appsService
@@ -218,6 +234,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const handleCommandSelect = useCallback(
       async (command: CommandItem, text?: string) => {
+        if (command.kind === 'slash-command-artifact' && command.slashCommandArtifactType) {
+          setActiveSlashCommandArtifact(command.slashCommandArtifactType);
+          inputBoxRef.current?.focus();
+          return;
+        }
         try {
           await appsService.executeCommandAction(
             channelId,
@@ -242,6 +263,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
     useEffect(() => {
       setPendingConversationId(null);
+      setActiveSlashCommandArtifact(null);
     }, [channelId, conversationId]);
     const agentProgressConversationId = conversationId ?? pendingConversationId ?? undefined;
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
@@ -576,14 +598,34 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
         );
 
-        const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
+        const isDirectSev2Command = /^\/sev2(?:\s|$)/i.test(_plainText.trim());
+        const isSev2Message =
+          !messageId && (activeSlashCommandArtifact === 'sev2' || isDirectSev2Command);
+        const sev2BodyText = isDirectSev2Command
+          ? _plainText
+              .trim()
+              .replace(/^\/sev2(?:\s+|$)/i, '')
+              .trim()
+          : _plainText.trim();
+        if (isSev2Message && !sev2BodyText) {
+          toast.error('Describe the incident before sending');
+          throw new Error('SEV2 incident body is required');
+        }
+
+        const bodyHtml = processMessageForSending(
+          isDirectSev2Command ? stripSev2SlashCommandFromHtml(html) : html,
+          allUsersForMentionResolution,
+        );
+        const processedHtml = isSev2Message
+          ? buildSev2SlashCommandArtifactFlowMessage(bodyHtml, `slash-command-sev2-${uuidv4()}`)
+          : bodyHtml;
         const hasFiles = files && files.length > 0;
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
           !isDM &&
           !allowThreadBroadcastMentions &&
-          containsSpecialBroadcastMention(processedHtml);
+          containsSpecialBroadcastMention(isSev2Message ? bodyHtml : processedHtml);
 
         if (hasThreadBroadcastMention) {
           toast.warning('Not allowed in threads', {
@@ -677,9 +719,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
         // Restores draft content back to both the state machine and the editor
         const restoreDraft = () => {
-          saveDraft(lookupId, processedHtml, '');
+          const restoredHtml = isSev2Message ? bodyHtml : processedHtml;
+          saveDraft(lookupId, restoredHtml, '');
           inputBoxRef.current?.clearContent();
-          inputBoxRef.current?.insertContent(processedHtml);
+          inputBoxRef.current?.insertContent(restoredHtml);
+          if (isSev2Message) setActiveSlashCommandArtifact('sev2');
           toast.error('Failed to send message', {
             description: 'Message restored as draft. Please try again.',
           });
@@ -732,6 +776,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }),
             );
             saveDraft(lookupId, '', '');
+            if (isSev2Message) setActiveSlashCommandArtifact(null);
             handleMutationResult(result, restoreDraft, undefined, undefined, {
               channelId,
               conversationId,
@@ -796,6 +841,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             );
 
             saveDraft(lookupId, '', '');
+            if (isSev2Message) setActiveSlashCommandArtifact(null);
             handleMutationResult(
               result,
               restoreDraft,
@@ -859,6 +905,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         context.workspaceId,
         allowThreadBroadcastMentions,
         twinEdit,
+        activeSlashCommandArtifact,
       ],
     );
 
@@ -872,14 +919,30 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           toast.error('You must be logged in to schedule messages');
           return;
         }
-        const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
+        const plainText = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
+        const isDirectSev2Command = /^\s*\/sev2(?:\s|$)/i.test(plainText);
+        const sev2BodyText = isDirectSev2Command
+          ? plainText.replace(/^\s*\/sev2(?:\s+|$)/i, '').trim()
+          : plainText.trim();
+        const isSev2Message = activeSlashCommandArtifact === 'sev2' || isDirectSev2Command;
+        if (isSev2Message && !sev2BodyText) {
+          toast.error('Describe the incident before scheduling');
+          return;
+        }
+        const bodyHtml = processMessageForSending(
+          isDirectSev2Command ? stripSev2SlashCommandFromHtml(html) : html,
+          allUsersForMentionResolution,
+        );
+        const processedHtml = isSev2Message
+          ? buildSev2SlashCommandArtifactFlowMessage(bodyHtml, `slash-command-sev2-${uuidv4()}`)
+          : bodyHtml;
         const hasFiles = files.length > 0;
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
           !isDM &&
           !allowThreadBroadcastMentions &&
-          containsSpecialBroadcastMention(processedHtml);
+          containsSpecialBroadcastMention(isSev2Message ? bodyHtml : processedHtml);
         if (hasThreadBroadcastMention) {
           toast.warning('Not allowed in threads', {
             description: '@channel and @here are disabled in thread replies.',
@@ -904,6 +967,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           );
           // Clear draft after scheduling
           saveDraft(lookupId, '', '');
+          if (isSev2Message) setActiveSlashCommandArtifact(null);
           toast.success('Message scheduled', {
             description: `Will be sent at ${new Date(scheduledFor).toLocaleString()}`,
           });
@@ -924,6 +988,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         lookupId,
         setRecentScheduledFor,
         allowThreadBroadcastMentions,
+        activeSlashCommandArtifact,
       ],
     );
 
@@ -1007,7 +1072,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onSendMessage={handleSendMessage}
               onContentChange={handleContentChange}
               onTyping={handleTyping}
-              placeholder={placeholderText}
+              placeholder={
+                activeSlashCommandArtifact === 'sev2'
+                  ? 'What broke? Impact, scope, current status…'
+                  : placeholderText
+              }
               typingUsers={typingUsers}
               showTypingIndicator={showTypingIndicator}
               hasAgentActivity={agentActive}
@@ -1020,6 +1089,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }
               commandItems={channelCommands}
               onCommandSelect={handleCommandSelect}
+              {...(activeSlashCommandArtifact && {
+                slashCommandArtifactType: activeSlashCommandArtifact,
+              })}
+              {...(dynamicName && {
+                slashCommandArtifactChannelLabel: isDM ? dynamicName : `#${dynamicName}`,
+              })}
+              onCancelSlashCommandArtifact={() => setActiveSlashCommandArtifact(null)}
               {...(!twinEdit && editorValue !== undefined && { value: editorValue })}
               {...(messageId && onCancel && { onCancel: handleCancelEdit })}
               {...(conversationId && { conversationId })}

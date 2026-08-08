@@ -500,6 +500,71 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+// ── Slash-command artifact ────────────────────────────────────────────────
+// A slash command can emit a persistent, structured message card. The command
+// identity and every requested side effect live in this FlowJSON payload so
+// consumers never have to infer behavior from ad-hoc HTML attributes or
+// message metadata. `command` intentionally remains an identifier string: new
+// commands can be registered by the dashboard without widening this schema.
+export const slashCommandArtifactBannerSideEffectSchema = z
+  .object({
+    type: z.literal('banner'),
+    badge: z.string().min(1),
+    title: z.string().min(1),
+    viewActionLabel: z.string().min(1),
+    tone: z.literal('orange'),
+    status: z.enum(['active', 'completed']).default('active'),
+    callExternalId: z.string().min(1).optional(),
+  })
+  .strict();
+
+/**
+ * Request channel-wide notification delivery for an artifact. Delivery uses
+ * the same audience/preference tier as an @channel mention, while consumers
+ * retain slash-command-specific notification and Activity presentation.
+ */
+export const slashCommandArtifactNotifyChannelSideEffectSchema = z
+  .object({
+    type: z.literal('notify_channel'),
+  })
+  .strict();
+
+export const slashCommandArtifactSideEffectSchema = z.discriminatedUnion(
+  'type',
+  [
+    slashCommandArtifactBannerSideEffectSchema,
+    slashCommandArtifactNotifyChannelSideEffectSchema,
+  ],
+);
+
+export const slashCommandArtifactPropsSchema = z
+  .object({
+    command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+    sideEffects: z.array(slashCommandArtifactSideEffectSchema),
+  })
+  .strict();
+
+export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
+  type: z.literal('slash_command_artifact'),
+  props: slashCommandArtifactPropsSchema,
+  // The message body is a normal Flow text node, which keeps mentions and
+  // formatting consistent with every other FlowJSON message.
+  children: z.array(textComponentSchema).min(1).max(1),
+});
+
+export type SlashCommandArtifactBannerSideEffect = z.infer<
+  typeof slashCommandArtifactBannerSideEffectSchema
+>;
+export type SlashCommandArtifactNotifyChannelSideEffect = z.infer<
+  typeof slashCommandArtifactNotifyChannelSideEffectSchema
+>;
+export type SlashCommandArtifactSideEffect = z.infer<
+  typeof slashCommandArtifactSideEffectSchema
+>;
+export type SlashCommandArtifactProps = z.infer<
+  typeof slashCommandArtifactPropsSchema
+>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -520,6 +585,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),

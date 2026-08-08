@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, getSlashCommandArtifactDiagnosticKey } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -11,6 +11,10 @@ import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
+import {
+  updateArtifactBannerLifecycle,
+  type SlashCommandArtifactCallMetadata,
+} from './slashCommandArtifactLifecycle';
 
 export type { Call, CallParticipant };
 
@@ -206,10 +210,24 @@ export class CallRepository {
   }
 
   async update(id: string, data: UpdateCallInput): Promise<Call> {
-    const result = await DatabaseClient.getInstance().call.update({
-      where: { id },
-      data
-    });
+    const client = DatabaseClient.getInstance();
+    const result =
+      data.status === CallStatus.ENDED
+        ? await client.$transaction(async tx => {
+            const call = await tx.call.update({ where: { id }, data });
+            const metadata = call.metadata as SlashCommandArtifactCallMetadata | null;
+            if (metadata?.artifactMessageId) {
+              await updateArtifactBannerLifecycle(
+                tx,
+                metadata.artifactMessageId,
+                call.externalId,
+                'completed',
+                'call_repository_update',
+              );
+            }
+            return call;
+          })
+        : await client.call.update({ where: { id }, data });
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
   }
@@ -750,6 +768,10 @@ export class CallRepository {
     endedAt: Date,
     tx: Prisma.TransactionClient
   ): Promise<void> {
+    const call = await tx.call.findUnique({
+      where: { id: callId },
+      select: { externalId: true, metadata: true },
+    });
     await tx.call.update({
       where: { id: callId },
       data: {
@@ -758,6 +780,16 @@ export class CallRepository {
       }
     });
     await refreshCallParticipantPreview(tx, callId);
+    const metadata = call?.metadata as SlashCommandArtifactCallMetadata | null;
+    if (call?.externalId && metadata?.artifactMessageId) {
+      await updateArtifactBannerLifecycle(
+        tx,
+        metadata.artifactMessageId,
+        call.externalId,
+        'completed',
+        'end_call',
+      );
+    }
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
@@ -828,6 +860,16 @@ export class CallRepository {
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
+          const metadata = call.metadata as SlashCommandArtifactCallMetadata | null;
+          if (metadata?.artifactMessageId) {
+            await updateArtifactBannerLifecycle(
+              tx,
+              metadata.artifactMessageId,
+              callExternalId,
+              'completed',
+              'participant_leave',
+            );
+          }
         }
 
         // Update system message whether the call is fully ended or just rescheduled
@@ -904,17 +946,34 @@ export class CallRepository {
         });
       }
 
+      const callMetadata = call.metadata as SlashCommandArtifactCallMetadata | null;
+      const callEnded = call.status === CallStatus.ENDED || shouldEndCall;
+      if (callEnded && callMetadata?.artifactMessageId) {
+        await updateArtifactBannerLifecycle(
+          tx,
+          callMetadata.artifactMessageId,
+          callExternalId,
+          'completed',
+          'room_finished',
+        );
+      }
       // Clear conversation.callId when call ends (for conversation calls)
-      const callMetadata = call.metadata as { conversationId?: string } | null;
       if (callMetadata?.conversationId) {
         try {
           await tx.conversation.update({
             where: { conversationId: callMetadata.conversationId },
             data: { callId: null },
           });
-          logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
+          logger.info('call_conversation_link_cleared', {
+            conversationKey: getSlashCommandArtifactDiagnosticKey(callMetadata.conversationId),
+            source: 'room_finished',
+          });
         } catch (err) {
-          logger.error(`[handleRoomFinished] Failed to clear conversation.callId for conversation ${callMetadata.conversationId}`, err);
+          logger.error('call_conversation_link_clear_failed', {
+            conversationKey: getSlashCommandArtifactDiagnosticKey(callMetadata.conversationId),
+            source: 'room_finished',
+            errorType: err instanceof Error ? err.name : 'unknown',
+          });
         }
       }
 
@@ -1171,6 +1230,7 @@ export class CallRepository {
       messageId: string;
       now: Date;
       callOrigin?: CallOrigin;
+      artifactMessageId?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1186,7 +1246,8 @@ export class CallRepository {
       conversationId,
       messageId,
       now,
-      callOrigin
+      callOrigin,
+      artifactMessageId,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1216,9 +1277,20 @@ export class CallRepository {
           metadata: {
             systemMessageId: messageId,
             conversationId,
+            ...(artifactMessageId && { artifactMessageId }),
           },
         },
       });
+
+      if (artifactMessageId) {
+        await updateArtifactBannerLifecycle(
+          tx,
+          artifactMessageId,
+          roomName,
+          'active',
+          'call_created',
+        );
+      }
 
       // Create call_participants: joining user as ACCEPTED, others as INVITED
       const invitedParticipantIds: string[] = [];

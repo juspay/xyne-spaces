@@ -34,6 +34,7 @@ import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { isSev2SlashCommandArtifactMessage } from '../SlashCommandArtifacts';
 import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
@@ -792,7 +793,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       });
   };
 
-  const canEditMessage = user?.id ? isMessageEditable(message, user.id) : false;
+  const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
+  // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
+  // but do not open this message in the generic editor, which would discard that wrapper.
+  const canEditMessage = canModifyMessage && !isSev2SlashCommandArtifactMessage(message.content);
+  const canDeleteMessage = canModifyMessage && !hasTicket;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -997,7 +1002,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
-      ...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage }),
+      ...(canDeleteMessage && { onDeleteMessage: handleDeleteMessage }),
       ...(replies?.onOpenThread &&
         (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
         !isShowInChannel &&
@@ -1315,7 +1320,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}
-              {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
+              {...(canDeleteMessage && { onDeleteMessage: handleDeleteMessage })}
               {...(canEditMessage && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               {...(replies &&
                 (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&

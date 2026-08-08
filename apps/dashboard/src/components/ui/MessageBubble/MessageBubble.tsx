@@ -54,6 +54,7 @@ import {
   stripCitationMarks,
 } from '../TipTapExtensions/CitationMark';
 import { registerClawIcons } from '../../Chat/XyneAISidebar/utils/clawCitationUrl';
+import { isSev2SlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts';
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
@@ -746,7 +747,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }
 
   // For mobile "my" messages, use the specialized mobile component
-  if (isMobile && isMe) {
+  const isSev2Message = isSev2SlashCommandArtifactMessage(message.content);
+
+  if (isMobile && isMe && !isSev2Message) {
     return (
       <MobileMessageMyBubble
         message={message}
@@ -1408,6 +1411,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           isSystemMessage={isSystemMessage}
                           messageId={message.messageId}
                           conversationId={message.conversationId}
+                          slashCommandArtifactContext={{
+                            ...(channelId && { channelId }),
+                            senderId: message.senderId,
+                            createdAt: message.createdAt,
+                            surface: context === 'thread' ? 'thread' : 'channel',
+                          }}
                         />
                       ) : (
                         <div className='jp-message-html inline-block'>
@@ -1418,6 +1427,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             messageId={message.messageId}
                             conversationId={message.conversationId}
                             preserveThreadRoute={context === 'thread'}
+                            slashCommandArtifactContext={{
+                              ...(channelId && { channelId }),
+                              senderId: message.senderId,
+                              createdAt: message.createdAt,
+                              surface: context === 'thread' ? 'thread' : 'channel',
+                            }}
                           />
                         </div>
                       )}

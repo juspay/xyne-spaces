@@ -644,6 +644,28 @@ export const queries = defineQueries({
     },
   ),
 
+  userSlashCommandArtifactMessages: defineQuery(({ ctx }) => {
+    return zql.messages
+      .where('content', 'ILIKE', '%data-flow-json=%')
+      .where(
+        'content',
+        'ILIKE',
+        '%&quot;type&quot;:&quot;slash_command_artifact&quot;%',
+      )
+      .where('isDeleted', false)
+      .whereExists('conversation', conversation =>
+        conversation.whereExists('channel', channel =>
+          channel.whereExists('participants', participant =>
+            participant.where('userId', ctx.userID),
+          ),
+        ),
+      )
+      .orderBy('createdAt', 'desc')
+      .limit(100)
+      .related('conversation', conversation => conversation.related('channel'))
+      .related('sender');
+  }),
+
   messagesByIds: defineQuery(
     z.object({ messageIds: z.array(z.string()) }),
     ({ ctx, args: { messageIds } }) => {
@@ -1876,6 +1898,16 @@ export const queries = defineQueries({
       .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
       .where('status', CallStatus.ACTIVE)
       .orderBy('startedAt', 'desc')
+      .related('participants');
+  }),
+  slashCommandArtifactCalls: defineQuery(() => {
+    return zql.calls
+      .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+      .where(helpers =>
+        helpers.cmp('status', 'NOT IN', [CallStatus.SCHEDULED, CallStatus.CANCELLED]),
+      )
+      .orderBy('startedAt', 'desc')
+      .limit(200)
       .related('participants');
   }),
   activeCallsInChannel: defineQuery(

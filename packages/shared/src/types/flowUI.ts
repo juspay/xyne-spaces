@@ -26,7 +26,8 @@ export type FlowComponentType =
   | 'plan'
   | 'pr'
   | 'pr_approval'
-  | 'call_schedule';
+  | 'call_schedule'
+  | 'slash_command_artifact';
 
 export interface FlowComponent {
   id: string;
@@ -188,4 +189,3 @@ export function isFlowDefinition(obj: unknown): obj is FlowDefinition {
     Array.isArray((obj as Record<string, unknown>).components)
   );
 }
-

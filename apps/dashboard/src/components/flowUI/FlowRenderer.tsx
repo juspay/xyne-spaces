@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { FlowContext, FlowContextValue } from './FlowContext';
+import { FlowContext, FlowContextValue, type FlowMessageContext } from './FlowContext';
 import { NodeRegistry } from './nodes/NodeRegistry';
 import type {
   FlowComponent,
@@ -21,6 +21,7 @@ interface FlowRendererProps {
   onStateChange?: (state: FlowState) => void;
   /** Compact rendering — used inside action-response popups */
   compact?: boolean;
+  messageContext?: FlowMessageContext;
 }
 
 export const FlowRenderer: React.FC<FlowRendererProps> = ({
@@ -30,6 +31,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   onAppAction,
   onStateChange,
   compact = false,
+  messageContext,
 }) => {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validatedFlow, setValidatedFlow] = useState<FlowDefinition | null>(null);
@@ -276,6 +278,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       onAppAction,
       messageId,
       conversationId,
+      ...(messageContext && { messageContext }),
     }),
     [
       state,
@@ -283,6 +286,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       compact,
       messageId,
       conversationId,
+      messageContext,
       executeAction,
       validateField,
       validateAllFields,

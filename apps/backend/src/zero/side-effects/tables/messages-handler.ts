@@ -35,7 +35,7 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType } from '@xyne/shared';
+  UserType, MessageType, parseSlashCommandArtifactMessage } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -73,7 +73,10 @@ function extractTextFromFlowJson(content: string): string {
     const json = attrMatch[1]
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r');
+      .replace(/&#13;/g, '\r')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as { components?: unknown[] };
 
     const texts: string[] = [];
@@ -109,6 +112,11 @@ function extractTextFromFlowJson(content: string): string {
  */
 function extractCleanTextFromFlowJson(content: string): string {
   const raw = extractTextFromFlowJson(content);
+  return cleanNotificationText(raw);
+}
+
+/** Strip Flow mrkdwn tokens without exposing internal entity identifiers. */
+function cleanNotificationText(raw: string): string {
   if (!raw) return '';
   return raw
     .replace(/<userid:[^>]+>/g, '')
@@ -138,21 +146,33 @@ function getFlowJsonRawTextForMentions(content: string): string | null {
 }
 
 /**
- * Friendly notification label for a flow CARD (plan, etc.) whose todos/title
- * don't live in text `content` props — so extractTextFromFlowJson returns ''
- * and the preview would otherwise fall back to the meaningless "Flow JSON" text
- * node. Currently handles the `plan` component; returns null for other flows so
- * the caller keeps its existing extraction.
+ * Friendly notification label for structured Flow cards. Slash-command
+ * artifacts and plans both belong here so callers have one Flow-card path and
+ * never need to inspect command-specific legacy HTML markers.
  */
 function getFlowCardNotificationLabel(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
+
+  const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
+  if (slashCommandArtifact) {
+    const banner = slashCommandArtifact.props.sideEffects.find(
+      sideEffect => sideEffect.type === 'banner',
+    );
+    const label = banner?.badge ?? `/${slashCommandArtifact.props.command}`;
+    const body = cleanNotificationText(slashCommandArtifact.body);
+    return body ? `${label}: ${body}` : `${label} slash command posted`;
+  }
+
   const attrMatch = content.match(/data-flow-json="([^"]+)"/);
   if (!attrMatch) return null;
   try {
     const json = attrMatch[1]
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r');
+      .replace(/&#13;/g, '\r')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as {
       components?: Array<{ type?: string; props?: Record<string, unknown> }>;
     };
@@ -380,6 +400,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const channelName = channel?.name || 'Unknown Channel';
     const senderName = sender?.displayName || sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
+    const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
+    const hasNotifyChannelSideEffect =
+      slashCommandArtifact?.props.sideEffects.some(
+        sideEffect => sideEffect.type === 'notify_channel',
+      ) ?? false;
     const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
     const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
     const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
@@ -527,6 +552,17 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         mentionSource: u.mentionSource
       }))
 
+    const slashCommandNotificationUserIds = hasNotifyChannelSideEffect
+      ? users
+          .filter(
+            user =>
+              user.id !== senderId &&
+              user.userType !== UserType.APP &&
+              user.status === UserStatus.ACTIVE,
+          )
+          .map(user => user.id)
+      : [];
+
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
 
     if (mentionedAppUsersIds.length > 0) {
@@ -595,19 +631,21 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const finalMentionedUserIds = validMentionedUsers
       .map(user => user.userId);
 
-    const notificationUserIds = [
-      ...new Set(
-        mentionedUsers
-          .map(u => u.userId)
-          .filter(
-            userId =>
-              channelParticipantIds.has(userId) &&
-              userId !== senderId
-          )
-      ),
-    ];
+    const notificationUserIds = hasNotifyChannelSideEffect
+      ? []
+      : [
+          ...new Set(
+            mentionedUsers
+              .map(u => u.userId)
+              .filter(
+                userId =>
+                  channelParticipantIds.has(userId) &&
+                  userId !== senderId
+              )
+          ),
+        ];
 
-    if (validMentionedUsers.length > 0) {
+    if (!hasNotifyChannelSideEffect && validMentionedUsers.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
       const activities = validMentionedUsers.map(user => ({
         id: uuidv4(),
@@ -639,6 +677,24 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         })
       : undefined;
 
+    if (slashCommandNotificationUserIds.length > 0) {
+      const isThreadActivity = conversation.initialMessageId !== messageId;
+      await activityService.createActivities(
+        slashCommandNotificationUserIds.map(userId => ({
+          id: uuidv4(),
+          userId,
+          actorId: senderId,
+          actorAction: 'slash_command_artifact' as const,
+          actionSource: 'message' as const,
+          actionSourceId: messageId,
+          messageId,
+          channelId,
+          isThreadActivity,
+          classification: ActivityClassification.FYI,
+        })),
+      );
+    }
+
     // Keyword-notification matching: scan the message's plain text against
     // every participant's configured keywords (already loaded by
     // prefetchFilterData). Mentioned users are excluded so a mention+keyword
@@ -648,7 +704,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // subscription. DM channels never reach this point (early return above).
     const keywordScanText = getKeywordScanText(content);
     let keywordMatchesByUser = new Map<string, string[]>();
-    if (keywordScanText && prefetchedData) {
+    if (!hasNotifyChannelSideEffect && keywordScanText && prefetchedData) {
       const candidateKeywords = new Map<string, string[]>();
       for (const participant of channelParticipants) {
         const userId = participant.userId;
@@ -664,12 +720,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const keywordUserIds = [...keywordMatchesByUser.keys()];
     const keywordUserIdSet = new Set(keywordUserIds);
 
-    if (!isReply) {
-      const channelMessageRecipientIds = channelParticipants
-        .map(participant => participant.userId)
-        // Keyword-matched users get the stronger mention-style notification
-        // instead of the channel-message one.
-        .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId) && !keywordUserIdSet.has(userId));
+    if (hasNotifyChannelSideEffect || !isReply) {
+      const channelMessageRecipientIds = hasNotifyChannelSideEffect
+        ? slashCommandNotificationUserIds
+        : channelParticipants
+            .map(participant => participant.userId)
+            // Keyword-matched users get the stronger mention-style notification
+            // instead of the channel-message one.
+            .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId) && !keywordUserIdSet.has(userId));
 
       if (channelMessageRecipientIds.length > 0) {
         try {
@@ -685,6 +743,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             this.ctx.workspaceId,
             sender?.picture ?? '',
             prefetchedData,
+            {
+              channelWide: hasNotifyChannelSideEffect,
+              isThreadMessage: !!isReply,
+            },
           );
         } catch (error) {
           logger.error('[SIDE-EFFECT] Spaces channel message notifications failed', { error });
@@ -809,14 +871,16 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       );
     }
 
-    await this.handleSpecialMentionActivities(
-      channelId,
-      messageId,
-      senderId,
-      mentionType,
-      finalMentionedUserIds,
-      conversation.initialMessageId !== messageId,
-    );
+    if (!hasNotifyChannelSideEffect) {
+      await this.handleSpecialMentionActivities(
+        channelId,
+        messageId,
+        senderId,
+        mentionType,
+        finalMentionedUserIds,
+        conversation.initialMessageId !== messageId,
+      );
+    }
 
     // Handle bot mentions in channels - trigger bot execution when @mentioned
     await this.handleBotMentions(
@@ -827,7 +891,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       channelParticipants
     );
 
-    if (isReply && conversationId) {
+    if (isReply && conversationId && !hasNotifyChannelSideEffect) {
       // Exclude already-notified mention recipients from thread replies.
       const replyExcludedUserIds = [
         ...new Set([

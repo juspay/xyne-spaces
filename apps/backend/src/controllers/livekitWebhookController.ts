@@ -389,6 +389,7 @@ class LiveKitWebhookController {
         const callType = roomMetadata.callType;
         const callOrigin = roomMetadata.callOrigin;
         const existingConversationId = roomMetadata.conversationId;
+        const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
 
         if (!channelId) {
@@ -476,6 +477,7 @@ class LiveKitWebhookController {
           messageId,
           now,
           callOrigin,
+          ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',

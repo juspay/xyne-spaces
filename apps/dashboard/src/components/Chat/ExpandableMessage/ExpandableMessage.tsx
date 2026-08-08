@@ -11,6 +11,12 @@ interface ExpandableMessageProps {
   isSystemMessage?: boolean;
   messageId?: string;
   conversationId?: string;
+  slashCommandArtifactContext?: {
+    channelId?: string;
+    senderId?: string;
+    createdAt?: number;
+    surface?: 'channel' | 'thread';
+  };
 }
 
 export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
@@ -21,6 +27,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   isSystemMessage = false,
   messageId,
   conversationId,
+  slashCommandArtifactContext,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldShowButton, setShouldShowButton] = useState(false);
@@ -57,6 +64,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             isSystemMessage={isSystemMessage}
             {...(messageId !== undefined && { messageId })}
             {...(conversationId !== undefined && { conversationId })}
+            {...(slashCommandArtifactContext !== undefined && { slashCommandArtifactContext })}
           />
         </div>
       </div>

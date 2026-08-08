@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
+import type { SlashCommandArtifactType } from '../../Chat/SlashCommandArtifacts';
 
 export interface MentionSelectorProps {
   editor: Editor | null;
@@ -14,6 +15,9 @@ export interface CommandItem {
   name: string;
   description: string;
   category?: string;
+  kind?: 'app' | 'slash-command-artifact';
+  slashCommandArtifactType?: SlashCommandArtifactType;
+  badge?: string;
 }
 
 export interface CommandSelectorProps {

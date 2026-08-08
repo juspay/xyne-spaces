@@ -17,6 +17,7 @@ import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
+import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -34,6 +35,9 @@ export const ActivityItem = memo(function ActivityItem({
   isExpanded,
 }: ActivityItemProps): ReactElement | null {
   switch (activity.actorAction) {
+    case 'slash_command_artifact':
+      return <SlashCommandArtifactActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'mentioned_user':
       if (activity.canvasId) {
         return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;

@@ -278,6 +278,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                     message={isWorkflowMessage ? 'Workflow created' : message.content}
                     showEdited={message.edited}
                     maxHeight={500}
+                    messageId={message.messageId}
+                    conversationId={message.conversationId}
+                    slashCommandArtifactContext={{
+                      ...(channelId && { channelId }),
+                      senderId: message.senderId,
+                      createdAt: message.createdAt,
+                      surface: context === 'thread' ? 'thread' : 'channel',
+                    }}
                   />
                 </div>
               )

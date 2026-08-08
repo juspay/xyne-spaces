@@ -986,6 +986,11 @@ class NotificationService {
     workspaceId: string,
     senderPicture: string = '',
     prefetchedData?: PrefetchedFilterData,
+    options?: {
+      /** Deliver at the @channel preference tier while retaining channel-message copy/type. */
+      channelWide?: boolean;
+      isThreadMessage?: boolean;
+    },
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -1002,8 +1007,11 @@ class NotificationService {
       recipientIds,
       channelId,
       false,
-      'channel_message',
-      { notificationType: NotificationType.CHANNEL_MESSAGE },
+      options?.channelWide ? 'mention' : 'channel_message',
+      {
+        notificationType: NotificationType.CHANNEL_MESSAGE,
+        ...(options?.channelWide ? { mentionType: '@channel' as const } : {}),
+      },
       prefetchedData,
     );
 
@@ -1012,9 +1020,13 @@ class NotificationService {
       desktopUsers: desktopUsers.length,
       mobileUsers: mobileUsers.length,
       channelId,
+      channelWide: options?.channelWide ?? false,
     });
 
     const conversationData = await fetchConversationForNotification(conversationId);
+    const actionUrl = options?.isThreadMessage
+      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
 
     const notificationData = {
       title: `New message in #${channelName}`,
@@ -1022,7 +1034,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl,
       metadata: {
         channelId,
         conversationId,
