@@ -15,6 +15,38 @@ export const SCHEDULE_CONFIG_SCHEMA = {
   },
 };
 
+/**
+ * Ensure a task scheduled from inside a slash-command run still begins with
+ * that command, so the scheduled fire reproduces the interactive command.
+ *
+ * A slash-command run (e.g. `/dashboard ...`) force-mounts a command-specific
+ * tool palette (autoTools: sandbox-*, sandbox-deliver-files, ...), skills,
+ * sandbox profile, and per-turn instruction  all keyed off
+ * `parseTaskCommand(task)` at run time (xyne-claw routes/run.ts). The scheduler
+ * dispatches the stored task VERBATIM (scheduled-jobs-worker.ts: `task =
+ * row.task`), and the live-dashboard share refresh is gated on
+ * `isDashboardTask(row.task)` (dashboardShareRefreshService.ts). So unless the
+ * stored task still begins with the command, a scheduled `/dashboard` refresh
+ * parses no command: it loses the autoTools it needs to rebuild the artifact
+ * AND the persistent share link never refreshes. The model is only softly
+ * instructed to re-type the prefix, so we enforce it here.
+ *
+ * `command` is `meta["taskCommand"]`, set by run.ts only for command runs
+ * (undefined otherwise, in which case the task is returned unchanged).
+ */
+export function carryTaskCommandPrefix(
+  task: string,
+  command: string | undefined,
+): string {
+  if (typeof task !== "string") return task;
+  if (typeof command !== "string" || !command.startsWith("/")) return task;
+  const lower = task.trimStart().toLowerCase();
+  const cmd = command.toLowerCase();
+  const alreadyPrefixed =
+    lower === cmd || lower.startsWith(`${cmd} `) || lower.startsWith(`${cmd}\n`);
+  return alreadyPrefixed ? task : `${command} ${task}`;
+}
+
 export const scheduleTask: ToolDefinition = {
   slug: "schedule-task",
   name: "Schedule Task",
@@ -89,10 +121,18 @@ export const scheduleTask: ToolDefinition = {
     const s2sKey = context.config["XYNE_CLAW_S2S_KEY"] ?? "";
     const type = params["type"] as string;
 
+    // Carry the current run's slash-command (e.g. "/dashboard") into the
+    // stored task so the SCHEDULED fire behaves like the interactive command.
+    // See carryTaskCommandPrefix (above) for the full rationale.
+    const scheduledTask = carryTaskCommandPrefix(
+      params["task"] as string,
+      meta["taskCommand"],
+    );
+
     const body: Record<string, unknown> = {
       userId,
       agentSlug,
-      task: params["task"],
+      task: scheduledTask,
       type,
       channelId: meta["channelId"],
       conversationId: meta["conversationId"],
@@ -235,7 +275,9 @@ export const scheduledJobControl: ToolDefinition = {
             currentScheduledJobId,
             ...(action === "update"
               ? {
-                  ...(params["task"] != null ? { task: params["task"] } : {}),
+                  ...(params["task"] != null
+                    ? { task: carryTaskCommandPrefix(params["task"] as string, meta["taskCommand"]) }
+                    : {}),
                   ...(params["label"] != null ? { label: params["label"] } : {}),
                 }
               : {}),
