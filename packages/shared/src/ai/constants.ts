@@ -20,6 +20,8 @@ export const AI_MESSAGE_TYPES = {
   CONTROL_TRANSFER: 'ai_control_transfer',
   /** Toggle AI voice on/off */
   VOICE_TOGGLE: 'ai_voice_toggle',
+  /** Host toggles the transcription agent on/off mid-call */
+  TRANSCRIPTION_TOGGLE: 'transcription_toggle',
 } as const;
 
 // ============================================================================
@@ -61,4 +63,6 @@ export const AI_EVENT_TYPES = {
   AI_CONTROLLER_CHANGED: 'AI_CONTROLLER_CHANGED',
   /** AI control request event */
   AI_CONTROL_REQUEST: 'AI_CONTROL_REQUEST',
+  /** Transcription toggled by host event */
+  AI_TRANSCRIPTION_TOGGLE: 'AI_TRANSCRIPTION_TOGGLE',
 } as const;

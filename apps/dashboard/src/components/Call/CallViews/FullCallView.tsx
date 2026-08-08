@@ -1,6 +1,7 @@
 import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
-import { WifiLow } from 'lucide-react';
+import { WifiLow, Captions, CaptionsOff } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import {
@@ -188,6 +189,12 @@ export function FullCallView({
   const showQualityToast = useNetworkQualityToast(networkQuality);
 
   const isHost = isHostProp ?? false;
+
+  // Host transcription kill-switch state (see roomMachine TOGGLE_TRANSCRIPTION).
+  const isTranscriptionEnabled = useSelector(
+    roomActor,
+    state => state.context.isTranscriptionEnabled,
+  );
 
   // Active-recording state is driven by room metadata so every participant (incl.
   // late joiners) sees the indicator. `isRecordingProp`/optimistic local state are
@@ -479,9 +486,39 @@ export function FullCallView({
           )}
         </div>
         <div className='flex items-center gap-3'>
+          {isHost && (
+            <button
+              type='button'
+              onClick={() => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' })}
+              title={
+                isTranscriptionEnabled
+                  ? 'Turn off transcription (stops capturing audio for this call)'
+                  : 'Turn transcription back on'
+              }
+              aria-pressed={!isTranscriptionEnabled}
+              data-testid='transcription-toggle-button'
+              data-track-category='CALLS'
+              data-track-name='TRANSCRIPTION_TOGGLE'
+              data-track-metadata={JSON.stringify({ enabled: isTranscriptionEnabled })}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                isTranscriptionEnabled
+                  ? 'border-border text-muted-foreground hover:bg-muted'
+                  : 'border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20',
+              )}
+            >
+              {isTranscriptionEnabled ? (
+                <Captions className='w-3.5 h-3.5' />
+              ) : (
+                <CaptionsOff className='w-3.5 h-3.5' />
+              )}
+              {isTranscriptionEnabled ? 'Transcribing' : 'Transcription off'}
+            </button>
+          )}
           <CallPrivacyIndicator
             title='Transcribing'
             callId={callId}
+            isTranscriptionEnabled={isTranscriptionEnabled}
             description={CALL_PRIVACY_DESCRIPTION}
             actions={callPrivacyActions}
             activeTone={isRecordingActive ? 'recording' : 'ai'}

@@ -148,6 +148,55 @@ class CallHostControlController {
     }
   };
 
+  /** POST /api/calls/:callId/transcript-disposition */
+  setTranscriptDisposition = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { disposition } = req.body as { disposition?: string };
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+    if (disposition !== 'keep' && disposition !== 'discard') {
+      res
+        .status(400)
+        .json({ success: false, error: "disposition must be 'keep' or 'discard'" });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallHostControlController] transcript-disposition not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+        res
+          .status(403)
+          .json({ success: false, error: 'Only the call host can set transcript disposition' });
+        return;
+      }
+
+      const previousMetadata = call.metadata;
+      const existingMetadata =
+        previousMetadata && typeof previousMetadata === 'object' && !Array.isArray(previousMetadata)
+          ? (previousMetadata as Record<string, unknown>)
+          : {};
+      await repositories.calls.update(call.id, {
+        metadata: { ...existingMetadata, transcriptDisposition: disposition },
+      });
+
+      logger.info(`[CallHostControlController] transcript-disposition set | callId=${callId}, disposition=${disposition}`);
+      res.json({ success: true, disposition });
+    } catch (error) {
+      logger.error(`[CallHostControlController] transcript-disposition failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to set transcript disposition' });
+    }
+  };
+
   /** POST /api/calls/:callId/remove-participant */
   removeCallParticipant = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;

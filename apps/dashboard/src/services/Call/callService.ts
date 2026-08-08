@@ -327,6 +327,19 @@ export class CallService {
     }
   }
   /**
+   * Record the host's end-of-call transcript disposition (host only).
+   * Best-effort: the backend defaults to keeping the transcript + generating
+   * artifacts if this never arrives. Only 'discard' deletes the transcript and
+   * skips all artifacts/indexing.
+   */
+  async setTranscriptDisposition(callId: string, disposition: 'keep' | 'discard'): Promise<void> {
+    try {
+      await apiInstance.post(`/calls/${callId}/transcript-disposition`, { disposition });
+    } catch {
+      // Swallow: end-of-call best-effort; backend defaults to keep.
+    }
+  }
+  /**
    * Mute all participants (host only)
    * Mutes the audio tracks of all participants except the host
    */

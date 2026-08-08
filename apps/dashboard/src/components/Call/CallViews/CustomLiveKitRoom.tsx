@@ -10,12 +10,14 @@ import { createCallReminderClock } from '../CallPrivacyIndicator/CallPrivacyRemi
 import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import { useHandRaise } from '../hooks/useHandRaise';
 import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
+import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNotice';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
+import { TranscriptDispositionModal } from '../EndCallModal/TranscriptDispositionModal';
 import { AFKWarningModal } from '../AFKWarningModal/AFKWarningModal';
 import {
   useIsCallHost,
@@ -77,6 +79,8 @@ export function CustomLiveKitRoom({
     connectionState,
     isAIAssistantEnabled,
     transcriptionAgentLeft,
+    isTranscriptionEnabled,
+    transcriptionToggleNotice,
     aiController,
     pendingControlRequest,
     isAiControlRequested,
@@ -102,6 +106,7 @@ export function CustomLiveKitRoom({
   // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
   const { raisedHands, toggleHandRaise } = useHandRaise(room);
   useAgentLeftWarning(transcriptionAgentLeft);
+  useTranscriptionToggleNotice(transcriptionToggleNotice);
   // Session-scoped reminder clock lives here (always mounted for the whole call)
   // so the transcription disclosure timers survive the mini <-> full view switch.
   // It is passed to FullCallView only; mini call view never needs it.
@@ -208,6 +213,8 @@ export function CustomLiveKitRoom({
   }, []);
 
   const [showEndCallModal, setShowEndCallModal] = useState(false);
+  // Shown to the host at end-of-call only when transcription is currently OFF.
+  const [showDispositionModal, setShowDispositionModal] = useState(false);
 
   const isHost = useIsCallHost(externalId, user?.id);
 
@@ -325,13 +332,35 @@ export function CustomLiveKitRoom({
     [isChatOpen, isOnlyParticipant, room?.remoteParticipants.size, saveWhiteboardIfNeeded],
   );
 
-  const handleDisconnectClick = useCallback(() => {
+  // Normal end flow, run after any transcript-disposition prompt is resolved.
+  const proceedWithEnd = useCallback(() => {
     if (isHost && !isOnlyParticipant) {
       setShowEndCallModal(true);
     } else {
       handleDisconnect();
     }
   }, [isHost, isOnlyParticipant, handleDisconnect]);
+
+  const handleDisconnectClick = useCallback(() => {
+    // Ask the host to keep/discard only when they end the call while transcription is OFF.
+    // Every other case (not host, never paused, paused-then-resumed) keeps + generates
+    // artifacts by default, so we go straight to the normal end flow.
+    if (isHost && !isTranscriptionEnabled) {
+      setShowDispositionModal(true);
+      return;
+    }
+    proceedWithEnd();
+  }, [isHost, isTranscriptionEnabled, proceedWithEnd]);
+
+  const handleTranscriptDisposition = useCallback(
+    (disposition: 'keep' | 'discard') => {
+      // Best-effort: the backend defaults to keep if this never arrives.
+      void callService.setTranscriptDisposition(callId, disposition);
+      setShowDispositionModal(false);
+      proceedWithEnd();
+    },
+    [callId, proceedWithEnd],
+  );
 
   // End call for everyone (host only)
   const handleEndForAll = useCallback(() => {
@@ -476,6 +505,12 @@ export function CustomLiveKitRoom({
           onEndForAll={handleEndForAll}
           isHost={isHost}
         />
+        <TranscriptDispositionModal
+          isOpen={showDispositionModal}
+          onClose={() => setShowDispositionModal(false)}
+          onKeep={() => handleTranscriptDisposition('keep')}
+          onDiscard={() => handleTranscriptDisposition('discard')}
+        />
         <AFKWarningModal
           isOpen={showAFKModal}
           secondsRemaining={afkSecondsRemaining}
@@ -559,6 +594,12 @@ export function CustomLiveKitRoom({
         onEndForSelf={() => handleDisconnect()}
         onEndForAll={handleEndForAll}
         isHost={isHost}
+      />
+      <TranscriptDispositionModal
+        isOpen={showDispositionModal}
+        onClose={() => setShowDispositionModal(false)}
+        onKeep={() => handleTranscriptDisposition('keep')}
+        onDiscard={() => handleTranscriptDisposition('discard')}
       />
       <AFKWarningModal
         isOpen={showAFKModal}

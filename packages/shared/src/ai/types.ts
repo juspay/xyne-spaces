@@ -97,6 +97,19 @@ export interface AIVoiceToggleMessage {
   participantName: string;
 }
 
+/**
+ * Transcription toggle event (host enables/disables the transcription agent mid-call).
+ * When `enabled` is false the still-in-room agent unsubscribes from audio and stops
+ * writing any transcript sinks; `at` is the epoch-ms cutoff for the pause.
+ */
+export interface TranscriptionToggleMessage {
+  type: 'transcription_toggle';
+  enabled: boolean;
+  at: number;
+  participantId: string;
+  participantName: string;
+}
+
 // ============================================================================
 // Union Types
 // ============================================================================
@@ -110,7 +123,8 @@ export type AIDataMessage =
   | AIControlRequestMessage
   | AIControlTransferMessage
   | AIControlRequestDeniedMessage
-  | AIVoiceToggleMessage;
+  | AIVoiceToggleMessage
+  | TranscriptionToggleMessage;
 
 /**
  * Generic data message from data channel (before parsing)
@@ -125,6 +139,7 @@ export interface RawDataMessage {
   new_controller_id?: string;
   new_controller_name?: string;
   enabled?: boolean;
+  at?: number;
   participantId?: string;
   participantName?: string;
   data?: {
@@ -189,6 +204,18 @@ export interface AIControlRequestDeniedEvent {
 }
 
 /**
+ * Parsed transcription toggle event ready for UI (all clients react to reflect
+ * the paused state: hide the agent tile, flip the banner, show a toast).
+ */
+export interface AITranscriptionToggleEvent {
+  type: 'AI_TRANSCRIPTION_TOGGLE';
+  enabled: boolean;
+  at: number;
+  participantId: string;
+  participantName: string;
+}
+
+/**
  * All possible parsed AI events
  */
 export type AIEvent =
@@ -196,4 +223,5 @@ export type AIEvent =
   | AICreateTicketEvent
   | AIControllerEvent
   | AIControlRequestEvent
-  | AIControlRequestDeniedEvent;
+  | AIControlRequestDeniedEvent
+  | AITranscriptionToggleEvent;

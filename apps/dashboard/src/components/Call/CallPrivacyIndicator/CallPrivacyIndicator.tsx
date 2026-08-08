@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot } from 'lucide-react';
+import { Bot, MicOff } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useCallPrivacyReminder } from './CallPrivacyReminder';
 import type { MutableRefObject } from 'react';
@@ -12,6 +12,7 @@ interface CallPrivacyIndicatorProps {
   actions: CallPrivacyAction[];
   callId?: string | undefined;
   activeTone?: CallPrivacyActionTone | undefined;
+  isTranscriptionEnabled?: boolean | undefined;
   reminderTriggerKey?: number | undefined;
   reminderEnabled?: boolean | undefined;
   reminderClockRef?: MutableRefObject<CallReminderClock> | undefined;
@@ -60,6 +61,7 @@ export function CallPrivacyIndicator({
   actions,
   callId,
   activeTone = 'ai',
+  isTranscriptionEnabled = true,
   reminderTriggerKey,
   reminderEnabled = true,
   reminderClockRef,
@@ -68,8 +70,9 @@ export function CallPrivacyIndicator({
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isRecordingTone = activeTone === 'recording';
+  const isPaused = !isTranscriptionEnabled;
   const activeAction = actions.find(action => action.tone === activeTone) ?? actions[0];
-  const ActiveIcon = activeAction?.Icon ?? Bot;
+  const ActiveIcon = isPaused ? MicOff : (activeAction?.Icon ?? Bot);
   const { reminder, isReminderVisible } = useCallPrivacyReminder({
     title,
     actions,
@@ -98,13 +101,19 @@ export function CallPrivacyIndicator({
         onClick={() => setIsOpen(prev => !prev)}
         className={cn(
           'relative z-[2] flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors shadow-lg',
-          isRecordingTone
-            ? 'border-red-300 bg-red-500/15 text-red-200 hover:bg-red-500/25'
-            : 'border-sky-300 bg-sky-400/15 text-pink-200 hover:bg-sky-400/25',
+          isPaused
+            ? 'border-gray-500 bg-gray-500/10 text-gray-400 hover:bg-gray-500/20'
+            : isRecordingTone
+              ? 'border-red-300 bg-red-500/15 text-red-200 hover:bg-red-500/25'
+              : 'border-sky-300 bg-sky-400/15 text-pink-200 hover:bg-sky-400/25',
         )}
         aria-label='Call transcription and recording status'
         aria-expanded={isOpen}
-        title={activeAction?.title ?? title}
+        title={
+          isPaused
+            ? 'Transcription paused — audio not being captured'
+            : (activeAction?.title ?? title)
+        }
         data-track-category='CALLS'
         data-track-name='OPEN_CALL_PRIVACY_INDICATOR'
         data-track-metadata={JSON.stringify(trackMetadata ?? {})}
@@ -113,7 +122,7 @@ export function CallPrivacyIndicator({
           className={cn(
             'absolute inset-[-5px] rounded-full border-4 transition-opacity duration-200',
             isRecordingTone ? 'border-red-400/30' : 'border-sky-400/60',
-            isReminderVisible && 'opacity-0',
+            (isReminderVisible || isPaused) && 'opacity-0',
           )}
         />
         <ActiveIcon
@@ -132,7 +141,9 @@ export function CallPrivacyIndicator({
           aria-label='Call transcription and recording details'
           className='absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[min(92vw,340px)] rounded-lg bg-[#25272a] p-4 text-white shadow-2xl border border-white/10'
         >
-          <h2 className='text-lg font-semibold tracking-normal text-gray-100'>{title}</h2>
+          <h2 className='text-lg font-semibold tracking-normal text-gray-100'>
+            {isPaused ? `${title} (paused)` : title}
+          </h2>
 
           <div className='mt-3 space-y-2 text-sm leading-5 text-gray-200'>
             {description.map(item => (

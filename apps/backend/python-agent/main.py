@@ -340,7 +340,25 @@ async def entrypoint(ctx: JobContext):
             if payload.get("type") == "ai_voice_toggle":
                 new_state = payload.get("enabled", False)
                 ai_manager.handle_voice_toggle(new_state, participant_id, participant_name)
-            
+
+            elif payload.get("type") == "transcription_toggle":
+                # Host kill-switch. SECURITY: only the call host (createdBy in room
+                # metadata) may toggle; use the authenticated sender identity, never
+                # the payload. If host id is unknown (older room metadata), fall back
+                # to trusting the client-side host gating.
+                host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
+                if host_id and participant_id and participant_id != host_id:
+                    logger.warning(
+                        f"transcription_toggle rejected: sender={participant_id} is not host={host_id}"
+                    )
+                else:
+                    enabled = bool(payload.get("enabled", True))
+                    logger.info(
+                        f"transcription_toggle received | enabled={enabled}, "
+                        f"by={participant_name} ({participant_id})"
+                    )
+                    asyncio.create_task(multi_user_transcriber.set_transcription_enabled(enabled))
+
             elif payload.get("type") == "ai_control_request":
                 # SECURITY: Use authenticated participant identity from data_packet, not from payload
                 # This prevents identity spoofing attacks

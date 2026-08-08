@@ -171,6 +171,8 @@ export interface RoomContext {
   callStartTime: number | null; // Track when the call started for duration calculation
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
+  isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
+  transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -273,6 +275,14 @@ export type RoomMachineEvent =
   | { type: 'AI_CONTROLLER_CHANGED'; controller: string | null; controllerName: string | null }
   | { type: 'TRANSCRIPTION_AGENT_LEFT' } // LiveKit signalled the agent dropped mid-call
   | { type: 'DISMISS_AGENT_LEFT_WARNING' } // User acknowledged the agent-left toast
+  | { type: 'TOGGLE_TRANSCRIPTION' } // Host toggled the transcription agent on/off (local action)
+  | {
+      type: 'TRANSCRIPTION_TOGGLED'; // Broadcast received: host paused/resumed transcription
+      enabled: boolean;
+      participantId: string;
+      participantName: string;
+    }
+  | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
   | { type: 'AI_CONTROL_REQUEST'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_PENDING'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_SENT' } // Local user sent a control request
@@ -718,6 +728,18 @@ export const roomMachine = setup({
                 if (event.type === 'AI_CONTROL_REQUEST_DENIED') {
                   sendBack({
                     type: 'AI_CONTROL_REQUEST_DENIED',
+                  } as const);
+                }
+                break;
+
+              case 'AI_TRANSCRIPTION_TOGGLE':
+                // Only process on 'ai-actions' topic; every client reflects the host's toggle
+                if (_topic === AI_DATA_TOPIC && event.type === 'AI_TRANSCRIPTION_TOGGLE') {
+                  sendBack({
+                    type: 'TRANSCRIPTION_TOGGLED',
+                    enabled: event.enabled,
+                    participantId: event.participantId,
+                    participantName: event.participantName,
                   } as const);
                 }
                 break;
@@ -1253,6 +1275,8 @@ export const roomMachine = setup({
       callStartTime: () => null,
       isAIAssistantEnabled: () => false,
       transcriptionAgentLeft: () => false,
+      isTranscriptionEnabled: () => true,
+      transcriptionToggleNotice: () => null,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1404,6 +1428,8 @@ export const roomMachine = setup({
     callStartTime: null,
     isAIAssistantEnabled: false,
     transcriptionAgentLeft: false,
+    isTranscriptionEnabled: true,
+    transcriptionToggleNotice: null,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -1963,6 +1989,64 @@ export const roomMachine = setup({
         DISMISS_AGENT_LEFT_WARNING: {
           actions: assign({
             transcriptionAgentLeft: () => false,
+          }),
+        },
+        // Host kill-switch: flip transcription locally, broadcast to the agent + peers.
+        TOGGLE_TRANSCRIPTION: {
+          actions: [
+            assign({
+              isTranscriptionEnabled: ({ context }) => !context.isTranscriptionEnabled,
+              // Turning transcription OFF also forces AI voice off (talk-back needs STT).
+              isAIAssistantEnabled: ({ context }) =>
+                context.isTranscriptionEnabled ? false : context.isAIAssistantEnabled,
+            }),
+            ({ context }): void => {
+              if (!context.room) return;
+              const enabled = context.isTranscriptionEnabled; // post-assign (new) value
+              void context.room.localParticipant.publishData(
+                new TextEncoder().encode(
+                  JSON.stringify({
+                    type: 'transcription_toggle',
+                    enabled,
+                    at: Date.now(),
+                    participantId: context.room.localParticipant.identity,
+                    participantName: context.room.localParticipant.name,
+                  }),
+                ),
+                { reliable: true, topic: AI_DATA_TOPIC },
+              );
+              // Cascade AI voice off when transcription is disabled.
+              if (!enabled) {
+                void context.room.localParticipant.publishData(
+                  new TextEncoder().encode(
+                    JSON.stringify({
+                      type: 'ai_voice_toggle',
+                      enabled: false,
+                      participantId: context.room.localParticipant.identity,
+                      participantName: context.room.localParticipant.name,
+                    }),
+                  ),
+                  { reliable: true },
+                );
+              }
+            },
+          ],
+        },
+        // Broadcast received (non-host peers): reflect the host's toggle + surface a toast.
+        TRANSCRIPTION_TOGGLED: {
+          actions: assign({
+            isTranscriptionEnabled: ({ event }) => event.enabled,
+            isAIAssistantEnabled: ({ event, context }) =>
+              event.enabled ? context.isAIAssistantEnabled : false,
+            transcriptionToggleNotice: ({ event }) => ({
+              enabled: event.enabled,
+              byName: event.participantName || 'Host',
+            }),
+          }),
+        },
+        DISMISS_TRANSCRIPTION_NOTICE: {
+          actions: assign({
+            transcriptionToggleNotice: () => null,
           }),
         },
         AI_CONTROLLER_CHANGED: {
