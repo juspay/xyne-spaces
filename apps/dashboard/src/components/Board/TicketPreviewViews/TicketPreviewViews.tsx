@@ -9,7 +9,6 @@ import {
   Plus,
   Calendar,
   Paperclip,
-  Workflow,
   Ticket,
   List,
 } from 'lucide-react';
@@ -437,14 +436,6 @@ const CreateTicketModal = ({
                     </p>
                   )}
 
-                  {field.type === 'workflow' && (
-                    <>
-                      <Workflow size={14} strokeWidth={2.33} className='text-muted-foreground' />
-                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
-                        User Onboarding
-                      </p>
-                    </>
-                  )}
 
                   {field.type === 'tags' && (
                     <div className='flex gap-1.5 flex-wrap'>
