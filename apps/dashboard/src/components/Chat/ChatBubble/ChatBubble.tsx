@@ -1,8 +1,6 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
-import { queries } from '../../../zero/queries';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
 import { LinkPreview } from '../LinkPreview/LinkPreview';
@@ -122,6 +120,7 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
+  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
@@ -151,6 +150,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
+  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
@@ -294,12 +294,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
 
-  const [threadTicket] = useCachedQuery(queries.ticketByIdV2({ ticketId: threadTicketId }), {
-    enabled: !!threadTicketId,
-  });
-  const isFlowStep = !!(
-    threadTicket?.metadata as { flow?: { planNodeId?: string } } | null | undefined
-  )?.flow?.planNodeId;
   const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
 
   // Mark activities as read when message becomes visible

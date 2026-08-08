@@ -208,13 +208,19 @@ export async function createFlowSubTicketMappings(input: {
       // Upserts avoid concurrent find/create P2002 failures and make retries idempotent.
       await tx.ticketSubTicketMapping.upsert({
         where: { id: mappingId },
-        create: { id: mappingId, ticketId: parent.id, subTicketId },
+        create: {
+          id: mappingId,
+          workspaceId: parent.workspaceId,
+          ticketId: parent.id,
+          subTicketId,
+        },
         update: {},
       });
       await tx.ticketActivity.upsert({
         where: { id: activityId },
         create: {
           id: activityId,
+          workspaceId: parent.workspaceId,
           ticketId: parent.id,
           activityType: ActivityType.SUBTICKET_CREATED,
           updatedBy: input.createdBy,

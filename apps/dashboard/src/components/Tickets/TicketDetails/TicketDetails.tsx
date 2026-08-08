@@ -743,7 +743,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     enabled: !!ticket?.boardId,
   });
   const flowRootTicketId = ticket ? (getFlowMeta(ticket)?.rootTicketId ?? '') : '';
-  const [flowRootTicket] = useCachedQuery(queries.ticketByIdV2({ ticketId: flowRootTicketId }), {
+  const [flowRootTicket] = useCachedQuery(queries.ticketRowById({ ticketId: flowRootTicketId }), {
     enabled: !!flowRootTicketId,
   });
   const isFlowRunPaused = flowRootTicket?.statusV2 === TicketStatusV2.PAUSED;

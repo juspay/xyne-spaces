@@ -152,6 +152,7 @@ export class BoardRepository {
           const stageByName = new Map(rawStages.map(stage => [stage.name, stage]));
           await tx.stageTransition.createMany({
             data: FLOW_STAGE_TRANSITIONS.map(([fromName, toName]) => ({
+              workspaceId: data.workspaceId,
               boardId: board.id,
               fromStageId: stageByName.get(fromName)!.id,
               toStageId: stageByName.get(toName)!.id,

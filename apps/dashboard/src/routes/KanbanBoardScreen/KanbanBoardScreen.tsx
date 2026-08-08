@@ -35,6 +35,7 @@ import {
   FileSpreadsheet,
   FileText,
   Archive,
+  ArrowLeft,
 } from 'lucide-react';
 import { CalendarView } from '../../components/Tickets/CalendarView';
 import ReactFlow, {
@@ -180,6 +181,7 @@ import Button from '../../components/ui/Button';
 import { Popover } from '../../components/ui/Popover/Popover';
 import { cn } from '../../utils/classNames';
 import { useZero } from '../../hooks/useZero';
+import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
@@ -298,6 +300,20 @@ type KanbanLocalTicket = Ticket & {
 type LayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
 type TicketGraphMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type TicketGraphSubTicket = NonNullable<TicketGraphMapping['subTicket']>;
+type FlowRunActivity = QueryResultType<typeof queries.ticketActivitiesForTickets>[number];
+
+const FLOW_RUN_ACTIVITY_PAGE_SIZE = 25;
+
+function mergeFlowRunActivities(
+  existing: readonly FlowRunActivity[],
+  incoming: readonly FlowRunActivity[],
+): FlowRunActivity[] {
+  const byId = new Map(existing.map(activity => [activity.id, activity]));
+  incoming.forEach(activity => byId.set(activity.id, activity));
+  return Array.from(byId.values()).sort(
+    (left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id),
+  );
+}
 
 interface TicketGraphNode {
   key: string;
@@ -1829,10 +1845,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ticket =>
           ticket.id === selectedGraphRootTicketId || ticket.rootId === selectedGraphRootTicketId,
       )
-      .map(ticket => ticket.id);
+      .map(ticket => ticket.id)
+      .sort();
   }, [flowActivityOpen, graphTickets, isFlowBoard, selectedGraphRootTicketId]);
-  const [flowRunActivities] = useCachedQuery(
-    queries.ticketActivitiesForTickets({ ticketIds: flowRunActivityTicketIds }),
+  const flowRunActivityScopeKey = `${selectedGraphRootTicketId ?? ''}:${flowRunActivityTicketIds.join(',')}`;
+  const [flowRunActivityPageState, setFlowRunActivityPageState] = useState<{
+    scopeKey: string;
+    activities: FlowRunActivity[];
+    hasMore: boolean;
+  }>({ scopeKey: '', activities: [], hasMore: true });
+  const flowRunActivityFetchScopeRef = useRef<string | null>(null);
+  const [flowRunActivityLoadingScope, setFlowRunActivityLoadingScope] = useState<string | null>(
+    null,
+  );
+  const [firstFlowRunActivityPage, firstFlowRunActivityPageDetails] = useCachedQuery(
+    queries.ticketActivitiesForTickets({
+      ticketIds: flowRunActivityTicketIds,
+      limit: FLOW_RUN_ACTIVITY_PAGE_SIZE,
+      start: null,
+    }),
     {
       enabled:
         flowActivityOpen &&
@@ -1841,16 +1872,109 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         flowRunActivityTicketIds.length > 0,
     },
   );
+  useEffect(() => {
+    if (
+      flowRunActivityTicketIds.length === 0 ||
+      firstFlowRunActivityPageDetails.type !== 'complete'
+    ) {
+      return;
+    }
+    const firstPage = firstFlowRunActivityPage ?? [];
+    setFlowRunActivityPageState(previous => {
+      const sameScope = previous.scopeKey === flowRunActivityScopeKey;
+      return {
+        scopeKey: flowRunActivityScopeKey,
+        activities: mergeFlowRunActivities(sameScope ? previous.activities : [], firstPage),
+        hasMore: sameScope ? previous.hasMore : firstPage.length === FLOW_RUN_ACTIVITY_PAGE_SIZE,
+      };
+    });
+  }, [
+    firstFlowRunActivityPage,
+    firstFlowRunActivityPageDetails.type,
+    flowRunActivityScopeKey,
+    flowRunActivityTicketIds.length,
+  ]);
+  const loadedFlowRunActivities = useMemo(
+    () =>
+      flowRunActivityPageState.scopeKey === flowRunActivityScopeKey
+        ? flowRunActivityPageState.activities
+        : [],
+    [
+      flowRunActivityPageState.activities,
+      flowRunActivityPageState.scopeKey,
+      flowRunActivityScopeKey,
+    ],
+  );
+  const flowRunHasMoreActivities =
+    flowRunActivityPageState.scopeKey === flowRunActivityScopeKey
+      ? flowRunActivityPageState.hasMore
+      : true;
+  const loadMoreFlowRunActivities = useCallback(() => {
+    if (
+      loadedFlowRunActivities.length === 0 ||
+      !flowRunHasMoreActivities ||
+      flowRunActivityFetchScopeRef.current === flowRunActivityScopeKey
+    ) {
+      return;
+    }
+    const oldestActivity = loadedFlowRunActivities.at(-1);
+    if (!oldestActivity) return;
+
+    const requestedScopeKey = flowRunActivityScopeKey;
+    const requestedTicketIds = [...flowRunActivityTicketIds];
+    flowRunActivityFetchScopeRef.current = requestedScopeKey;
+    setFlowRunActivityLoadingScope(requestedScopeKey);
+    void zero
+      .run(
+        queries.ticketActivitiesForTickets({
+          ticketIds: requestedTicketIds,
+          limit: FLOW_RUN_ACTIVITY_PAGE_SIZE,
+          start: { timestamp: oldestActivity.timestamp, id: oldestActivity.id },
+        }),
+        { type: 'complete' },
+      )
+      .then(nextPage => {
+        setFlowRunActivityPageState(previous => {
+          if (previous.scopeKey !== requestedScopeKey) return previous;
+          const page = nextPage ?? [];
+          return {
+            ...previous,
+            activities: mergeFlowRunActivities(previous.activities, page),
+            hasMore: page.length === FLOW_RUN_ACTIVITY_PAGE_SIZE,
+          };
+        });
+      })
+      .catch(error => {
+        logger.error(Event.ZERO_RUN_ERROR, {
+          error,
+          query: 'ticketActivitiesForTickets',
+        });
+      })
+      .finally(() => {
+        if (flowRunActivityFetchScopeRef.current === requestedScopeKey) {
+          flowRunActivityFetchScopeRef.current = null;
+        }
+        setFlowRunActivityLoadingScope(current => (current === requestedScopeKey ? null : current));
+      });
+  }, [
+    flowRunActivityScopeKey,
+    flowRunActivityTicketIds,
+    flowRunHasMoreActivities,
+    loadedFlowRunActivities,
+    zero,
+  ]);
+  const flowRunActivityLoadMoreRef = useIntersectionObserver<HTMLDivElement>(
+    loadMoreFlowRunActivities,
+    { threshold: 0.1, triggerOnce: false },
+  );
   const flowRunTimelineActivities = useMemo(
     () =>
-      [...(flowRunActivities ?? [])]
-        .filter(activity => {
-          if (activity.activityType !== ActivityType.STATUS) return true;
-          const value = activity.value as { field?: string } | null;
-          return value?.field === 'stageName';
-        })
-        .sort((left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id)),
-    [flowRunActivities],
+      loadedFlowRunActivities.filter(activity => {
+        if (activity.activityType !== ActivityType.STATUS) return true;
+        const value = activity.value as { field?: string } | null;
+        return value?.field === 'stageName';
+      }),
+    [loadedFlowRunActivities],
   );
   const flowRunTicketById = useMemo(
     () => new Map(graphTickets.map(ticket => [ticket.id, ticket])),
@@ -1945,17 +2069,23 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     if (!selectedGraphRootTicketId) setFlowSelection(null);
   }, [selectedGraphRootTicketId]);
+  const selectedFlowRunRootTicket = useMemo(() => {
+    if (!selectedGraphRootTicketId) return null;
+    return (
+      (graphTickets as unknown as FlowRunTicket[]).find(
+        ticket => ticket.id === selectedGraphRootTicketId,
+      ) ?? null
+    );
+  }, [graphTickets, selectedGraphRootTicketId]);
   const selectedFlowRunModel = useMemo(() => {
-    if (!flowModel || !selectedGraphRootTicketId) return null;
+    if (!flowModel || !selectedGraphRootTicketId || !selectedFlowRunRootTicket) return null;
     const flowTickets = graphTickets as unknown as FlowRunTicket[];
-    const rootTicket = flowTickets.find(ticket => ticket.id === selectedGraphRootTicketId);
-    if (!rootTicket) return null;
     return buildFlowRunModel(
       flowModel,
-      rootTicket,
+      selectedFlowRunRootTicket,
       mapPlanToRunTickets(flowTickets, selectedGraphRootTicketId),
     );
-  }, [flowModel, graphTickets, selectedGraphRootTicketId]);
+  }, [flowModel, graphTickets, selectedFlowRunRootTicket, selectedGraphRootTicketId]);
   const handleFlowGroupBacklog = useCallback(
     async (groupId: string): Promise<void> => {
       if (!selectedFlowRunModel || !selectedGraphRootTicketId || flowGroupBacklogPendingId) return;
@@ -3577,7 +3707,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               <div className='flex items-center gap-2'>
                 <GitBranch className='h-4 w-4 text-muted-foreground' />
                 <h2 className='text-sm font-semibold text-foreground'>
-                  {selectedGraphRootTicketId ? 'Flow Run' : 'Main Tickets'}
+                  {selectedGraphRootTicketId
+                    ? `${selectedFlowRunRootTicket?.title ?? 'Ticket'} run`
+                    : 'Main Tickets'}
                 </h2>
                 <span className='rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
                   {selectedGraphRootTicketId
@@ -3630,35 +3762,40 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     </DropdownMenu.Portal>
                   </DropdownMenu.Root>
                 )}
-                {isFlowBoard && filteredSingleBoardId && flowProjectId && (
-                  <button
-                    type='button'
-                    onClick={() =>
-                      void navigate(
-                        `/listProjects/${flowProjectId}?editBoard=${filteredSingleBoardId}`,
-                      )
-                    }
-                    data-track-category='flow_board'
-                    data-track-name='edit_board'
-                    className='flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground'
-                  >
-                    <Pencil className='h-3 w-3' />
-                    Edit board
-                  </button>
-                )}
+                {!selectedGraphRootTicketId &&
+                  isFlowBoard &&
+                  filteredSingleBoardId &&
+                  flowProjectId && (
+                    <button
+                      type='button'
+                      onClick={() =>
+                        void navigate(
+                          `/listProjects/${flowProjectId}?editBoard=${filteredSingleBoardId}`,
+                        )
+                      }
+                      data-track-category='flow_board'
+                      data-track-name='edit_board'
+                      className='flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground'
+                    >
+                      <Pencil className='h-3 w-3' />
+                      Edit board
+                    </button>
+                  )}
                 {selectedGraphRootTicketId && (
-                  <button
+                  <Button
                     type='button'
+                    size='sm'
                     data-track-category='flow_board'
                     data-track-name='back_to_main_tickets'
                     onClick={() => {
                       setSelectedGraphRootTicketId(null);
                       setFlowSelection(null);
                     }}
-                    className='rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground'
+                    className='h-8 bg-foreground px-3 text-xs text-background shadow-sm hover:bg-foreground/85 hover:text-background'
                   >
+                    <ArrowLeft className='size-3.5' />
                     Back to main tickets
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -4123,6 +4260,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             <p className='py-4 text-center text-muted-foreground'>
                               No run activity yet.
                             </p>
+                          )}
+                          {loadedFlowRunActivities.length > 0 && flowRunHasMoreActivities && (
+                            <div
+                              ref={flowRunActivityLoadMoreRef}
+                              className='py-3 text-center text-[11px] text-muted-foreground/70'
+                              aria-live='polite'
+                            >
+                              {flowRunActivityLoadingScope === flowRunActivityScopeKey
+                                ? 'Loading older activity…'
+                                : 'Scroll for older activity'}
+                            </div>
                           )}
                         </div>
                       )}

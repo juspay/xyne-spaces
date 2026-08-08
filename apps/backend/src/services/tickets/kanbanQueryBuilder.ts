@@ -1,6 +1,5 @@
 import { Prisma } from '@prisma/client';
 import {
-  FLOW_STEP_ROOT_ID_FIELD,
   TicketPriority,
   TicketStatusV2,
   UserResponsibility,
@@ -217,7 +216,7 @@ export const buildKanbanTicketWhere = (
       { isArchived: false },
       buildChannelAccessFilter(context.currentUserId),
       buildScopeFilter(context),
-      context.excludeFlowSteps ? { [FLOW_STEP_ROOT_ID_FIELD]: null } : undefined,
+      context.excludeFlowSteps ? { rootId: null } : undefined,
       {
         OR: [{ ticketType: null }, { ticketType: { not: SUPPORT_TICKET_TYPE } }],
       },

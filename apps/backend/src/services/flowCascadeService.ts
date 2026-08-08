@@ -923,6 +923,7 @@ async function createFlowStepTicket(params: {
       await tx.conversation.create({
         data: {
           conversationId,
+          workspaceId: rootTicket.workspaceId,
           channelId: rootTicket.channelId,
           createdBy: actorUserId,
           initialMessageId,
@@ -982,6 +983,7 @@ async function createFlowStepTicket(params: {
             '98175b0b-310d-50de-852f-0f6df9be4c30'
           ),
           conversationId,
+          workspaceId: rootTicket.workspaceId,
           userId: actorUserId,
           participationType: 'MENTIONED',
           isSubscribed: true,

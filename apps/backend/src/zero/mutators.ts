@@ -6685,15 +6685,16 @@ export function createMutators(
           subTicketXyneId: z.string().optional(),
         }),
         async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
+          const parentAsSubTicket = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
+          );
+          // Parent ticket is also needed below to denormalize channelId onto the activity.
           const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
-          const parentBoard = parentTicket
-            ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
-            : null;
-          if (parentBoard?.boardType !== BoardType.FLOW) {
-            const parentAsSubTicket = await tx.run(
-              zql.sub_tickets.where('mappedTicketId', ticketId).one(),
-            );
-            if (parentAsSubTicket) {
+          if (parentAsSubTicket) {
+            const parentBoard = parentTicket
+              ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+              : null;
+            if (parentBoard?.boardType !== BoardType.FLOW) {
               throw new Error('Cannot create a sub-ticket under a sub-ticket');
             }
           }

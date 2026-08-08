@@ -322,7 +322,8 @@ export const getActivityDescription = (
       if (value?.field === 'stageFormFile') {
         const fieldLabel = value.fieldName || 'file';
         const filename = value.newFilename || value.oldFilename || 'file';
-        const stageSuffix = value.stageName ? ` in ${value.stageName} form` : '';
+        const contextName = value.contextName ?? value.stageName;
+        const stageSuffix = contextName ? ` in ${contextName} form` : '';
         const action = value.action;
 
         if (action === 'removed') {

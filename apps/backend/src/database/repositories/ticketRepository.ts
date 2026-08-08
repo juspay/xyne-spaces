@@ -706,6 +706,7 @@ export class TicketRepository {
     ) {
       await prisma.ticketActivity.create({
         data: {
+          workspaceId: currentTicket.workspaceId,
           ticketId,
           updatedBy,
           activityType: ActivityType.METADATA,

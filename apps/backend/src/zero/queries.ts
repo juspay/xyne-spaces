@@ -10,7 +10,6 @@ import {
   defineQuery,
   DocType,
   EntityUserAccess,
-  FLOW_STEP_ROOT_ID_FIELD,
   flowStepVisibilitySchemaShape,
   FormContextType,
   FormEntityType,
@@ -258,7 +257,7 @@ const applyKanbanTicketPageConditions = (
   }
 
   if (args.excludeFlowSteps) {
-    query = query.where(FLOW_STEP_ROOT_ID_FIELD, 'IS', null);
+    query = query.where('rootId', 'IS', null);
   }
 
   switch (viewMode) {
@@ -830,7 +829,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (excludeFlowSteps) {
-        query = query.where(FLOW_STEP_ROOT_ID_FIELD, 'IS', null);
+        query = query.where('rootId', 'IS', null);
       }
       // Apply context filter based on viewMode
       switch (viewMode) {
@@ -935,7 +934,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (excludeFlowSteps) {
-        query = query.where(FLOW_STEP_ROOT_ID_FIELD, 'IS', null);
+        query = query.where('rootId', 'IS', null);
       }
       // Apply context filter based on viewMode
       switch (viewMode) {
@@ -1903,6 +1902,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       .related('stageEtaEntries')
       .related('ticketStageRequests', a => a.related('form'))
       .one();
+  }),
+  ticketRowById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.tickets.where('id', ticketId).one();
   }),
   ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
@@ -3055,11 +3057,21 @@ export const queries: AnyQueryRegistry = defineQueries({
     zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc')
   ),
   ticketActivitiesForTickets: defineQuery(
-    z.object({ ticketIds: z.array(z.string()) }),
-    ({ args: { ticketIds } }) =>
-      zql.ticket_activities
+    z.object({
+      ticketIds: z.array(z.string()),
+      limit: z.number(),
+      start: z.object({ timestamp: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { ticketIds, limit, start } }) => {
+      let query = zql.ticket_activities
         .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
-        .orderBy('timestamp', 'asc'),
+        .orderBy('timestamp', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ timestamp: start.timestamp, id: start.id }, { inclusive: false });
+      }
+      return query.limit(limit);
+    },
   ),
 
   channelAndThreadMessages: defineQuery(
@@ -4172,13 +4184,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({ subTicketIds: z.array(z.string()) }),
     ({ args: { subTicketIds } }) => {
       return zql.sub_tickets.where(helpers => helpers.cmp('id', 'IN', subTicketIds));
-    },
-  ),
-
-  subTicketsByMappedTicketIds: defineQuery(
-    z.object({ mappedTicketIds: z.array(z.string()) }),
-    ({ args: { mappedTicketIds } }) => {
-      return zql.sub_tickets.where(helpers => helpers.cmp('mappedTicketId', 'IN', mappedTicketIds));
     },
   ),
 

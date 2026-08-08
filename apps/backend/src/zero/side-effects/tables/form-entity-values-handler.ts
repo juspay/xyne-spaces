@@ -344,7 +344,6 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       if (fieldDefinition.fieldType === FormFieldType.DOC) {
         await this.createFileFieldActivity(
           formEntityValue.entityId,
-          formEntityValue.contextId,
           fieldDefinition.fieldName,
           stringFromFormValue(previousRawValue),
           stringFromFormValue(formEntityValue.actualFieldValue),
@@ -372,7 +371,6 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
   private async createFileFieldActivity(
     ticketId: string,
-    contextId: string | null,
     fieldName: string,
     previousAttachmentId: string | null,
     nextAttachmentId: string | null,
@@ -380,14 +378,13 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
   ): Promise<void> {
     if ((previousAttachmentId ?? null) === (nextAttachmentId ?? null)) return;
 
-    const [previousAttachment, nextAttachment, stage] = await Promise.all([
+    const [previousAttachment, nextAttachment] = await Promise.all([
       previousAttachmentId
         ? db.messageAttachment.findUnique({ where: { id: previousAttachmentId } })
         : null,
       nextAttachmentId
         ? db.messageAttachment.findUnique({ where: { id: nextAttachmentId } })
         : null,
-      contextId ? db.stage.findUnique({ where: { id: contextId }, select: { name: true } }) : null,
     ]);
 
     const action = previousAttachmentId && nextAttachmentId
@@ -395,8 +392,6 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       : nextAttachmentId
         ? 'added'
         : 'removed';
-    const formContextName = stage?.name ?? contextName;
-
     await db.ticketActivity.create({
       data: {
         ticketId,
@@ -407,7 +402,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
           field: 'stageFormFile',
           fieldName,
           action,
-          ...(formContextName ? { stageName: formContextName } : {}),
+          ...(contextName ? { contextName } : {}),
           ...(previousAttachmentId ? { oldValue: previousAttachmentId } : {}),
           ...(nextAttachmentId ? { newValue: nextAttachmentId } : {}),
           ...(previousAttachment?.originalFilename
