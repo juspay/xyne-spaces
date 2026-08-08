@@ -2081,23 +2081,25 @@ export const sandboxRepoSetup: ToolDefinition = {
     const wantWrite = params["write"] === true;
 
     // Import here to avoid circular dependency
-    const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
+    const { REPO_CONFIGS, isReadOnlySandboxJob } = await import("./repo-configs.js");
 
     // ── Routing ──────────────────────────────────────────────────────────
     // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot
-    //    clone): scheduled/automation runs and forceReadOnly (reviewer) agents.
+    //    clone): AUTOMATION runs and forceReadOnly (reviewer) agents. Scheduled
+    //    jobs are intentionally NOT pinned (see isReadOnlySandboxJob) — they get
+    //    a normal writable sandbox so they can build/refresh artifacts unattended.
     // `allowWriteInReadOnlyJob` (per-agent opt-in, propagated from
-    // agent.config.allowWriteInReadOnlyJob) lets an automation/scheduled run
+    // agent.config.allowWriteInReadOnlyJob) lets an automation run
     // escalate to a writable sandbox on write:true — e.g. the error-pipeline
     // doctor implementing a fix + opening a PR unattended. This is the SAME flag
     // that opts out of the tool-palette stripping in run.ts (processTask); we
     // honor it here too so both halves of read-only enforcement stay in sync
     // (previously it only affected the tool palette, leaving the sandbox routing
-    // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
+    // read-only). It ONLY relaxes the isReadOnlySandboxJob force; `forceReadOnlySandbox`
     // (reviewer agents) still wins unconditionally. Default-off.
     const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
     const forcedReadOnly =
-      (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
+      (isReadOnlySandboxJob(context.meta?.["eventType"]) && !allowWriteInReadOnlyJob) ||
       context.meta?.["forceReadOnlySandbox"] === "true";
     if (forcedReadOnly) {
       return resolveSbxGit(repoName, context);

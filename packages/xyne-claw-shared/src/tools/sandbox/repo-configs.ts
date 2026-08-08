@@ -264,11 +264,12 @@ export const SBX_GIT: SbxGitConfig = {
 };
 
 /**
- * Read-only-job detector. Scheduled jobs and automation runs are diverted to
- * the shared sbx-git sandbox; everything else gets the normal per-project clone.
- * Mirrors the eventType checks claw already uses (run.ts:1577-78 / :1595).
+ * Non-interactive batch-run detector: scheduled jobs AND automation runs. Used
+ * for low-priority model/queue selection and the plan-tools gate in claw's
+ * run.ts. This is NOT the sandbox read-only pin — see isReadOnlySandboxJob.
+ * Mirrors the eventType checks claw already uses (run.ts).
  */
-export function isReadOnlyJob(
+export function isScheduledOrAutomationRun(
   eventType: string | undefined,
   conversationId: string | undefined,
 ): boolean {
@@ -276,6 +277,18 @@ export function isReadOnlyJob(
   if (e === "automation" || e === "scheduled_job" || e === "scheduled") return true;
   if ((conversationId ?? "").startsWith("scheduled_")) return true;
   return false;
+}
+
+/**
+ * Sandbox read-only pin: which runs are diverted to the shared read-only
+ * sbx-git sandbox (and have mutating sandbox tools stripped). ONLY automation
+ * runs are pinned. Scheduled jobs are intentionally NOT pinned — they get a
+ * normal writable sandbox so they can build/refresh artifacts (e.g. live
+ * dashboards) unattended. The per-agent opt-out (allowWriteInReadOnlyJob) and
+ * the reviewer opt-in (forceReadOnlySandbox) are applied at the call sites.
+ */
+export function isReadOnlySandboxJob(eventType: string | undefined): boolean {
+  return (eventType ?? "").trim().toLowerCase() === "automation";
 }
 
 /**
