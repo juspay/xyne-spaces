@@ -215,6 +215,8 @@ export function CustomLiveKitRoom({
   const [showEndCallModal, setShowEndCallModal] = useState(false);
   // Shown to the host at end-of-call only when transcription is currently OFF.
   const [showDispositionModal, setShowDispositionModal] = useState(false);
+  const [dispositionSubmitting, setDispositionSubmitting] = useState(false);
+  const [dispositionError, setDispositionError] = useState<string | null>(null);
 
   const isHost = useIsCallHost(externalId, user?.id);
 
@@ -354,13 +356,37 @@ export function CustomLiveKitRoom({
 
   const handleTranscriptDisposition = useCallback(
     (disposition: 'keep' | 'discard') => {
-      // Best-effort: the backend defaults to keep if this never arrives.
-      void callService.setTranscriptDisposition(callId, disposition);
-      setShowDispositionModal(false);
-      proceedWithEnd();
+      if (dispositionSubmitting) return;
+      setDispositionError(null);
+      setDispositionSubmitting(true);
+      void (async (): Promise<void> => {
+        try {
+          await callService.setTranscriptDisposition(callId, disposition);
+          setShowDispositionModal(false);
+          proceedWithEnd();
+        } catch {
+          if (disposition === 'keep') {
+            // Keep is the backend default anyway — proceed even if the request failed.
+            setShowDispositionModal(false);
+            proceedWithEnd();
+          } else {
+            // Discard is safety-critical: do NOT end the call until the backend confirms
+            // it, otherwise it would default to keeping the transcript the host discarded.
+            // Keep the modal open with a visible error so the host can retry.
+            setDispositionError('Could not discard the transcript. Please try again.');
+          }
+        } finally {
+          setDispositionSubmitting(false);
+        }
+      })();
     },
-    [callId, proceedWithEnd],
+    [callId, proceedWithEnd, dispositionSubmitting],
   );
+
+  const closeDispositionModal = useCallback(() => {
+    setShowDispositionModal(false);
+    setDispositionError(null);
+  }, []);
 
   // End call for everyone (host only)
   const handleEndForAll = useCallback(() => {
@@ -507,9 +533,11 @@ export function CustomLiveKitRoom({
         />
         <TranscriptDispositionModal
           isOpen={showDispositionModal}
-          onClose={() => setShowDispositionModal(false)}
+          onClose={closeDispositionModal}
           onKeep={() => handleTranscriptDisposition('keep')}
           onDiscard={() => handleTranscriptDisposition('discard')}
+          submitting={dispositionSubmitting}
+          error={dispositionError}
         />
         <AFKWarningModal
           isOpen={showAFKModal}
@@ -597,9 +625,11 @@ export function CustomLiveKitRoom({
       />
       <TranscriptDispositionModal
         isOpen={showDispositionModal}
-        onClose={() => setShowDispositionModal(false)}
+        onClose={closeDispositionModal}
         onKeep={() => handleTranscriptDisposition('keep')}
         onDiscard={() => handleTranscriptDisposition('discard')}
+        submitting={dispositionSubmitting}
+        error={dispositionError}
       />
       <AFKWarningModal
         isOpen={showAFKModal}

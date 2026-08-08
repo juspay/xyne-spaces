@@ -437,6 +437,18 @@ export const roomMachine = setup({
           }
         };
 
+        // Authoritative host identity for verifying privileged data-channel messages.
+        // The backend stamps `createdBy` (the host's LiveKit identity) into room metadata.
+        const getRoomHostId = (): string | null => {
+          try {
+            if (!room.metadata) return null;
+            const parsed = JSON.parse(room.metadata) as { createdBy?: unknown };
+            return typeof parsed.createdBy === 'string' ? parsed.createdBy : null;
+          } catch {
+            return null;
+          }
+        };
+
         // Connection events
         room.on(LiveKitRoomEvent.Connected, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
@@ -733,8 +745,17 @@ export const roomMachine = setup({
                 break;
 
               case 'AI_TRANSCRIPTION_TOGGLE':
-                // Only process on 'ai-actions' topic; every client reflects the host's toggle
-                if (_topic === AI_DATA_TOPIC && event.type === 'AI_TRANSCRIPTION_TOGGLE') {
+                // SECURITY: only reflect a toggle that came from the authenticated call
+                // host. A peer could otherwise publish this on the ai-actions topic to
+                // spoof "transcription off" on everyone's screen while the agent keeps
+                // capturing audio. Verify the LiveKit-authenticated sender identity against
+                // the host id from room metadata; fail closed if either is unavailable.
+                if (
+                  _topic === AI_DATA_TOPIC &&
+                  event.type === 'AI_TRANSCRIPTION_TOGGLE' &&
+                  !!_participant?.identity &&
+                  _participant.identity === getRoomHostId()
+                ) {
                   sendBack({
                     type: 'TRANSCRIPTION_TOGGLED',
                     enabled: event.enabled,

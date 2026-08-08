@@ -343,11 +343,17 @@ async def entrypoint(ctx: JobContext):
 
             elif payload.get("type") == "transcription_toggle":
                 # Host kill-switch. SECURITY: only the call host (createdBy in room
-                # metadata) may toggle; use the authenticated sender identity, never
-                # the payload. If host id is unknown (older room metadata), fall back
-                # to trusting the client-side host gating.
+                # metadata) may toggle, verified against the authenticated sender
+                # identity — never the payload. FAIL CLOSED: if the host id is
+                # unavailable (older room metadata) or the sender is not the host,
+                # reject rather than trusting client-side gating — otherwise any
+                # participant could disable transcription in such rooms.
                 host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
-                if host_id and participant_id and participant_id != host_id:
+                if not host_id:
+                    logger.warning(
+                        "transcription_toggle rejected: host id unavailable in room metadata (fail-closed)"
+                    )
+                elif participant_id != host_id:
                     logger.warning(
                         f"transcription_toggle rejected: sender={participant_id} is not host={host_id}"
                     )

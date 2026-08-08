@@ -328,15 +328,26 @@ export class CallService {
   }
   /**
    * Record the host's end-of-call transcript disposition (host only).
-   * Best-effort: the backend defaults to keeping the transcript + generating
-   * artifacts if this never arrives. Only 'discard' deletes the transcript and
-   * skips all artifacts/indexing.
+   * Throws on failure so the caller can handle it. The discard path is
+   * safety-critical: the backend defaults to KEEP if this never arrives, which
+   * would persist a transcript the host explicitly discarded — so callers must
+   * confirm success before ending the call rather than firing-and-forgetting.
    */
   async setTranscriptDisposition(callId: string, disposition: 'keep' | 'discard'): Promise<void> {
     try {
       await apiInstance.post(`/calls/${callId}/transcript-disposition`, { disposition });
-    } catch {
-      // Swallow: end-of-call best-effort; backend defaults to keep.
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
     }
   }
   /**
