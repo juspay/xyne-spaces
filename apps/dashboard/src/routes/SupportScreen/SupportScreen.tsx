@@ -3470,7 +3470,7 @@ export const SupportTicketDetail = ({
   }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
-  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
+  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('replyAll');
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const [isArchivingTicket, setIsArchivingTicket] = useState(false);
   // Auto-draft citations, fetched from the desk-owner's claw draft conversation
