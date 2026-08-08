@@ -97,8 +97,8 @@ import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
-type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
+type TabType = 'thread' | 'details' | 'files' | 'rca';
+type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
   channelId?: string;
@@ -182,7 +182,7 @@ export const ThreadMessages = ({
 
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'workflows', 'rca'];
+  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
   const selectedTab: TabType = validTabs.includes(selectedTabParam as TabType)
     ? (selectedTabParam as TabType)
     : 'thread';
@@ -776,10 +776,6 @@ export const ThreadMessages = ({
       setUnderTicketActiveTab('rca');
       return;
     }
-    if (selectedTab === 'workflows') {
-      setUnderTicketActiveTab('workflows');
-      return;
-    }
     setUnderTicketActiveTab('replies');
   }, [underTicketView, selectedTab, isFixTicket]);
 
@@ -944,7 +940,7 @@ export const ThreadMessages = ({
     });
   };
 
-  // Early return for underTicketView mode - separate tab-based UI with Replies and Workflows
+  // Early return for underTicketView mode - separate tab-based UI with Messages and RCA
   if (underTicketView) {
     return (
       <div
