@@ -114,6 +114,7 @@ import { ReleaseChangeTypesACL } from '../tables/release-change-types-acl';
 import { ReleaseChangesACL } from '../tables/release-changes-acl';
 import { ReleaseEventsACL } from '../tables/release-events-acl';
 import { ReposACL } from '../tables/repos-acl';
+import { SdlcEntityLinksACL } from '../tables/sdlc-entity-links-acl';
 import { StageApproversACL } from '../tables/stage-approvers-acl';
 import { StageTransitionsACL } from '../tables/stage-transitions-acl';
 import { SurfaceNudgeCountsACL } from '../tables/surface-nudge-counts-acl';
@@ -407,6 +408,8 @@ export class ACLFactory {
         return new ReleaseEventsACL(ctx);
       case 'repos':
         return new ReposACL(ctx);
+      case 'sdlc_entity_links':
+        return new SdlcEntityLinksACL(ctx);
       case 'stage_approvers':
         return new StageApproversACL(ctx);
       case 'stage_transitions':

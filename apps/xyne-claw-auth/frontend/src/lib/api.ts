@@ -2517,7 +2517,7 @@ export interface ChatMsg {
   contextItems?: AttachedContextRef[];
 }
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "repository";
 export type ContextSearchType = ContextType | "all";
 
 export interface ContextItem {
@@ -2529,7 +2529,7 @@ export interface ContextItem {
 }
 
 export interface AttachedContextRef {
-  type: ContextType;
+  type: Exclude<ContextType, "repository">;
   id: string;
   title: string;
   threadId?: string;
@@ -2725,6 +2725,9 @@ export async function sendChatMessage(
     /** Per-request model/provider override. Used by the in-chat model switcher
      *  to pin a LiteLLM model off the agent's shared key for this turn. */
     providerOverride?: { provider: string; model?: string };
+    /** Trusted SDLC repository selection. The backend resolves and authorizes
+     *  the id; URL/branch values are never accepted from the browser. */
+    researchContext?: { type: "repository"; id: string; name?: string };
   },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
@@ -2765,6 +2768,7 @@ export async function sendChatMessage(
         ? { additionalInstructions: requestOptions.additionalInstructions.trim() }
         : {}),
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
+      ...(requestOptions?.researchContext ? { researchContext: requestOptions.researchContext } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),
   });

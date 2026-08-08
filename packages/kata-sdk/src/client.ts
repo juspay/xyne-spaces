@@ -59,11 +59,13 @@ function randomHex(length: number): string {
 function createKubeClient(): CustomObjectsApi {
   const config = new KubeConfig();
 
-  try {
-    config.loadFromCluster();
-  } catch {
-    config.loadFromDefault();
-  }
+  // loadFromDefault supports both execution modes: it reads KUBECONFIG or
+  // ~/.kube/config for local development, and falls back to the mounted
+  // service-account credentials when running inside Kubernetes. Calling
+  // loadFromCluster first does not eagerly read those mounted files, so its
+  // missing-file failure surfaces later from makeApiClient and bypasses the
+  // catch block entirely.
+  config.loadFromDefault();
 
   return config.makeApiClient(CustomObjectsApi);
 }

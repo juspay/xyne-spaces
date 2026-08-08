@@ -1,4 +1,9 @@
-import { createBuilder, defineQueries } from '@rocicorp/zero';
+import {
+  createBuilder,
+  defineQueries,
+  type AnyQueryDefinition,
+  type QueryRegistry,
+} from '@rocicorp/zero';
 import {
   BaseTicketType,
   BoardType,
@@ -3713,6 +3718,54 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getAllRepos: defineQuery(() => {
     return zql.repos.orderBy('name', 'asc');
   }),
+  getSdlcRepos: defineQuery(() => {
+    return zql.repos
+      .where('projectId', 'IS NOT', null)
+      .where('channelId', 'IS NOT', null)
+      .related('project', project => project.related('sdlcBoard'))
+      .related('channel', channel =>
+        channel
+          .related('participants')
+          .related('channelStats')
+          .related('tickets', ticket => ticket.related('pullRequests')),
+      )
+      .related('setupExecution')
+      .related('sdlcEntityLinks')
+      .orderBy('name', 'asc');
+  }),
+  getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
+    return zql.repos
+      .where('id', repoId)
+      .where('projectId', 'IS NOT', null)
+      .where('channelId', 'IS NOT', null)
+      .related('project', project => project.related('sdlcBoard'))
+      .related('channel', channel =>
+        channel
+          .related('participants')
+          .related('channelStats')
+          .related('canvasFolders', folder =>
+            folder.where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs']).related('canvases'),
+          )
+          .related('tickets', ticket =>
+            ticket
+              .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc'))
+              .related('workflows', workflow =>
+                workflow
+                  .where('workflowType', 'SDLC_WORK')
+                  .orderBy('createdAt', 'desc')
+                  .related('workflowExecutions', execution =>
+                    execution.orderBy('updatedAt', 'desc'),
+                  ),
+              ),
+          ),
+      )
+      .related('setupExecution')
+      .related('sdlcEntityLinks')
+      .one();
+  }),
+  getSdlcLinks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
+    return zql.sdlc_entity_links.where('repoId', repoId).orderBy('createdAt', 'asc');
+  }),
   getAllForms: defineQuery(() => {
     return zql.forms
       .related('formFields', q => q.related('globalField'))
@@ -4620,4 +4673,4 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('userMappings')
       .one();
   }),
-});
+}) as unknown as QueryRegistry<Record<string, AnyQueryDefinition>, typeof schema>;

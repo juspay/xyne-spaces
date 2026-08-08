@@ -63,6 +63,7 @@ import {
   WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
+  SdlcEntityLinksACL,
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
@@ -269,6 +270,8 @@ export class QueryACLFactory {
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':
         return new ReposACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_entity_links':
+        return new SdlcEntityLinksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
