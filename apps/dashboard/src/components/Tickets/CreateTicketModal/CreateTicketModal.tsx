@@ -388,7 +388,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const [newTags, setNewTags] = useState<string[]>([]);
 
-
   // Title generator hook
   const {
     title: generatedTitle,

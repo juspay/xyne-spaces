@@ -436,7 +436,6 @@ const CreateTicketModal = ({
                     </p>
                   )}
 
-
                   {field.type === 'tags' && (
                     <div className='flex gap-1.5 flex-wrap'>
                       <span className='inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded'>
