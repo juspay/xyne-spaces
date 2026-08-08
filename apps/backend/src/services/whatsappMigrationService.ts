@@ -980,7 +980,6 @@ export class WhatsAppMigrationService {
 
           await tx.reactionCount.deleteMany({ where: { messageId } });
           await tx.reaction.deleteMany({ where: { messageId } });
-          await tx.messageSearch.deleteMany({ where: { messageId } });
 
           if (shouldSoftDelete) {
             await tx.message.update({

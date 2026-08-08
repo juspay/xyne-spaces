@@ -40,7 +40,6 @@ import {
   Trash2,
   User,
   Users,
-  WorkflowIcon,
   X,
 } from 'lucide-react';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -55,7 +54,6 @@ import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
-import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
@@ -390,9 +388,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const [newTags, setNewTags] = useState<string[]>([]);
 
-  // Fetch workflow types using optimized hook
-  const { workflowTypes } = useWorkflowTypes();
-
   // Title generator hook
   const {
     title: generatedTitle,
@@ -485,7 +480,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const showAssignee = ticketFormConfig?.assignedTo?.enabled ?? true;
   const showDueDate = ticketFormConfig?.dueDate?.enabled ?? true;
   const showTodo = ticketFormConfig?.todo?.enabled ?? true;
-  const showWorkflows = ticketFormConfig?.workflows?.enabled ?? true;
   const showLabels = ticketFormConfig?.labels?.enabled ?? true;
   const showMerchantId = ticketFormConfig?.merchantId?.enabled ?? false;
   const showTicketType = ticketFormConfig?.ticketType?.enabled ?? true;
@@ -495,7 +489,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryAssignee = ticketFormConfig?.assignedTo?.mandatory ?? false;
   const mandatoryDueDate = ticketFormConfig?.dueDate?.mandatory ?? false;
   const mandatoryTodo = ticketFormConfig?.todo?.mandatory ?? false;
-  const mandatoryWorkflows = ticketFormConfig?.workflows?.mandatory ?? false;
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
   const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
   const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
@@ -1020,7 +1013,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         showAssignee,
         showTodo,
         showDueDate,
-        showWorkflows,
         showLabels,
         showMerchantId,
         showTicketType,
@@ -1028,7 +1020,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         mandatoryAssignee,
         mandatoryTodo,
         mandatoryDueDate,
-        mandatoryWorkflows,
         mandatoryLabels,
         mandatoryMerchantId,
         mandatoryTicketType,
@@ -1041,7 +1032,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       showAssignee,
       showTodo,
       showDueDate,
-      showWorkflows,
       showLabels,
       showMerchantId,
       showTicketType,
@@ -1049,7 +1039,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryAssignee,
       mandatoryTodo,
       mandatoryDueDate,
-      mandatoryWorkflows,
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
@@ -1080,9 +1069,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
       if (showTodo && mandatoryTodo && !formData.status) {
         mandatoryFieldErrors.push('Todo/Status is required');
-      }
-      if (showWorkflows && mandatoryWorkflows && !formData.workflowType) {
-        mandatoryFieldErrors.push('Workflow is required');
       }
       if (showLabels && mandatoryLabels && (!formData.tags || formData.tags.length === 0)) {
         mandatoryFieldErrors.push('Labels are required');
@@ -2662,34 +2648,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               );
             }}
           </form.Field>
-
-          {/* Workflow Type Selection - conditionally rendered */}
-          {showWorkflows && (
-            <form.Field name='workflowType'>
-              {field => {
-                return (
-                  <EntitySelector
-                    variant='inline'
-                    options={workflowTypes.map(workflowType => ({
-                      ...workflowType,
-                      value: workflowType.id,
-                      icon: null,
-                    }))}
-                    selectedValue={field.state.value}
-                    onSelect={value => {
-                      field.handleChange(value as CreateTicketFormData['workflowType']);
-                    }}
-                    searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                    placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                    inputIcon={<WorkflowIcon strokeWidth={2.33} className='size-[14px]' />}
-                    inputClassName='bg-background'
-                    showIndicator={false}
-                    testId='ticket-workflow-selector'
-                  />
-                );
-              }}
-            </form.Field>
-          )}
 
           {/* Tags Selection - conditionally rendered */}
           {showLabels && (

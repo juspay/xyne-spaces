@@ -107,7 +107,6 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
@@ -2393,7 +2392,6 @@ export function createMutators(
             createdAt: now,
           });
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -2563,21 +2561,6 @@ export function createMutators(
             authData.workspaceId,
           );
 
-          asyncTasks.push(async () => {
-            if (message === undefined || user === undefined) return;
-
-
-            // Create search index entry
-            try {
-              await repositories.messageSearch.upsert(
-                message.messageId,
-                plainTextContent,
-                authData.workspaceId
-              );
-            } catch (error) {
-              logger.error('Failed to create message search index:', error);
-            }
-          });
 
           // Handle bot DM messages - trigger bot execution if this is a DM with a bot
           // Runs async after mutator returns to avoid blocking the response
@@ -3092,7 +3075,6 @@ export function createMutators(
             throw new Error('You need to be a participant for adding a conversations');
           }
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -3390,22 +3372,6 @@ export function createMutators(
             authData.workspaceId,
           );
 
-          asyncTasks.push(async () => {
-
-            if (message === undefined || user === undefined) return;
-
-
-            // Create search index entry
-            try {
-              await repositories.messageSearch.upsert(
-                message.messageId,
-                plainTextContent,
-                authData.workspaceId
-              );
-            } catch (error) {
-              logger.error('Failed to create message search index:', error);
-            }
-          });
 
           // Handle bot DM replies - trigger bot execution if this is a DM with a bot
           // Runs async after mutator returns to avoid blocking the response
@@ -3626,26 +3592,6 @@ export function createMutators(
             }
           }
 
-          if (content !== undefined) {
-            asyncTasks.push(async () => {
-              try {
-                // For forwarded messages, index both the forwarded content and the optionalText
-                // For regular messages, just index the content
-                let contentToIndex = content;
-                if (isForwardedMessage) {
-                  const parsedForwarded = parseForwardedMessageXml(message.content);
-                  contentToIndex = `${parsedForwarded?.content || ''} ${content}`.trim();
-                }
-                await repositories.messageSearch.upsert(
-                  messageId,
-                  generatePlainTextContent(contentToIndex),
-                  authData.workspaceId
-                );
-              } catch (error) {
-                logger.error('Failed to update message search index:', error);
-              }
-            });
-          }
         },
       ),
       react: defineMutator(
@@ -3947,15 +3893,6 @@ export function createMutators(
             }
           }
 
-          // Clean up asynchronously
-          asyncTasks.push(async () => {
-            try {
-              // Delete from search index
-              await repositories.messageSearch.delete(messageId);
-            } catch (error) {
-              logger.error('Failed to cleanup system message after non-participant action:', error);
-            }
-          });
         },
       ),
       delete: defineMutator(
@@ -4164,13 +4101,6 @@ export function createMutators(
 
           // 6. Async Side Effects
           asyncTasks.push(async () => {
-            // Delete from search index
-            try {
-              await repositories.messageSearch.delete(messageId);
-            } catch (error) {
-              logger.error('Failed to delete from message search index:', error);
-            }
-
             // Delete attachment files from GCS if any attachments exist
             if (attachments.length > 0) {
               await Promise.allSettled(

@@ -2176,7 +2176,6 @@ model Message {
   messageActs       String?
 
   // Relations
-  messageSearch  MessageSearch? // One-to-one relation with search index
   conversation   Conversation   @relation(fields: [conversationId], references: [conversationId])
   sender         User           @relation("MessageSender", fields: [senderId], references: [id])
   reactions      Reaction[]
@@ -2194,20 +2193,6 @@ model Message {
   @@index([conversationId, createdAt, messageId])
   @@map("messages")
   @@schema("public")
-}
-//Message Search Model
-model MessageSearch {
-  workspaceId String // denormalized tenant key (stamped on insert)
-  messageId        String      @id
-  plaintextContent String
-  searchVector     Unsupported("tsvector")
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  message          Message     @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
-
-  @@map("message_search")
-  @@schema("workflow")
 }
 
 // File Attachment Models

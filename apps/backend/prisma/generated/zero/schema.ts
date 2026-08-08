@@ -1350,16 +1350,6 @@ export const messageTable = table("messages")
   })
   .primaryKey("messageId");
 
-export const messageSearchTable = table("message_search")
-  .columns({
-    workspaceId: string(),
-    messageId: string(),
-    plaintextContent: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("messageId");
-
 export const messageAttachmentTable = table("message_attachments")
   .columns({
     id: string(),
@@ -3996,11 +3986,6 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
 }));
 
 export const messageTableRelationships = relationships(messageTable, ({ one, many }) => ({
-  messageSearch: one({
-    sourceField: ["messageId"],
-    destField: ["messageId"],
-    destSchema: messageSearchTable,
-  }),
   conversation: one({
     sourceField: ["conversationId"],
     destField: ["conversationId"],
@@ -4025,14 +4010,6 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     sourceField: ["messageId"],
     destField: ["entityId"],
     destSchema: externalMessageTable,
-  })
-}));
-
-export const messageSearchTableRelationships = relationships(messageSearchTable, ({ one }) => ({
-  message: one({
-    sourceField: ["messageId"],
-    destField: ["messageId"],
-    destSchema: messageTable,
   })
 }));
 
@@ -4743,7 +4720,6 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
-      messageSearchTable,
       messageAttachmentTable,
       reactionTable,
       reactionCountTable,
@@ -4893,7 +4869,6 @@ export const schema = createSchema(
       conversationParticipantTableRelationships,
       emailTableRelationships,
       messageTableRelationships,
-      messageSearchTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
@@ -5028,7 +5003,6 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
-export type MessageSearch = Row<typeof schema.tables.message_search>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
