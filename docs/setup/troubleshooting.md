@@ -79,6 +79,22 @@ pnpm --filter xyne-spaces-backend run db:common:generate
 
 ## Services
 
+### `EMFILE: too many open files, watch`
+
+A dev process (usually `tsx --watch` in xyne-claw or claw-auth) crashed the file
+watcher. macOS shells often default to a 256-open-file limit, and several watch
+processes together exceed it. `pnpm run dev` raises the limit automatically for
+everything it starts; you only hit this when running an app directly. Raise the
+limit in that shell first:
+
+```bash
+ulimit -n 10240
+pnpm --filter xyne-claw run dev
+```
+
+(The accompanying `write EPIPE` is just the watcher's IPC pipe dying — fixing
+the limit fixes both.)
+
 ### Port already in use
 
 Something is bound to a port the stack needs — most often a system Postgres on 5432

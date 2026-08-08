@@ -220,13 +220,28 @@ const quoteForShell = (argument) =>
     ? `"${argument}"`
     : argument;
 
+const quoteForPosix = (argument) => `'${argument.replace(/'/g, "'\\''")}'`;
+
 function runPnpm(args) {
   return new Promise((resolvePromise) => {
-    const child = spawn("pnpm", args.map(quoteForShell), {
-      cwd: repoRoot,
-      stdio: "inherit",
-      shell: process.platform === "win32",
-    });
+    const child =
+      process.platform === "win32"
+        ? spawn("pnpm", args.map(quoteForShell), {
+            cwd: repoRoot,
+            stdio: "inherit",
+            shell: true,
+          })
+        : spawn(
+            "sh",
+            [
+              "-c",
+              `ulimit -n 10240 2>/dev/null; exec pnpm ${args.map(quoteForPosix).join(" ")}`,
+            ],
+            {
+              cwd: repoRoot,
+              stdio: "inherit",
+            },
+          );
     const forward = (signal) => () => {
       try {
         child.kill(signal);
