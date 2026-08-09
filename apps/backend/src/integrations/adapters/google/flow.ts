@@ -13,6 +13,7 @@ import { GooglePubSubMessage, GooglePubSubData } from './types';
 import { config } from '@/config/env';
 import { MessageDirection } from '@xyne/shared';
 import { advanceSyncCursor, seedSyncCursor } from '@/services/syncCursorRecovery';
+import { enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 
 const TAG = '[GoogleFlow]';
 const externalMessageRepo = new ExternalMessageRepository();
@@ -149,6 +150,12 @@ export class GoogleFlow extends BaseFlow {
           deferred,
           failed,
         });
+        if (deferred > 0) {
+          await enqueueCursorCatchup({
+            sourceId: source.id,
+            watchHistoryId: pubsubData.historyId,
+          });
+        }
       } else if (!cursor) {
         logger.warn(`${TAG} [CURSOR_HELD] history returned no historyId — not advancing`, {
           sourceName: source.name,

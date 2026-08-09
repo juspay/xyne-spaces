@@ -14,13 +14,13 @@ export interface EmailFetchJobData {
   isDlMemberSync?: boolean;
 }
 
-export interface ReconnectCatchupJobData {
+export interface CursorCatchupJobData {
   sourceId: string;
   watchHistoryId: string;
   requesterUserId?: string;
 }
 
-export type EmailFetchQueueJobData = EmailFetchJobData | ReconnectCatchupJobData;
+export type EmailFetchQueueJobData = EmailFetchJobData | CursorCatchupJobData;
 
 class EmailFetchQueue {
   private queue: Bull.Queue<EmailFetchQueueJobData> | null = null;
@@ -103,17 +103,16 @@ class EmailFetchQueue {
 
 export const emailFetchQueue = new EmailFetchQueue();
 
-export async function enqueueReconnectCatchup(params: ReconnectCatchupJobData): Promise<void> {
+export async function enqueueCursorCatchup(params: CursorCatchupJobData): Promise<void> {
   try {
     if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
-    await emailFetchQueue.getQueue().add(
-      'reconnect-catchup',
-      params,
-      { jobId: `catchup:${params.sourceId}` },
-    );
-    logger.info('[EMAIL-FETCH-QUEUE] Queued reconnect catch-up', { sourceId: params.sourceId });
+    await emailFetchQueue.getQueue().add('cursor-catchup', params, {
+      jobId: `catchup:${params.sourceId}:${params.watchHistoryId}`,
+      removeOnFail: true,
+    });
+    logger.info('[EMAIL-FETCH-QUEUE] Queued cursor catch-up', { sourceId: params.sourceId });
   } catch (error) {
-    logger.error('[EMAIL-FETCH-QUEUE] Failed to queue reconnect catch-up', {
+    logger.error('[EMAIL-FETCH-QUEUE] Failed to queue cursor catch-up', {
       sourceId: params.sourceId,
       error,
     });

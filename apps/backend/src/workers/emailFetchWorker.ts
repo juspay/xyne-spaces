@@ -10,7 +10,7 @@ import {
   emailFetchQueue,
   type EmailFetchJobData,
   type EmailFetchQueueJobData,
-  type ReconnectCatchupJobData,
+  type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { getHttpStatus } from '@/services/googleService';
@@ -33,8 +33,8 @@ class EmailFetchWorker {
       return this.processJob(job as Bull.Job<EmailFetchJobData>);
     });
 
-    queue.process('reconnect-catchup', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
-      return this.processReconnectCatchup(job as Bull.Job<ReconnectCatchupJobData>);
+    queue.process('cursor-catchup', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
+      return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
     queue.on('failed', (job, err) => {
@@ -52,8 +52,8 @@ class EmailFetchWorker {
     logger.info('[EMAIL-FETCH-WORKER] Started, ready to process jobs');
   }
 
-  private async processReconnectCatchup(
-    job: Bull.Job<ReconnectCatchupJobData>,
+  private async processCursorCatchup(
+    job: Bull.Job<CursorCatchupJobData>,
   ): Promise<void> {
     const { sourceId, watchHistoryId, requesterUserId } = job.data;
     const source = await externalSourceRepo.findById(sourceId);

@@ -25,7 +25,7 @@ import {
   sanitizeReturnPath,
 } from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
-import { emailFetchQueue, enqueueReconnectCatchup } from '@/queues/emailFetchQueue';
+import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
 
@@ -896,7 +896,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         sourceId: sourceRow.id,
       });
 
-      await enqueueReconnectCatchup({
+      await enqueueCursorCatchup({
         sourceId: sourceRow.id,
         watchHistoryId: reEncrypted.watchResult.historyId,
         requesterUserId: stateData.userId,
@@ -957,7 +957,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           },
         });
 
-        await enqueueReconnectCatchup({
+        await enqueueCursorCatchup({
           sourceId: existingForWorkspace.id,
           watchHistoryId: network.watchResult.historyId,
           requesterUserId: stateData.userId,
@@ -1162,7 +1162,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           },
         });
 
-        await enqueueReconnectCatchup({
+        await enqueueCursorCatchup({
           sourceId: existingSource.id,
           watchHistoryId: network.watchResult.historyId,
           requesterUserId: stateData.userId,
