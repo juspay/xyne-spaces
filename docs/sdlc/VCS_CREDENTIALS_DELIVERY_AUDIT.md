@@ -14,7 +14,7 @@ Date: 2026-08-05
 | Progressive gate | Durable access worker, anonymous public fallback, manual baseline Next, approval-gated artifacts, capability-gated Start Work, identical backend checks |
 | Runtime | Backend-only one-use grants, strict `sdlc-agent` and sandbox/public-key-bound encrypted bootstrap nested under repository setup, sandbox-only PAT-account lookup and commit attribution, restrictive randomized helper with run-finally cleanup and cached-session refresh, public credential-free path, convention-derived branch, narrow backend-owned draft-PR tool |
 | Failure/security | Provider error codes, stale capability on runtime auth failure, PAT/authenticated-URL redaction, secret-path guards, no PAT in durable context |
-| Rollout | Per-workspace `Workspace.metadata.sdlcVcsCredentialsV1` flag and operations/rollback runbook |
+| Rollout | Available to all workspaces; role/repository authorization and operations/rollback runbook |
 
 ## Acceptance-criteria audit
 

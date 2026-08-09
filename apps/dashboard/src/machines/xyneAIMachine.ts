@@ -94,6 +94,10 @@ export interface XyneAIContext {
   canvasInfo: CanvasInfo | null;
   // Canvas selection context - groups canvas with its selections
   canvasContexts: CanvasSelectionContext[];
+  /** Context pills supplied by the surface that opened Ask AI. */
+  initialContextSelections: AskAIInitialContextSelections | null;
+  /** Re-seeds context even when a user clicks Ask AI on the same item twice. */
+  contextOpenNonce: number;
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
   // Knowledge Base context
@@ -456,6 +460,11 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections: event.initialContextSelections ?? null,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -527,6 +536,14 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections:
+            event.initialContextSelections !== undefined
+              ? event.initialContextSelections
+              : context.initialContextSelections,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -584,6 +601,8 @@ export const xyneAIMachine = setup({
         startFreshChat: false,
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
+        initialContextSelections: null,
+        contextOpenNonce: context.contextOpenNonce,
         focusSessionId: null,
         kbCollectionId: null,
         kbChannelId: null,
@@ -729,6 +748,8 @@ export const xyneAIMachine = setup({
     startFreshChat: false,
     canvasInfo: null,
     canvasContexts: [],
+    initialContextSelections: null,
+    contextOpenNonce: 0,
     focusSessionId: null,
     kbCollectionId: null,
     kbChannelId: null,

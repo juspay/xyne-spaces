@@ -2,7 +2,7 @@
 
 Status: implementation handoff
 Scope: GitHub.com fine-grained PAT v1
-Last updated: 2026-08-05
+Last updated: 2026-08-09
 
 This runbook operates the design in [VCS_CREDENTIALS_PLAN.md](./VCS_CREDENTIALS_PLAN.md). It never asks
 an operator to copy a token into logs, tickets, chat, or commands.
@@ -20,21 +20,17 @@ write when a task creates or changes a file under `.github/workflows`.
 S3. Give the token an expiry and record its owner/expiry in the team's secret-management system.
 Expected: rotation has an accountable owner and date; the PAT value is not stored in this repository.
 
-## 2. Workspace rollout flag
+## 2. Availability
 
-The backend reads `Workspace.metadata.sdlcVcsCredentialsV1`. Only the exact boolean `true` enables
-credential viewing, configuration, and runtime grants. Public anonymous access checks continue to work while
-the flag is off.
+Repository credentials are available to every workspace without a metadata or environment feature key.
+Workspace owner/admin authorization still controls configuration, replacement, revalidation, and disconnect;
+repository membership and capability checks still control consumption.
 
-S1. Enable one smoke-test workspace by merging `{ "sdlcVcsCredentialsV1": true }` into that workspace's
-metadata through the approved database/admin path.
-Expected: Workspace Management → Repository credentials loads instead of returning feature-not-enabled.
+S1. As a workspace owner/admin, open Workspace Management → Repository credentials.
+Expected: the credential surface loads without workspace metadata configuration.
 
-S2. Keep every other workspace unset or false until the configured smoke passes.
-Expected: other workspaces cannot configure or consume a workspace PAT.
-
-S3. After acceptance, enable workspaces in small batches and watch access-check/runtime error codes.
-Expected: rollout can stop without schema rollback or data deletion.
+S2. Watch access-check/runtime error codes during rollout.
+Expected: credential and provider failures remain isolated by workspace and repository.
 
 ## 3. Configure or rotate
 
@@ -110,14 +106,14 @@ revalidate or replace the credential.
 
 ## 7. Rollback
 
-S1. Set `Workspace.metadata.sdlcVcsCredentialsV1` to false for the affected workspace.
-Expected: new credential reads/mutations and runtime grants stop; stored data is preserved.
-
-S2. Stop/retry affected executions through existing SDLC controls.
+S1. Stop/retry affected executions through existing SDLC controls.
 Expected: no new credential-bearing sandbox run starts.
 
-S3. Disconnect and revoke the PAT if compromise is suspected.
+S2. Disconnect and revoke the PAT if compromise is suspected.
 Expected: ciphertext is cleared, revision changes, repository checks stale, and GitHub rejects the old PAT.
+
+S3. Roll back the application release if the credential feature itself must be disabled globally.
+Expected: availability changes through deployment rollback, not mutable workspace metadata.
 
 S4. Leave additive migration columns/tables in place during application rollback.
 Expected: legacy Bitbucket, Release, commit analysis, webhook, deployment GitHub, approvals, and artifact data are

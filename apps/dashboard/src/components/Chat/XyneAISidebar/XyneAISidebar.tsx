@@ -79,6 +79,7 @@ import {
   type CanvasInfo,
   type XyneAIContext,
   type SelectionInfo,
+  type AskAIInitialContextSelections,
   type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
@@ -108,8 +109,16 @@ interface XyneAISidebarProps {
   threadInfo?: ThreadInfo | null;
   startFreshChat?: boolean;
   canvasInfo?: CanvasInfo | null;
+  /** Context supplied by surface opening this Ask AI conversation. */
+  initialContextSelections?: AskAIInitialContextSelections | null;
+  /** Re-applies supplied context on every explicit Ask AI open. */
+  contextOpenNonce?: number;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
+  preserveStreamingOnClose?: boolean;
+  hideHeaderClose?: boolean;
+  denseHeader?: boolean;
+  debuggerPresentation?: 'split' | 'replace';
   onDebuggerOpenChange?: (open: boolean) => void;
   initialConversationId?: string;
   onConversationChange?: (conversationId: string) => void;
@@ -137,9 +146,15 @@ const XyneAISidebar = ({
   channelId,
   threadInfo,
   canvasInfo,
+  initialContextSelections,
+  contextOpenNonce,
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
+  preserveStreamingOnClose = false,
+  hideHeaderClose = false,
+  denseHeader = false,
+  debuggerPresentation = 'split',
   onDebuggerOpenChange,
   initialConversationId,
   onConversationChange,
@@ -258,6 +273,11 @@ const XyneAISidebar = ({
   const [selectedCanvases, setSelectedCanvases] = useState<SelectedCanvas[]>([]);
   const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
   const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
+  useEffect(() => {
+    if (!initialContextSelections) return;
+    setSelectedCanvases(initialContextSelections.canvases);
+    setSelectedRecordings(initialContextSelections.recordings);
+  }, [initialContextSelections, contextOpenNonce]);
   const [browserContext, setBrowserContext] = useState<{
     type: 'browser';
     text: string;
@@ -1825,7 +1845,8 @@ const XyneAISidebar = ({
     onUserTagsChange: setCurrentUserTags,
   };
 
-  const showInlineDebugger = showDebugger && isV2;
+  const showInlineDebugger = showDebugger && isV2 && debuggerPresentation === 'split';
+  const showReplacingDebugger = showDebugger && isV2 && debuggerPresentation === 'replace';
   const isCompactSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 760;
   const isTightSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 640;
 
@@ -1875,6 +1896,7 @@ const XyneAISidebar = ({
           'relative flex min-h-0 min-w-0 flex-1 flex-col',
           isMobile && 'bg-background',
           showInlineDebugger && 'border-r border-border/70',
+          showReplacingDebugger && 'hidden',
         )}
       >
         {/* Drag and Drop Overlay */}
@@ -1929,6 +1951,8 @@ const XyneAISidebar = ({
                 isTight={isTightSidebar}
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}
+                hideClose={hideHeaderClose}
+                dense={denseHeader}
                 onShowDebugger={
                   isV2 && !isAgentForced
                     ? () => {
@@ -1950,7 +1974,7 @@ const XyneAISidebar = ({
                 {...(onClose !== undefined
                   ? {
                       onClose: () => {
-                        abortCurrentRequest();
+                        if (!preserveStreamingOnClose) abortCurrentRequest();
                         onClose();
                       },
                     }
@@ -2261,6 +2285,23 @@ const XyneAISidebar = ({
           </div>
         )}
       </div>
+
+      {showReplacingDebugger && (
+        <AskAIDebugPanel
+          open
+          fill
+          conversationId={conversationId || streamThreadKey}
+          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          liveEvents={debugEvents}
+          running={isActiveSessionStreaming}
+          artifactsReadyVersion={debugArtifactsReadyVersion}
+          selectedTurnIndex={debugTurnIndex}
+          selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
+          selectedSessionId={debugSessionId}
+          focusToolCallId={debugFocusToolCallId}
+          onClose={() => setShowDebugger(false)}
+        />
+      )}
 
       {showInlineDebugger && (
         <>

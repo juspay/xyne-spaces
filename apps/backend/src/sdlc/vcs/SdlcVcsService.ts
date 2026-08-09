@@ -44,7 +44,6 @@ const adapters: Record<VcsProvider, VcsProviderAdapter> = {
 const activeExecutionStatuses = ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING', 'EXTERNAL_WAIT'];
 // This is only a lease for recovering a stuck queue job. It is not a credential TTL.
 const ACCESS_CHECK_RUNNING_LEASE_MS = 5 * 60_000;
-const CREDENTIAL_FEATURE_FLAG = 'sdlcVcsCredentialsV1';
 const SDLC_AGENT_SLUG = 'sdlc-agent';
 
 export class SdlcVcsService implements SdlcVcs {
@@ -57,7 +56,6 @@ export class SdlcVcsService implements SdlcVcs {
   }
 
   async listCredentials(actor: SdlcActor): Promise<unknown[]> {
-    await this.requireCredentialFeature(actor.workspaceId);
     const user = await this.requireWorkspaceUser(actor);
     const rows = await this.credentialStore.list(this.prisma, actor.workspaceId);
     const counts = await this.repositoryCountsByProvider(actor.workspaceId);
@@ -84,7 +82,6 @@ export class SdlcVcsService implements SdlcVcs {
     provider: VcsProvider,
     input: { token: string; resourceOwner: string }
   ): Promise<unknown> {
-    await this.requireCredentialFeature(actor.workspaceId);
     await this.requireWorkspaceAdmin(actor);
     const adapter = this.adapter(provider);
     let validation;
@@ -139,7 +136,6 @@ export class SdlcVcsService implements SdlcVcs {
   }
 
   async revalidateCredential(actor: SdlcActor, provider: VcsProvider): Promise<unknown> {
-    await this.requireCredentialFeature(actor.workspaceId);
     await this.requireWorkspaceAdmin(actor);
     const row = await this.requireConnectedCredential(actor.workspaceId, provider);
     try {
@@ -199,7 +195,6 @@ export class SdlcVcsService implements SdlcVcs {
   }
 
   async disconnectCredential(actor: SdlcActor, provider: VcsProvider): Promise<void> {
-    await this.requireCredentialFeature(actor.workspaceId);
     await this.requireWorkspaceAdmin(actor);
     const row = await this.prisma.$transaction(async (tx) => {
       await this.credentialStore.lock(tx, actor.workspaceId, provider);
@@ -392,9 +387,11 @@ export class SdlcVcsService implements SdlcVcs {
     let credentialInvalidated = false;
     try {
       const parsed = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
-      const credential = (await this.credentialFeatureEnabled(input.workspaceId))
-        ? await this.credentialStore.find(this.prisma, input.workspaceId, provider)
-        : null;
+      const credential = await this.credentialStore.find(
+        this.prisma,
+        input.workspaceId,
+        provider
+      );
       let token: string | undefined;
       const credentialRevision = credential?.revision ?? null;
       let identityLogin: string | null = null;
@@ -594,7 +591,6 @@ export class SdlcVcsService implements SdlcVcs {
     sessionId: string;
     operation: 'CLONE' | 'PUSH' | 'CREATE_PULL_REQUEST';
   }): Promise<RuntimeGrant> {
-    await this.requireCredentialFeature(input.actor.workspaceId);
     const required: VcsCapability[] =
       input.operation === 'CLONE'
         ? ['READ_REPOSITORY']
@@ -1045,26 +1041,6 @@ export class SdlcVcsService implements SdlcVcs {
     });
     if (!user) throw new AppError('Workspace user not found', 403);
     return user;
-  }
-
-  private async credentialFeatureEnabled(workspaceId: string): Promise<boolean> {
-    const workspace = await this.prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { metadata: true },
-    });
-    const metadata =
-      workspace?.metadata &&
-      typeof workspace.metadata === 'object' &&
-      !Array.isArray(workspace.metadata)
-        ? (workspace.metadata as Record<string, unknown>)
-        : {};
-    return metadata[CREDENTIAL_FEATURE_FLAG] === true;
-  }
-
-  private async requireCredentialFeature(workspaceId: string): Promise<void> {
-    if (!(await this.credentialFeatureEnabled(workspaceId))) {
-      throw new AppError('Workspace repository credentials are not enabled', 404);
-    }
   }
 
   private async requireWorkspaceAdmin(actor: SdlcActor): Promise<void> {

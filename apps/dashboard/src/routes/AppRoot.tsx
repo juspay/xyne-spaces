@@ -369,6 +369,11 @@ const AppRoot = (): ReactElement => {
   const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
+  const xyneAIInitialContextSelections = useSelector(
+    xyneAIActor,
+    state => state.context.initialContextSelections,
+  );
+  const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
@@ -569,7 +574,7 @@ const AppRoot = (): ReactElement => {
                     <EditWarningModal />
                     <Outlet />
                   </main>
-                ) : isSdlcDebuggerOpen && !isMobile ? (
+                ) : isSdlcDebuggerOpen && !isMobile && sdlcRepoId === null ? (
                   <div className='flex h-screen flex-col'>
                     <ResizableGroup
                       orientation='horizontal'
@@ -598,7 +603,7 @@ const AppRoot = (): ReactElement => {
                       </Panel>
                     </ResizableGroup>
                   </div>
-                ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
+                ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage && sdlcRepoId === null ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
                   <div className='flex flex-col h-screen'>
                     <ResizableGroup
@@ -635,21 +640,27 @@ const AppRoot = (): ReactElement => {
                         minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
                       >
                         <XyneAISidebarZIndexShell>
-                          <XyneAISidebar
-                            channelId={xyneAIChannelId}
-                            threadInfo={xyneAIThreadInfo}
-                            startFreshChat={xyneAIStartFreshChat}
-                            canvasInfo={xyneAICanvasInfo}
-                            kbCollectionId={xyneAIKbCollectionId ?? ''}
-                            kbChannelId={xyneAIKbChannelId ?? ''}
-                            kbDocId={xyneAIKbDocId ?? ''}
-                            kbDocName={xyneAIKbDocName ?? ''}
-                            kbOpenNonce={xyneAIKbOpenNonce}
-                            researchContext={xyneAIResearchContext}
-                            initialQuery={xyneAIInitialQuery ?? undefined}
-                            autoSendNonce={xyneAIAutoSendNonce}
-                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                          />
+                          <div className='flex h-full min-h-0 flex-col'>
+                            <div className='min-h-0 flex-1'>
+                              <XyneAISidebar
+                                channelId={xyneAIChannelId}
+                                threadInfo={xyneAIThreadInfo}
+                                startFreshChat={xyneAIStartFreshChat}
+                                canvasInfo={xyneAICanvasInfo}
+                                initialContextSelections={xyneAIInitialContextSelections}
+                                contextOpenNonce={xyneAIContextOpenNonce}
+                                kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                kbChannelId={xyneAIKbChannelId ?? ''}
+                                kbDocId={xyneAIKbDocId ?? ''}
+                                kbDocName={xyneAIKbDocName ?? ''}
+                                kbOpenNonce={xyneAIKbOpenNonce}
+                                researchContext={xyneAIResearchContext}
+                                initialQuery={xyneAIInitialQuery ?? undefined}
+                                autoSendNonce={xyneAIAutoSendNonce}
+                                onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                              />
+                            </div>
+                          </div>
                         </XyneAISidebarZIndexShell>
                       </Panel>
                     </ResizableGroup>
