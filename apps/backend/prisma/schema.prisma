@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "SdlcVcsRuntimeGrant"]
 }
 
 datasource db {

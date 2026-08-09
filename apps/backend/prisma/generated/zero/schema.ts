@@ -59,7 +59,7 @@ export const toolTable = table("tools")
 
 export const agentToolsMappingTable = table("agent_tools_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     agentId: string(),
     toolId: string(),
@@ -131,7 +131,7 @@ export const subTicketTable = table("sub_tickets")
 
 export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     subTicketId: string(),
@@ -140,7 +140,7 @@ export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
 
 export const ticketAssignmentTable = table("ticket_assignments")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     userId: string().optional(),
@@ -153,7 +153,7 @@ export const ticketAssignmentTable = table("ticket_assignments")
 
 export const ticketActivityTable = table("ticket_activities")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     updatedBy: string(),
@@ -166,7 +166,7 @@ export const ticketActivityTable = table("ticket_activities")
 
 export const ticketEntityMappingTable = table("ticket_entity_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     entityType: string(),
@@ -176,7 +176,7 @@ export const ticketEntityMappingTable = table("ticket_entity_mappings")
 
 export const ticketTagTable = table("ticket_tags")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     ticketId: string(),
@@ -185,7 +185,7 @@ export const ticketTagTable = table("ticket_tags")
 
 export const projectTagTable = table("project_tags")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     projectId: string(),
@@ -195,7 +195,7 @@ export const projectTagTable = table("project_tags")
 
 export const ticketTagMappingTable = table("ticket_tag_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     tagId: string(),
@@ -206,7 +206,7 @@ export const ticketTagMappingTable = table("ticket_tag_mappings")
 
 export const ticketReferenceMappingTable = table("ticket_reference_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     sourceTicketId: string(),
     targetTicketId: string(),
@@ -219,7 +219,7 @@ export const ticketReferenceMappingTable = table("ticket_reference_mappings")
 
 export const ticketStageEtaTable = table("ticket_stage_eta")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -254,7 +254,7 @@ export const workflowTable = table("workflows")
 
 export const workflowExecutionTable = table("workflow_executions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     workflowId: string(),
     workflowType: string().optional(),
@@ -275,7 +275,7 @@ export const workflowExecutionTable = table("workflow_executions")
 
 export const workflowExecutionStateTable = table("workflow_execution_states")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     workflowExecutionId: string(),
     context: string().optional(),
@@ -295,7 +295,7 @@ export const workflowMappingTable = table("workflow_mappings")
 
 export const workflowExecutionLockTable = table("workflow_execution_locks")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     workflowExecutionId: string(),
     workerId: string(),
@@ -307,7 +307,7 @@ export const workflowExecutionLockTable = table("workflow_execution_locks")
 
 export const workflowExecutionUsersTable = table("workflow_execution_users")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     workflowExecutionId: string(),
@@ -318,7 +318,7 @@ export const workflowExecutionUsersTable = table("workflow_execution_users")
 
 export const workflowStepTable = table("workflow_steps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     workflowExecutionId: string(),
     stepExecutorType: string(),
@@ -337,7 +337,7 @@ export const workflowStepTable = table("workflow_steps")
 
 export const workflowKnowledgeTable = table("workflow_knowledge")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     workflowExecutionId: string(),
     checkpointId: string(),
@@ -352,7 +352,7 @@ export const workflowKnowledgeTable = table("workflow_knowledge")
 
 export const knowledgeDocumentTable = table("knowledge_documents")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     projectId: string(),
     repositoryUrl: string().optional(),
@@ -371,7 +371,7 @@ export const knowledgeDocumentTable = table("knowledge_documents")
 
 export const agentStepTable = table("agent_steps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     stepsId: string().optional(),
     toolCallId: string().optional(),
@@ -388,7 +388,7 @@ export const agentStepTable = table("agent_steps")
 
 export const externalStepResponseTable = table("external_step_responses")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     workflowExecutionId: string(),
     workflowStepId: string(),
@@ -400,7 +400,7 @@ export const externalStepResponseTable = table("external_step_responses")
 
 export const apiKeyTable = table("api_keys")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     description: string().optional(),
@@ -448,7 +448,7 @@ export const roleTable = table("roles")
 
 export const userRoleMappingTable = table("user_role_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     roleId: string(),
@@ -459,7 +459,7 @@ export const userRoleMappingTable = table("user_role_mappings")
 
 export const userSessionTable = table("user_sessions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     refreshToken: string(),
@@ -508,7 +508,7 @@ export const userTable = table("users")
 
 export const userPreferenceTable = table("user_preferences")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(),
@@ -527,7 +527,7 @@ export const userPreferenceTable = table("user_preferences")
 
 export const userSkillTable = table("user_skills")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     userId: string(),
     name: string(),
     description: string().optional(),
@@ -538,7 +538,7 @@ export const userSkillTable = table("user_skills")
 
 export const scheduledMessageTable = table("scheduled_messages")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     title: string(),
     messageContent: string(),
@@ -554,7 +554,7 @@ export const scheduledMessageTable = table("scheduled_messages")
 
 export const callMessageTable = table("call_messages")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     callId: string(),
     participantId: string(),
@@ -565,7 +565,7 @@ export const callMessageTable = table("call_messages")
 
 export const userGroupMappingTable = table("user_group_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -580,7 +580,7 @@ export const userGroupMappingTable = table("user_group_mappings")
 
 export const userAssignmentStateTable = table("user_assignment_states")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -594,7 +594,7 @@ export const userAssignmentStateTable = table("user_assignment_states")
 
 export const boardComplexityScoreTable = table("board_complexity_scores")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userGroupId: string(),
     boardId: string(),
@@ -608,7 +608,7 @@ export const boardComplexityScoreTable = table("board_complexity_scores")
 
 export const userWorkloadMappingTable = table("user_workload_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -623,7 +623,7 @@ export const userWorkloadMappingTable = table("user_workload_mappings")
 
 export const userExpertiseMappingTable = table("user_expertise_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -639,7 +639,7 @@ export const userExpertiseMappingTable = table("user_expertise_mappings")
 
 export const userPresenceTable = table("user_presence")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     status: string(),
@@ -659,7 +659,7 @@ export const userPresenceTable = table("user_presence")
 
 export const userProfileTable = table("user_profiles")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     dob: number().optional(),
@@ -689,7 +689,7 @@ export const resourceTable = table("resources")
 
 export const resourceAccessTable = table("resource_access")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     groupId: string().optional(),
     userId: string().optional(),
@@ -702,7 +702,7 @@ export const resourceAccessTable = table("resource_access")
 
 export const aclAuditLogTable = table("acl_audit_logs")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     timestamp: number(),
     actorUserId: string().optional(),
@@ -716,7 +716,7 @@ export const aclAuditLogTable = table("acl_audit_logs")
 
 export const pullRequestsTable = table("pull_requests")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     prId: number(),
     workflowExecutionId: string().optional(),
@@ -914,7 +914,7 @@ export const invitationTable = table("invitations")
   .columns({
     id: string(),
     orgId: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     email: string(),
     role: string(),
     invitedBy: string(),
@@ -979,7 +979,7 @@ export const boardTable = table("boards")
 
 export const stageTable = table("stages")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     eta: number().optional(),
@@ -997,7 +997,7 @@ export const stageTable = table("stages")
 
 export const stagePrStatusMappingTable = table("stage_pr_status_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     stageId: string(),
     prStatus: string(),
@@ -1007,7 +1007,7 @@ export const stagePrStatusMappingTable = table("stage_pr_status_mappings")
 
 export const stageTransitionTable = table("stage_transitions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     boardId: string(),
     fromStageId: string().optional(),
@@ -1050,7 +1050,7 @@ export const channelTable = table("channels")
 
 export const channelStatsTable = table("channel_stats")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     channelId: string(),
     lastActivityAt: number(),
     participantCount: number(),
@@ -1061,7 +1061,7 @@ export const channelStatsTable = table("channel_stats")
 
 export const channelParticipantTable = table("channel_participants")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1076,7 +1076,7 @@ export const channelParticipantTable = table("channel_participants")
 
 export const channelUserStatusTable = table("channel_user_status")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1123,7 +1123,7 @@ export const conversationTable = table("conversations")
     channelId: string(),
     createdBy: string(),
     initialMessageId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1142,7 +1142,7 @@ export const conversationTable = table("conversations")
 
 export const conversationParticipantTable = table("conversation_participants")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     conversationId: string(),
     userId: string(),
@@ -1157,7 +1157,7 @@ export const conversationParticipantTable = table("conversation_participants")
 
 export const emailTable = table("emails")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     type: string(),
     subject: string(),
@@ -1180,7 +1180,7 @@ export const emailTable = table("emails")
 
 export const emailDraftTable = table("email_drafts")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     conversationId: string().optional(),
     userId: string().optional(),
@@ -1200,7 +1200,7 @@ export const emailDraftTable = table("email_drafts")
 
 export const emailReadTable = table("email_reads")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     userId: string(),
@@ -1254,7 +1254,7 @@ export const ticketUserMailboxTable = table("ticket_user_mailbox")
 
 export const emailSignatureTable = table("email_signatures")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     name: string(),
@@ -1286,7 +1286,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     autoDraftAgentSlug: string().optional(),
     deskType: string(),
     dlEmail: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
   })
@@ -1294,7 +1294,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
 
 export const classificationMappingTable = table("classification_mappings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     category: string(),
@@ -1306,7 +1306,7 @@ export const classificationMappingTable = table("classification_mappings")
 
 export const boardSlaPolicyTable = table("board_sla_policies")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     boardId: string(),
     priority: string(),
@@ -1328,7 +1328,7 @@ export const messageTable = table("messages")
     conversationId: string(),
     childConversationId: string().optional(),
     senderId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     content: string(),
     msgType: string(),
     hasAttachment: boolean(),
@@ -1347,7 +1347,7 @@ export const messageTable = table("messages")
 
 export const messageSearchTable = table("message_search")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     messageId: string(),
     plaintextContent: string(),
     createdAt: number(),
@@ -1381,7 +1381,7 @@ export const messageAttachmentTable = table("message_attachments")
 
 export const reactionTable = table("reactions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     reactionId: string(),
     messageId: string(),
     userId: string(),
@@ -1392,7 +1392,7 @@ export const reactionTable = table("reactions")
 
 export const reactionCountTable = table("reaction_counts")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     countId: string(),
     messageId: string(),
     emojiName: string(),
@@ -1403,7 +1403,7 @@ export const reactionCountTable = table("reaction_counts")
 
 export const customEmojiTable = table("custom_emojis")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     url: string(),
@@ -1416,7 +1416,7 @@ export const activityTable = table("activities")
   .columns({
     id: string(),
     userId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     actorAction: string(),
     actionSource: string(),
     actionSourceId: string(),
@@ -1443,7 +1443,7 @@ export const activityTable = table("activities")
 
 export const userExternalTokenTable = table("user_external_tokens")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     provider: string(),
@@ -1459,7 +1459,7 @@ export const userExternalTokenTable = table("user_external_tokens")
 
 export const externalMessageTable = table("external_messages")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     externalSourceId: string(),
     externalId: string(),
@@ -1475,7 +1475,7 @@ export const externalMessageTable = table("external_messages")
 
 export const proactiveNudgeTable = table("proactive_nudges")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     messageId: string(),
     type: string(),
@@ -1491,7 +1491,7 @@ export const proactiveNudgeTable = table("proactive_nudges")
 
 export const surfaceNudgeTable = table("surface_nudges")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     nudgeKind: string(),
     sourceId: string(),
@@ -1510,7 +1510,7 @@ export const surfaceNudgeTable = table("surface_nudges")
 
 export const surfaceNudgeCountTable = table("surface_nudge_counts")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     nudgeCount: number(),
     userId: string().optional(),
@@ -1529,7 +1529,7 @@ export const surfaceNudgeCountTable = table("surface_nudge_counts")
 
 export const notificationTable = table("notifications")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     type: string(),
@@ -1551,7 +1551,7 @@ export const notificationTable = table("notifications")
 
 export const notificationPreferenceTable = table("notification_preferences")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     notificationType: string(),
@@ -1565,7 +1565,7 @@ export const notificationPreferenceTable = table("notification_preferences")
 
 export const browserNotificationSubscriptionTable = table("browser_notification_subscriptions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     endpoint: string(),
@@ -1581,7 +1581,7 @@ export const browserNotificationSubscriptionTable = table("browser_notification_
 
 export const callTable = table("calls")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     externalId: string(),
     title: string().optional(),
@@ -1652,7 +1652,7 @@ export const summaryTemplateTable = table("summary_templates")
 
 export const callParticipantTable = table("call_participants")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     callId: string(),
     userId: string(),
@@ -1672,7 +1672,7 @@ export const callParticipantTable = table("call_participants")
 
 export const callRecordingTable = table("call_recordings")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     callId: string(),
     egressId: string().optional(),
@@ -1692,7 +1692,7 @@ export const callRecordingTable = table("call_recordings")
 
 export const recurringCallSeriesTable = table("recurring_call_series")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     title: string(),
     description: string().optional(),
@@ -1714,7 +1714,7 @@ export const recurringCallSeriesTable = table("recurring_call_series")
 
 export const recurringCallParticipantTable = table("recurring_call_participants")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     recurringSeriesId: string(),
     userId: string(),
@@ -1732,7 +1732,7 @@ export const recurringCallParticipantTable = table("recurring_call_participants"
 
 export const canvasFolderTable = table("canvas_folders")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     projectId: string().optional(),
     channelId: string().optional(),
@@ -1745,7 +1745,7 @@ export const canvasFolderTable = table("canvas_folders")
 
 export const canvasTable = table("canvases")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     title: string(),
     content: json(),
@@ -1775,7 +1775,7 @@ export const canvasTable = table("canvases")
 
 export const canvasVersionTable = table("canvas_versions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     canvasId: string(),
     name: string(),
@@ -1819,7 +1819,7 @@ export const canvasCommentTable = table("canvas_comments")
 
 export const canvasParticipantTable = table("canvas_participants")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     canvasId: string(),
     userId: string().optional(),
@@ -1833,7 +1833,7 @@ export const canvasParticipantTable = table("canvas_participants")
 
 export const canvasUserStatusTable = table("canvas_user_status")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     canvasId: string(),
     userId: string(),
@@ -1845,7 +1845,7 @@ export const canvasUserStatusTable = table("canvas_user_status")
 
 export const bookmarkTable = table("bookmarks")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     entityId: string(),
@@ -1860,7 +1860,7 @@ export const bookmarkTable = table("bookmarks")
 
 export const linkTable = table("links")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     url: string(),
     title: string(),
@@ -1876,7 +1876,7 @@ export const linkTable = table("links")
 
 export const linkAccessTable = table("link_access")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     linkId: string(),
     userId: string(),
@@ -1886,7 +1886,7 @@ export const linkAccessTable = table("link_access")
 
 export const vespaInsertionLogsTable = table("vespa_insertion_logs")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     entityId: string(),
     entityType: string(),
@@ -1905,7 +1905,7 @@ export const vespaInsertionLogsTable = table("vespa_insertion_logs")
 
 export const repoTable = table("repos")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     url: string(),
@@ -1924,25 +1924,6 @@ export const repoTable = table("repos")
     accessCheckStartedAt: number().optional(),
     accessErrorCode: string().optional(),
     accessErrorMessage: string().optional(),
-  })
-  .primaryKey("id");
-
-export const sdlcVcsRuntimeGrantTable = table("sdlc_vcs_runtime_grants")
-  .columns({
-    id: string(),
-    workspaceId: string(),
-    repoId: string(),
-    provider: string(),
-    operation: string(),
-    credentialRevision: number(),
-    executionId: string(),
-    sessionId: string(),
-    expiresAt: number(),
-    redeemedAt: number().optional(),
-    sandboxId: string().optional(),
-    sandboxPublicKeyHash: string().optional(),
-    envelopeIssuedAt: number().optional(),
-    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -1986,7 +1967,7 @@ export const formTable = table("forms")
 
 export const formContextMappingTable = table("forms_context_mapping")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     formId: string(),
     contextId: string(),
@@ -1997,7 +1978,7 @@ export const formContextMappingTable = table("forms_context_mapping")
 
 export const globalFieldTable = table("global_fields")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     projectId: string(),
     fieldName: string(),
@@ -2011,7 +1992,7 @@ export const globalFieldTable = table("global_fields")
 
 export const formFieldsTable = table("form_fields")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     formId: string(),
     globalFieldId: string().optional(),
@@ -2029,7 +2010,7 @@ export const formFieldsTable = table("form_fields")
 
 export const formEntityValuesTable = table("form_entity_values")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     entityId: string(),
     entityType: string(),
@@ -2046,7 +2027,7 @@ export const formEntityValuesTable = table("form_entity_values")
 
 export const dashboardTable = table("dashboards")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2058,7 +2039,7 @@ export const dashboardTable = table("dashboards")
 
 export const queryTable = table("queries")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     title: string(),
     queryJson: json(),
@@ -2074,7 +2055,7 @@ export const queryTable = table("queries")
 
 export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     dashboardId: string(),
     queryId: string(),
@@ -2093,7 +2074,7 @@ export const merchantTable = table("merchants")
 
 export const draftMessageTable = table("draft_messages")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -2108,7 +2089,7 @@ export const draftMessageTable = table("draft_messages")
 
 export const userActivityEventTable = table("user_activity_events")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     sessionId: string(),
@@ -2138,7 +2119,7 @@ export const activityAliasTable = table("activity_aliases")
 
 export const collectionTable = table("collections")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     parentId: string().optional(),
     ownerId: string(),
@@ -2156,7 +2137,7 @@ export const collectionTable = table("collections")
 
 export const collectionItemTable = table("collection_items")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     rootCollectionId: string(),
     collectionId: string(),
@@ -2175,7 +2156,7 @@ export const collectionItemTable = table("collection_items")
 
 export const collectionPermissionTable = table("collection_permissions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     collectionId: string(),
     userId: string().optional(),
@@ -2190,7 +2171,7 @@ export const collectionPermissionTable = table("collection_permissions")
 
 export const stageApproversTable = table("stage_approvers")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string().optional(),
     roleId: string().optional(),
@@ -2204,7 +2185,7 @@ export const stageApproversTable = table("stage_approvers")
 
 export const applicationTable = table("applications")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     projectId: string(),
@@ -2226,7 +2207,7 @@ export const applicationTable = table("applications")
 
 export const applicationReleaseTicketTable = table("application_release_tickets")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     applicationReleaseId: string(),
     ticketId: string(),
@@ -2241,7 +2222,7 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
 
 export const releaseEventTable = table("release_events")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2259,7 +2240,7 @@ export const releaseEventTable = table("release_events")
 
 export const releaseChangeTable = table("release_changes")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2272,7 +2253,7 @@ export const releaseChangeTable = table("release_changes")
 
 export const releaseChangeTypeTable = table("release_change_types")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     applicationId: string(),
     changeType: string(),
@@ -2287,7 +2268,7 @@ export const releaseChangeTypeTable = table("release_change_types")
 
 export const ticketStageRequestTable = table("ticket_stage_requests")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -2304,7 +2285,7 @@ export const ticketStageRequestTable = table("ticket_stage_requests")
 
 export const rcaTable = table("rcas")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     title: string(),
     ticketId: string(),
@@ -2324,7 +2305,7 @@ export const rcaTable = table("rcas")
 
 export const impactTable = table("impacts")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     rcaId: string().optional(),
@@ -2336,7 +2317,7 @@ export const impactTable = table("impacts")
 
 export const coeTable = table("coes")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     rcaId: string(),
     ownerId: string(),
@@ -2351,7 +2332,7 @@ export const coeTable = table("coes")
 
 export const releaseAttributionTable = table("release_attributions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     ticketId: string(),
     releaseId: string(),
@@ -2364,7 +2345,7 @@ export const releaseAttributionTable = table("release_attributions")
 
 export const recapTable = table("recaps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     entityType: string(),
     entityId: string(),
@@ -2376,7 +2357,7 @@ export const recapTable = table("recaps")
 
 export const channelDailyRecapTable = table("channel_daily_recaps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2387,7 +2368,7 @@ export const channelDailyRecapTable = table("channel_daily_recaps")
 
 export const channelRecapTable = table("channel_recaps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2398,7 +2379,7 @@ export const channelRecapTable = table("channel_recaps")
 
 export const sessionRecordingFileTable = table("session_recording_files")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     sessionId: string(),
     userId: string(),
@@ -2410,7 +2391,7 @@ export const sessionRecordingFileTable = table("session_recording_files")
 
 export const surfaceLinkTable = table("surface_links")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     sourceType: string(),
     sourceId: string(),
@@ -2425,7 +2406,7 @@ export const surfaceLinkTable = table("surface_links")
 
 export const appsTable = table("apps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2442,7 +2423,7 @@ export const appsTable = table("apps")
 
 export const installedAppsTable = table("installed_apps")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     appId: string(),
     userId: string(),
@@ -2456,7 +2437,7 @@ export const installedAppsTable = table("installed_apps")
 
 export const installedAppCommandTable = table("installed_app_commands")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     installedAppId: string(),
     sourceCommandId: string(),
@@ -2471,7 +2452,7 @@ export const installedAppCommandTable = table("installed_app_commands")
 
 export const appIncomingWebhookTable = table("app_incoming_webhooks")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     installedAppId: string(),
     channelId: string(),
@@ -2490,7 +2471,7 @@ export const appIncomingWebhookTable = table("app_incoming_webhooks")
 
 export const appCommandTable = table("app_commands")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     appId: string(),
     commandName: string(),
@@ -2506,7 +2487,7 @@ export const appCommandTable = table("app_commands")
 
 export const savedUserConfigurationTable = table("saved_user_configurations")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     userId: string(),
     name: string(),
@@ -2521,7 +2502,7 @@ export const savedUserConfigurationTable = table("saved_user_configurations")
 
 export const savedUserConfigurationValueTable = table("saved_user_configuration_values")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     configId: string(),
     entityName: string(),
@@ -2534,7 +2515,7 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
 
 export const delayedMessageTable = table("delayed_messages")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -2568,7 +2549,7 @@ export const dataSourceTable = table("data_sources")
 
 export const dataSourceTableTable = table("data_source_tables")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     dataSourceId: string(),
     schemaName: string(),
@@ -2582,7 +2563,7 @@ export const dataSourceTableTable = table("data_source_tables")
 
 export const dataSourceColumnTable = table("data_source_columns")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     tableId: string(),
     columnName: string(),
@@ -2602,7 +2583,7 @@ export const dataSourceColumnTable = table("data_source_columns")
 
 export const dataSourceRelationshipTable = table("data_source_relationships")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     dataSourceId: string(),
     fromColumnId: string(),
@@ -2629,7 +2610,7 @@ export const dynamicDashboardTable = table("dynamic_dashboards")
 
 export const dashboardParticipantTable = table("dashboard_participants")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     dashboardId: string(),
     userId: string(),
@@ -2641,7 +2622,7 @@ export const dashboardParticipantTable = table("dashboard_participants")
 
 export const dashboardActivityTable = table("dashboard_activity")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     entityType: string(),
     entityId: string(),
@@ -2654,7 +2635,7 @@ export const dashboardActivityTable = table("dashboard_activity")
 
 export const dynamicDashboardQueryTable = table("dynamic_dashboard_queries")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     title: string().optional(),
     queryType: string(),
@@ -2672,7 +2653,7 @@ export const dynamicDashboardQueryTable = table("dynamic_dashboard_queries")
 
 export const dynamicDashboardQueryMappingTable = table("dynamic_dashboard_queries_mapping")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     dashboardId: string(),
     queryId: string(),
@@ -2694,7 +2675,7 @@ export const availableAppPermissionTable = table("available_app_permissions")
 
 export const appPermissionTable = table("app_permission")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     appId: string(),
     permissionId: string(),
@@ -2705,7 +2686,7 @@ export const appPermissionTable = table("app_permission")
 
 export const installedAppPermissionTable = table("installed_app_permissions")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     installedAppId: string(),
     permissionId: string(),
@@ -2808,7 +2789,7 @@ export const doclingAsyncPartTable = table("docling_async_parts")
 
 export const entityTable = table("entities")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     type: string(),
     canonicalName: string(),
@@ -2821,7 +2802,7 @@ export const entityTable = table("entities")
 
 export const entityAliasTable = table("entity_aliases")
   .columns({
-    workspaceId: string().optional(),
+    workspaceId: string(),
     id: string(),
     entityId: string(),
     type: string(),
@@ -4852,7 +4833,6 @@ export const schema = createSchema(
       linkAccessTable,
       vespaInsertionLogsTable,
       repoTable,
-      sdlcVcsRuntimeGrantTable,
       sdlcEntityLinkTable,
       lookupValueTable,
       formTable,
@@ -5140,7 +5120,6 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
-export type SdlcVcsRuntimeGrant = Row<typeof schema.tables.sdlc_vcs_runtime_grants>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
