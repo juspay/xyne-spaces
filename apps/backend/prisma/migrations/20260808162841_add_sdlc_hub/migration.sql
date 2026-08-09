@@ -16,7 +16,7 @@ ADD COLUMN     "projectId" TEXT,
 ADD COLUMN     "sdlcSetupExecutionId" TEXT;
 
 -- CreateTable
-CREATE TABLE "public"."sdlc_vcs_runtime_grants" (
+CREATE TABLE "workflow"."sdlc_vcs_runtime_grants" (
     "id" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "repoId" TEXT NOT NULL,
@@ -52,16 +52,16 @@ CREATE TABLE "public"."sdlc_entity_links" (
 );
 
 -- CreateIndex
-CREATE INDEX "sdlc_vcs_runtime_grants_workspaceId_repoId_idx" ON "public"."sdlc_vcs_runtime_grants"("workspaceId", "repoId");
+CREATE INDEX "sdlc_vcs_runtime_grants_workspaceId_repoId_idx" ON "workflow"."sdlc_vcs_runtime_grants"("workspaceId", "repoId");
 
 -- CreateIndex
-CREATE INDEX "sdlc_vcs_runtime_grants_executionId_sessionId_idx" ON "public"."sdlc_vcs_runtime_grants"("executionId", "sessionId");
+CREATE INDEX "sdlc_vcs_runtime_grants_executionId_sessionId_idx" ON "workflow"."sdlc_vcs_runtime_grants"("executionId", "sessionId");
 
 -- CreateIndex
-CREATE INDEX "sdlc_vcs_runtime_grants_expiresAt_idx" ON "public"."sdlc_vcs_runtime_grants"("expiresAt");
+CREATE INDEX "sdlc_vcs_runtime_grants_expiresAt_idx" ON "workflow"."sdlc_vcs_runtime_grants"("expiresAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "sdlc_vcs_grant_sandbox_binding_key" ON "public"."sdlc_vcs_runtime_grants"("executionId", "sessionId", "repoId", "operation", "sandboxId", "sandboxPublicKeyHash");
+CREATE UNIQUE INDEX "sdlc_vcs_grant_sandbox_binding_key" ON "workflow"."sdlc_vcs_runtime_grants"("executionId", "sessionId", "repoId", "operation", "sandboxId", "sandboxPublicKeyHash");
 
 -- CreateIndex
 CREATE INDEX "sdlc_entity_links_workspaceId_repoId_idx" ON "public"."sdlc_entity_links"("workspaceId", "repoId");

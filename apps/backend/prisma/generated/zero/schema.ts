@@ -1927,6 +1927,25 @@ export const repoTable = table("repos")
   })
   .primaryKey("id");
 
+export const sdlcVcsRuntimeGrantTable = table("sdlc_vcs_runtime_grants")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    repoId: string(),
+    provider: string(),
+    operation: string(),
+    credentialRevision: number(),
+    executionId: string(),
+    sessionId: string(),
+    expiresAt: number(),
+    redeemedAt: number().optional(),
+    sandboxId: string().optional(),
+    sandboxPublicKeyHash: string().optional(),
+    envelopeIssuedAt: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const sdlcEntityLinkTable = table("sdlc_entity_links")
   .columns({
     id: string(),
@@ -4833,6 +4852,7 @@ export const schema = createSchema(
       linkAccessTable,
       vespaInsertionLogsTable,
       repoTable,
+      sdlcVcsRuntimeGrantTable,
       sdlcEntityLinkTable,
       lookupValueTable,
       formTable,
@@ -5120,6 +5140,7 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcVcsRuntimeGrant = Row<typeof schema.tables.sdlc_vcs_runtime_grants>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;

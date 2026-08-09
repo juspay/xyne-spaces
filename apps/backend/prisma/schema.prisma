@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "SdlcVcsRuntimeGrant"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
 }
 
 datasource db {
@@ -50,7 +50,7 @@ model Agent {
   @@unique([name, version])
   @@index([modelId])
   @@map("agents")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model Model {

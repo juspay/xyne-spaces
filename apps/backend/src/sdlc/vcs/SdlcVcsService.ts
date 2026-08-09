@@ -704,7 +704,7 @@ export class SdlcVcsService implements SdlcVcs {
     let grant: SdlcVcsRuntimeGrant;
     try {
       grant = await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "id" FROM "public"."sdlc_vcs_runtime_grants" WHERE "id" = ${grantId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT "id" FROM "workflow"."sdlc_vcs_runtime_grants" WHERE "id" = ${grantId} FOR UPDATE`;
         const current = await tx.sdlcVcsRuntimeGrant.findUnique({ where: { id: grantId } });
         if (!current) throw new AppError('Runtime grant not found', 404);
         if (current.redeemedAt) throw new AppError('Runtime grant was already redeemed', 409);
@@ -839,7 +839,7 @@ export class SdlcVcsService implements SdlcVcs {
     binding: { executionId: string; sessionId: string; repoId: string; operation: 'CREATE_PULL_REQUEST' },
   ): Promise<{ password: string }> {
     const grant = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "public"."sdlc_vcs_runtime_grants" WHERE "id" = ${grantId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "workflow"."sdlc_vcs_runtime_grants" WHERE "id" = ${grantId} FOR UPDATE`;
       const current = await tx.sdlcVcsRuntimeGrant.findUnique({ where: { id: grantId } });
       if (!current) throw new AppError('Runtime grant not found', 404);
       if (current.redeemedAt) throw new AppError('Runtime grant was already redeemed', 409);
