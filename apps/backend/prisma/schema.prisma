@@ -50,7 +50,7 @@ model Agent {
   @@unique([name, version])
   @@index([modelId])
   @@map("agents")
-  @@schema("workflow")
+  @@schema("public")
 }
 
 model Model {
@@ -3158,7 +3158,7 @@ model SdlcVcsRuntimeGrant {
   @@index([expiresAt])
   @@unique([executionId, sessionId, repoId, operation, sandboxId, sandboxPublicKeyHash], map: "sdlc_vcs_grant_sandbox_binding_key")
   @@map("sdlc_vcs_runtime_grants")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 // Generic, repository-scoped trace and evidence links for the SDLC hub.
