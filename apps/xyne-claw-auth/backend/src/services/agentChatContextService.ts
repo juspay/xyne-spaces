@@ -1,14 +1,15 @@
-import { interact, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 
 export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file";
 // 'collection' / 'file' are not user-searchable via this service (they're
 // picked through the dashboard's KB picker, not via the generic search), so
 // they're intentionally excluded from the search-type enum.
-export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file"> | "all";
+export type ContextItemType = ContextType | "repository";
+export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file"> | "repository" | "all";
 
 export interface ContextItem {
   id: string;
-  type: ContextType;
+  type: ContextItemType;
   title: string;
   subtitle?: string;
   meta?: Record<string, unknown>;
@@ -191,6 +192,7 @@ export async function searchContextItems(type: ContextSearchType, q: string, lim
   if (type === "channel") return searchChannels(query, safeLimit, auth);
   if (type === "ticket") return searchTickets(query, safeLimit, auth);
   if (type === "canvas") return searchCanvases(query, safeLimit, auth);
+  if (type === "repository") return searchRepositories(query, safeLimit, auth);
   return searchCalls(query, safeLimit, auth);
 }
 
@@ -318,6 +320,33 @@ async function searchChannels(q: string, limit: number, auth?: SpacesAuthContext
       ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     } } : {}),
   }));
+}
+
+async function searchRepositories(q: string, limit: number, auth?: SpacesAuthContext): Promise<ContextItem[]> {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const response = await spacesFetch(
+    `/api/sdlc/repositories/context?${params.toString()}`,
+    undefined,
+    auth,
+  ) as {
+    success?: boolean;
+    contexts?: Array<{ repoId?: string; name?: string; url?: string; baseBranch?: string }>;
+  };
+
+  if (!response.success || !Array.isArray(response.contexts)) {
+    throw new Error("Spaces returned an invalid SDLC repository list");
+  }
+
+  return response.contexts.flatMap((repo) => {
+    if (!repo.repoId || !repo.name || !repo.url || !repo.baseBranch) return [];
+    return [{
+      id: repo.repoId,
+      type: "repository" as const,
+      title: repo.name,
+      subtitle: `${repo.baseBranch} · ${repo.url}`,
+      meta: { url: repo.url, baseBranch: repo.baseBranch },
+    }];
+  });
 }
 
 async function searchTickets(q: string, limit: number, auth?: SpacesAuthContext): Promise<ContextItem[]> {

@@ -753,7 +753,11 @@ export const queries = defineQueries({
 
   // If channel Id is available use this instead of getConversationById to leverage ACL optimizations for channel conversations
   getConversationByIdWithChannel: defineQuery(
-    z.object({ conversationId: z.string(), channelId: z.string(), isMember: z.boolean() }),
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ ctx, args: { conversationId } }) => {
       return zql.conversations
         .where('conversationId', conversationId)
@@ -834,7 +838,11 @@ export const queries = defineQueries({
     },
   ),
   getConversationByTimestamp: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), timestamp: z.number() }),
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      timestamp: z.number(),
+    }),
     ({ args: { channelId, timestamp } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -2545,7 +2553,10 @@ export const queries = defineQueries({
       .related('formContextMappings');
   }),
   stagesByBoards: defineQuery(
-    z.object({ projectId: z.string(), boardType: z.nativeEnum(BoardType).optional() }),
+    z.object({
+      projectId: z.string(),
+      boardType: z.nativeEnum(BoardType).optional(),
+    }),
     ({ args: { projectId, boardType } }) => {
       return zql.stages
         .whereExists('board', b => {
@@ -2923,7 +2934,11 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversations: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      limit: z.number(),
+    }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -2963,7 +2978,11 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV2: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      limit: z.number(),
+    }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -2998,7 +3017,11 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV3: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      limit: z.number(),
+    }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -3354,6 +3377,153 @@ export const queries = defineQueries({
         .where('userGroupId', userGroupId)
         .where('boardId', boardId);
     },
+  ),
+  getAllRepos: defineQuery(() => zql.repos.orderBy('name', 'asc')),
+  getSdlcRepos: defineQuery(() =>
+    zql.repos
+      .where('projectId', 'IS NOT', null)
+      .where('channelId', 'IS NOT', null)
+      .related('project', project => project.related('sdlcBoard'))
+      .related('channel', channel =>
+        channel
+          .related('participants')
+          .related('channelStats')
+          .related('tickets', ticket => ticket.related('pullRequests')),
+      )
+      .related('setupExecution')
+      .related('sdlcEntityLinks')
+      .orderBy('name', 'asc'),
+  ),
+  getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.repos
+      .where('id', repoId)
+      .where('projectId', 'IS NOT', null)
+      .where('channelId', 'IS NOT', null)
+      .related('project', project => project.related('sdlcBoard'))
+      .related('channel', channel =>
+        channel
+          .related('participants')
+          .related('channelStats')
+          .related('canvasFolders', folder =>
+            folder.where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs']).related('canvases'),
+          )
+          .related('tickets', ticket =>
+            ticket
+              .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc'))
+              .related('workflows', workflow =>
+                workflow
+                  .where('workflowType', 'SDLC_WORK')
+                  .orderBy('createdAt', 'desc')
+                  .related('workflowExecutions', execution =>
+                    execution.orderBy('updatedAt', 'desc'),
+                  ),
+              ),
+          ),
+      )
+      .related('setupExecution')
+      .related('sdlcEntityLinks')
+      .one(),
+  ),
+  getSdlcLinks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.sdlc_entity_links.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  ),
+  sdlcDiscussionConversations: defineQuery(
+    z.object({
+      channelId: z.string(),
+      conversationIds: z.array(z.string()),
+      limit: z.number().int().min(1),
+    }),
+    ({ ctx, args: { channelId, conversationIds, limit } }) =>
+      zql.conversations
+        .where('channelId', channelId)
+        .where(helpers =>
+          helpers.cmp(
+            'conversationId',
+            'IN',
+            conversationIds.length > 0 ? conversationIds : ['__no_sdlc_conversation__'],
+          ),
+        )
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
+        .related('initialMessageAttachments')
+        .related('initialMessageNudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
+        )
+        .related('participants', participantQuery =>
+          participantQuery.where('userId', ctx.userID).orderBy('joinedAt', 'asc'),
+        )
+        .orderBy('lastActivityAt', 'desc')
+        .limit(limit),
+  ),
+  sdlcDiscussionConversation: defineQuery(
+    z.object({ channelId: z.string(), conversationId: z.string() }),
+    ({ ctx, args: { channelId, conversationId } }) =>
+      zql.conversations
+        .where('channelId', channelId)
+        .where('conversationId', conversationId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
+        .related('initialMessageAttachments')
+        .related('initialMessageNudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
+        )
+        .related('participants', participantQuery =>
+          participantQuery.where('userId', ctx.userID).orderBy('joinedAt', 'asc'),
+        )
+        .one(),
+  ),
+  sdlcUserActivities: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number().int().min(1).max(50),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { channelId, limit, start } }) => {
+      let query = zql.activities
+        .where('userId', ctx.userID)
+        .where('channelId', channelId)
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ id: start.id, updatedAt: start.updatedAt }, { inclusive: false });
+      }
+      return query
+        .limit(limit)
+        .related('message', message => message.related('conversation').related('attachments'))
+        .related('reaction')
+        .related('canvas')
+        .related('call')
+        .related('ticket');
+    },
+  ),
+  sdlcRelatedConversations: defineQuery(
+    z.object({ conversationIds: z.array(z.string()) }),
+    ({ args: { conversationIds } }) =>
+      zql.conversations.where(helpers =>
+        helpers.cmp(
+          'conversationId',
+          'IN',
+          conversationIds.length > 0 ? conversationIds : ['__no_sdlc_related_conversation__'],
+        ),
+      ),
   ),
   getAllForms: defineQuery(() => {
     return zql.forms
@@ -3993,7 +4163,10 @@ export const queries = defineQueries({
   // {} to get ALL collections the user can access (used by the Ask AI picker from
   // any chat). Access is enforced by the collections ACL either way.
   scopedCollections: defineQuery(
-    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
+    z.object({
+      scopeType: z.string().optional(),
+      scopeId: z.string().optional(),
+    }),
     ({ ctx, args: { scopeType, scopeId } }) => {
       const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
       const scoped =

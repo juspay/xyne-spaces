@@ -57,6 +57,28 @@ export interface CanvasSelectionContext {
   selections: SelectionInfo[];
 }
 
+/**
+ * Context pills to seed when Ask AI is opened from a surface that already knows
+ * exactly which records the question is about. Keeping this in the machine
+ * means the global sidebar, rather than an ad-hoc query string, owns the same
+ * context that it sends to the Claw API.
+ */
+export interface AskAIInitialContextSelections {
+  canvases: Array<{ id: string; title: string; canvasId?: string }>;
+  recordings: Array<{
+    id: string;
+    title: string;
+    channelId?: string;
+    conversationId?: string;
+    externalId?: string;
+  }>;
+}
+
+export interface XyneAIResearchContext {
+  type: 'product' | 'repository';
+  id: string;
+  name: string;
+}
 // Context interface for the XyneAI machine
 export interface XyneAIContext {
   xyneAIState: XyneAIState;
@@ -72,6 +94,10 @@ export interface XyneAIContext {
   canvasInfo: CanvasInfo | null;
   // Canvas selection context - groups canvas with its selections
   canvasContexts: CanvasSelectionContext[];
+  /** Context pills supplied by the surface that opened Ask AI. */
+  initialContextSelections: AskAIInitialContextSelections | null;
+  /** Re-seeds context even when a user clicks Ask AI on the same item twice. */
+  contextOpenNonce: number;
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
   // Knowledge Base context
@@ -84,6 +110,11 @@ export interface XyneAIContext {
   // re-attach the KB collection chip when the user clicks the Ask AI button
   // again from /knowledge-base after manually removing the chip.
   kbOpenNonce: number;
+  // Trusted entity selected by the surface opening the assistant.
+  researchContext: XyneAIResearchContext | null;
+  // Parent-driven message submission (for contextual CTAs such as SDLC actions).
+  initialQuery: string | null;
+  autoSendNonce: number;
 }
 
 // Event types for XyneAI machine
@@ -104,6 +135,9 @@ export type XyneAIEvent =
       kbChannelId?: string | null;
       kbDocId?: string | null;
       kbDocName?: string | null;
+      initialContextSelections?: AskAIInitialContextSelections | null;
+      researchContext?: XyneAIResearchContext | null;
+      initialQuery?: string | null;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
@@ -426,6 +460,11 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections: event.initialContextSelections ?? null,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -434,6 +473,11 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId ?? null,
           kbDocId: event.kbDocId ?? null,
           kbDocName: event.kbDocName ?? null,
+          researchContext: event.researchContext ?? null,
+          initialQuery: event.initialQuery?.trim() || null,
+          autoSendNonce: event.initialQuery?.trim()
+            ? context.autoSendNonce + 1
+            : context.autoSendNonce,
           // Bump the nonce on every KB-scoped OPEN (collection OR file) so the
           // sidebar re-attaches the collection chip and/or file scope even if
           // the user previously removed them.
@@ -492,6 +536,14 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          initialContextSelections:
+            event.initialContextSelections !== undefined
+              ? event.initialContextSelections
+              : context.initialContextSelections,
+          contextOpenNonce:
+            event.initialContextSelections !== undefined
+              ? context.contextOpenNonce + 1
+              : context.contextOpenNonce,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -501,6 +553,11 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId !== undefined ? event.kbChannelId : context.kbChannelId,
           kbDocId: event.kbDocId !== undefined ? event.kbDocId : context.kbDocId,
           kbDocName: event.kbDocName !== undefined ? event.kbDocName : context.kbDocName,
+          researchContext: event.researchContext ?? null,
+          initialQuery: event.initialQuery?.trim() || null,
+          autoSendNonce: event.initialQuery?.trim()
+            ? context.autoSendNonce + 1
+            : context.autoSendNonce,
           // Re-bump on every KB-scoped OPEN (collection OR file).
           kbOpenNonce:
             event.kbCollectionId || event.kbDocId ? context.kbOpenNonce + 1 : context.kbOpenNonce,
@@ -544,12 +601,17 @@ export const xyneAIMachine = setup({
         startFreshChat: false,
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
+        initialContextSelections: null,
+        contextOpenNonce: context.contextOpenNonce,
         focusSessionId: null,
         kbCollectionId: null,
         kbChannelId: null,
         kbDocId: null,
         kbDocName: null,
         kbOpenNonce: context.kbOpenNonce,
+        researchContext: null,
+        initialQuery: null,
+        autoSendNonce: context.autoSendNonce,
       };
 
       // Clear from IndexedDB when closing
@@ -686,12 +748,17 @@ export const xyneAIMachine = setup({
     startFreshChat: false,
     canvasInfo: null,
     canvasContexts: [],
+    initialContextSelections: null,
+    contextOpenNonce: 0,
     focusSessionId: null,
     kbCollectionId: null,
     kbChannelId: null,
     kbDocId: null,
     kbDocName: null,
     kbOpenNonce: 0,
+    researchContext: null,
+    initialQuery: null,
+    autoSendNonce: 0,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -764,7 +831,8 @@ export const xyneAIMachine = setup({
 const initializeActor = async (): Promise<void> => {
   try {
     const persistedContext = await loadContextFromIndexedDB();
-    if (persistedContext && persistedContext.xyneAIState === 'open') {
+    const isSdlcRoute = window.location.pathname.split('/').includes('sdlc');
+    if (persistedContext && persistedContext.xyneAIState === 'open' && !isSdlcRoute) {
       // Restore the open state with persisted context
       // Only include defined values in the send event
       xyneAIActor.send({

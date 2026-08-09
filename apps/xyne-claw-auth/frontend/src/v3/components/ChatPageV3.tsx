@@ -3368,9 +3368,13 @@ export function ChatPageV3() {
 
   const handleToggleMention = useCallback(() => setMentionOpen((v) => !v), []);
   const handleAddContext = useCallback((item: ContextItem) => {
-    setSelectedContext((prev) =>
-      prev.some((c) => c.type === item.type && c.id === item.id) ? prev : [...prev, item],
-    );
+    setSelectedContext((prev) => {
+      if (prev.some((c) => c.type === item.type && c.id === item.id)) return prev;
+      if (item.type === "repository") {
+        return [...prev.filter((c) => c.type !== "repository"), item];
+      }
+      return [...prev, item];
+    });
   }, []);
   const handleRemoveContext = useCallback((item: Pick<ContextItem, "type" | "id">) => {
     setSelectedContext((prev) =>
@@ -3921,7 +3925,11 @@ export function ChatPageV3() {
     // Snapshot composer state and clear immediately for snappy UX.
     const filesSnapshot = pendingFiles.map((p) => p.file);
     const previewsToRevoke = pendingFiles.map((p) => p.previewUrl);
-    const contextSnapshot: AttachedContextRef[] = selectedContext.map((item) => ({
+    const selectedSnapshot = [...selectedContext];
+    const repositoryContext = selectedSnapshot.find((item) => item.type === "repository");
+    const contextSnapshot: AttachedContextRef[] = selectedSnapshot
+      .filter((item) => item.type !== "repository")
+      .map((item) => ({
       type: item.type,
       id: item.id,
       title: item.title,
@@ -3929,12 +3937,12 @@ export function ChatPageV3() {
       item.meta["conversationId"].trim().length > 0
         ? { threadId: item.meta["conversationId"].trim() }
         : {}),
-    }));
+    } as AttachedContextRef));
     const placeholderText =
       text ||
       (hasFiles
         ? `Sent ${filesSnapshot.length} image${filesSnapshot.length !== 1 ? "s" : ""}`
-        : `Attached ${contextSnapshot.length} context item${contextSnapshot.length !== 1 ? "s" : ""}`);
+        : `Attached ${selectedSnapshot.length} context item${selectedSnapshot.length !== 1 ? "s" : ""}`);
 
     setInputValue("");
     setPendingFiles([]);
@@ -3957,10 +3965,7 @@ export function ChatPageV3() {
             })),
             ...prev,
           ]);
-          setSelectedContext((prev) => [
-            ...contextSnapshot.map((c) => ({ id: c.id, type: c.type, title: c.title } as ContextItem)),
-            ...prev,
-          ]);
+          setSelectedContext((prev) => [...selectedSnapshot, ...prev]);
           setInputValue(text);
           return;
         }
@@ -3970,6 +3975,9 @@ export function ChatPageV3() {
         await send(activeAgentSlug, userId, placeholderText, {
           attachmentIds: uploadedIds.length > 0 ? uploadedIds : undefined,
           attachedContext: contextSnapshot.length > 0 ? contextSnapshot : undefined,
+          ...(repositoryContext ? {
+            researchContext: { type: "repository", id: repositoryContext.id, name: repositoryContext.title },
+          } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
         });

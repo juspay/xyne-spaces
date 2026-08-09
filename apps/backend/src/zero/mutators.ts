@@ -89,6 +89,10 @@ import {
   normalizeNotificationKeywords,
   isDeskChannelType,
   deskTypeForChannelType,
+  createSdlcLinkSchema,
+  isSdlcSurfaceMetadata,
+  isSdlcTicketMetadata,
+  sdlcDiscussionSchema,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
@@ -109,6 +113,7 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import { resolveSdlcDiscussionOwnerId } from '@/sdlc/sdlcDiscussionOwner';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -477,6 +482,16 @@ async function deleteConversationWithParticipants(
     participants.map(participant =>
       tx.mutate.conversation_participants.delete({ id: participant.id })
     )
+  );
+
+  const discussionLinks = await tx.run(
+    zql.sdlc_entity_links
+      .where('targetType', 'CONVERSATION')
+      .where('targetId', conversationId)
+      .where('relationType', 'DISCUSSION'),
+  );
+  await Promise.all(
+    discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
   );
 
   await tx.mutate.conversations.delete({ conversationId });
@@ -2330,8 +2345,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           messageId: z.string(),
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
+          sdlcDiscussion: sdlcDiscussionSchema.optional(),
         }),
-        async ({ tx, args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds } }) => {
+        async ({
+          tx,
+          args: {
+            channelId,
+            content,
+            type,
+            conversationId,
+            messageId,
+            timestamp,
+            attachmentIds,
+            sdlcDiscussion,
+          },
+        }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -2359,6 +2387,67 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('You need to be a participant for adding a conversations');
           }
 
+          if (sdlcDiscussion) {
+            const [repo, existingDiscussion] = await Promise.all([
+              tx.run(zql.repos.where('id', sdlcDiscussion.repoId).one()),
+              tx.run(
+                zql.sdlc_entity_links
+                  .where('repoId', sdlcDiscussion.repoId)
+                  .where('targetType', 'CONVERSATION')
+                  .where('targetId', conversationId)
+                  .where('relationType', 'DISCUSSION'),
+              ),
+            ]);
+            if (
+              !repo ||
+              repo.workspaceId !== authData.workspaceId ||
+              repo.channelId !== channelId
+            ) {
+              throw new Error('Invalid SDLC discussion owner');
+            }
+            const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
+              {
+                workspaceId: authData.workspaceId,
+                repoId: repo.id,
+                channelId,
+                surfaceType: sdlcDiscussion.surfaceType,
+                surfaceId: sdlcDiscussion.surfaceId,
+              },
+              {
+                getCanvas: async id =>
+                  (await tx.run(zql.canvases.where('id', id).one())) ?? null,
+                getTicket: async id => {
+                  const ticket = await tx.run(zql.tickets.where('id', id).one());
+                  return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
+                },
+                getPullRequest: async id =>
+                  (await tx.run(zql.pull_requests.where('id', id).one())) ?? null,
+                findLinkSource: async input => {
+                  const link = await tx.run(
+                    zql.sdlc_entity_links
+                      .where('repoId', input.repoId)
+                      .where('targetType', input.targetType)
+                      .where('targetId', input.targetId)
+                      .where('relationType', input.relationType)
+                      .one(),
+                  );
+                  if (
+                    !link ||
+                    (link.sourceType !== 'CANVAS' && link.sourceType !== 'TICKET')
+                  ) {
+                    return null;
+                  }
+                  return { sourceType: link.sourceType, sourceId: link.sourceId };
+                },
+              },
+            );
+            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerCanvasId) {
+              throw new Error('Invalid SDLC discussion owner');
+            }
+            if (existingDiscussion.length > 0) {
+              throw new Error('Conversation already has an SDLC discussion owner');
+            }
+          }
 
           await tx.mutate.conversations.insert({
             conversationId,
@@ -2372,6 +2461,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             metadata: undefined,
             createdAt: now,
           });
+
+          if (sdlcDiscussion) {
+            await tx.mutate.sdlc_entity_links.insert({
+              id: sdlcDiscussion.linkId,
+              workspaceId: authData.workspaceId,
+              repoId: sdlcDiscussion.repoId,
+              sourceType: 'CANVAS',
+              sourceId: sdlcDiscussion.ownerCanvasId,
+              targetType: 'CONVERSATION',
+              targetId: conversationId,
+              relationType: 'DISCUSSION',
+              createdBy: authData.sub,
+              createdAt: now,
+            });
+          }
 
           const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
@@ -5553,8 +5657,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           updatedAt: z.number(),
         }),
         async ({ tx, args: params }) => {
-          const ticket = await tx.run(zql.tickets.where("id", params.id).one());
-          if (!ticket) throw new Error("Ticket not found");
+          const ticket = await tx.run(zql.tickets.where('id', params.id).one());
+          if (!ticket) throw new Error('Ticket not found');
+          const lifecycleChange = params.stageName !== undefined || params.statusV2 !== undefined;
+          const board = lifecycleChange
+            ? await tx.run(zql.boards.where('id', ticket.boardId).one())
+            : null;
+          if (
+            lifecycleChange &&
+            (isSdlcTicketMetadata(ticket.metadata) || isSdlcSurfaceMetadata(board?.metadata))
+          ) {
+            throw new Error('Ticket stages are controlled by the SDLC workflow');
+          }
 
           const now = Date.now();
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
@@ -6663,6 +6777,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
+          }
+
+          const attachedSdlcRepository = await tx.run(
+            zql.repos.where('projectId', projectId).where('channelId', 'IS NOT', null).one(),
+          );
+          if (attachedSdlcRepository) {
+            throw new Error('Detach SDLC repositories before deleting their project');
           }
 
           // Delete project
@@ -8897,10 +9018,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             canvas.createdBy === authData.sub ||
             (participant &&
               (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER)) ||
-              guestSharedRole === CanvasRole.EDITOR ||
-              guestSharedRole === CanvasRole.OWNER;
+            guestSharedRole === CanvasRole.EDITOR ||
+            guestSharedRole === CanvasRole.OWNER;
+          const canvasMetadata = canvas.metadata as Record<string, unknown> | null;
+          const isSdlcBaseline =
+            canvasMetadata?.surface === 'SDLC' && canvasMetadata.artifactKind === 'BASELINE';
 
-          if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
+          if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
             throw new Error('You do not have permission to edit this canvas');
           }
 
@@ -8992,6 +9116,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (canvas.createdBy !== authData.sub) {
             throw new Error('Only the creator can delete the canvas');
           }
+
+          const discussionLinks = await tx.run(
+            zql.sdlc_entity_links
+              .where('sourceType', 'CANVAS')
+              .where('sourceId', id)
+              .where('relationType', 'DISCUSSION'),
+          );
+          await Promise.all(
+            discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
+          );
 
           await tx.mutate.canvases.delete({ id });
         },
@@ -10208,6 +10342,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             baseBranch,
             prefix,
             createdBy: authData.sub,
+            accessCheckStatus: 'NOT_CHECKED',
           });
         },
       ),
@@ -10259,6 +10394,89 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
         },
+      ),
+    },
+    sdlc: {
+      createLink: defineMutator(
+        createSdlcLinkSchema.extend({
+          id: z.string(),
+          repoId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+          if (!repo?.channelId) {
+            throw new Error('SDLC repository not found');
+          }
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', repo.channelId)
+              .where('userId', authData.sub)
+              .one()
+          );
+          if (!participant) {
+            throw new Error('Repository membership required');
+          }
+          const sourceExists =
+            args.sourceType === 'CANVAS'
+              ? Boolean(
+                  await tx.run(
+                    zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one()
+                  )
+                )
+              : args.sourceType === 'TICKET'
+                ? Boolean(
+                    await tx.run(
+                      zql.tickets
+                        .where('id', args.sourceId)
+                        .where('channelId', repo.channelId)
+                        .one()
+                    )
+                  )
+                : args.sourceType === 'CHANNEL'
+                  ? args.sourceId === repo.channelId
+                  : false;
+          if (!sourceExists) {
+            throw new Error('Relationship source does not belong to this SDLC repository');
+          }
+          await tx.mutate.sdlc_entity_links.insert({
+            id: args.id,
+            workspaceId: authData.workspaceId,
+            repoId: args.repoId,
+            sourceType: args.sourceType,
+            sourceId: args.sourceId,
+            targetType: args.targetType,
+            targetId: args.targetId,
+            relationType: args.relationType,
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
+          });
+        }
+      ),
+      deleteLink: defineMutator(
+        z.object({ repoId: z.string(), linkId: z.string() }),
+        async ({ tx, args: { repoId, linkId } }) => {
+          const repo = await tx.run(zql.repos.where('id', repoId).one());
+          if (!repo?.channelId) {
+            throw new Error('SDLC repository not found');
+          }
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', repo.channelId)
+              .where('userId', authData.sub)
+              .one()
+          );
+          if (!participant) {
+            throw new Error('Repository membership required');
+          }
+          const link = await tx.run(
+            zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one()
+          );
+          if (!link) {
+            throw new Error('SDLC relationship not found');
+          }
+          await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+        }
       ),
     },
     form: {

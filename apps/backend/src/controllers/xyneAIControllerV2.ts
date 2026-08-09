@@ -25,6 +25,9 @@ import {
   deleteClawConversation,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
+import { BASELINE_DEFINITIONS } from '@/sdlc/baselineDefinitions';
+import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
+import { buildSdlcAskAiContext } from '@/sdlc/sdlcAskAiContext';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -222,7 +225,6 @@ export class XyneAIControllerV2 {
       canvas_id,
       canvasViewAccessId,
       canvas_view_access_id,
-      selectionContexts: _selectionContexts,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
       webSearchEnabled: webSearchEnabledCC,
@@ -255,7 +257,6 @@ export class XyneAIControllerV2 {
       file_ids,
       attachedContext,
       attached_context,
-      displayQuery: _displayQuery,
       draftMode,
       provider,
       model,
@@ -265,7 +266,7 @@ export class XyneAIControllerV2 {
     // Use snake_case as fallback for camelCase (Web Worker sends snake_case)
     const effectiveSessionId = sessionId || session_id;
     const effectiveChannelIds = channelIds.length > 0 ? channelIds : channel_ids;
-    const effectiveResearchContext = researchContext || research_context;
+    let effectiveResearchContext = researchContext || research_context;
     const effectiveConversationId = conversationId || conversation_id;
     // Legacy pre-XYNE-17290 clients may still send canvasViewAccessId or
     // canvas_view_access_id — coalesce them into effectiveCanvasId.
@@ -330,6 +331,70 @@ export class XyneAIControllerV2 {
           });
           return;
         }
+      }
+
+      let sdlcDashboardContext: string | undefined;
+      const sdlcRepo = effectiveChannelIds[0]
+        ? await db.repo.findFirst({
+            where: { channelId: effectiveChannelIds[0] },
+            select: {
+              id: true,
+              name: true,
+              canonicalUrl: true,
+              url: true,
+              projectId: true,
+              workspaceId: true,
+            },
+          })
+        : null;
+      if (sdlcRepo) {
+        if (!effectiveResearchContext) {
+          effectiveResearchContext = {
+            type: 'repository',
+            id: sdlcRepo.id,
+            name: sdlcRepo.name,
+          };
+        }
+        const [memories, contextLinks] = await Promise.all([
+          sdlcRepo.projectId
+            ? db.knowledgeDocument.findMany({
+                where: { projectId: sdlcRepo.projectId },
+                select: { title: true, content: true, metadata: true },
+              })
+            : [],
+          db.sdlcEntityLink.findMany({
+            where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: { targetType: true, targetId: true },
+          }),
+        ]);
+        const approvedBaseline = memories
+          .filter(memory => {
+            const metadata = memory.metadata as Record<string, unknown> | null;
+            return metadata?.repoId === sdlcRepo.id && typeof metadata.baselineKind === 'string';
+          })
+          .sort((left, right) => {
+            const leftKind = String((left.metadata as Record<string, unknown>).baselineKind);
+            const rightKind = String((right.metadata as Record<string, unknown>).baselineKind);
+            return (
+              BASELINE_DEFINITIONS.findIndex(item => item.kind === leftKind) -
+              BASELINE_DEFINITIONS.findIndex(item => item.kind === rightKind)
+            );
+          });
+        const linkedContext = sdlcRepo.workspaceId
+          ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
+          : [];
+        sdlcDashboardContext = buildSdlcAskAiContext({
+          repo: {
+            id: sdlcRepo.id,
+            name: sdlcRepo.name,
+            url: sdlcRepo.canonicalUrl || sdlcRepo.url,
+          },
+          channelId: effectiveChannelIds[0],
+          baselineDocuments: approvedBaseline,
+          linkedContext,
+        });
       }
 
       // Fetch user information for agent context
@@ -421,6 +486,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           researchContext: effectiveResearchContext,
+          ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
           generateFollowUpSuggestions: true,
           sessionId: effectiveSessionId,

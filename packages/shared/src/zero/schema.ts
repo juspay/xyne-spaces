@@ -329,6 +329,7 @@ export const projectTable = table('projects')
     updatedBy: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
+    sdlcBoardId: string().optional(),
   })
   .primaryKey('id');
 
@@ -1369,11 +1370,38 @@ export const repoTable = table('repos')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    name: string(),                     // e.g., "xyne-spaces"
-    url: string(),                      // SSH or HTTPS URL
-    baseBranch: json<string[]>(),       // Base branches to checkout from: ["main", "develop"]
-    prefix: string(),                   // Branch prefix: "feature"
+    name: string(), // e.g., "xyne-spaces"
+    url: string(), // SSH or HTTPS URL
+    canonicalUrl: string().optional(),
+    baseBranch: json<string[]>(), // Base branches to checkout from: ["main", "develop"]
+    prefix: string(), // Branch prefix: "feature"
     createdBy: string(),
+    projectId: string().optional(),
+    channelId: string().optional(),
+    sdlcSetupExecutionId: string().optional(),
+    accessCheckStatus: string(),
+    accessCapabilities: json().optional(),
+    accessEvidence: json().optional(),
+    accessCredentialRevision: number().optional(),
+    accessCheckedAt: number().optional(),
+    accessCheckStartedAt: number().optional(),
+    accessErrorCode: string().optional(),
+    accessErrorMessage: string().optional(),
+  })
+  .primaryKey('id');
+
+export const sdlcEntityLinkTable = table('sdlc_entity_links')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    repoId: string(),
+    sourceType: string(),
+    sourceId: string(),
+    targetType: string(),
+    targetId: string(),
+    relationType: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -2525,6 +2553,16 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: canvasTable,
   }),
+  repos: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: repoTable,
+  }),
+  sdlcBoard: one({
+    sourceField: ['sdlcBoardId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
   projectTags: many({
     sourceField: ['id'],
     destField: ['projectId'],
@@ -2541,6 +2579,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
   project: one({
     sourceField: ['projectId'],
     destField: ['id'],
+    destSchema: projectTable,
+  }),
+  sdlcForProject: one({
+    sourceField: ['id'],
+    destField: ['sdlcBoardId'],
     destSchema: projectTable,
   }),
   createdByUser: one({
@@ -3167,10 +3210,46 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
+  sdlcRepos: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: repoTable,
+  }),
   guestAccess: many({
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
+  }),
+}));
+
+export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  setupExecution: one({
+    sourceField: ['sdlcSetupExecutionId'],
+    destField: ['id'],
+    destSchema: workflowExecutionTable,
+  }),
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['repoId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
   }),
 }));
 
@@ -4498,6 +4577,7 @@ export const schema = createSchema({
     linkTable,
     linkAccessTable,
     repoTable,
+    sdlcEntityLinkTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -4591,6 +4671,8 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelStatsTableRelationships,
+    repoTableRelationships,
+    sdlcEntityLinkTableRelationships,
     messageTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
@@ -4756,6 +4838,7 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
