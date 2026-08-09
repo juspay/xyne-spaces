@@ -82,6 +82,7 @@ function SidebarWikiPageRow(props: {
   page: SdlcWikiPage;
   depth: number;
   selected: boolean;
+  trackingScope: 'Wiki' | 'RepoKnowledge';
   onOpen: (page: SdlcWikiPage) => void;
 }): ReactElement {
   return (
@@ -98,7 +99,7 @@ function SidebarWikiPageRow(props: {
       title={props.page.path}
       aria-current={props.selected ? 'page' : undefined}
       data-track-category='SdlcHub'
-      data-track-name='WikiSidebarCanvasOpened'
+      data-track-name={`${props.trackingScope}SidebarCanvasOpened`}
       data-track-metadata={JSON.stringify({
         canvasId: props.page.canvasId,
         path: props.page.path,
@@ -122,6 +123,7 @@ function SidebarWikiFolderNode(props: {
   expanded: Set<string>;
   forceExpanded: boolean;
   selectedCanvasId: string | null;
+  trackingScope: 'Wiki' | 'RepoKnowledge';
   onToggle: (path: string) => void;
   onOpen: (page: SdlcWikiPage) => void;
 }): ReactElement {
@@ -137,7 +139,7 @@ function SidebarWikiFolderNode(props: {
         aria-expanded={open}
         title={props.node.path}
         data-track-category='SdlcHub'
-        data-track-name='WikiSidebarFolderToggled'
+        data-track-name={`${props.trackingScope}SidebarFolderToggled`}
         data-track-metadata={JSON.stringify({ path: props.node.path, open: !open })}
       >
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -157,6 +159,7 @@ function SidebarWikiFolderNode(props: {
               expanded={props.expanded}
               forceExpanded={props.forceExpanded}
               selectedCanvasId={props.selectedCanvasId}
+              trackingScope={props.trackingScope}
               onToggle={props.onToggle}
               onOpen={props.onOpen}
             />
@@ -167,6 +170,7 @@ function SidebarWikiFolderNode(props: {
               page={page}
               depth={props.depth + 1}
               selected={page.canvasId === props.selectedCanvasId}
+              trackingScope={props.trackingScope}
               onOpen={props.onOpen}
             />
           ))}
@@ -181,6 +185,7 @@ export function SdlcWikiSidebarTree(props: {
   loading: boolean;
   error: boolean;
   selectedCanvasId: string | null;
+  variant?: 'wiki' | 'repo-knowledge';
   onRetry: () => void;
   onOpen: (page: SdlcWikiPage) => void;
 }): ReactElement {
@@ -188,6 +193,8 @@ export function SdlcWikiSidebarTree(props: {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const visiblePages = useMemo(() => filterWikiPages(props.pages, query), [props.pages, query]);
   const tree = useMemo(() => buildWikiTree(visiblePages), [visiblePages]);
+  const repoKnowledge = props.variant === 'repo-knowledge';
+  const trackingScope = repoKnowledge ? 'RepoKnowledge' : 'Wiki';
 
   useEffect(() => {
     const selectedPage = props.pages.find(page => page.canvasId === props.selectedCanvasId);
@@ -209,11 +216,14 @@ export function SdlcWikiSidebarTree(props: {
   };
 
   return (
-    <section className='flex h-full min-h-0 flex-col' aria-label='Wiki files'>
+    <section
+      className='flex h-full min-h-0 flex-col'
+      aria-label={repoKnowledge ? 'Repo Knowledge documents' : 'Wiki files'}
+    >
       <div className='shrink-0 px-3 pb-2 pt-3'>
         <div className='flex items-center justify-between gap-2 px-1'>
           <span className='text-[11px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/70'>
-            Files
+            {repoKnowledge ? 'Repo Knowledge' : 'Files'}
           </span>
           <span className='font-mono text-[11px] tabular-nums text-sidebar-foreground/60'>
             {props.pages.length}
@@ -227,11 +237,11 @@ export function SdlcWikiSidebarTree(props: {
           <input
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder='Filter files'
-            aria-label='Filter Wiki files'
+            placeholder={repoKnowledge ? 'Filter documents' : 'Filter files'}
+            aria-label={repoKnowledge ? 'Filter Repo Knowledge documents' : 'Filter Wiki files'}
             className='h-9 w-full rounded-md border border-sidebar-border-muted bg-background/80 pl-9 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-sidebar-accent-ring dark:bg-sidebar-accent/30 dark:text-sidebar-accent-foreground dark:placeholder:text-sidebar-foreground/55'
             data-track-category='SdlcHub'
-            data-track-name='WikiSidebarSearched'
+            data-track-name={`${trackingScope}SidebarSearched`}
           />
         </div>
       </div>
@@ -245,13 +255,19 @@ export function SdlcWikiSidebarTree(props: {
             onClick={props.onRetry}
             className='w-full rounded-md px-2 py-3 text-left text-xs text-sidebar-foreground/65 hover:bg-sidebar-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent-ring'
             data-track-category='SdlcHub'
-            data-track-name='WikiSidebarReloaded'
+            data-track-name={`${trackingScope}SidebarReloaded`}
           >
             Files unavailable. Try again
           </button>
         ) : visiblePages.length === 0 ? (
           <div className='px-2 py-3 text-xs text-sidebar-foreground/55'>
-            {props.pages.length === 0 ? 'No files imported' : 'No matching files'}
+            {props.pages.length === 0
+              ? repoKnowledge
+                ? 'No Repo Knowledge yet'
+                : 'No files imported'
+              : repoKnowledge
+                ? 'No matching documents'
+                : 'No matching files'}
           </div>
         ) : (
           <>
@@ -263,6 +279,7 @@ export function SdlcWikiSidebarTree(props: {
                 expanded={expanded}
                 forceExpanded={Boolean(query.trim())}
                 selectedCanvasId={props.selectedCanvasId}
+                trackingScope={trackingScope}
                 onToggle={toggle}
                 onOpen={props.onOpen}
               />
@@ -273,6 +290,7 @@ export function SdlcWikiSidebarTree(props: {
                 page={page}
                 depth={0}
                 selected={page.canvasId === props.selectedCanvasId}
+                trackingScope={trackingScope}
                 onOpen={props.onOpen}
               />
             ))}

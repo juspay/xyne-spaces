@@ -40,10 +40,20 @@ export const SDLC_RELATION_TYPES = [
   "TICKET",
   "CONTEXT",
   "PULL_REQUEST",
+  "DISCUSSION",
 ] as const;
 
 export const sdlcRelationTypeSchema = z.enum(SDLC_RELATION_TYPES);
 export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
+
+export const sdlcDiscussionSchema = z.object({
+  repoId: z.string().min(1),
+  ownerCanvasId: z.string().min(1),
+  surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]),
+  surfaceId: z.string().min(1),
+  linkId: z.string().min(1),
+});
+export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
 export const SDLC_SETUP_STATUSES = [
   "NOT_STARTED",

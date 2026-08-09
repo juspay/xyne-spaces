@@ -3,7 +3,7 @@
 Status: implementation source of truth
 Owner: Xyne Spaces
 Scope: desktop web, v1
-Last updated: 2026-08-04
+Last updated: 2026-08-09
 
 ## 1. Product summary
 
@@ -26,6 +26,7 @@ Engineering intent is fragmented across chats, emails, calls, documents, tickets
 7. Reuse existing data models and infrastructure wherever practical.
 8. Let workspace administrators configure one shared GitHub credential for public/private repository access without exposing it to repository members.
 9. Verify repository capabilities before baseline generation and progressively unlock SDLC surfaces only when their prerequisites pass.
+10. Keep human discussion attached to the SDLC item it explains while reusing normal Channel conversations and message behavior.
 
 ## 4. Non-goals
 
@@ -47,6 +48,7 @@ v1 does not include:
 - Feedback, Quick Start, Automations, or test-management modules;
 - repository detach/delete after setup;
 - new automated test suites or unit tests.
+- changing Ask AI session/history behavior or exposing SDLC conversations in global Ask AI, Chat, Wiki, or pull-request surfaces.
 
 Existing build, typecheck, lint, enum, and manual smoke checks remain release gates.
 
@@ -81,6 +83,8 @@ to v2.
 | Create/edit PRDs and Tech Docs            | Yes                   | Yes                   | No         |
 | Create/link/start Tickets                 | Yes                   | Yes                   | No         |
 | Use repository AI chat                    | Yes                   | Yes                   | No         |
+| Read/create/reply to SDLC conversations   | Yes                   | Yes                   | No         |
+| View repository-filtered personal Activity | Yes                  | Yes                   | No         |
 | Read linked context                       | Subject to source ACL | Subject to source ACL | No         |
 
 The hidden repository channel is an authorization boundary. It must not appear in normal Chat navigation, but its conversations store SDLC AI history. Source-level ACLs still apply when linked or retrieved content comes from elsewhere.
@@ -108,6 +112,7 @@ Layout:
 - repository/module rail;
 - main content area;
 - persistent AI sidebar in SDLC mode;
+- contextual human-conversation panel opened from a selected SDLC owner;
 - contextual Related drawer, absent from Overview and opened explicitly from a specific canvas.
 
 The visual signature is a truthful trace spine:
@@ -376,6 +381,42 @@ memory automatically.
 Before all five baseline approvals, the SDLC Ask AI experience may explain setup/read status but must not
 create PRDs, Tech Docs, or Tickets through tools.
 
+### 12.1 Human conversations
+
+Human SDLC conversations reuse normal top-level conversations and messages in the hidden repository Channel.
+They do not introduce a second chat model. One `SdlcEntityLink` with relation `DISCUSSION` assigns each
+conversation to exactly one owner:
+
+- a pipeline rooted at a PRD Canvas; or
+- one selected Wiki or Repo Knowledge Canvas.
+
+PRD, Tech Doc, Ticket, and linked Pull Request views resolve to the same PRD-rooted pipeline owner and therefore
+show the same conversation list. A Ticket or Pull Request without a resolvable PRD-rooted SDLC chain has no
+pipeline conversation action. Wiki and Repo Knowledge conversations remain scoped to their selected Canvas.
+
+The SDLC header shows **Conversations** beside the existing **Assistant** action only when a concrete owner is
+selected. Each action opens its own right panel and closes the other. The Assistant behavior, sessions, history,
+and context remain unchanged in v1. The conversation panel reuses Chat ordering, pagination, unread state,
+notifications, mentions, reactions, attachments, message controls, composer, and thread rendering. It contains a
+single-column list; selecting a row opens the thread, Back returns to the list, and **New conversation** starts the
+normal first-message composer. The selected conversation is encoded in the URL for refresh and browser-history
+behavior.
+
+No v1 flow attaches an existing conversation, moves it, assigns multiple owners, unlinks it, or backfills old
+hidden-Channel conversations. The panel lists only conversations explicitly created for its resolved owner.
+Deletion follows normal Chat behavior and removes any resulting orphan discussion link.
+
+This feature exists only inside the desktop SDLC Hub. Normal Chat navigation continues to hide the repository
+Channel. Global Wiki, Pull Request, Ask AI, and mobile surfaces remain unchanged. Detailed behavior and delivery
+seams are recorded in [CONVERSATIONS_PLAN.md](./CONVERSATIONS_PLAN.md).
+
+### 12.2 Repository Activity preview
+
+Overview shows a view-only projection of the current user's existing Activity feed filtered to the hidden
+repository Channel. It includes all matching activity types and preserves the global feed's current read/unread
+display, but creates no SDLC-specific Activity rows, changes no read state, and provides no hidden-Channel Chat
+navigation.
+
 ## 13. Start Work
 
 ### 13.1 Preconditions
@@ -571,3 +612,9 @@ Read models and optimistic mutations must be mirrored across backend/dashboard Z
 16. PR create/update moves Ticket to In Review; merge moves it to Done.
 17. Repository admins can inspect baseline generation through the existing Ask AI debug panel without token disclosure.
 18. Legacy Bitbucket/deployment GitHub behavior remains unchanged; shared/backend/dashboard/Claw builds and typechecks pass.
+19. A repository member can open **Conversations** from a selected PRD, Tech Doc, Ticket, or linked Pull Request and see one shared PRD-rooted pipeline conversation list.
+20. A repository member can open an independent conversation list from a selected Wiki or Repo Knowledge document.
+21. Creating a conversation writes a normal hidden-Channel conversation plus exactly one `DISCUSSION` link; the thread then behaves like Chat for all members.
+22. Unlinked historical conversations do not appear, and v1 offers no attach, move, multi-owner, unlink, or backfill flow.
+23. Conversation selection survives refresh and browser navigation; **Assistant** remains behaviorally unchanged and is mutually exclusive with the conversation panel.
+24. Overview renders the current user's existing Activity rows filtered to the repository Channel without creating events or mutating read state.
