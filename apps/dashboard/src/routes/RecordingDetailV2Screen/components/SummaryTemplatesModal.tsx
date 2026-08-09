@@ -1,27 +1,26 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
-  AlignLeft,
-  ArrowRightFromLine,
-  Database,
-  FileCheck2,
-  Globe2,
-  GripVertical,
-  Hash,
-  LoaderCircle,
-  Mail,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Share2,
-  Sparkles,
-  Trash2,
-  Users,
-  X,
-} from 'lucide-react';
+  ChevronDown,
+  ClockDefault,
+  DeleteDustbin01,
+  DragableSixDots,
+  EnvelopeDefault,
+  Globe,
+  Hashtag,
+  LockClose,
+  MultipleCrossCancelDefault,
+  PlusDefault,
+  SearchDefault,
+  Spinner,
+  ThreeDotsMenuHorizontal,
+  UserTwo,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { DefaultOutlet } from '@xyne/shared';
+import { XyneAIStar } from '../../../components/icons/xyne-ai';
+import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
-import { Dialog } from '../../../components/ui/Dialog';
+import { Popover } from '../../../components/ui/Popover';
 import { useHasResourceAccess } from '../../../hooks/usePermissions';
 import { useUser } from '../../../hooks/useUsers';
 import {
@@ -62,17 +61,34 @@ interface TemplateDraft extends SummaryTemplateInput {
   isSystem: boolean;
 }
 
-const getTemplateIcon = (name: string): string => (name === 'Default summary' ? '⚡' : '#');
+/**
+ * Templates carry no icon of their own, so the badge derives one from the name's
+ * first character. Split by code point rather than `name[0]` so a leading emoji
+ * survives instead of rendering as half a surrogate pair. Falls back to `#` only
+ * while the name is empty (the input allows clearing it before save re-titles it).
+ */
+export const getTemplateIcon = (name: string): string => {
+  if (name === 'Default summary') return '⚡';
+  const [firstChar] = Array.from(name.trim());
+  return firstChar ? firstChar.toUpperCase() : '#';
+};
+
+/**
+ * Shared chrome for the three AI assist actions (draft context, suggest sections,
+ * generate summary prompt) so they read as one family rather than drifting apart.
+ */
+const AI_ACTION_BUTTON_CLASS =
+  'h-7 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground';
 
 const EMPTY_SECTION = (): SummaryTemplateSection => ({
   id: crypto.randomUUID(),
-  title: 'New section',
-  description: 'Describe what this section should capture.',
+  title: '',
+  description: '',
 });
 
 const NEW_TEMPLATE = (currentUserId: string): TemplateDraft => ({
   id: null,
-  name: 'Untitled template',
+  name: '',
   autoTriggerPrompt: '',
   sections: [EMPTY_SECTION()],
   systemPrompt: '',
@@ -143,7 +159,34 @@ export function SummaryTemplatesModal({
   const [publicationAction, setPublicationAction] = useState<'approve' | 'deny' | null>(null);
   const [aiAction, setAiAction] = useState<'context' | 'sections' | 'systemPrompt' | null>(null);
   const [shareTemplate, setShareTemplate] = useState<SummaryTemplate | null>(null);
+  const [shareCount, setShareCount] = useState<number | null>(null);
   const draftCreator = useUser(draft?.createdBy ?? '');
+
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const templateId = draft?.id;
+    setShareCount(null);
+    if (!templateId || !draft.canEdit) return;
+
+    let cancelled = false;
+    void recordingService
+      .getSummaryTemplateShares(templateId)
+      .then(shares => {
+        if (!cancelled) setShareCount(shares.length);
+      })
+      .catch(() => undefined);
+
+    return (): void => {
+      cancelled = true;
+    };
+  }, [draft?.id, draft?.canEdit]);
+
+  // A brand-new template opens with every field blank, so put the caret in the title
+  // rather than making the user hunt for the first thing to fill in.
+  useEffect(() => {
+    if (isCreatingTemplate && draft && !draft.id) nameInputRef.current?.focus();
+  }, [isCreatingTemplate, draft?.id]);
 
   useEffect(() => {
     if (draft) return;
@@ -440,81 +483,101 @@ export function SummaryTemplatesModal({
       ? `${currentUserName} (me)`
       : creatorName;
   const isAdminPublicationReview = isScribeAdmin && draft?.visibility === 'WAITING_FOR_APPROVAL';
+  const canOpenShare = Boolean(
+    draft?.id &&
+    !isAdminPublicationReview &&
+    (draft.canEdit || (isScribeAdmin && draft.visibility === 'WAITING_FOR_APPROVAL')),
+  );
+
+  const shareTrigger =
+    draft?.visibility === 'PUBLIC'
+      ? { icon: <Globe className='size-3.5' />, label: 'Public' }
+      : draft?.visibility === 'WAITING_FOR_APPROVAL'
+        ? { icon: <ClockDefault className='size-3.5' />, label: 'Pending review' }
+        : shareCount
+          ? { icon: <UserTwo className='size-3.5' />, label: `Shared · ${shareCount}` }
+          : { icon: <LockClose className='size-3.5' />, label: 'Private' };
 
   return (
     <div className='flex h-full min-h-0 flex-col bg-background text-foreground'>
-      <header className='flex h-16 shrink-0 items-center justify-between border-b border-border px-6'>
-        <h2 className='text-xl font-semibold'>Templates</h2>
-        <button
+      <header className='flex h-14 shrink-0 items-center justify-between border-b border-border px-4 sticky top-0 z-10 bg-background'>
+        <h2 className='text-sm font-semibold'>Summary Templates</h2>
+        <Button
           type='button'
+          variant='ghost'
+          size='iconSm'
           onClick={onClose}
-          className='rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground'
+          className='rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground'
           aria-label='Close templates'
           data-track-category='SummaryTemplates'
           data-track-name='Close'
         >
-          <X className='size-5' />
-        </button>
+          <MultipleCrossCancelDefault className='size-4' />
+        </Button>
       </header>
 
       <div className='flex min-h-0 flex-1'>
-        <aside className='flex w-[310px] shrink-0 flex-col border-r border-border bg-muted/20 p-4'>
-          <button
-            type='button'
-            onClick={() => {
-              const next = NEW_TEMPLATE(currentUserId);
-              setDraft(next);
-              setOriginalDraft(null);
-              setIsCreatingTemplate(true);
-            }}
-            className='flex h-11 items-center gap-3 rounded-xl border border-border bg-background px-4 text-sm font-medium shadow-sm transition-colors hover:bg-muted'
-            data-track-category='SummaryTemplates'
-            data-track-name='NewTemplate'
-          >
-            <Plus className='size-4' />
-            New template
-          </button>
-
-          <label className='mt-3 flex h-11 items-center gap-3 rounded-xl border border-border bg-background px-4 text-sm shadow-sm focus-within:ring-2 focus-within:ring-ring'>
-            <Search className='size-4 text-muted-foreground' />
-            <input
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-              placeholder='Search templates...'
-              className='min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground'
+        <aside className='flex w-72 shrink-0 flex-col border-r border-border bg-muted/20'>
+          <div className='flex shrink-0 flex-col gap-2.5 px-3.5 py-3.5'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => {
+                const next = NEW_TEMPLATE(currentUserId);
+                setDraft(next);
+                setOriginalDraft(null);
+                setIsCreatingTemplate(true);
+              }}
+              className='h-9 w-full gap-2.5 rounded-lg border-border px-3 shadow-none hover:bg-muted'
               data-track-category='SummaryTemplates'
-              data-track-name='Search'
-            />
-          </label>
+              data-track-name='NewTemplate'
+            >
+              <PlusDefault className='size-4' />
+              New template
+            </Button>
 
-          <div className='thin-scrollbar mt-5 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1'>
+            <label className='flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-2.5 text-sm focus-within:ring-2 focus-within:ring-ring'>
+              <SearchDefault className='size-4 shrink-0 text-muted-foreground' />
+              <input
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+                placeholder='Search templates...'
+                className='min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground'
+                data-track-category='SummaryTemplates'
+                data-track-name='Search'
+              />
+            </label>
+          </div>
+
+          <div className='thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3.5 pt-0.5'>
             {loading ? (
-              <p className='px-2 text-sm text-muted-foreground'>Loading templates…</p>
+              <p className='px-2 py-2 text-sm text-muted-foreground'>Loading templates…</p>
             ) : (
               groupedTemplates.map(({ group, templates: groupTemplates }) => (
                 <section key={group}>
-                  <h3 className='mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                  <h3 className='px-2 pb-1 pt-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
                     {GROUP_LABELS[group]}
                   </h3>
-                  <div className='space-y-1'>
+                  <div>
                     {groupTemplates.map(template => {
                       const active = draft?.id === template.id;
                       return (
-                        <button
+                        <Button
                           key={template.id}
                           type='button'
+                          variant='ghost'
                           onClick={() => selectTemplate(template)}
                           className={cn(
-                            'flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted',
+                            'h-auto w-full justify-start gap-2.5 whitespace-normal rounded-lg px-2 py-1.5 text-left font-normal hover:bg-muted',
                             active && 'bg-muted',
                           )}
                           data-track-category='SummaryTemplates'
                           data-track-name='SelectTemplate'
                         >
-                          <span className='flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-base shadow-sm'>
+                          <span className='flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold shadow-sm'>
                             {getTemplateIcon(template.name)}
                           </span>
-                          <span className='min-w-0'>
+                          <span className='min-w-0 flex-1'>
                             <span className='block truncate text-sm font-medium'>
                               {template.name}
                             </span>
@@ -530,7 +593,7 @@ export function SummaryTemplatesModal({
                                       : 'Shared with me'}
                             </span>
                           </span>
-                        </button>
+                        </Button>
                       );
                     })}
                   </div>
@@ -540,19 +603,19 @@ export function SummaryTemplatesModal({
           </div>
         </aside>
 
-        <main className='thin-scrollbar min-w-0 flex-1 overflow-y-auto'>
+        <main className='thin-scrollbar min-w-0 flex-1 overflow-y-auto overscroll-contain'>
           {draft ? (
-            <div className='mx-auto max-w-[920px] px-8 py-8'>
+            <div className='px-7 pb-7 pt-6'>
               {isAdminPublicationReview && (
-                <div className='mb-7 flex flex-col gap-4 rounded-2xl border border-amber-300 bg-amber-50/70 p-5 dark:border-amber-700 dark:bg-amber-950/20 sm:flex-row sm:items-center'>
-                  <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-amber-300 bg-background text-amber-700 dark:border-amber-700 dark:text-amber-300'>
-                    <Globe2 className='size-5' />
+                <div className='mb-5 flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4 sm:flex-row sm:items-center'>
+                  <span className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-status-pending'>
+                    <Globe className='size-4' />
                   </span>
                   <div className='min-w-0 flex-1'>
-                    <p className='text-lg font-semibold'>
+                    <p className='text-sm font-semibold'>
                       {creatorName} wants to make this template public
                     </p>
-                    <p className='mt-0.5 text-sm text-muted-foreground'>
+                    <p className='mt-0.5 text-xs text-muted-foreground'>
                       Approving publishes it for everyone in this workspace. Review it first —
                       you&apos;re a Scribe admin.
                     </p>
@@ -564,6 +627,7 @@ export function SummaryTemplatesModal({
                       disabled={publicationAction !== null}
                       loading={publicationAction === 'deny'}
                       onClick={() => void handleAdminPublicationReview('deny')}
+                      className='h-8 rounded-lg px-3 text-xs font-medium text-muted-foreground'
                       data-track-category='SummaryTemplates'
                       data-track-name='DeclineTemplatePublication'
                     >
@@ -574,7 +638,7 @@ export function SummaryTemplatesModal({
                       disabled={publicationAction !== null}
                       loading={publicationAction === 'approve'}
                       onClick={() => void handleAdminPublicationReview('approve')}
-                      className='bg-foreground text-background hover:bg-foreground/90'
+                      className='h-8 rounded-lg bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90'
                       data-track-category='SummaryTemplates'
                       data-track-name='MakeTemplatePublic'
                     >
@@ -584,48 +648,75 @@ export function SummaryTemplatesModal({
                 </div>
               )}
 
-              <div className='flex items-start justify-between gap-4 border-b border-border pb-7'>
-                <div className='flex min-w-0 items-start gap-4'>
-                  <span className='flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/30 text-xl'>
-                    {templateIcon}
-                  </span>
-                  <div className='min-w-0'>
-                    <input
-                      value={draft.name}
-                      onChange={event =>
-                        setDraft(current =>
-                          current ? { ...current, name: event.target.value } : current,
-                        )
-                      }
-                      readOnly={!isEditable}
-                      maxLength={120}
-                      aria-label='Template name'
-                      className='w-full bg-transparent text-3xl font-semibold leading-tight outline-none read-only:cursor-default'
-                      data-track-category='SummaryTemplates'
-                      data-track-name='EditName'
-                    />
-                    <div className='mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground'>
-                      <span className='flex size-7 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background'>
-                        {draft.isSystem
-                          ? 'XY'
-                          : creatorName
-                              .split(/\s+/)
-                              .map(part => part[0])
-                              .join('')
-                              .slice(0, 2)
-                              .toUpperCase()}
-                      </span>
-                      <span>{creatorLabel}</span>
-                      {draft.visibility !== 'PRIVATE' && (
-                        <span className='inline-flex h-8 items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground'>
-                          <Users className='size-3.5' />
-                          {draft.visibility === 'PUBLIC' ? 'Public' : 'Pending admin review'}
+              <div className='flex items-start gap-3 border-b border-border pb-5'>
+                <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/30 text-xl font-semibold'>
+                  {templateIcon}
+                </span>
+                <div className='min-w-0 flex-1 pt-px'>
+                  <input
+                    ref={nameInputRef}
+                    placeholder='Untitled template'
+                    value={draft.name}
+                    onChange={event =>
+                      setDraft(current =>
+                        current ? { ...current, name: event.target.value } : current,
+                      )
+                    }
+                    readOnly={!isEditable}
+                    maxLength={120}
+                    aria-label='Template name'
+                    className='w-full bg-transparent py-0.5 text-2xl font-bold tracking-tight outline-none read-only:cursor-default placeholder:text-muted-foreground/40 placeholder:text-medium'
+                    data-track-category='SummaryTemplates'
+                    data-track-name='EditName'
+                  />
+                  <div className='mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-muted-foreground'>
+                    <span className='inline-flex items-center gap-1.5'>
+                      {draft.isSystem ? (
+                        <span className='inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background'>
+                          XY
                         </span>
+                      ) : (
+                        <Avatar
+                          userId={draft.createdBy}
+                          size='sm'
+                          rounded
+                          showActiveStatus={false}
+                          className='size-5 shrink-0'
+                        />
                       )}
-                      {draft.id &&
-                        !isAdminPublicationReview &&
-                        (draft.canEdit ||
-                          (isScribeAdmin && draft.visibility === 'WAITING_FOR_APPROVAL')) && (
+                      <p className='text-sm text-muted-foreground cursor-default'>{creatorLabel}</p>
+                    </span>
+                    {!canOpenShare && draft.visibility !== 'PRIVATE' && (
+                      <span className='inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground'>
+                        {shareTrigger.icon}
+                        {shareTrigger.label}
+                      </span>
+                    )}
+                    {canOpenShare && (
+                      <Popover
+                        open={shareTemplate !== null}
+                        onOpenChange={open => {
+                          if (open) void handleOpenShare();
+                          else setShareTemplate(null);
+                        }}
+                        modal
+                        side='bottom'
+                        align='start'
+                        sideOffset={8}
+                        onInteractOutside={event => {
+                          const target = event.target as Element | null;
+                          if (
+                            target?.closest?.('[data-radix-popper-content-wrapper]') ||
+                            target?.closest?.('[data-sonner-toast], [data-sonner-toaster]')
+                          ) {
+                            event.preventDefault();
+                          }
+                        }}
+                        // Bounded flex column, not a scroller: the recipient list
+                        // inside owns the overflow so the search field and actions
+                        // stay put.
+                        className='flex max-h-96 w-80 flex-col rounded-xl border-border p-3 shadow-xl'
+                        trigger={
                           <Button
                             type='button'
                             variant='outline'
@@ -633,56 +724,63 @@ export function SummaryTemplatesModal({
                             disabled={
                               saving || (draft.canEdit && isDirty && !draftRequirements.isComplete)
                             }
-                            onClick={() => void handleOpenShare()}
-                            className='h-8 gap-2'
+                            className='h-7 gap-1.5 rounded-lg border-border bg-muted/40 px-2.5 text-xs font-medium shadow-none'
+                            aria-label={`Sharing: ${shareTrigger.label}`}
                             data-track-category='SummaryTemplates'
                             data-track-name='OpenShareTemplate'
                           >
-                            <Share2 className='size-3.5' />
-                            {draft.canEdit ? 'Share' : 'Review'}
+                            {shareTrigger.icon}
+                            {shareTrigger.label}
+                            <ChevronDown className={cn('size-4 text-muted-foreground')} />
                           </Button>
+                        }
+                      >
+                        {shareTemplate && (
+                          <SummaryTemplateShareModal
+                            template={shareTemplate}
+                            onTemplateChange={handlePublicationChange}
+                            onSharesChange={setShareCount}
+                          />
                         )}
-                    </div>
+                      </Popover>
+                    )}
                   </div>
                 </div>
 
                 {draft.id && draft.canEdit && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button
+                      <Button
                         type='button'
-                        className='rounded-xl border border-border p-2.5 text-muted-foreground hover:bg-muted hover:text-foreground'
+                        variant='outline'
+                        size='iconSm'
+                        className='rounded-lg border-border text-muted-foreground shadow-none hover:bg-muted hover:text-foreground'
                         aria-label='Template actions'
                         data-track-category='SummaryTemplates'
                         data-track-name='OpenActions'
                       >
-                        <MoreHorizontal className='size-5' />
-                      </button>
+                        <ThreeDotsMenuHorizontal className='size-4' />
+                      </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end'>
                       <DropdownMenuItem
                         onClick={() => void handleDelete()}
                         className='gap-2 text-destructive focus:text-destructive'
                       >
-                        <Trash2 className='size-4' /> Delete template
+                        <DeleteDustbin01 className='size-4' /> Delete template
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
               </div>
 
-              <section className='border-b border-border py-7'>
-                <div className='mb-4 flex items-center justify-between gap-4'>
-                  <div className='flex items-center gap-3'>
-                    <span className='flex size-9 items-center justify-center rounded-lg border border-border bg-muted/30'>
-                      <AlignLeft className='size-4 text-muted-foreground' />
-                    </span>
-                    <div>
-                      <h3 className='font-semibold'>Meeting Context</h3>
-                      <p className='text-sm text-muted-foreground'>
-                        What the meeting is about and what you want out of it.
-                      </p>
-                    </div>
+              <section className='py-3'>
+                <div className='mb-2.5 flex items-center gap-2.5'>
+                  <div className='min-w-0 flex-1'>
+                    <h3 className='font-semibold'>Meeting Context</h3>
+                    <p className='text-sm text-muted-foreground'>
+                      What the meeting is about and what you want out of it.
+                    </p>
                   </div>
                   <Button
                     type='button'
@@ -690,14 +788,14 @@ export function SummaryTemplatesModal({
                     size='sm'
                     disabled={!isEditable || aiAction !== null || !draftRequirements.hasTitle}
                     onClick={() => void handleDraftContext()}
-                    className='gap-2'
+                    className={AI_ACTION_BUTTON_CLASS}
                     data-track-category='SummaryTemplates'
                     data-track-name='DraftContextWithAI'
                   >
                     {aiAction === 'context' ? (
-                      <LoaderCircle className='size-3.5 animate-spin' />
+                      <Spinner className='size-3.5 animate-spin' />
                     ) : (
-                      <Sparkles className='size-3.5' />
+                      <XyneAIStar size={13} />
                     )}
                     {aiAction === 'context' ? 'Drafting…' : 'Draft with AI'}
                   </Button>
@@ -711,26 +809,21 @@ export function SummaryTemplatesModal({
                   }
                   readOnly={!isEditable}
                   maxLength={500}
-                  rows={4}
+                  rows={3}
                   placeholder='Describe the meeting and the summary you want…'
-                  className='w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring read-only:bg-muted/20'
+                  className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditContext'
                 />
               </section>
 
-              <section className='border-b border-border py-7'>
-                <div className='mb-4 flex items-center justify-between gap-4'>
-                  <div className='flex items-center gap-3'>
-                    <span className='flex size-9 items-center justify-center rounded-lg border border-border bg-muted/30'>
-                      <Database className='size-4 text-muted-foreground' />
-                    </span>
-                    <div>
-                      <h3 className='font-semibold'>Sections</h3>
-                      <p className='text-sm text-muted-foreground'>
-                        How the summary is structured — one card per section.
-                      </p>
-                    </div>
+              <section className='pb-3 flex flex-col gap-2.5 justify-start items-start w-full'>
+                <div className='mb-2.5 flex items-center gap-2.5 w-full'>
+                  <div className='min-w-0 flex-1'>
+                    <h3 className='font-semibold'>Sections</h3>
+                    <p className='text-sm text-muted-foreground'>
+                      How the summary is structured — one card per section.
+                    </p>
                   </div>
                   <Button
                     type='button'
@@ -743,27 +836,32 @@ export function SummaryTemplatesModal({
                       !draftRequirements.hasMeetingContext
                     }
                     onClick={() => void handleSuggestSections()}
-                    className='gap-2'
+                    className={AI_ACTION_BUTTON_CLASS}
                     data-track-category='SummaryTemplates'
                     data-track-name='SuggestSectionsWithAI'
                   >
                     {aiAction === 'sections' ? (
-                      <LoaderCircle className='size-3.5 animate-spin' />
+                      <Spinner className='size-3.5 animate-spin' />
                     ) : (
-                      <Sparkles className='size-3.5' />
+                      <XyneAIStar size={13} />
                     )}
                     {aiAction === 'sections' ? 'Suggesting…' : 'Suggest sections'}
                   </Button>
                 </div>
 
-                <div className='space-y-3'>
+                <div className='flex flex-col gap-2.5 w-full'>
                   {draft.sections.map(section => (
                     <div
                       key={section.id}
-                      className='group flex items-start gap-3 rounded-xl border border-border px-4 py-4'
+                      className='relative group flex flex-col items-start gap-1.5 rounded-xl border border-border bg-background p-3'
                     >
-                      <GripVertical className='mt-1 size-4 shrink-0 text-muted-foreground/60' />
-                      <div className='min-w-0 flex-1'>
+                      <div className='flex gap-1.5 items-center'>
+                        <span
+                          title='Drag to reorder'
+                          className='shrink-0 cursor-grab text-muted-foreground/60'
+                        >
+                          <DragableSixDots className='size-3.5' />
+                        </span>
                         <input
                           value={section.title}
                           onChange={event =>
@@ -771,11 +869,14 @@ export function SummaryTemplatesModal({
                           }
                           readOnly={!isEditable}
                           maxLength={100}
+                          placeholder='Section title'
                           aria-label='Section title'
-                          className='w-full bg-transparent text-sm font-semibold outline-none read-only:cursor-default'
+                          className='w-full bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground/60'
                           data-track-category='SummaryTemplates'
                           data-track-name='EditSectionTitle'
                         />
+                      </div>
+                      <div className='pl-5 w-full'>
                         <textarea
                           value={section.description}
                           onChange={event =>
@@ -783,16 +884,18 @@ export function SummaryTemplatesModal({
                           }
                           readOnly={!isEditable}
                           maxLength={500}
-                          rows={2}
+                          rows={1}
+                          placeholder='Instructions for this section…'
                           aria-label='Section description'
-                          className='mt-1 w-full resize-none bg-transparent text-sm leading-5 text-muted-foreground outline-none read-only:cursor-default'
+                          className='w-full resize-none bg-transparent text-sm leading-normal text-muted-foreground outline-none placeholder:text-muted-foreground/60'
                           data-track-category='SummaryTemplates'
                           data-track-name='EditSectionDescription'
                         />
                       </div>
                       {isEditable && draft.sections.length > 1 && (
-                        <button
-                          type='button'
+                        <Button
+                          variant='ghost'
+                          size='iconSm'
                           onClick={() =>
                             setDraft(current =>
                               current
@@ -805,21 +908,22 @@ export function SummaryTemplatesModal({
                                 : current,
                             )
                           }
-                          className='rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-destructive group-hover:opacity-100'
+                          className='absolute right-2 top-2 size-6 rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100'
+                          title='Remove section'
                           aria-label='Remove section'
                           data-track-category='SummaryTemplates'
                           data-track-name='RemoveSection'
                         >
-                          <X className='size-4' />
-                        </button>
+                          <MultipleCrossCancelDefault className='size-3.5' strokeWidth={2.5} />
+                        </Button>
                       )}
                     </div>
                   ))}
                 </div>
 
                 {isEditable && (
-                  <button
-                    type='button'
+                  <Button
+                    variant='link'
                     onClick={() =>
                       setDraft(current =>
                         current
@@ -827,28 +931,23 @@ export function SummaryTemplatesModal({
                           : current,
                       )
                     }
+                    className='hover:no-underline gap-1 !px-0 !py-0 text-sm font-medium text-muted-foreground hover:text-primary'
                     disabled={draft.sections.length >= 20}
-                    className='mt-3 inline-flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent'
                     data-track-category='SummaryTemplates'
                     data-track-name='AddSection'
                   >
-                    <Plus className='size-4' /> Add section
-                  </button>
+                    <PlusDefault className='size-4' /> Add section
+                  </Button>
                 )}
               </section>
 
-              <section className='border-b border-border py-7'>
-                <div className='mb-4 flex items-center justify-between gap-4'>
-                  <div className='flex items-center gap-3'>
-                    <span className='flex size-9 items-center justify-center rounded-lg border border-border bg-muted/30'>
-                      <Sparkles className='size-4 text-muted-foreground' />
-                    </span>
-                    <div>
-                      <h3 className='font-semibold'>System prompt</h3>
-                      <p className='text-sm text-muted-foreground'>
-                        Instructions the AI follows when generating this summary.
-                      </p>
-                    </div>
+              <section className='pb-3'>
+                <div className='mb-2.5 flex items-center gap-2.5'>
+                  <div className='min-w-0 flex-1'>
+                    <h3 className='font-semibold'>System prompt</h3>
+                    <p className='text-sm text-muted-foreground'>
+                      Instructions the AI follows when generating this summary.
+                    </p>
                   </div>
                   <Button
                     type='button'
@@ -862,14 +961,14 @@ export function SummaryTemplatesModal({
                       !draftRequirements.hasSections
                     }
                     onClick={() => void handleGenerateSystemPrompt()}
-                    className='gap-2'
+                    className={AI_ACTION_BUTTON_CLASS}
                     data-track-category='SummaryTemplates'
                     data-track-name='GenerateSystemPromptWithAI'
                   >
                     {aiAction === 'systemPrompt' ? (
-                      <LoaderCircle className='size-3.5 animate-spin' />
+                      <Spinner className='size-3.5 animate-spin' />
                     ) : (
-                      <Sparkles className='size-3.5' />
+                      <XyneAIStar size={13} />
                     )}
                     {aiAction === 'systemPrompt' ? 'Generating…' : 'Generate summary prompt'}
                   </Button>
@@ -884,20 +983,17 @@ export function SummaryTemplatesModal({
                   }
                   readOnly={!isEditable}
                   maxLength={12_000}
-                  rows={8}
+                  rows={4}
                   placeholder='Generate or write the instructions used to create summaries with this template…'
-                  className='w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring read-only:bg-muted/20'
+                  className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditSystemPrompt'
                 />
               </section>
 
-              <section className='py-7'>
-                <div className='mb-4 flex items-center gap-3'>
-                  <span className='flex size-9 items-center justify-center rounded-lg border border-border bg-muted/30'>
-                    <ArrowRightFromLine className='size-4 text-muted-foreground' />
-                  </span>
-                  <div>
+              <section className='pb-3'>
+                <div className='mb-4 flex items-center gap-2.5'>
+                  <div className='min-w-0 flex-1'>
                     <h3 className='font-semibold'>Output</h3>
                     <p className='text-sm text-muted-foreground'>
                       What happens after the meeting — wire this template to an outlet.
@@ -905,57 +1001,30 @@ export function SummaryTemplatesModal({
                   </div>
                 </div>
 
-                <div className='overflow-hidden rounded-xl border border-border'>
+                <div className='overflow-hidden rounded-xl border border-border bg-background'>
                   {[
                     {
                       value: DefaultOutlet.MESSAGE,
                       title: 'Post to channel',
                       description: 'Drop the recap into a Spaces channel',
-                      icon: Hash,
+                      icon: Hashtag,
                       enabled: true,
                     },
                     {
                       value: DefaultOutlet.EMAIL,
                       title: 'Draft follow-up email',
                       description: 'Compose a follow-up to attendees',
-                      icon: Mail,
+                      icon: EnvelopeDefault,
                       enabled: true,
-                    },
-                    {
-                      value: 'CRM',
-                      title: 'Add to CRM',
-                      description: 'Log the notes against the deal',
-                      icon: Database,
-                      enabled: false,
-                    },
-                    {
-                      value: 'SCORECARD',
-                      title: 'Draft scorecard',
-                      description: 'Turn the interview into a scorecard',
-                      icon: FileCheck2,
-                      enabled: false,
-                    },
-                    {
-                      value: 'CHATGPT',
-                      title: 'Send to ChatGPT',
-                      description: 'Open the summary in ChatGPT',
-                      icon: Sparkles,
-                      enabled: false,
-                    },
-                    {
-                      value: 'CLAUDE',
-                      title: 'Send to Claude',
-                      description: 'Open the summary in Claude',
-                      icon: Sparkles,
-                      enabled: false,
                     },
                   ].map(option => {
                     const selected = draft.defaultOutlet === option.value;
                     const Icon = option.icon;
                     return (
-                      <button
+                      <Button
                         key={option.value}
                         type='button'
+                        variant='ghost'
                         disabled={!isEditable || !option.enabled}
                         onClick={() =>
                           option.enabled &&
@@ -969,7 +1038,7 @@ export function SummaryTemplatesModal({
                           )
                         }
                         className={cn(
-                          'flex w-full items-center gap-4 border-b border-border px-4 py-3 text-left last:border-b-0',
+                          'h-auto w-full justify-start gap-3 whitespace-normal rounded-none border-b border-border px-3 py-2.5 text-left font-normal last:border-b-0',
                           selected && 'bg-muted',
                           !option.enabled && 'opacity-50',
                           isEditable && option.enabled && 'hover:bg-muted/70',
@@ -979,20 +1048,22 @@ export function SummaryTemplatesModal({
                       >
                         <span
                           className={cn(
-                            'size-4 rounded-full border-2 border-muted-foreground/50',
-                            selected && 'border-[5px] border-foreground',
+                            'inline-flex size-4 shrink-0 items-center justify-center rounded-full border-2 bg-background',
+                            selected ? 'border-foreground' : 'border-muted-foreground/50',
                           )}
-                        />
-                        <span className='flex size-9 items-center justify-center rounded-lg border border-border bg-background'>
+                        >
+                          {selected && <span className='size-1.5 rounded-full bg-foreground' />}
+                        </span>
+                        <span className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground'>
                           <Icon className='size-4' />
                         </span>
-                        <span>
+                        <span className='min-w-0 flex-1'>
                           <span className='block text-sm font-medium'>{option.title}</span>
                           <span className='block text-xs text-muted-foreground'>
                             {option.description}
                           </span>
                         </span>
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -1006,14 +1077,20 @@ export function SummaryTemplatesModal({
         </main>
       </div>
 
-      <footer className='flex min-h-20 shrink-0 items-center justify-between gap-4 border-t border-border px-6 py-3'>
-        <p className='text-xs text-muted-foreground'>
+      <footer className='flex shrink-0 items-center justify-between gap-2.5 border-t border-border px-5 py-3'>
+        <p className='min-w-0 text-xs text-muted-foreground'>
           {willSaveDraft && !draftRequirements.isComplete
             ? `Complete ${draftRequirements.missing.join(', ')} to save.`
             : ''}
         </p>
-        <div className='flex shrink-0 items-center gap-3'>
-          <Button type='button' variant='outline' onClick={onClose} disabled={saving}>
+        <div className='flex shrink-0 items-center gap-2.5'>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={onClose}
+            disabled={saving}
+            className='h-9 rounded-lg px-4 text-sm font-medium text-muted-foreground'
+          >
             Cancel
           </Button>
           <Button
@@ -1025,6 +1102,7 @@ export function SummaryTemplatesModal({
               aiAction !== null ||
               (willSaveDraft && !draftRequirements.isComplete)
             }
+            className='h-9 rounded-lg px-4 text-sm font-semibold'
           >
             {saving
               ? 'Saving…'
@@ -1038,23 +1116,6 @@ export function SummaryTemplatesModal({
           </Button>
         </div>
       </footer>
-
-      {shareTemplate && (
-        <Dialog
-          open
-          onOpenChange={open => !open && setShareTemplate(null)}
-          title='Share template'
-          description={`Share ${shareTemplate.name} with people, groups, or channels.`}
-          className='overflow-hidden rounded-xl p-0'
-          zIndexClassName='z-[60]'
-          testId='summary-template-share-dialog'
-        >
-          <SummaryTemplateShareModal
-            template={shareTemplate}
-            onTemplateChange={handlePublicationChange}
-          />
-        </Dialog>
-      )}
     </div>
   );
 }

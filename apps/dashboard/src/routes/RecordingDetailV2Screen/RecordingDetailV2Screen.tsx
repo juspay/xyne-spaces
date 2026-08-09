@@ -81,7 +81,7 @@ import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { SummaryTemplatesModal } from './components/SummaryTemplatesModal';
+import { SummaryTemplatesModal, getTemplateIcon } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 
 interface RecordingNavState {
@@ -94,6 +94,12 @@ const AUDIO_POLL_MAX_ATTEMPTS = 30;
 // the whole poll window and still has no audio, stitching is not pending — the
 // recording simply has no playable audio, so we skip polling and mark it unavailable.
 const AUDIO_STITCH_GRACE_MS = AUDIO_POLL_INTERVAL_MS * AUDIO_POLL_MAX_ATTEMPTS;
+
+const DEFAULT_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
+  id: 'default',
+  name: 'Default summary',
+  icon: '✨',
+};
 
 const POST_SPLIT_BUTTON_CLASS =
   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
@@ -698,11 +704,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const isOwner = recording.createdByUserId === currentUser?.id;
-  const summaryTemplateOptions: RecordingSummaryTemplate[] = summaryTemplates.map(template => ({
-    id: template.id,
-    name: template.name,
-    icon: template.name === 'Default summary' ? '✨' : '#',
-  }));
+  const summaryTemplateOptions: RecordingSummaryTemplate[] = [
+    DEFAULT_SUMMARY_TEMPLATE_OPTION,
+    ...summaryTemplates
+      .filter(template => template.id !== DEFAULT_SUMMARY_TEMPLATE_OPTION.id)
+      .map(template => ({
+        id: template.id,
+        name: template.name,
+        icon: getTemplateIcon(template.name),
+      })),
+  ];
   const activeSummaryTemplateId = pendingSummaryTemplateId ?? storedSummaryTemplateId;
   const selectedSummaryTemplate: RecordingSummaryTemplate =
     summaryTemplateOptions.find(template => template.id === activeSummaryTemplateId) ??
@@ -710,9 +721,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
       ? {
           id: storedSummaryTemplate.id,
           name: storedSummaryTemplate.name,
-          icon: storedSummaryTemplate.name === 'Default summary' ? '✨' : '#',
+          icon: getTemplateIcon(storedSummaryTemplate.name),
         }
-      : { id: 'default', name: 'Default summary', icon: '✨' });
+      : DEFAULT_SUMMARY_TEMPLATE_OPTION);
 
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab = tabPreference === 'notes' ? 'notes' : secondTab;
@@ -1053,9 +1064,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
         <Dialog
           open={templatesModalMode !== null}
           onOpenChange={open => !open && setTemplatesModalMode(null)}
-          title='Templates'
+          title='Summary Templates'
           description='Choose, create, edit, and share a recording summary template.'
-          className='h-[calc(100vh-48px)] !max-w-[1180px] overflow-hidden rounded-2xl p-0'
+          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
           testId='summary-templates-dialog'
         >
           <SummaryTemplatesModal

@@ -525,7 +525,7 @@ const RecordingsV2Screen = (): ReactElement => {
           onOpenChange={open => !open && handleCloseTemplates()}
           title='Templates'
           description='Create, edit, and share recording summary templates.'
-          className='h-[calc(100vh-48px)] !max-w-[1180px] overflow-hidden rounded-2xl p-0'
+          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
           testId='recordings-summary-templates-dialog'
         >
           <SummaryTemplatesModal

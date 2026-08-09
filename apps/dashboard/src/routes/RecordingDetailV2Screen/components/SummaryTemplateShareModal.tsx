@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import { Check, Clock3, Globe2, Hash, LoaderCircle, Users, X } from 'lucide-react';
+import {
+  CheckTickSingle,
+  ClockDefault,
+  Globe,
+  Hashtag,
+  MultipleCrossCancelDefault,
+  Spinner,
+  UserTwo,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { useChannelSearch, useUserGroupSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
@@ -21,11 +29,20 @@ import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
 interface SummaryTemplateShareModalProps {
   template: SummaryTemplate;
   onTemplateChange?: (template: SummaryTemplate) => void;
+  onSharesChange?: (count: number) => void;
 }
+
+/** Section caption shared by the popover's grouped lists. */
+const SECTION_LABEL_CLASS =
+  'mb-1 mt-3 shrink-0 px-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground';
+
+/** Row action sized for the popover rather than the old full-width dialog. */
+const INLINE_ACTION_CLASS = 'h-7 gap-1.5 rounded-lg px-2.5 text-xs font-medium';
 
 export function SummaryTemplateShareModal({
   template,
   onTemplateChange,
+  onSharesChange,
 }: SummaryTemplateShareModalProps): ReactElement {
   const { user: currentUser } = useAuth();
   const activeUsers = useActiveUsers();
@@ -72,6 +89,10 @@ export function SummaryTemplateShareModal({
     };
   }, [isOwner, template.id]);
 
+  useEffect(() => {
+    if (!loading) onSharesChange?.(shares.length);
+  }, [loading, onSharesChange, shares.length]);
+
   const sharedUserIds = useMemo(
     () => new Set(shares.flatMap(share => (share.userId ? [share.userId] : []))),
     [shares],
@@ -100,7 +121,7 @@ export function SummaryTemplateShareModal({
         label: group.name,
         subtitle: 'Group',
         value: `user_group:${group.id}`,
-        icon: <Users className='size-3.5 text-muted-foreground' />,
+        icon: <UserTwo className='size-3.5 text-muted-foreground' />,
       }));
     const channelOptions = channels
       .filter(channel => !sharedChannelIds.has(channel.id))
@@ -108,7 +129,7 @@ export function SummaryTemplateShareModal({
         label: channel.name,
         subtitle: 'Channel',
         value: `channel:${channel.id}`,
-        icon: <Hash className='size-3.5 text-muted-foreground' />,
+        icon: <Hashtag className='size-3.5 text-muted-foreground' />,
       }));
     return [...userOptions, ...groupOptions, ...channelOptions];
   }, [
@@ -203,229 +224,234 @@ export function SummaryTemplateShareModal({
 
   if (!currentUser || (!isOwner && !canReview)) {
     return (
-      <div className='p-5 text-sm text-muted-foreground'>
+      <p className='px-0.5 py-1 text-xs text-muted-foreground'>
         Only the template creator or a Scribe admin can manage this template.
-      </div>
+      </p>
     );
   }
 
   return (
-    <div className='flex w-full flex-col gap-4 p-5'>
+    <div className='flex min-h-0 w-full flex-1 flex-col'>
+      <p className='mb-2 shrink-0 px-0.5 text-sm font-semibold'>Share template</p>
+
       {isOwner && (
         <>
-          <div className='space-y-2'>
-            <p className='text-[13px] leading-5 text-muted-foreground'>
-              Share with people, groups, or channels
-            </p>
-            <SearchParticipants
-              options={options}
-              selectedValues={selectedValues}
-              onMultiSelect={setSelectedValues}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              exclusiveSelection={false}
-            />
-          </div>
-
-          <div className='flex justify-end'>
+          <SearchParticipants
+            options={options}
+            selectedValues={selectedValues}
+            onMultiSelect={setSelectedValues}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            exclusiveSelection={false}
+          />
+          {selectedValues.length > 0 && (
             <Button
               size='sm'
               onClick={() => void handleShare()}
-              disabled={selectedValues.length === 0 || sharing}
+              disabled={sharing}
+              className='mt-2 h-8 w-full rounded-lg text-xs font-medium'
               data-track-category='SummaryTemplates'
               data-track-name='ShareTemplateConfirm'
             >
-              {sharing ? 'Sharing…' : 'Share'}
+              {sharing
+                ? 'Sharing…'
+                : selectedValues.length === 1
+                  ? 'Share with 1 recipient'
+                  : `Share with ${selectedValues.length} recipients`}
             </Button>
-          </div>
+          )}
 
-          <div className='space-y-2 border-t border-border pt-3'>
-            <p className='text-[13px] text-muted-foreground'>People with access</p>
+          <p className={SECTION_LABEL_CLASS}>Who has access</p>
+          <div className='thin-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain'>
+            <div className='flex items-center gap-2 px-0.5 py-1'>
+              <Avatar userId={template.createdBy} size='sm' rounded showActiveStatus={false} />
+              <span className='min-w-0 flex-1 truncate text-sm'>
+                {getUserDisplayName(currentUser)} (me)
+              </span>
+              <span className='shrink-0 text-xs text-muted-foreground'>Owner</span>
+            </div>
+
             {loading ? (
-              <div className='flex items-center gap-2 py-2 text-sm text-muted-foreground'>
-                <LoaderCircle className='size-4 animate-spin' /> Loading…
-              </div>
-            ) : shares.length === 0 ? (
-              <p className='py-2 text-sm text-muted-foreground'>Only you have access.</p>
+              <p className='flex items-center gap-2 px-0.5 py-1 text-xs text-muted-foreground'>
+                <Spinner className='size-3.5 animate-spin' /> Loading…
+              </p>
             ) : (
-              <div className='max-h-60 space-y-3.5 overflow-y-auto pr-1'>
-                {shares.map(share => {
-                  const label = share.userGroupId
-                    ? (share.userGroup?.name ?? share.userGroupId)
-                    : share.channelId
-                      ? (share.channel?.name ?? share.channelId)
-                      : share.user
-                        ? getUserDisplayName(share.user)
-                        : share.userId;
-                  const icon = share.userGroupId ? (
-                    <Users className='size-4 shrink-0 text-muted-foreground' />
-                  ) : share.channelId ? (
-                    <Hash className='size-4 shrink-0 text-muted-foreground' />
-                  ) : (
-                    <Avatar userId={share.userId} size='sm' showActiveStatus={false} />
-                  );
-                  return (
-                    <div key={share.id} className='group flex items-center justify-between gap-2'>
-                      <div className='flex min-w-0 items-center gap-2'>
-                        {icon}
-                        <span className='truncate text-sm'>{label}</span>
-                      </div>
-                      <button
-                        type='button'
-                        onClick={() => void handleRevoke(share)}
-                        disabled={revokingId === share.id}
-                        className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground disabled:opacity-50 group-hover:opacity-100'
-                        aria-label='Remove access'
-                        data-track-category='SummaryTemplates'
-                        data-track-name='RevokeTemplateShare'
-                      >
-                        {revokingId === share.id ? (
-                          <LoaderCircle className='size-3.5 animate-spin' />
-                        ) : (
-                          <X className='size-3.5' />
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+              shares.map(share => {
+                const label = share.userGroupId
+                  ? (share.userGroup?.name ?? share.userGroupId)
+                  : share.channelId
+                    ? (share.channel?.name ?? share.channelId)
+                    : share.user
+                      ? getUserDisplayName(share.user)
+                      : share.userId;
+                const icon = share.userGroupId ? (
+                  <UserTwo className='size-4 shrink-0 text-muted-foreground' />
+                ) : share.channelId ? (
+                  <Hashtag className='size-4 shrink-0 text-muted-foreground' />
+                ) : (
+                  <Avatar userId={share.userId} size='sm' rounded showActiveStatus={false} />
+                );
+                return (
+                  <div key={share.id} className='group flex items-center gap-2 px-0.5 py-1'>
+                    {icon}
+                    <span className='min-w-0 flex-1 truncate text-sm'>{label}</span>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='iconSm'
+                      onClick={() => void handleRevoke(share)}
+                      disabled={revokingId === share.id}
+                      className='size-6 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+                      aria-label='Remove access'
+                      data-track-category='SummaryTemplates'
+                      data-track-name='RevokeTemplateShare'
+                    >
+                      {revokingId === share.id ? (
+                        <Spinner className='size-3 animate-spin' />
+                      ) : (
+                        <MultipleCrossCancelDefault className='size-3' />
+                      )}
+                    </Button>
+                  </div>
+                );
+              })
             )}
           </div>
         </>
       )}
 
-      <div className='border-t border-border pt-4'>
-        {template.visibility === 'PRIVATE' && isOwner && (
-          <div className='rounded-xl border border-border p-4'>
-            <div className='flex gap-3'>
-              <Globe2 className='mt-0.5 size-5 shrink-0 text-muted-foreground' />
-              <div className='min-w-0'>
-                <p className='font-medium'>Publish template</p>
-                <p className='mt-1 text-sm text-muted-foreground'>
-                  {isAdmin
-                    ? 'Public templates can be used by anyone in this workspace. As a Scribe admin, you can publish directly.'
-                    : 'Public templates can be used by anyone in this workspace. A Scribe admin reviews it first.'}
-                </p>
+      {/* Full-bleed rule, matching the reference's negative side margins. */}
+      <div className='-mx-3 my-2.5 h-px shrink-0 bg-border' />
+
+      {template.visibility === 'PRIVATE' && isOwner && (
+        <div className='flex shrink-0 items-start gap-2 px-0.5'>
+          <span className='mt-px shrink-0 text-muted-foreground'>
+            <Globe className='size-4' />
+          </span>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium'>Publish template</p>
+            <p className='mt-px text-xs leading-normal text-muted-foreground'>
+              {isAdmin
+                ? 'Public templates can be used by anyone in this workspace. As a Scribe admin, you can publish directly.'
+                : 'Public templates can be used by anyone in this workspace. A Scribe admin reviews it first.'}
+            </p>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className={`mt-2 ${INLINE_ACTION_CLASS} text-muted-foreground`}
+              loading={publicationAction === (isAdmin ? 'publish' : 'request')}
+              disabled={loading || (!isAdmin && admins.length === 0)}
+              onClick={() => void handlePublication(isAdmin ? 'publish' : 'request')}
+              data-track-category='SummaryTemplates'
+              data-track-name={isAdmin ? 'PublishTemplateDirectly' : 'RequestTemplatePublication'}
+            >
+              {isAdmin ? 'Make public' : 'Send to admin for review'}
+            </Button>
+            {!loading && !isAdmin && admins.length === 0 && (
+              <p className='mt-1.5 text-xs text-muted-foreground'>
+                No Scribe admins are configured for this workspace.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {template.visibility === 'WAITING_FOR_APPROVAL' && (
+        <div className='flex shrink-0 items-start gap-2 px-0.5'>
+          <span className='mt-px shrink-0 text-status-pending'>
+            <ClockDefault className='size-4' />
+          </span>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium'>Pending admin review</p>
+            <p className='mt-px text-xs leading-normal text-muted-foreground'>
+              Once a Scribe admin approves it, this template becomes public.
+            </p>
+
+            {showAdmins && admins.length > 0 && (
+              <div className='mt-2 flex flex-col'>
+                {admins.map(admin => (
+                  <div key={admin.id} className='flex items-center gap-2 py-1'>
+                    <span className='min-w-0 flex-1 truncate text-sm'>
+                      {admin.name || admin.email || 'Scribe admin'}
+                    </span>
+                    <span className='shrink-0 text-xs text-muted-foreground'>Scribe admin</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className='mt-2 flex flex-wrap items-center gap-2'>
+              {admins.length > 0 && (
                 <Button
                   type='button'
                   variant='outline'
                   size='sm'
-                  className='mt-3'
-                  loading={publicationAction === (isAdmin ? 'publish' : 'request')}
-                  disabled={loading || (!isAdmin && admins.length === 0)}
-                  onClick={() => void handlePublication(isAdmin ? 'publish' : 'request')}
-                  data-track-category='SummaryTemplates'
-                  data-track-name={
-                    isAdmin ? 'PublishTemplateDirectly' : 'RequestTemplatePublication'
-                  }
+                  onClick={() => setShowAdmins(value => !value)}
+                  className={`${INLINE_ACTION_CLASS} text-muted-foreground`}
                 >
-                  {isAdmin ? 'Make public' : 'Send to admin for review'}
+                  {showAdmins ? 'Hide admins' : 'Show admins'}
                 </Button>
-                {!loading && !isAdmin && admins.length === 0 && (
-                  <p className='mt-2 text-xs text-muted-foreground'>
-                    No Scribe admins are configured for this workspace.
-                  </p>
-                )}
-              </div>
+              )}
+              {isOwner && (
+                <Button
+                  type='button'
+                  variant='link'
+                  size='sm'
+                  loading={publicationAction === 'withdraw'}
+                  onClick={() => void handlePublication('withdraw')}
+                  className='h-7 px-0 text-xs font-medium'
+                  data-track-category='SummaryTemplates'
+                  data-track-name='WithdrawTemplatePublication'
+                >
+                  Withdraw request
+                </Button>
+              )}
+              {canReview && (
+                <>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    loading={publicationAction === 'deny'}
+                    onClick={() => void handlePublication('deny')}
+                    className={`${INLINE_ACTION_CLASS} text-muted-foreground`}
+                    data-track-category='SummaryTemplates'
+                    data-track-name='DenyTemplatePublication'
+                  >
+                    Deny
+                  </Button>
+                  <Button
+                    type='button'
+                    size='sm'
+                    loading={publicationAction === 'approve'}
+                    onClick={() => void handlePublication('approve')}
+                    className={`${INLINE_ACTION_CLASS} bg-foreground text-background hover:bg-foreground/90`}
+                    data-track-category='SummaryTemplates'
+                    data-track-name='ApproveTemplatePublication'
+                  >
+                    Approve and publish
+                  </Button>
+                </>
+              )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {template.visibility === 'WAITING_FOR_APPROVAL' && (
-          <div className='rounded-xl border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-700 dark:bg-amber-950/20'>
-            <div className='flex gap-3'>
-              <Clock3 className='mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-400' />
-              <div className='min-w-0 flex-1'>
-                <p className='font-medium text-amber-900 dark:text-amber-200'>
-                  Pending admin review
-                </p>
-                <p className='mt-1 text-sm text-muted-foreground'>
-                  Once a Scribe admin approves it, this template becomes public.
-                </p>
-                {showAdmins && admins.length > 0 && (
-                  <div className='mt-3 space-y-2'>
-                    {admins.map(admin => (
-                      <div
-                        key={admin.id}
-                        className='flex items-center justify-between gap-3 text-sm'
-                      >
-                        <span className='truncate'>
-                          {admin.name || admin.email || 'Scribe admin'}
-                        </span>
-                        <span className='shrink-0 text-xs text-muted-foreground'>Scribe admin</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className='mt-3 flex flex-wrap items-center gap-2'>
-                  {admins.length > 0 && (
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      onClick={() => setShowAdmins(value => !value)}
-                    >
-                      {showAdmins ? 'Hide admins' : 'Show admins'}
-                    </Button>
-                  )}
-                  {isOwner && (
-                    <Button
-                      type='button'
-                      variant='link'
-                      size='sm'
-                      loading={publicationAction === 'withdraw'}
-                      onClick={() => void handlePublication('withdraw')}
-                      data-track-category='SummaryTemplates'
-                      data-track-name='WithdrawTemplatePublication'
-                    >
-                      Withdraw request
-                    </Button>
-                  )}
-                  {canReview && (
-                    <>
-                      <Button
-                        type='button'
-                        variant='outline'
-                        size='sm'
-                        loading={publicationAction === 'deny'}
-                        onClick={() => void handlePublication('deny')}
-                        data-track-category='SummaryTemplates'
-                        data-track-name='DenyTemplatePublication'
-                      >
-                        Deny
-                      </Button>
-                      <Button
-                        type='button'
-                        size='sm'
-                        loading={publicationAction === 'approve'}
-                        onClick={() => void handlePublication('approve')}
-                        data-track-category='SummaryTemplates'
-                        data-track-name='ApproveTemplatePublication'
-                      >
-                        Approve and publish
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
+      {template.visibility === 'PUBLIC' && (
+        <div className='flex shrink-0 items-start gap-2 px-0.5'>
+          <span className='mt-px shrink-0 text-status-success'>
+            <CheckTickSingle className='size-4' />
+          </span>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium'>Public template</p>
+            <p className='mt-px text-xs leading-normal text-muted-foreground'>
+              Anyone in this workspace can see and use this template.
+            </p>
           </div>
-        )}
-
-        {template.visibility === 'PUBLIC' && (
-          <div className='flex gap-3 rounded-xl border border-border p-4'>
-            <span className='flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'>
-              <Check className='size-4' />
-            </span>
-            <div>
-              <p className='font-medium'>Public template</p>
-              <p className='mt-1 text-sm text-muted-foreground'>
-                Anyone in this workspace can see and use this template.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
