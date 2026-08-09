@@ -919,7 +919,7 @@ export const agentRunRepository = {
   },
 
   /** High-level global overview suitable for dashboard header cards. */
-  globalOverviewStats: async (cutoff: Date | null) => {
+  globalOverviewStats: async (cutoff: Date | null, orgId?: string) => {
     type Row = {
       total_runs: bigint;
       completed_runs: bigint;
@@ -946,7 +946,8 @@ export const agentRunRepository = {
         -- by ~10x (doctor-agent: 15.7M fresh vs 231M cacheRead per day).
         COALESCE(SUM("tokensCacheRead"), 0) + COALESCE(SUM("tokensCacheWrite"), 0) AS total_tokens_cached
       FROM agent_runs
-      WHERE "agentSlug" IN (SELECT slug FROM agents WHERE scope = 'global')
+      WHERE "agentSlug" IN (SELECT slug FROM agents WHERE scope = 'global' ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty})
+      ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
     `;
     const r = rows[0]!;
@@ -964,7 +965,7 @@ export const agentRunRepository = {
   },
 
   /** Per-agent stats sorted by total runs desc. */
-  runStatsByAgent: async (cutoff: Date | null) => {
+  runStatsByAgent: async (cutoff: Date | null, orgId?: string) => {
     type Row = {
       agent_slug: string;
       total_runs: bigint;
@@ -988,7 +989,9 @@ export const agentRunRepository = {
         COALESCE(SUM("tokensIn"),  0)     AS total_tokens_in,
         COALESCE(SUM("tokensOut"), 0)     AS total_tokens_out
       FROM agent_runs
-      ${cutoff ? Prisma.sql`WHERE "startedAt" >= ${cutoff}` : Prisma.empty}
+      WHERE 1=1
+      ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
+      ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       GROUP BY "agentSlug"
       ORDER BY total_runs DESC
     `;
@@ -1274,7 +1277,7 @@ export const agentRunRepository = {
    * Top-N users with per-agent run breakdown for admin unified users table.
    * Returns top users by run count + per-user/per-agent group-by merged in JS.
    */
-  userActivityBreakdown: async (cutoff: Date | null, limit: number) => {
+  userActivityBreakdown: async (cutoff: Date | null, limit: number, orgId?: string) => {
     type UserRow = { user_id: string; run_count: bigint; unique_agents: bigint; total_tokens_in: bigint; total_tokens_out: bigint };
     const userRows = await prisma.$queryRaw<UserRow[]>`
       SELECT
@@ -1285,6 +1288,7 @@ export const agentRunRepository = {
         COALESCE(SUM("tokensOut"), 0)         AS total_tokens_out
       FROM agent_runs
       WHERE "agentSlug" IN (SELECT slug FROM agents WHERE scope = 'global')
+      ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       GROUP BY "userId"
       ORDER BY run_count DESC
@@ -1322,13 +1326,14 @@ export const agentRunRepository = {
       FROM agent_runs
       WHERE "userId" = ANY(${topUserIds}::text[])
         AND "agentSlug" IN (SELECT slug FROM agents WHERE scope = 'global')
+        ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       GROUP BY "userId", "agentSlug"
       ORDER BY run_count DESC
     `;
 
     const users = await prisma.user.findMany({
-      where: { id: { in: topUserIds } },
+      where: { id: { in: topUserIds }, ...(orgId ? { orgId } : {}) },
       select: { id: true, email: true, name: true },
     });
     const infoById = new Map(users.map((u) => [u.id, u] as const));
@@ -1381,7 +1386,7 @@ export const agentRunRepository = {
    * metric toggles (the same project keeps the same color regardless of
    * which value drives the slice sizes).
    */
-  listProjectsForDashboard: async (cutoff: Date | null) => {
+  listProjectsForDashboard: async (cutoff: Date | null, orgId?: string) => {
     type Row = {
       project_id: string;
       project_name: string | null;
@@ -1401,6 +1406,7 @@ export const agentRunRepository = {
         (COUNT(*) FILTER (WHERE status = 'failed'))::bigint        AS failed_runs
       FROM agent_runs
       WHERE "projectId" IS NOT NULL
+      ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       GROUP BY "projectId"
       ORDER BY run_count DESC
@@ -1416,7 +1422,7 @@ export const agentRunRepository = {
   },
 
   /** Per-agent run stats filtered to a specific project. */
-  projectAgentUsage: async (projectId: string, cutoff: Date | null) => {
+  projectAgentUsage: async (projectId: string, cutoff: Date | null, orgId?: string) => {
     type Row = {
       agent_slug: string;
       total_runs: bigint;
@@ -1443,6 +1449,7 @@ export const agentRunRepository = {
         MAX("startedAt")                   AS last_run_at
       FROM agent_runs
       WHERE "projectId" = ${projectId}
+      ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       GROUP BY "agentSlug"
       ORDER BY total_runs DESC
@@ -1461,7 +1468,7 @@ export const agentRunRepository = {
   },
 
   /** Top-N users by run count within a specific project. */
-  projectTopUsers: async (projectId: string, cutoff: Date | null, limit: number) => {
+  projectTopUsers: async (projectId: string, cutoff: Date | null, limit: number, orgId?: string) => {
     type Row = {
       user_id: string;
       run_count: bigint;
@@ -1478,6 +1485,7 @@ export const agentRunRepository = {
         COALESCE(SUM("tokensOut"), 0)         AS total_tokens_out
       FROM agent_runs
       WHERE "projectId" = ${projectId}
+      ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       GROUP BY "userId"
       ORDER BY run_count DESC
@@ -1500,7 +1508,7 @@ export const agentRunRepository = {
     };
     const [users, perAgentRows, agentMeta] = await Promise.all([
       prisma.user.findMany({
-        where: { id: { in: userIds } },
+        where: { id: { in: userIds }, ...(orgId ? { orgId } : {}) },
         select: { id: true, email: true, name: true },
       }),
       prisma.$queryRaw<PerAgentRow[]>`
@@ -1519,12 +1527,13 @@ export const agentRunRepository = {
         FROM agent_runs
         WHERE "projectId" = ${projectId}
           AND "userId" = ANY(${userIds}::text[])
+          ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
         ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
         GROUP BY "userId", "agentSlug"
         ORDER BY run_count DESC
       `,
       prisma.agent.findMany({
-        where: {},
+        where: orgId ? { orgId } : {},
         select: { slug: true, name: true, scope: true, enabled: true, spacesAppId: true },
       }),
     ]);
@@ -1569,7 +1578,7 @@ export const agentRunRepository = {
    * Skills used by agents that ran within a specific project.
    * Joins agent_runs -> agents -> agent_skills -> skills.
    */
-  projectSubagentUsage: async (projectId: string, cutoff: Date | null) => {
+  projectSubagentUsage: async (projectId: string, cutoff: Date | null, orgId?: string) => {
     type Row = {
       subagent_name: string;
       agent_count: bigint;
@@ -1584,13 +1593,16 @@ export const agentRunRepository = {
         SELECT DISTINCT "agentSlug"
         FROM agent_runs
         WHERE "projectId" = ${projectId}
+        ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
         ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       ) AS ar
-      JOIN agents a ON a.slug = ar."agentSlug",
+      JOIN agents a ON a.slug = ar."agentSlug"
+        ${orgId ? Prisma.sql`AND a."orgId" = ${orgId}` : Prisma.empty},
         jsonb_array_elements_text(
           COALESCE(a.config->'tools'->'subagents', '[]'::jsonb)
         ) AS subagent_name
       WHERE a.config->'tools'->'subagents' IS NOT NULL
+        ${orgId ? Prisma.sql`AND a."orgId" = ${orgId}` : Prisma.empty}
         AND jsonb_array_length(a.config->'tools'->'subagents') > 0
       GROUP BY subagent_name
       ORDER BY agent_count DESC, subagent_name ASC
@@ -1602,7 +1614,7 @@ export const agentRunRepository = {
     }));
   },
 
-  projectSkillUsage: async (projectId: string, cutoff: Date | null) => {
+  projectSkillUsage: async (projectId: string, cutoff: Date | null, orgId?: string) => {
     type Row = {
       skill_id: string;
       skill_slug: string;
@@ -1623,9 +1635,11 @@ export const agentRunRepository = {
         SELECT DISTINCT "agentSlug"
         FROM agent_runs
         WHERE "projectId" = ${projectId}
+        ${orgId ? Prisma.sql`AND "orgId" = ${orgId}` : Prisma.empty}
         ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
       ) AS ar
       JOIN agents a ON a.slug = ar."agentSlug"
+        ${orgId ? Prisma.sql`AND a."orgId" = ${orgId}` : Prisma.empty}
       JOIN agent_skills aks ON aks."agentId" = a.id
       JOIN skills s ON s.id = aks."skillId"
       GROUP BY s.id, s.slug, s.name, s.source

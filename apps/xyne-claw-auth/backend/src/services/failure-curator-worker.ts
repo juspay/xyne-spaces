@@ -272,6 +272,8 @@ export interface BackfillReport {
 const CONCURRENCY = Number(process.env["FAILURE_CURATOR_BACKFILL_CONCURRENCY"] ?? 3);
 
 export async function backfillFailureCurator(opts: {
+  /** Scope the backfill to this org. Required — prevents cross-org leaks. */
+  orgId: string;
   /** When set, only process this agent. */
   agentSlug?: string;
   /** How many days back to look. Default 7. */
@@ -281,18 +283,18 @@ export async function backfillFailureCurator(opts: {
   const now = new Date();
   const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-  // Decide the agent set
+  // Decide the agent set (scoped to opts.orgId)
   let agentPairs: Array<{ orgId: string; agentSlug: string }>;
   if (opts.agentSlug) {
     agentPairs = await prisma.agent.findMany({
-      where: { slug: opts.agentSlug },
+      where: { slug: opts.agentSlug, orgId: opts.orgId },
       select: { orgId: true, slug: true },
     }).then((rows) => rows.map((row) => ({ orgId: row.orgId, agentSlug: row.slug })));
   } else {
     agentPairs = await prisma.$queryRaw<Array<{ orgId: string; agentSlug: string }>>`
       SELECT DISTINCT "orgId", "agentSlug" FROM "agent_runs"
        WHERE "completedAt" >= ${since}
-         AND "orgId" IS NOT NULL
+         AND "orgId" = ${opts.orgId}
     `;
     agentPairs = agentPairs.sort((a, b) => a.agentSlug.localeCompare(b.agentSlug) || a.orgId.localeCompare(b.orgId));
   }

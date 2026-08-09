@@ -17,8 +17,7 @@ export interface CompiledBucket {
 }
 
 const TTL_MS = 60_000;
-let cached: CompiledBucket[] | null = null;
-let fetchedAt = 0;
+const cached = new Map<string, { rules: CompiledBucket[] | null; fetchedAt: number }>();
 
 function compileMarkers(src: string): RegExp | null {
   if (!src) return null;
@@ -44,31 +43,32 @@ function compileKeywords(keywords: string[]): RegExp | null {
   }
 }
 
-export async function laneNames(): Promise<string[]> {
-  const rules = await getRules();
+export async function laneNames(orgId: string): Promise<string[]> {
+  const rules = await getRules(orgId);
   const names = rules?.map((r) => r.name) ?? [];
   if (!names.includes("default")) names.push("default");
   return names;
 }
 
 /** Current compiled bucket rules, in matchOrder. Stale-ok on DB errors. */
-export async function getRules(): Promise<CompiledBucket[] | null> {
-  if (cached && Date.now() - fetchedAt < TTL_MS) return cached;
+export async function getRules(orgId: string): Promise<CompiledBucket[] | null> {
+  const previous = cached.get(orgId);
+  if (previous && Date.now() - previous.fetchedAt < TTL_MS) return previous.rules;
   try {
     const rows = await prisma.errorBucket.findMany({
-      where: { enabled: true },
+      where: { orgId, enabled: true },
       orderBy: { matchOrder: "asc" },
       select: { name: true, keywords: true, markers: true },
     });
-    cached = rows.map((b) => ({
+    const rules = rows.map((b) => ({
       name: b.name,
       keywords: compileKeywords(b.keywords),
       markers: compileMarkers(b.markers),
     }));
-    fetchedAt = Date.now();
+    cached.set(orgId, { rules, fetchedAt: Date.now() });
   } catch (err) {
     log.warn(`[rules] DB read failed (${err instanceof Error ? err.message : String(err)}) — keeping previous rules`);
-    fetchedAt = Date.now(); // back off — don't hammer a down DB per error
+    cached.set(orgId, { rules: previous?.rules ?? null, fetchedAt: Date.now() }); // back off — don't hammer a down DB per error
   }
-  return cached;
+  return cached.get(orgId)?.rules ?? null;
 }

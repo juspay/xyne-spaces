@@ -116,7 +116,7 @@ async function registerAttioClient(redirectUri: string): Promise<string> {
 
 /** Ensures an "attio" McpServer row exists, creating it if necessary. */
 async function ensureAttioServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "attio" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "attio", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

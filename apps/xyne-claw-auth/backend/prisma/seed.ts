@@ -577,10 +577,7 @@ async function main() {
       healthcheckSpec?: unknown;
       writeToolPolicy?: unknown;
     };
-    await prisma.mcpServer.upsert({
-      where: { type: server.type },
-      create: server,
-      update: ({
+    const update = {
         name: server.name,
         url: server.url,
         description: server.description,
@@ -593,12 +590,19 @@ async function main() {
         ...(s.writeToolPolicy ? { writeToolPolicy: s.writeToolPolicy as Prisma.InputJsonValue } : {}),
         connectorMeta: { seeded: true, version: 1 } as Prisma.InputJsonValue,
         enabled: true,
-      } as Prisma.McpServerUpdateInput),
+      } as Prisma.McpServerUpdateInput;
+    const existingServer = await prisma.mcpServer.findFirst({
+      where: { type: server.type, orgId: null },
     });
+    if (existingServer) {
+      await prisma.mcpServer.update({ where: { id: existingServer.id }, data: update });
+    } else {
+      await prisma.mcpServer.create({ data: { ...server, orgId: null } });
+    }
     console.log(`[seed] Upserted server: ${server.name} (${server.type})`);
   }
 
-  const stale = await prisma.mcpServer.findFirst({ where: { type: "atlassian" } });
+  const stale = await prisma.mcpServer.findFirst({ where: { type: "atlassian", orgId: null } });
   if (stale) {
     await prisma.mcpServer.delete({ where: { id: stale.id } });
     console.log("[seed] Removed stale atlassian server");
@@ -2054,7 +2058,9 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
   // user's live Spaces session before the agent-pin cascade is consulted.
   const dashboardCredsPayload = encryptCreds({});
   if (dashboardCredsPayload) {
-    const dashboardServerRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-dashboard" } });
+    const dashboardServerRow = await prisma.mcpServer.findFirst({
+      where: { type: "xyne-dashboard", orgId: null },
+    });
     if (dashboardServerRow) {
       await prisma.agentMcpConnection.upsert({
         where: {

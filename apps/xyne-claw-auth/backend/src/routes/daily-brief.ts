@@ -261,7 +261,7 @@ router.put("/settings", async (req: Request, res: Response) => {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
     }
-    const admin = (await isClawAdmin(userId)) || (await isOrgAdmin(userId, orgId));
+    const admin = (await isClawAdmin(userId, orgId)) || (await isOrgAdmin(userId, orgId));
     if (!admin) {
       res.status(403).json({ success: false, error: "Only an org admin can change the daily brief agent" });
       return;

@@ -1,6 +1,7 @@
  
- import type { McpServer } from "@prisma/client";
+import type { McpServer } from "@prisma/client";
 import { prisma } from "../db.js";
+import { findMcpServer } from "./server-resolution.js";
 import type {
   CredentialField,
   HttpLaunchConfig,
@@ -161,13 +162,13 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
  */
 const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin"]);
 
-export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
+export async function resolveConnectorDefinition(serverType: string, orgId?: string): Promise<ResolvedConnectorDefinition | undefined> {
   if (STATIC_FIRST_TYPES.has(serverType)) {
     const staticDef = fromStaticAdapter(serverType);
     if (staticDef) return staticDef;
   }
 
-  const row = await prisma.mcpServer.findUnique({ where: { type: serverType } });
+  const row = await findMcpServer(serverType, orgId);
   if (row && row.enabled) {
     // Only use the dynamic (DB-driven) path when the row has an actual launch
     // config — launchConfigTemplate for stdio or httpConfigTemplate for http.
@@ -197,8 +198,12 @@ export async function resolveConnectorDefinition(serverType: string): Promise<Re
   return fromStaticAdapter(serverType);
 }
 
-export async function hasConnectorDefinition(serverType: string): Promise<boolean> {
-  return (await resolveConnectorDefinition(serverType)) !== undefined;
+export async function hasConnectorDefinition(serverType: string, orgId?: string): Promise<boolean> {
+  if (!orgId) {
+    if (fromStaticAdapter(serverType)) return true;
+    return (await prisma.mcpServer.findFirst({ where: { type: serverType }, select: { id: true } })) !== null;
+  }
+  return (await resolveConnectorDefinition(serverType, orgId)) !== undefined;
 }
 
 export async function getCredentialFieldsByServerType(): Promise<Record<string, readonly CredentialField[]>> {
@@ -213,4 +218,3 @@ export async function getCredentialFieldsByServerType(): Promise<Record<string, 
   }
   return map;
 }
-

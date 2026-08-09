@@ -93,11 +93,6 @@ function lightAgentProjection(agent: Record<string, unknown>, orgNames?: Map<str
   };
 }
 
-const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
-  ?.split(",")
-  .map((tenant) => tenant.trim())
-  .find((tenant) => tenant.length > 0);
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -151,7 +146,9 @@ async function normalizeGatewayServicesInConfig(config: Record<string, unknown> 
   const normalized: string[] = [];
   const seen = new Set<string>();
 
-  const gatewayTenant = DEFAULT_GATEWAY_TENANT;
+  // Gateway support is intentionally disconnected. Existing saved selections
+  // are retained, but no service-registry lookup is performed.
+  const gatewayTenant: string | undefined = undefined;
   let serviceRows: Array<{ serviceName: string; tools: Prisma.JsonValue }> = [];
   if (gatewayTenant) {
     serviceRows = await prisma.serviceRegistry.findMany({
@@ -344,7 +341,7 @@ router.get("/", async (req: Request, res: Response) => {
     // trust the query string for that decision.
     const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
     const authedUserId = String(req.headers["x-user-id"] ?? "");
-    const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+    const admin = authedUserId ? await isClawAdmin(authedUserId, getOrgId(req)) : false;
 
     // The admin "see ALL agents" bypass is OPT-IN via ?scope=all. The default
     // list (e.g. the main "My Agents" view) stays filtered to
@@ -484,7 +481,14 @@ router.post("/", async (req: Request, res: Response) => {
 
     // Determine scope: only admins can create global agents
     const requesterId = getRequesterId(req);
-    const admin = requesterId ? await isClawAdmin(requesterId) : false;
+    const admin = requesterId ? await isClawAdmin(requesterId, getOrgId(req)) : false;
+
+    // Platform scope can only be set via seed script, never via the API.
+    if (scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents can only be created via the seed script" });
+      return;
+    }
+
     const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
     // For personal agents, owner is required
@@ -663,7 +667,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     // ACL: check edit permissions based on scope
     const requesterId = getRequesterId(req);
     if (requesterId) {
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       const isOwner = existing.ownerUserId === requesterId;
       const share = await agentShareRepository.findByAgentAndUser(existing.id, requesterId);
       const isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
@@ -749,7 +753,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
         res.status(400).json({ success: false, error: "delegationTier must be 'standard' or 'orchestrator'" });
         return;
       }
-      const requesterIsAdmin = requesterId ? await isClawAdmin(requesterId) : false;
+      const requesterIsAdmin = requesterId ? await isClawAdmin(requesterId, getOrgId(req)) : false;
       if (!requesterIsAdmin) {
         res.status(403).json({ success: false, error: "Only claw admins can change delegationTier" });
         return;
@@ -1553,6 +1557,10 @@ router.post("/requests/:requestId/approve", requireClawAdmin, async (req: Reques
       res.status(404).json({ success: false, error: "Request not found or already processed" });
       return;
     }
+    if (request.orgId !== getOrgId(req)) {
+      res.status(403).json({ success: false, error: "Request belongs to a different organization" });
+      return;
+    }
 
     // Execute the action based on target type
     if (request.targetType === "skill" && request.skillId) {
@@ -1605,6 +1613,10 @@ router.post("/requests/:requestId/reject", requireClawAdmin, async (req: Request
     const request = await agentRequestRepository.findById(req.params.requestId);
     if (!request || request.status !== "pending") {
       res.status(404).json({ success: false, error: "Request not found or already processed" });
+      return;
+    }
+    if (request.orgId !== getOrgId(req)) {
+      res.status(403).json({ success: false, error: "Request belongs to a different organization" });
       return;
     }
 
@@ -1713,9 +1725,13 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
  * Resolve the caller's relationship to an agent: owner (real ownership, not
  * admin-derived), contributor (EDITOR/CONTRIBUTOR share), or admin.
  */
-async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null }, requesterId: string) {
+async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null; scope: string; orgId?: string | null }, requesterId: string) {
+  // Platform agents are cloneable by anyone — no approval flow (no owner to approve).
+  if (agent.scope === "platform") {
+    return { isOwner: false, admin: false, isContributor: false, privileged: true };
+  }
   const isOwner = agent.ownerUserId === requesterId;
-  const admin = await isClawAdmin(requesterId);
+  const admin = await isClawAdmin(requesterId, agent.orgId ?? undefined);
   let isContributor = false;
   if (!isOwner && !admin) {
     const share = await agentShareRepository.findByAgentAndUser(agent.id, requesterId);
@@ -1807,9 +1823,9 @@ router.get("/clone-requests/incoming", async (req: Request, res: Response) => {
   try {
     const requesterId = getRequesterId(req);
     if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-    const admin = await isClawAdmin(requesterId);
+    const admin = await isClawAdmin(requesterId, getOrgId(req));
 
-    const requests = await agentRequestRepository.listPendingClones();
+    const requests = await agentRequestRepository.listPendingClones(getOrgId(req));
     const agentIds = [...new Set(requests.map((r) => r.agentId).filter((id): id is string => !!id))];
     const requesterIds = [...new Set(requests.map((r) => r.requesterId))];
     const [agents, requesters] = await Promise.all([
@@ -1875,7 +1891,7 @@ export async function resolveCloneRequest(
   const agent = request.agentId ? await agentRepository.findById(request.agentId) : null;
   if (!agent) return { ok: false, code: 404, error: "Source agent not found" };
 
-  const admin = await isClawAdmin(reviewerId);
+  const admin = await isClawAdmin(reviewerId, agent.orgId ?? undefined);
   if (agent.ownerUserId !== reviewerId && !admin) {
     return { ok: false, code: 403, error: "Only the agent owner or an admin can resolve this request" };
   }
@@ -3042,7 +3058,7 @@ router.post("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async
       res.status(400).json({ success: false, error: "slug must be lowercase alphanumeric + hyphen, 1-32 chars" });
       return;
     }
-    const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+    const server = await prisma.mcpServer.findFirst({ where: { type: mcpServerType, orgId: null } });
     if (!server) {
       res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
       return;
@@ -3114,7 +3130,7 @@ router.delete(
         res.status(400).json({ success: false, error: "Invalid instance slug" });
         return;
       }
-      const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+      const server = await prisma.mcpServer.findFirst({ where: { type: mcpServerType, orgId: null } });
       if (!server) {
         res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
         return;
@@ -3921,7 +3937,7 @@ router.post(
         res.status(400).json({ success: false, error: "agentIds (non-empty array of other agents) is required" });
         return;
       }
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       if (platform && !admin) {
         res.status(403).json({ success: false, error: "Only CLAW_ADMIN can create platform-wide (cross-org) shared credentials" });
         return;

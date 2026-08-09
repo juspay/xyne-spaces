@@ -174,7 +174,7 @@ router.post("/:userId/oauth/google/callback", async (req: Request<{ userId: stri
     const { ciphertext, iv, authTag } = encrypt(JSON.stringify(creds), CONFIG.encryptionKey);
 
     // Ensure "google" server type exists
-    let googleServer = await prisma.mcpServer.findUnique({ where: { type: "google" } });
+    let googleServer = await prisma.mcpServer.findFirst({ where: { type: "google", orgId: null } });
     if (!googleServer) {
       googleServer = await prisma.mcpServer.create({
         data: {
@@ -294,7 +294,7 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
     const { ciphertext, iv, authTag } = encrypt(JSON.stringify(creds), CONFIG.encryptionKey);
 
     // Ensure "google" server type exists
-    let googleServer = await prisma.mcpServer.findUnique({ where: { type: "google" } });
+    let googleServer = await prisma.mcpServer.findFirst({ where: { type: "google", orgId: null } });
     if (!googleServer) {
       googleServer = await prisma.mcpServer.create({
         data: {

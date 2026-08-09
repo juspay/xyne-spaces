@@ -188,7 +188,7 @@ router.post("/:userId/oauth/microsoft/callback", async (req: Request<{ userId: s
 
     const { ciphertext, iv, authTag } = encrypt(JSON.stringify(creds), CONFIG.encryptionKey);
 
-    let microsoftServer = await prisma.mcpServer.findUnique({ where: { type: "microsoft" } });
+    let microsoftServer = await prisma.mcpServer.findFirst({ where: { type: "microsoft", orgId: null } });
     if (!microsoftServer) {
       microsoftServer = await prisma.mcpServer.create({
         data: {
@@ -306,7 +306,7 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
 
     const { ciphertext, iv, authTag } = encrypt(JSON.stringify(creds), CONFIG.encryptionKey);
 
-    let microsoftServer = await prisma.mcpServer.findUnique({ where: { type: "microsoft" } });
+    let microsoftServer = await prisma.mcpServer.findFirst({ where: { type: "microsoft", orgId: null } });
     if (!microsoftServer) {
       microsoftServer = await prisma.mcpServer.create({
         data: {

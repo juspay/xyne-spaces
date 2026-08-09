@@ -115,7 +115,7 @@ async function registerWebflowClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "webflow" McpServer row exists, creating it if necessary. */
 async function ensureWebflowServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "webflow" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "webflow", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

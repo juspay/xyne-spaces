@@ -38,7 +38,7 @@ async function resolveMetricsScope(req: Request, endpoint: string): Promise<{
 }> {
   const userId = String(req.headers["x-user-id"] ?? "");
   if (!userId) throw new Error("x-user-id header is required");
-  const admin = await isClawAdmin(userId);
+  const admin = await isClawAdmin(userId, getOrgId(req));
   const adminScope = getAdminOrgScope(req, endpoint, admin);
   const fallbackOrgId = adminScope.orgId
     ?? (adminScope.allOrgs ? undefined : (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId);
@@ -1045,7 +1045,7 @@ async function authorizeAgentEdit(req: Request, res: Response, agentSlug: string
     res.status(404).json({ error: "Agent not found" });
     return null;
   }
-  const admin = await isClawAdmin(userId);
+  const admin = await isClawAdmin(userId, editOrgId);
   if (admin) return { userId, orgId: editOrgId };
   if (agent.ownerUserId === userId) return { userId, orgId: editOrgId };
   const share = await prisma.agentShare.findUnique({
@@ -1171,10 +1171,18 @@ metricsRouter.post("/improvements/backfill", async (req: Request, res: Response)
   try {
     const userId = String(req.headers["x-user-id"] ?? "");
     if (!userId) { res.status(401).json({ error: "x-user-id header is required" }); return; }
-    if (!(await isClawAdmin(userId))) { res.status(403).json({ error: "Admin required" }); return; }
+    if (!(await isClawAdmin(userId, getOrgId(req)))) { res.status(403).json({ error: "Admin required" }); return; }
+
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      log.error(`[metrics/improvements/backfill] orgId is required; refusing global backfill userId=${userId}`);
+      res.status(400).json({ error: "orgId is required" });
+      return;
+    }
 
     const body = (req.body ?? {}) as { agentSlug?: string; days?: number };
     const report = await backfillFailureCurator({
+      orgId,
       ...(typeof body.agentSlug === "string" && body.agentSlug ? { agentSlug: body.agentSlug } : {}),
       ...(typeof body.days === "number" ? { days: body.days } : {}),
     });

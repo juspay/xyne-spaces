@@ -114,7 +114,7 @@ async function registerMailerLiteClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "mailerlite" McpServer row exists, creating it if necessary. */
 async function ensureMailerLiteServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "mailerlite" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "mailerlite", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

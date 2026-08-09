@@ -161,7 +161,7 @@ router.post("/provider-credentials/:provider/share", async (req: Request<{ provi
 
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
     if (!user?.orgId) { res.status(400).json({ success: false, error: "No org context" }); return; }
-    const admin = await isClawAdmin(userId);
+    const admin = await isClawAdmin(userId, user.orgId);
     if (platform && !admin) {
       res.status(403).json({ success: false, error: "Only CLAW_ADMIN can create platform-wide (cross-org) shared credentials" });
       return;

@@ -9,10 +9,21 @@ const log = createLogger("agent-acl");
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Check whether a user has CLAW_ADMIN role.
+ * Check whether a user has CLAW_ADMIN role in a specific organization.
+ *
+ * An omitted org is deliberately denied. Falling back to `User.orgId` turns a
+ * user-level role into a cross-resource authorization bypass whenever a
+ * handler forgets to scope its target query.
  */
-export async function isClawAdmin(userId: string): Promise<boolean> {
-  if (!userId) return false;
+export async function isClawAdmin(userId: string, orgId?: string): Promise<boolean> {
+  if (!userId || !orgId) return false;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+  if (user?.orgId !== orgId) return false;
+  const member = await prisma.orgMember.findUnique({
+    where: { userId_orgId: { userId, orgId } },
+    select: { leftAt: true },
+  });
+  if (!member || member.leftAt !== null) return false;
   const role = await userRoleRepository.findByUserAndRole(userId, "CLAW_ADMIN");
   return Boolean(role);
 }
@@ -24,9 +35,9 @@ export async function isClawAdmin(userId: string): Promise<boolean> {
  * themselves this role); SEARCH_EVAL_ACCESS lets an admin extend access to
  * specific individuals without making them a full CLAW_ADMIN.
  */
-export async function hasSearchEvalAccess(userId: string): Promise<boolean> {
+export async function hasSearchEvalAccess(userId: string, orgId?: string): Promise<boolean> {
   if (!userId) return false;
-  if (await isClawAdmin(userId)) return true;
+  if (await isClawAdmin(userId, orgId)) return true;
   const role = await userRoleRepository.findByUserAndRole(userId, "SEARCH_EVAL_ACCESS");
   return Boolean(role);
 }
@@ -126,10 +137,30 @@ export async function requireClawAdmin(
     return;
   }
 
-  const admin = await isClawAdmin(requesterId);
+  // Admin permissions are valid only in the caller's authenticated org.
+  const orgId = getOrgId(req);
+  if (!orgId) {
+    res.status(403).json({ success: false, error: "Org context required for admin access" });
+    return;
+  }
+
+  const admin = await isClawAdmin(requesterId, orgId);
   if (!admin) {
     res.status(403).json({ success: false, error: "CLAW_ADMIN role required" });
     return;
+  }
+
+  // Strip client-supplied cross-org overrides so handlers always use the
+  // authenticated org context above.
+  // ?orgScope=all / ?scope=all widen queries to all orgs — strip them so
+  // getAdminOrgScope always returns the requester's own org.
+  delete req.query["orgScope"];
+  delete req.query["scope"];
+  // Client-supplied orgId would let an admin target a different org's data —
+  // strip it from both query and body so handlers fall back to getOrgId(req).
+  delete req.query["orgId"];
+  if (req.body && typeof req.body === "object") {
+    delete (req.body as Record<string, unknown>)["orgId"];
   }
 
   next();
@@ -150,7 +181,7 @@ export async function requireSearchEvalAccess(
     return;
   }
 
-  const allowed = await hasSearchEvalAccess(requesterId);
+  const allowed = await hasSearchEvalAccess(requesterId, getOrgId(req));
   if (!allowed) {
     res.status(403).json({ success: false, error: "Search Eval access required" });
     return;
@@ -185,7 +216,7 @@ export async function requireAgentOwnerOrAdmin(
     return;
   }
 
-  const admin = await isClawAdmin(requesterId);
+  const admin = await isClawAdmin(requesterId, getOrgId(req));
   const isOwner = agent.ownerUserId === requesterId;
 
   if (!admin && !isOwner) {
@@ -234,7 +265,7 @@ export async function requireAgentOwnerContributorOrAdmin(
     return;
   }
 
-  const admin = await isClawAdmin(requesterId);
+  const admin = await isClawAdmin(requesterId, getOrgId(req));
   const isOwner = access.isOwner;
   const isContributor = !admin && access.isContributor;
 

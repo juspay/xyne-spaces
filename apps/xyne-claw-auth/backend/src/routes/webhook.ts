@@ -1574,10 +1574,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         await postExperimentReply("No active /experiment to stop.");
         return;
       }
-      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
-      if (!allowed) {
-        await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
-        return;
+      // Org boundary: an admin may stop another user's experiment, but only
+      // within their own org.
+      if (run.userId !== payload.userId) {
+        const [adminUser, runUser] = await Promise.all([
+          prisma.user.findUnique({ where: { id: payload.userId }, select: { orgId: true } }),
+          prisma.user.findUnique({ where: { id: run.userId }, select: { orgId: true } }),
+        ]);
+        if (!(await isClawAdmin(payload.userId, runUser?.orgId)) || !adminUser || !runUser || adminUser.orgId !== runUser.orgId) {
+          await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
+          return;
+        }
       }
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
       let cancelledEpoch = false;
@@ -1634,9 +1641,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           : "No /experiment has run in this thread.");
         return;
       }
-      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
-        await postExperimentReply("Not your experiment.");
-        return;
+      if (experimentCommand.id && run.userId !== payload.userId) {
+        const runUser = await prisma.user.findUnique({ where: { id: run.userId }, select: { orgId: true } });
+        if (!(await isClawAdmin(payload.userId, runUser?.orgId))) {
+          await postExperimentReply("Not your experiment.");
+          return;
+        }
       }
       const [findings, reviews] = await Promise.all([
         experimentRepository.listFindings(run.id),
@@ -3502,6 +3512,11 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   if (!automationOrgId) {
     clog.error(`[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`);
     res.status(400).json({ success: false, error: "orgId is required" });
+    return;
+  }
+  if (pathAgentOrgId && automationOrgId !== pathAgentOrgId) {
+    clog.warn(`[webhook/automation-run] cross-org dispatch rejected userOrg=${automationOrgId} agentOrg=${pathAgentOrgId} agentSlug=${agentSlug} sessionId=${sessionId}`);
+    res.status(403).json({ success: false, error: "User and agent must belong to the same organization" });
     return;
   }
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);

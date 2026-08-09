@@ -7,6 +7,7 @@ import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
+import { findMcpServer } from "../mcp/server-resolution.js";
 import { getDoctorBitbucketStats } from "../services/bitbucket-stats.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
@@ -20,6 +21,11 @@ import { bucketStats as epBucketStats } from "../error-pipeline/buckets.js";
 import { listFixRecords } from "../error-pipeline/runner/store.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("admin");
+
+// Platform/super-admin authorization will replace this when that role exists.
+function canManagePlatformMcpSettings(): boolean {
+  return false;
+}
 
 const router = Router();
 
@@ -43,8 +49,9 @@ router.get("/roles", requireClawAdmin, async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: `role must be one of: ${GRANTABLE_ROLES.join(", ")}` });
       return;
     }
-    // TODO(admin-org-scope): user_roles has no orgId by design; keep grants platform-global.
-    const roles = await userRoleRepository.listByRole(role);
+    const requesterOrgId = getOrgId(req)!;
+    const roles = (await userRoleRepository.listByRole(role))
+      .filter((r) => r.user.orgId === requesterOrgId);
     const orgNames = await getOrgNameMap(roles.map((r) => r.user.orgId));
     res.json({
       success: true,
@@ -77,13 +84,17 @@ router.post("/roles", requireClawAdmin, async (req: Request, res: Response) => {
       return;
     }
 
+    const requesterOrgId = getOrgId(req)!;
     let targetUser = await userRepository.findById(raw);
-    const requesterOrgId = getOrgId(req);
-    if (!targetUser && requesterOrgId) {
+    if (!targetUser) {
       targetUser = await prisma.user.findFirst({ where: { email: raw, orgId: requesterOrgId } });
     }
     if (!targetUser) {
       res.status(404).json({ success: false, error: `No user matches "${raw}"` });
+      return;
+    }
+    if (targetUser.orgId !== requesterOrgId) {
+      res.status(403).json({ success: false, error: "Cannot grant roles to users outside your organization" });
       return;
     }
 
@@ -116,6 +127,11 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
 
     const targetUser = await userRepository.findById(userId);
     if (!targetUser) { res.status(404).json({ success: false, error: "User not found" }); return; }
+    const requesterOrgId = getOrgId(req)!;
+    if (targetUser.orgId !== requesterOrgId) {
+      res.status(403).json({ success: false, error: "Cannot revoke roles from users outside your organization" });
+      return;
+    }
 
     await userRoleRepository.delete(userId, role);
     await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
@@ -144,8 +160,8 @@ router.get("/roles/check/:userId", async (req: Request<{ userId: string }>, res:
       return;
     }
     const [admin, searchEvalAccess] = await Promise.all([
-      isClawAdmin(requesterId),
-      hasSearchEvalAccess(requesterId),
+      isClawAdmin(requesterId, getOrgId(req)),
+      hasSearchEvalAccess(requesterId, getOrgId(req)),
     ]);
     res.json({ success: true, data: { isAdmin: admin, hasSearchEvalAccess: searchEvalAccess } });
   } catch (err) {
@@ -333,19 +349,20 @@ router.get("/scheduled-jobs", requireClawAdmin, async (req: Request, res: Respon
 
 // ── Global MCP credentials (admin-only fallback creds) ──────────────────────
 
-router.get("/mcp-servers", requireClawAdmin, async (_req: Request, res: Response) => {
+router.get("/mcp-servers", requireClawAdmin, async (req: Request, res: Response) => {
   try {
-    // Platform-global by design: the Global MCP tab manages shared fallback registry/credentials.
+    const orgId = getOrgId(req)!;
     const servers = await prisma.mcpServer.findMany({
-      include: { globalCredentials: true },
+      where: { OR: [{ orgId }, { orgId: null }] },
+      include: {
+        globalCredentials: { where: { orgId } },
+      },
       orderBy: { name: "asc" },
     });
     res.json({
       success: true,
       data: servers.map((s) => {
-        // Legacy top-level fields reflect the deployment-wide default row
-        // (orgId NULL); org overrides are listed separately.
-        const defaultCreds = s.globalCredentials.find((c) => c.orgId === null) ?? null;
+        const orgCreds = s.globalCredentials[0] ?? null;
         return {
           id: s.id,
           type: s.type,
@@ -353,12 +370,10 @@ router.get("/mcp-servers", requireClawAdmin, async (_req: Request, res: Response
           description: s.description,
           enabled: s.enabled,
           allowGlobalFallback: s.allowGlobalFallback,
-          hasGlobalCredentials: Boolean(defaultCreds),
-          globalCredentialsUpdatedAt: defaultCreds?.updatedAt ?? null,
-          globalCredentialsSetByUserId: defaultCreds?.setByUserId ?? null,
-          orgGlobalCredentials: s.globalCredentials
-            .filter((c) => c.orgId !== null)
-            .map((c) => ({ orgId: c.orgId, updatedAt: c.updatedAt, setByUserId: c.setByUserId })),
+          hasGlobalCredentials: Boolean(orgCreds),
+          globalCredentialsUpdatedAt: orgCreds?.updatedAt ?? null,
+          globalCredentialsSetByUserId: orgCreds?.setByUserId ?? null,
+          orgId,
         };
       }),
     });
@@ -376,17 +391,24 @@ router.put("/mcp-servers/:type/global-fallback", requireClawAdmin, async (req: R
       res.status(400).json({ success: false, error: "allow (boolean) is required" });
       return;
     }
-    const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+    const server = await findMcpServer(req.params.type, getOrgId(req));
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
+    if (server.orgId === null && !canManagePlatformMcpSettings()) {
+      res.status(403).json({ success: false, error: "Global MCP fallback is platform-managed" });
+      return;
+    }
 
-    await prisma.mcpServer.update({ where: { id: server.id }, data: { allowGlobalFallback: allow } });
+    await prisma.mcpServer.update({
+      where: { id: server.id },
+      data: { allowGlobalFallback: allow },
+    });
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: allow ? "MCP_GLOBAL_FALLBACK_ENABLED" : "MCP_GLOBAL_FALLBACK_DISABLED",
       targetId: server.id,
       description: `Global fallback ${allow ? "enabled" : "disabled"} for MCP server ${server.type}`,
     });
-    res.json({ success: true, data: { type: server.type, allowGlobalFallback: allow } });
+    res.json({ success: true, data: { type: server.type, orgId: getOrgId(req)!, allowGlobalFallback: allow } });
   } catch (err) {
     log.error("[admin] toggle global-fallback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -396,18 +418,18 @@ router.put("/mcp-servers/:type/global-fallback", requireClawAdmin, async (req: R
 router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req: Request<{ type: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const { credentials, orgId } = req.body as { credentials?: Record<string, unknown>; orgId?: string };
+    const { credentials } = req.body as { credentials?: Record<string, unknown> };
     if (!credentials || typeof credentials !== "object" || Array.isArray(credentials)) {
       res.status(400).json({ success: false, error: "credentials object is required" });
       return;
     }
-    // orgId omitted → deployment-wide default row (legacy behavior).
-    const credOrgId = typeof orgId === "string" && orgId.trim() ? orgId.trim() : null;
+    // Org-scoped: use the requester's org (Phase 1 strips req.body.orgId).
+    const credOrgId = getOrgId(req)!;
     if (credOrgId) {
       const org = await prisma.organization.findUnique({ where: { id: credOrgId } });
       if (!org) { res.status(404).json({ success: false, error: "Organization not found" }); return; }
     }
-    const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+    const server = await findMcpServer(req.params.type, getOrgId(req));
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
 
     const enc = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
@@ -461,9 +483,9 @@ router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req
 router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req: Request<{ type: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    // ?orgId=<id> deletes that org's override; omitted → the default row.
-    const orgIdParam = typeof req.query["orgId"] === "string" && req.query["orgId"].trim() ? req.query["orgId"].trim() : null;
-    const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+    // Org-scoped: use the requester's org (Phase 1 strips req.query.orgId).
+    const orgIdParam = getOrgId(req)!;
+    const server = await findMcpServer(req.params.type, getOrgId(req));
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
 
     const { count } = await prisma.globalMcpCredentials.deleteMany({
@@ -485,9 +507,9 @@ router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, async (
 
 router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req: Request<{ type: string }>, res: Response) => {
   try {
-    // ?orgId=<id> inspects that org's override; omitted → the default row.
-    const orgIdParam = typeof req.query["orgId"] === "string" && req.query["orgId"].trim() ? req.query["orgId"].trim() : null;
-    const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+    // Org-scoped: use the requester's org (Phase 1 strips req.query.orgId).
+    const orgIdParam = getOrgId(req)!;
+    const server = await findMcpServer(req.params.type, getOrgId(req));
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
     const row = await prisma.globalMcpCredentials.findFirst({
       where: { mcpServerId: server.id, orgId: orgIdParam },
@@ -526,8 +548,7 @@ const SHAREABLE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter",
 
 router.get("/provider-credentials", requireClawAdmin, async (req: Request, res: Response) => {
   try {
-    const orgId = (typeof req.query["orgId"] === "string" && req.query["orgId"].trim()) || getOrgId(req);
-    if (!orgId) { res.status(400).json({ success: false, error: "No org context" }); return; }
+    const orgId = getOrgId(req)!;
     const rows = await sharedProviderCredentialRepository.listByOrg(orgId);
     res.json({
       success: true,
@@ -571,6 +592,7 @@ router.post("/provider-credentials/promote", requireClawAdmin, async (req: Reque
     }
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, orgId: true, slug: true } });
     if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    if (agent.orgId !== getOrgId(req)) { res.status(403).json({ success: false, error: "Agent belongs to a different org" }); return; }
     // Read the RAW row (not the materialized view) — promoting a binding would
     // otherwise copy the other shared cred's material into a new row.
     const raw = await prisma.agentProviderCredentials.findUnique({
@@ -621,6 +643,7 @@ router.post("/provider-credentials/:id/bind", requireClawAdmin, async (req: Requ
     if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, orgId: true, slug: true } });
     if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    if (agent.orgId !== getOrgId(req)) { res.status(403).json({ success: false, error: "Agent belongs to a different org" }); return; }
     // orgId NULL = platform-wide credential, bindable by any org's agents.
     if (shared.orgId && agent.orgId !== shared.orgId) {
       res.status(403).json({ success: false, error: "Agent and credential belong to different orgs" });
@@ -650,6 +673,9 @@ router.post("/provider-credentials/:id/unbind", requireClawAdmin, async (req: Re
     if (!agentId) { res.status(400).json({ success: false, error: "agentId is required" }); return; }
     const shared = await sharedProviderCredentialRepository.findById(req.params.id);
     if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
+    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { orgId: true } });
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    if (agent.orgId !== getOrgId(req)) { res.status(403).json({ success: false, error: "Agent belongs to a different org" }); return; }
     const { count } = await prisma.agentProviderCredentials.deleteMany({
       where: { agentId, provider: shared.provider, sharedCredentialId: shared.id },
     });
@@ -685,6 +711,9 @@ router.post("/provider-credentials/:id/adopt", requireClawAdmin, async (req: Req
       res.status(400).json({ success: false, error: "Agent has no fresh dedicated credential to adopt — reconnect the provider on it first" });
       return;
     }
+    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { orgId: true } });
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    if (agent.orgId !== getOrgId(req)) { res.status(403).json({ success: false, error: "Agent belongs to a different org" }); return; }
     await sharedProviderCredentialRepository.updateCredential(shared.id, {
       encryptedKey: raw.encryptedKey,
       iv: raw.iv,
@@ -713,6 +742,7 @@ router.delete("/provider-credentials/:id", requireClawAdmin, async (req: Request
     const requesterId = getRequesterId(req)!;
     const shared = await sharedProviderCredentialRepository.findById(req.params.id);
     if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
+    if (shared.orgId !== getOrgId(req)) { res.status(403).json({ success: false, error: "Credential belongs to a different org or is platform-wide" }); return; }
     const bindings = await sharedProviderCredentialRepository.countBindings(shared.id);
     if (bindings > 0) {
       res.status(409).json({ success: false, error: `Credential has ${bindings} bound agent(s) — unbind them first` });
@@ -746,16 +776,18 @@ router.get("/dashboard", async (req: Request, res: Response) => {
     const window = windowFromDays(req.query["days"] ?? "30");
     const cutoff = window?.start ?? null;
     const limit = Math.min(Number(req.query["topUsersLimit"] ?? 10), 50);
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
 
     const [agentStats, overview, agentRunStats, rawUserActivity, ratingStats, agentsForDashboard, skillUsage, subagentUsage] = await Promise.all([
-      agentRepository.dashboardStats(),
-      agentRunRepository.globalOverviewStats(cutoff),
-      agentRunRepository.runStatsByAgent(cutoff),
-      agentRunRepository.userActivityBreakdown(cutoff, limit),
-      agentRunRepository.ratingStatsByAgent(cutoff),
-      agentRepository.listForDashboard(),
-      agentRepository.skillUsageByGlobalAgents(),
-      agentRepository.subagentUsageByGlobalAgents(),
+      agentRepository.dashboardStats(orgId),
+      agentRunRepository.globalOverviewStats(cutoff, orgId),
+      agentRunRepository.runStatsByAgent(cutoff, orgId),
+      agentRunRepository.userActivityBreakdown(cutoff, limit, orgId),
+      agentRunRepository.ratingStatsByAgent(cutoff, orgId),
+      agentRepository.listForDashboard(orgId),
+      agentRepository.skillUsageByGlobalAgents(orgId),
+      agentRepository.subagentUsageByGlobalAgents(orgId),
     ]);
 
     const ratingBySlug = new Map(ratingStats.map((r) => [r.agentSlug, r] as const));
@@ -876,7 +908,9 @@ router.get("/dashboard/projects", async (req: Request, res: Response) => {
   try {
     const window = windowFromDays(req.query["days"] ?? "all");
     const cutoff = window?.start ?? null;
-    const projects = await agentRunRepository.listProjectsForDashboard(cutoff);
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
+    const projects = await agentRunRepository.listProjectsForDashboard(cutoff, orgId);
     res.json({ success: true, data: projects });
   } catch (err) {
     log.error("[admin] dashboard/projects error:", err);
@@ -895,16 +929,18 @@ router.get("/dashboard/project-insights", async (req: Request, res: Response) =>
     }
     const window = windowFromDays(req.query["days"] ?? "30");
     const cutoff = window?.start ?? null;
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
 
     const [agentUsage, topUsers, skillUsage, subagentUsage] = await Promise.all([
-      agentRunRepository.projectAgentUsage(projectId, cutoff),
-      agentRunRepository.projectTopUsers(projectId, cutoff, 10),
-      agentRunRepository.projectSkillUsage(projectId, cutoff),
-      agentRunRepository.projectSubagentUsage(projectId, cutoff),
+      agentRunRepository.projectAgentUsage(projectId, cutoff, orgId),
+      agentRunRepository.projectTopUsers(projectId, cutoff, 10, orgId),
+      agentRunRepository.projectSkillUsage(projectId, cutoff, orgId),
+      agentRunRepository.projectSubagentUsage(projectId, cutoff, orgId),
     ]);
 
     // Enrich agent rows with name / scope / enabled from agent metadata
-    const agentMeta = await agentRepository.listForDashboard();
+    const agentMeta = await agentRepository.listForDashboard(orgId);
     const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
     const enrichedAgentUsage = agentUsage.map((r) => ({
       ...r,
@@ -958,7 +994,7 @@ router.post("/error-pipeline/token", requireClawAdmin, async (req: Request, res:
       return;
     }
     const token = jwt.sign(
-      { iss: "xyne-claw-auth", sub: "grafana-webhook" },
+      { iss: "xyne-claw-auth", sub: "grafana-webhook", orgId: getOrgId(req) },
       ERROR_PIPELINE.jwtSecret,
       { algorithm: "HS256", audience: INGEST_JWT_AUDIENCE, expiresIn: `${days}d` },
     );
@@ -982,9 +1018,11 @@ router.post("/error-pipeline/token", requireClawAdmin, async (req: Request, res:
 // flush, seed, token mint) stays CLAW_ADMIN-gated.
 router.get("/error-pipeline/items/:bucket", async (req: Request, res: Response) => {
   try {
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const limit = Math.min(Number(req.query["limit"] ?? 100) || 100, 500);
     const bucket = String(req.params["bucket"] ?? "default");
-    const items = await epQueue().peekItems(bucket, limit);
+    const items = await epQueue().peekItems(orgId, bucket, limit);
     res.json({ success: true, data: { bucket, count: items.length, items } });
   } catch (err) {
     log.error("[admin] error-pipeline items error:", err);
@@ -999,15 +1037,17 @@ router.get("/error-pipeline/items/:bucket", async (req: Request, res: Response) 
 router.post("/error-pipeline/seed", requireClawAdmin, async (req: Request, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const { ERROR_BUCKET_SEED } = await import("../lib/error-bucket-seed.js");
     for (const b of ERROR_BUCKET_SEED) {
       await prisma.errorBucket.upsert({
-        where: { name: b.name },
-        create: { name: b.name, description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
+        where: { orgId_name: { orgId, name: b.name } },
+        create: { orgId, name: b.name, description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
         update: { description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
       });
     }
-    const total = await prisma.errorBucket.count();
+    const total = await prisma.errorBucket.count({ where: { orgId } });
     log.info(`[admin] error-pipeline buckets seeded by ${requesterId} (${ERROR_BUCKET_SEED.length} upserted, ${total} total)`);
     res.json({ success: true, data: { upserted: ERROR_BUCKET_SEED.length, total } });
   } catch (err) {
@@ -1016,9 +1056,11 @@ router.post("/error-pipeline/seed", requireClawAdmin, async (req: Request, res: 
   }
 });
 
-router.get("/error-pipeline/buckets", async (_req: Request, res: Response) => {
+router.get("/error-pipeline/buckets", async (req: Request, res: Response) => {
   try {
-    res.json({ success: true, data: { buckets: await epBucketStats() } });
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
+    res.json({ success: true, data: { buckets: await epBucketStats(orgId) } });
   } catch (err) {
     log.error("[admin] error-pipeline buckets error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -1031,13 +1073,15 @@ router.get("/error-pipeline/buckets", async (_req: Request, res: Response) => {
 router.post("/error-pipeline/buckets/:name/flush", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const name = String(req.params.name).trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
       res.status(400).json({ success: false, error: "Invalid bucket name" });
       return;
     }
-    const dropped = await epQueue().flushBucket(name);
-    log.warn(`[admin] error-pipeline bucket "${name}" flushed by ${requesterId} (${dropped} items)`);
+    const dropped = await epQueue().flushBucket(orgId, name);
+    log.warn(`[admin] error-pipeline bucket "${name}" flushed by ${requesterId} in ${orgId} (${dropped} items)`);
     res.json({ success: true, data: { bucket: name, dropped } });
   } catch (err) {
     log.error("[admin] error-pipeline flush error:", err);
@@ -1118,8 +1162,10 @@ router.post("/error-pipeline/fork-conversation", async (req: Request, res: Respo
 
 router.get("/error-pipeline/fixes", async (req: Request, res: Response) => {
   try {
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const limit = Math.min(Number(req.query["limit"] ?? 200) || 200, 500);
-    res.json({ success: true, data: { fixes: await listFixRecords(limit) } });
+    res.json({ success: true, data: { fixes: await listFixRecords(limit, orgId) } });
   } catch (err) {
     log.error("[admin] error-pipeline fixes error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -1132,9 +1178,12 @@ router.get("/error-pipeline/fixes", async (req: Request, res: Response) => {
 // whole point of the DB-backed taxonomy: when a new subsystem merges, add a
 // lane or tune an existing lane's markers from the UI — no deploy.
 
-router.get("/error-pipeline/rules", async (_req: Request, res: Response) => {
+router.get("/error-pipeline/rules", async (req: Request, res: Response) => {
   try {
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const rules = await prisma.errorBucket.findMany({
+      where: { orgId },
       orderBy: { matchOrder: "asc" },
       select: { name: true, description: true, keywords: true, markers: true, matchOrder: true, enabled: true, updatedAt: true },
     });
@@ -1148,6 +1197,8 @@ router.get("/error-pipeline/rules", async (_req: Request, res: Response) => {
 router.put("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const name = String(req.params.name).trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
       res.status(400).json({ success: false, error: "Bucket name must be lowercase letters, digits and dashes (e.g. tickets-desk)." });
@@ -1177,8 +1228,8 @@ router.put("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<
     const matchOrder = Number.isInteger(body.matchOrder) ? (body.matchOrder as number) : 20;
     const enabled = typeof body.enabled === "boolean" ? body.enabled : true;
     const saved = await prisma.errorBucket.upsert({
-      where: { name },
-      create: { name, description, keywords, markers, matchOrder, enabled },
+      where: { orgId_name: { orgId, name } },
+      create: { orgId, name, description, keywords, markers, matchOrder, enabled },
       update: { description, keywords, markers, matchOrder, enabled },
     });
     log.info(`[admin] error-pipeline rule "${name}" saved by ${requesterId}`);
@@ -1192,6 +1243,8 @@ router.put("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<
 router.delete("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const name = String(req.params.name).trim().toLowerCase();
     if (name === "default") {
       res.status(400).json({ success: false, error: "The default bucket is the fallback lane and cannot be deleted." });
@@ -1199,12 +1252,12 @@ router.delete("/error-pipeline/rules/:name", requireClawAdmin, async (req: Reque
     }
     // Refuse to strand queued work: after a restart no worker or stats row
     // would cover this lane's stream, silently losing the items.
-    const depth = (await epQueue().stats([name]))[name];
+    const depth = (await epQueue().stats(orgId, [name]))[name];
     if (depth && depth.queued + depth.pending > 0) {
       res.status(409).json({ success: false, error: `Bucket "${name}" still has ${depth.queued + depth.pending} queued/in-flight item(s) — let them drain (or reroute them) before deleting.` });
       return;
     }
-    await prisma.errorBucket.delete({ where: { name } });
+    await prisma.errorBucket.delete({ where: { orgId_name: { orgId, name } } });
     log.info(`[admin] error-pipeline rule "${name}" deleted by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {

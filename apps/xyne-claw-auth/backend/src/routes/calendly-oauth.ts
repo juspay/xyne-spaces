@@ -107,7 +107,7 @@ async function registerCalendlyClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "calendly" McpServer row exists, creating it if necessary. */
 async function ensureCalendlyServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "calendly" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "calendly", orgId: null } });
   if (existing) return existing;
   return prisma.mcpServer.create({
     data: {

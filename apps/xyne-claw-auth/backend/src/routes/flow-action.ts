@@ -44,13 +44,9 @@ import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
 
 const router = Router();
-const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
-  ?.split(",")
-  .map((tenant) => tenant.trim())
-  .find((tenant) => tenant.length > 0);
-
 function resolveGatewayTenantForApproval(): string | null {
-  return DEFAULT_GATEWAY_TENANT ?? null;
+  // Gateway support is intentionally disconnected.
+  return null;
 }
 
 function parseGatewayServerTypeForApproval(serverType: string): { serviceName: string; backendId?: string } | null {
@@ -1220,7 +1216,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           orgId: proposer.orgId,
           slug: targetAgentSlug,
           enabled: true,
-          ...visibleAgentWhereForRunningUser(callerUserId, await isClawAdmin(callerUserId)),
+          ...visibleAgentWhereForRunningUser(callerUserId, await isClawAdmin(callerUserId, proposer.orgId ?? undefined)),
         },
         select: {
           id: true,

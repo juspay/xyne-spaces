@@ -73,10 +73,9 @@ export async function ensureEgnyteServer() {
     "create_link",
   ];
   const healthcheckSpec = { name: "list_filesystem_by_path", params: { path: "/" } };
-  return prisma.mcpServer.upsert({
-    where: { type: "egnyte" },
-    update: { writeToolPolicy: { mode: "allowlist", tools: writeTools }, healthcheckSpec, transport: "http" },
-    create: {
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "egnyte", orgId: null } });
+  if (existing) return prisma.mcpServer.update({ where: { id: existing.id }, data: { writeToolPolicy: { mode: "allowlist", tools: writeTools }, healthcheckSpec, transport: "http" } });
+  return prisma.mcpServer.create({ data: {
       type: "egnyte",
       name: "Egnyte",
       url: "",
@@ -85,8 +84,7 @@ export async function ensureEgnyteServer() {
       writeToolPolicy: { mode: "allowlist", tools: writeTools },
       healthcheckSpec,
       connectorMeta: { scope: "global", mode: "self-serve" },
-    },
-  });
+    }, });
 }
 
 const router = Router();

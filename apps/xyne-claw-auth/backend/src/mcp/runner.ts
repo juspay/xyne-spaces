@@ -145,6 +145,16 @@ const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL
  */
 const PER_AGENT_SERVER_TYPES = new Set<string>(["xyne-spaces-app-tools"]);
 
+async function resolveTemplateOrgId(userId: string, orgId?: string): Promise<string | undefined> {
+  if (orgId) return orgId;
+  return (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId ?? undefined;
+}
+
+async function resolveTemplateOrgId(userId: string, orgId?: string): Promise<string | undefined> {
+  if (orgId) return orgId;
+  return (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId ?? undefined;
+}
+
 function sessionKey(
   userId: string,
   serverType: string,
@@ -188,7 +198,9 @@ async function getOrCreateSession(
   serverType: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  orgId?: string,
 ): Promise<Client> {
+  orgId = await resolveTemplateOrgId(userId, orgId);
   const key = sessionKey(userId, serverType, agentSlug, credentials);
 
   // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
@@ -269,7 +281,7 @@ async function getOrCreateSession(
     return pending;
   }
 
-  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken)
+  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken, orgId)
     .finally(() => inflight.delete(key));
   inflight.set(key, spawnPromise);
   return spawnPromise;
@@ -283,8 +295,9 @@ async function spawnSession(
   serverType: string,
   credentials: Record<string, unknown>,
   incomingToken: string | undefined,
+  orgId?: string,
 ): Promise<Client> {
-  const definition = await resolveConnectorDefinition(serverType);
+  const definition = await resolveConnectorDefinition(serverType, orgId);
   if (!definition) {
     throw new Error(`No connector definition for server type: ${serverType}`);
   }
@@ -367,8 +380,10 @@ export async function listToolsForUser(
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  orgId?: string,
 ): Promise<McpServerTools> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  orgId = await resolveTemplateOrgId(userId, orgId);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, orgId);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -385,7 +400,7 @@ export async function listToolsForUser(
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
 
-  const definition = await resolveConnectorDefinition(serverType);
+  const definition = await resolveConnectorDefinition(serverType, orgId);
   const writeTools = definition?.writeTools ?? [];
   return { serverType, serverName, tools, writeTools };
 }
@@ -498,8 +513,10 @@ export async function callTool(
   tool: string,
   params: Record<string, unknown>,
   agentSlug?: string,
+  orgId?: string,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  orgId = await resolveTemplateOrgId(userId, orgId);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, orgId);
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.

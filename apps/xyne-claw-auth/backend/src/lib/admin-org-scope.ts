@@ -1,25 +1,22 @@
 import type { Request } from "express";
 import { prisma } from "../db.js";
-import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { getOrgId } from "../middleware/agent-acl.js";
 
 export interface AdminOrgScope {
   allOrgs: boolean;
   orgId: string | undefined;
 }
 
-export function getAdminOrgScope(req: Request, endpoint: string, allowAll = true): AdminOrgScope {
+export function getAdminOrgScope(req: Request, endpoint: string, _allowAll = true): AdminOrgScope {
+  // CLAW_ADMIN access is org-scoped: the cross-org `?orgScope=all` opt-in is
+  // no longer honored. `requireClawAdmin` also strips the param, but this
+  // hard-fails even for inline isClawAdmin callers that don't go through that
+  // middleware. The `_allowAll` param is kept for signature compatibility but
+  // has no effect.
+  void _allowAll;
+  void endpoint;
   const orgId = getOrgId(req);
-  const allOrgs = allowAll && req.query["orgScope"] === "all";
-  if (allOrgs) {
-    const userId = getRequesterId(req) ?? "unknown";
-    console.info("[admin-org-scope]", {
-      userId,
-      orgId: orgId ?? "unknown",
-      endpoint,
-      timestamp: new Date().toISOString(),
-    });
-  }
-  return { allOrgs, orgId: allOrgs ? undefined : orgId };
+  return { allOrgs: false, orgId };
 }
 
 export async function getOrgNameMap(orgIds: Iterable<string | null | undefined>): Promise<Map<string, string>> {

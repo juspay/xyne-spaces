@@ -190,7 +190,7 @@ router.get("/agents/status", requireUserAuth, async (req: Request, res: Response
       res.status(401).json({ success: false, error: "Authenticated organization session required" });
       return;
     }
-    const platformAdmin = await isClawAdmin(userId);
+    const platformAdmin = await isClawAdmin(userId, requestedOrgId);
     if (!platformAdmin && (sessionOrgId !== requestedOrgId || !(await isOrgAdmin(userId, requestedOrgId)))) {
       res.status(403).json({ success: false, error: "Requires platform admin or organization OWNER/ADMIN" });
       return;

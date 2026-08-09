@@ -41,7 +41,7 @@ router.get("/", async (req: Request, res: Response) => {
   try {
     const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
     const authedUserId = String(req.headers["x-user-id"] ?? "");
-    const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+    const admin = authedUserId ? await isClawAdmin(authedUserId, getOrgId(req)) : false;
     // Gate the admin "see ALL (incl. others' private)" bypass behind ?scope=all,
     // mirroring GET /agents. Without this an admin's normal skill list leaks
     // every user's private skills (the same regression agents.ts already fixed).
@@ -160,7 +160,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     const requesterId = getRequesterId(req);
     if (requesterId) {
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       const isOwner = existing.ownerUserId === requesterId;
       if (!admin && !isOwner) {
         res.status(403).json({ success: false, error: "Only the owner or admins can edit this skill" });
@@ -201,7 +201,7 @@ router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) =>
 
     const requesterId = getRequesterId(req);
     if (requesterId) {
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       const isOwner = existing.ownerUserId === requesterId;
       if (!admin && !isOwner) {
         res.status(403).json({ success: false, error: "Only the owner or admins can delete this skill" });
@@ -395,7 +395,7 @@ router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
       return;
     }
     // ACL: owner of a personal skill, OR admin (for any skill).
-    const admin = await isClawAdmin(requesterId);
+    const admin = await isClawAdmin(requesterId, getOrgId(req));
     if (!admin) {
       if (skill.scope !== "personal" || skill.ownerUserId !== requesterId) {
         res.status(403).json({
@@ -751,7 +751,7 @@ export async function resolveSkillUpdateRequest(
     approverUserId: approver.approverUserId,
     requiresAdmin: approver.requiresAdmin,
     callerUserId,
-    callerIsAdmin: await isClawAdmin(callerUserId),
+    callerIsAdmin: await isClawAdmin(callerUserId, skill.orgId ?? undefined),
     currentContentHash: hashSkillContent(skill.content),
     baseContentHash: request.baseContentHash ?? "",
   });

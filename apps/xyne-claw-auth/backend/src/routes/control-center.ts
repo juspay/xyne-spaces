@@ -21,7 +21,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
-import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
+import { requireClawAdmin, getRequesterId, getOrgId } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import {
@@ -165,11 +165,15 @@ async function resolveApproval(
   id: string,
   resolution: "approved" | "rejected",
   resolvedBy: string,
+  orgId?: string,
 ): Promise<void> {
   const redis = redisService.getConnection();
   const raw = await redis.get(`${APPROVAL_PREFIX}${id}`);
   if (!raw) throw Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" });
   const approval = JSON.parse(raw) as ControlCenterApproval;
+  if (approval.orgId && orgId && approval.orgId !== orgId) {
+    throw Object.assign(new Error("FORBIDDEN"), { code: "FORBIDDEN" });
+  }
   if (approval.status !== "pending") {
     throw Object.assign(new Error("ALREADY_RESOLVED"), { code: "ALREADY_RESOLVED" });
   }
@@ -440,11 +444,15 @@ router.post(
   async (req: Request<{ id: string }>, res: Response) => {
     try {
       const userId = getRequesterId(req) ?? "unknown";
-      await resolveApproval(req.params.id, "approved", userId);
+      await resolveApproval(req.params.id, "approved", userId, getOrgId(req));
       res.json({ success: true });
     } catch (err: any) {
       if (err?.code === "NOT_FOUND") {
         res.status(404).json({ success: false, error: "Approval not found or expired" });
+        return;
+      }
+      if (err?.code === "FORBIDDEN") {
+        res.status(403).json({ success: false, error: "Approval does not belong to your organization" });
         return;
       }
       if (err?.code === "ALREADY_RESOLVED") {
@@ -463,11 +471,15 @@ router.post(
   async (req: Request<{ id: string }>, res: Response) => {
     try {
       const userId = getRequesterId(req) ?? "unknown";
-      await resolveApproval(req.params.id, "rejected", userId);
+      await resolveApproval(req.params.id, "rejected", userId, getOrgId(req));
       res.json({ success: true });
     } catch (err: any) {
       if (err?.code === "NOT_FOUND") {
         res.status(404).json({ success: false, error: "Approval not found or expired" });
+        return;
+      }
+      if (err?.code === "FORBIDDEN") {
+        res.status(403).json({ success: false, error: "Approval does not belong to your organization" });
         return;
       }
       if (err?.code === "ALREADY_RESOLVED") {
@@ -631,6 +643,7 @@ router.get(
    ───────────────────────────────────────────────────────────────────── */
 
 router.get("/events", requireClawAdmin, async (req: Request, res: Response) => {
+  const requesterOrgId = getOrgId(req);
   await ensureCCSubscriber();
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -640,7 +653,21 @@ router.get("/events", requireClawAdmin, async (req: Request, res: Response) => {
 
   // Keepalive ping every 25s to prevent proxy/load-balancer timeouts.
   const keepalive = setInterval(() => res.write(":ping\n\n"), 25_000);
-  const listener = (msg: string) => res.write(`data: ${msg}\n\n`);
+  const listener = (msg: string) => {
+    // Org boundary: only forward events belonging to the requester's org.
+    // Events published to cc:events now carry orgId (set at publish time in
+    // agent-chat.ts and run.ts). Events without orgId are legacy/no-org and
+    // pass through (fail-open for backward compat).
+    if (requesterOrgId) {
+      try {
+        const event = JSON.parse(msg) as { orgId?: string };
+        if (event.orgId && event.orgId !== requesterOrgId) return;
+      } catch {
+        // Malformed payload — pass through (non-JSON control messages).
+      }
+    }
+    res.write(`data: ${msg}\n\n`);
+  };
   ccBus.on("cc", listener);
 
   req.on("close", () => {

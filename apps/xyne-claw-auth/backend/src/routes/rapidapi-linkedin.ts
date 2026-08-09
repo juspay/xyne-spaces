@@ -39,9 +39,7 @@ interface RapidApiLinkedInCreds {
 
 /** Ensures the "rapidapi-linkedin" McpServer row exists, creating it if needed. */
 async function ensureRapidApiLinkedInServer() {
-  const existing = await prisma.mcpServer.findUnique({
-    where: { type: "rapidapi-linkedin" },
-  });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "rapidapi-linkedin", orgId: null } });
   if (existing) return existing;
 
   return prisma.mcpServer.create({

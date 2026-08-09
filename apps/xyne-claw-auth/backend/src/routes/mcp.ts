@@ -57,10 +57,6 @@ import {
 
 const log = createLogger("mcp");
 
-const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
-  ?.split(",")
-  .map((tenant) => tenant.trim())
-  .find((tenant) => tenant.length > 0);
 const loggedGlobalServerExclusions = new Set<string>();
 
 function isStrictAgentToolsEnabled(): boolean {
@@ -68,9 +64,9 @@ function isStrictAgentToolsEnabled(): boolean {
 }
 
 function resolveGatewayTenantForRequest(): string | null {
-  // Do not trust caller-provided tenant headers for gateway selection.
-  // Gateway tenant context is deployment-scoped for this backend instance.
-  return DEFAULT_GATEWAY_TENANT ?? null;
+  // Gateway support is intentionally disconnected. Keep the implementation in
+  // place, but do not expose service discovery or execution through MCP.
+  return null;
 }
 
 async function resolveSessionAgentOrgId(userId: string, spacesAppId?: string): Promise<string | undefined> {
@@ -351,11 +347,11 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
   }
 
   if (serverType === "xyne-spaces") {
-    const server = await prisma.mcpServer.findUnique({ where: { type: serverType }, select: { name: true } });
+    const server = await prisma.mcpServer.findFirst({ where: { type: serverType, orgId: null }, select: { name: true } });
     return server?.name ?? "Xyne Spaces";
   }
 
-  const server = await prisma.mcpServer.findUnique({ where: { type: serverType }, select: { name: true } });
+  const server = await prisma.mcpServer.findFirst({ where: { type: serverType, orgId: null }, select: { name: true } });
   return server?.name ?? serverType;
 }
 
@@ -425,7 +421,7 @@ async function postAgentCallProposal(params: Record<string, unknown>, context: {
       orgId: context.orgId,
       slug: targetSlug,
       enabled: true,
-      ...visibleAgentWhereForRunningUser(context.userId, await isClawAdmin(context.userId)),
+      ...visibleAgentWhereForRunningUser(context.userId, await isClawAdmin(context.userId, context.orgId)),
     },
     select: { slug: true, name: true },
   });
@@ -753,10 +749,10 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const globalServers = await prisma.mcpServer.findMany({
       where: {
         allowGlobalFallback: true,
-        // Org-scoped global creds: ANY row (org override or NULL-org default)
-        // makes the server listable; the loader picks the right row at call
-        // time (org override first, default second).
-        globalCredentials: { some: {} },
+        OR: sessionAgentOrgId ? [{ orgId: sessionAgentOrgId }, { orgId: null }] : [{ orgId: null }],
+        globalCredentials: sessionAgentOrgId
+          ? { some: { OR: [{ orgId: sessionAgentOrgId }, { orgId: null }] } }
+          : { some: {} },
         id: { notIn: Array.from(userServerIds) },
       },
     });
@@ -791,7 +787,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // no existing user/global row for xyne-spaces (else we'd duplicate).
     const hasSpacesEntry = entries.some((e) => e.serverType === "xyne-spaces");
     if (!hasSpacesEntry && CONFIG.spacesDbUrl) {
-      const spacesServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces" } });
+      const spacesServer = await prisma.mcpServer.findFirst({ where: { type: "xyne-spaces", orgId: null } });
       log.info(`[mcp/tools] spaces virtual-entry check: mcpServerRow=${!!spacesServer}`);
       if (spacesServer) {
         entries.push({ type: "user", serverType: "xyne-spaces", serverName: spacesServer.name, enforcementType: "virtual" });
@@ -807,7 +803,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // the runtime listToolsForUser path would never spawn the MCP server.
     const hasAppToolsEntry = entries.some((e) => e.serverType === "xyne-spaces-app-tools");
     if (!hasAppToolsEntry) {
-      const appToolsServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
+      const appToolsServer = await prisma.mcpServer.findFirst({ where: { type: "xyne-spaces-app-tools", orgId: null } });
       if (appToolsServer) {
         entries.push({ type: "user", serverType: "xyne-spaces-app-tools", serverName: appToolsServer.name, enforcementType: "virtual" });
         log.info(`[mcp/tools] added virtual xyne-spaces-app-tools entry for userId=${userId}`);
@@ -818,7 +814,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // from RESEARCH_AGENT_MCP_API_KEY for every agent/user.
     const hasResearchAgentMcpEntry = entries.some((e) => e.serverType === "research-agent-mcp");
     if (!hasResearchAgentMcpEntry && CONFIG.researchAgentMcpApiKey) {
-      const researchAgentMcpServer = await prisma.mcpServer.findUnique({ where: { type: "research-agent-mcp" } });
+      const researchAgentMcpServer = await prisma.mcpServer.findFirst({ where: { type: "research-agent-mcp", orgId: null } });
       if (researchAgentMcpServer) {
         entries.push({ type: "global", serverType: "research-agent-mcp", serverName: researchAgentMcpServer.name, enforcementType: "virtual" });
         log.info(`[mcp/tools] added virtual research-agent-mcp entry for userId=${userId}`);
@@ -858,7 +854,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
 
     const results = await Promise.allSettled(
       entries.map(async (entry) => {
-        if (!(await hasConnectorDefinition(entry.serverType))) return null;
+        if (!(await hasConnectorDefinition(entry.serverType, sessionAgentOrgId))) return null;
         const effective = entry.serverType === "slack"
           ? await loadEffectiveCredentialsWithSpacesFallback(
               userId,
@@ -869,7 +865,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
             )
           : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
         if (!effective) return null;
-        const serverTools = await listToolsForUser(userId, entry.serverType, entry.serverName, effective.credentials, agentSlug);
+        const serverTools = await listToolsForUser(userId, entry.serverType, entry.serverName, effective.credentials, agentSlug, sessionAgentOrgId);
         return { entry, serverTools };
       }),
     );
@@ -1310,7 +1306,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
-    if (!(await hasConnectorDefinition(serverType))) {
+    if (!(await hasConnectorDefinition(serverType, sessionAgentOrgId))) {
       res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });
       return;
     }
@@ -1373,7 +1369,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     }
 
     // Write tools always require approval — cannot be overridden by agent config
-    const definition = await resolveConnectorDefinition(serverType);
+    const definition = await resolveConnectorDefinition(serverType, sessionAgentOrgId);
     const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
     const effectivePermission = isWriteTool ? "ask" : (permission ?? "allow");
 
@@ -1577,7 +1573,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const callStartedAt = Date.now();
     const upstreamResult = serverType === "bitbucket"
       ? await callBitbucketThrottled(userId, credentials, tool, effectiveParams, agentSlug)
-      : await callTool(userId, serverType, credentials, tool, effectiveParams, agentSlug);
+      : await callTool(userId, serverType, credentials, tool, effectiveParams, agentSlug, sessionAgentOrgId);
     let result = upstreamResult;
 
     // Upstream mcp-grafana query tools (query_elasticsearch, …) run through
@@ -1780,12 +1776,12 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         // Registry match is the validation; fall through to signing.
       } else {
       // Revalidate non-gateway actions before issuing a signature.
-      if (!(await hasConnectorDefinition(serverType))) {
+      if (!(await hasConnectorDefinition(serverType, sessionAgentOrgId))) {
         res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });
         return;
       }
 
-      const definition = await resolveConnectorDefinition(serverType);
+      const definition = await resolveConnectorDefinition(serverType, sessionAgentOrgId);
       const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
       if (!isWriteTool) {
         res.status(400).json({ success: false, error: "Only write actions can be signed" });

@@ -117,7 +117,7 @@ async function registerCustomerioClient(redirectUri: string): Promise<string> {
 
 /** Ensures a "customerio" McpServer row exists, creating it if necessary. */
 async function ensureCustomerioServer() {
-  const existing = await prisma.mcpServer.findUnique({ where: { type: "customerio" } });
+  const existing = await prisma.mcpServer.findFirst({ where: { type: "customerio", orgId: null } });
   if (existing) return existing;
 
   return prisma.mcpServer.create({

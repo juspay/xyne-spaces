@@ -27,6 +27,7 @@
  */
 
 import { prisma } from "../db.js";
+import { findMcpServer } from "../mcp/server-resolution.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials } from "./credentials-refresh.js";
@@ -181,13 +182,17 @@ export async function loadEffectiveCredentials(
     return null;
   }
 
+  const resolvedOrgId = agentOrgId
+    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+    ?? undefined;
+  const server = await findMcpServer(serverType, resolvedOrgId);
+  if (!server) return null;
+
   // 1. Agent-pinned creds win when present. Only checked if the caller
   //    provided an agentSlug (i.e. the call is happening inside an agent's
   //    session — direct admin/health calls pass undefined and skip this).
   if (agentSlug) {
-    const resolvedAgentOrgId = agentOrgId
-      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
-      ?? undefined;
+    const resolvedAgentOrgId = resolvedOrgId;
     const agentWhere = resolvedAgentOrgId
       ? { slug: agentSlug, orgId: resolvedAgentOrgId }
       : { id: "__missing_agent_org__" };
@@ -202,7 +207,7 @@ export async function loadEffectiveCredentials(
       agentConn = await prisma.agentMcpConnection.findFirst({
         where: {
           agent: agentWhere,
-          mcpServer: { type: serverType },
+          mcpServerId: server.id,
           slug: instanceSlug,
         },
       });
@@ -210,13 +215,13 @@ export async function loadEffectiveCredentials(
       agentConn = await prisma.agentMcpConnection.findFirst({
         where: {
           agent: agentWhere,
-          mcpServer: { type: serverType },
+          mcpServerId: server.id,
           slug: "default",
         },
       });
       if (!agentConn) {
         agentConn = await prisma.agentMcpConnection.findFirst({
-          where: { agent: agentWhere, mcpServer: { type: serverType } },
+          where: { agent: agentWhere, mcpServerId: server.id },
           orderBy: { createdAt: "asc" },
         });
       }
@@ -323,7 +328,7 @@ export async function loadEffectiveCredentials(
   }
 
   const userConn = await prisma.userMcpConnection.findFirst({
-    where: { userId, mcpServer: { type: serverType } },
+    where: { userId, mcpServerId: server.id },
     include: { mcpServer: true },
   });
 
@@ -345,10 +350,7 @@ export async function loadEffectiveCredentials(
     return { source: "user", connectionId: userConn.id, credentials, isUserOwned: true };
   }
 
-  const server = await prisma.mcpServer.findUnique({
-    where: { type: serverType },
-  });
-
+  const credOrgId = resolvedOrgId ?? null;
   if (!server || !server.allowGlobalFallback) {
     // xyne-spaces already had its live-first chance above, so reaching here
     // means both the live read and the cached userMcpConnection failed.
@@ -360,9 +362,6 @@ export async function loadEffectiveCredentials(
   // org, falling back to the calling user's org) beats the deployment-wide
   // default row (orgId NULL). Lets two orgs run the same server type with
   // different shared credentials (e.g. per-org GitHub bot PATs).
-  const credOrgId = agentOrgId
-    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
-    ?? null;
   const globalCreds =
     (credOrgId
       ? await prisma.globalMcpCredentials.findFirst({

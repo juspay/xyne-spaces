@@ -112,9 +112,9 @@ function sendValidationError(res: Response, err: unknown): boolean {
  * Return true if `userId` may edit/delete/share-manage this subagent. Owner,
  * CLAW_ADMIN, or any EDITOR share row qualifies.
  */
-async function canEditSubagent(row: NonNullable<DbRow>, userId: string): Promise<boolean> {
+async function canEditSubagent(row: NonNullable<DbRow>, userId: string, orgId?: string): Promise<boolean> {
   if (row.createdByUserId === userId) return true;
-  if (await isClawAdmin(userId)) return true;
+  if (await isClawAdmin(userId, orgId)) return true;
   const share = await subagentShareRepository.findBySubagentAndUser(row.id, userId);
   return share?.role === "EDITOR";
 }
@@ -249,7 +249,7 @@ router.put("/:name", async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: "subagent not found" });
     }
 
-    if (!(await canEditSubagent(existing, requesterId))) {
+    if (!(await canEditSubagent(existing, requesterId, getOrgId(req)))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can update this subagent",
@@ -312,7 +312,7 @@ router.delete("/:name", async (req: Request, res: Response) => {
       log.warn(`[subagents/delete] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
       return res.status(404).json({ success: false, error: "subagent not found" });
     }
-    if (!(await canEditSubagent(existing, requesterId))) {
+    if (!(await canEditSubagent(existing, requesterId, getOrgId(req)))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can disable this subagent",
@@ -343,7 +343,7 @@ router.post("/:name/enable", async (req: Request, res: Response) => {
       log.warn(`[subagents/restore] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
       return res.status(404).json({ success: false, error: "subagent not found" });
     }
-    if (!(await canEditSubagent(existing, requesterId))) {
+    if (!(await canEditSubagent(existing, requesterId, getOrgId(req)))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can re-enable this subagent",
@@ -406,7 +406,7 @@ router.post("/:name/shares", async (req: Request, res: Response) => {
       log.warn(`[subagents/share] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
       return res.status(404).json({ success: false, error: "subagent not found" });
     }
-    if (!(await canEditSubagent(row, requesterId))) {
+    if (!(await canEditSubagent(row, requesterId, getOrgId(req)))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can add a contributor",
@@ -471,7 +471,7 @@ router.delete("/:name/shares/:userId", async (req: Request, res: Response) => {
       log.warn(`[subagents/unshare] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId} targetUserId=${userId}`);
       return res.status(404).json({ success: false, error: "subagent not found" });
     }
-    if (!(await canEditSubagent(row, requesterId))) {
+    if (!(await canEditSubagent(row, requesterId, getOrgId(req)))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can remove a contributor",
