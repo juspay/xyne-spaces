@@ -308,6 +308,11 @@ export const CONFIG = {
   researchAgentMcpApiKey: process.env["RESEARCH_AGENT_MCP_API_KEY"]
     ?? process.env["research_agent_mcp_api_key"]
     ?? "",
+  /** Global, credentialless Heisenberg pipeline REST API proxied by its MCP server. */
+  heisenbergBaseUrl: (
+    process.env["HEISENBERG_BASE_URL"] ??
+    "<heisenberg-url>"
+  ).replace(/\/+$/, ""),
 } as const;
 
 // Grafana → error auto-fix pipeline (lives here — claw stays stateless; the

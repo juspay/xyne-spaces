@@ -824,6 +824,18 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
         log.info(`[mcp/tools] added virtual research-agent-mcp entry for userId=${userId}`);
       }
     }
+    // Virtual Heisenberg entry: the internal pipeline service has no user
+    // credentials. Its reviewed static adapter uses the deployment-wide
+    // HEISENBERG_BASE_URL (with a code default), so every agent can select it
+    // without creating a user_mcp_connections row.
+    const hasHeisenbergEntry = entries.some((e) => e.serverType === "heisenberg");
+    if (!hasHeisenbergEntry) {
+      const heisenbergServer = await prisma.mcpServer.findUnique({ where: { type: "heisenberg" } });
+      if (heisenbergServer?.enabled) {
+        entries.push({ type: "global", serverType: "heisenberg", serverName: heisenbergServer.name, enforcementType: "virtual" });
+        log.info(`[mcp/tools] added virtual heisenberg entry for userId=${userId}`);
+      }
+    }
 
     // Slack-surface runs do not require a separately configured MCP
     // connection. The verified workspace install supplies credentials.

@@ -517,6 +517,17 @@ const SERVERS = [
     healthcheckSpec: { name: "get_user_tweets", params: { username: "OpenAI", count: 1 } },
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
+  {
+    type: "heisenberg",
+    name: "Heisenberg Pipeline",
+    // stdio transport — the endpoint comes from HEISENBERG_BASE_URL at runtime.
+    url: "",
+    description: "Global MCP proxy for Heisenberg pipeline runs, status, coverage, test failures, and logs.",
+    transport: "stdio",
+    credentialForm: { fields: [] },
+    healthcheckSpec: { name: "heisenberg_health", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["heisenberg_start_pipeline", "heisenberg_index_logs"] },
+  },
 ] as const;
 
 async function main() {
