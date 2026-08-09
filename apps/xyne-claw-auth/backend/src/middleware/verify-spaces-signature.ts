@@ -9,15 +9,9 @@
  *   3. Compute HMAC-SHA256 over the RAW request body.
  *   4. Timing-safe compare against `X-Xyne-Signature` header (hex).
  *
- * Rollout modes (env `SPACES_WEBHOOK_VERIFY_MODE`):
- *   - `warn` (temporary default): log verification failures and continue. This
- *     keeps legacy unsigned Flow actions working until the Spaces signer is
- *     deployed.
- *   - any other value (use `enforce`): reject verification failures with 401.
- *
- * Warn mode is deliberately temporary. The webhook handler trusts payload
- * identity and can run agents with that user's credentials, so production must
- * switch to `enforce` as soon as Spaces signs all callbacks.
+ * Every verification failure rejects with 401. The webhook handler trusts
+ * payload identity and can run agents with that user's credentials, so an
+ * unsigned or invalid callback must never reach a downstream handler.
  *
  * Notes / gotchas:
  *   - Requires `req.rawBody` set by the json `verify` callback in main.ts.
@@ -47,10 +41,6 @@ function parseGcmBundle(blob: string): [string, string, string] | null {
 
 function tag(key: string, reason: string): string {
   return `[verify-spaces-sig] ${key} reason=${reason}`;
-}
-
-function signaturesEnforced(): boolean {
-  return (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "warn").toLowerCase() !== "warn";
 }
 
 /**
@@ -91,20 +81,15 @@ export async function verifySpacesSignature(
   const lookupTag = spacesAppId ? `spacesAppId=${spacesAppId}` : `slug=${slug ?? "(none)"}`;
 
   const verificationFailure = (reason: string, error: string, detail?: string): void => {
-    const enforce = signaturesEnforced();
     // One stable, grep-friendly log for every failed verification. Never
     // include the signature, secret, or request body.
     log.warn(
       tag(lookupTag, reason)
       + ` agentId=${agent?.id ?? "(not-found)"}`
       + (detail ? ` ${detail}` : "")
-      + (enforce ? " — rejected" : " — warn-only, passing through"),
+      + " — rejected",
     );
-    if (enforce) {
-      res.status(401).json({ success: false, error });
-      return;
-    }
-    next();
+    res.status(401).json({ success: false, error });
   };
 
   // 1. Resolve the agent + its stored secret.

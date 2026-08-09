@@ -52,7 +52,6 @@ function response(): { res: Response; status: ReturnType<typeof vi.fn>; json: Re
 describe("verifySpacesSignature", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env["SPACES_WEBHOOK_VERIFY_MODE"];
     mocks.agent = { id: "agent-1", signingSecret: storedSecret("signing-secret") };
   });
 
@@ -60,46 +59,20 @@ describe("verifySpacesSignature", () => {
     ["missing stored secret", null, "no_stored_secret"],
     ["malformed stored secret", "not-a-gcm-bundle", "malformed_secret_blob"],
     ["undecryptable stored secret", "YQ==:Yg==:Yw==", "decrypt_failed"],
-  ])("warns and passes through for %s in the temporary default mode", async (_name, signingSecret, reason) => {
+  ])("fails closed for %s", async (_name, signingSecret, reason) => {
     mocks.agent = { id: "agent-1", signingSecret };
     const { res, status } = response();
     const next = vi.fn() as NextFunction;
 
     await verifySpacesSignature(request(Buffer.from("{}")), res, next);
 
-    expect(status).not.toHaveBeenCalled();
-    expect(next).toHaveBeenCalledOnce();
-    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining(`reason=${reason}`));
-    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("warn-only, passing through"));
-  });
-
-  it("warns and passes through when the signature header is absent by default", async () => {
-    const { res, status } = response();
-    const next = vi.fn() as NextFunction;
-
-    await verifySpacesSignature(request(Buffer.from("{}")), res, next);
-
-    expect(status).not.toHaveBeenCalled();
-    expect(next).toHaveBeenCalledOnce();
-    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=no_signature_header"));
-  });
-
-  it("fails closed when enforce mode is enabled", async () => {
-    process.env["SPACES_WEBHOOK_VERIFY_MODE"] = "enforce";
-    const { res, status } = response();
-    const next = vi.fn() as NextFunction;
-
-    await verifySpacesSignature(request(Buffer.from("{}")), res, next);
-
     expect(status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
-    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=no_signature_header"));
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining(`reason=${reason}`));
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("rejected"));
   });
 
-  it("fails closed for missing stored secrets in enforce mode", async () => {
-    process.env["SPACES_WEBHOOK_VERIFY_MODE"] = "enforce";
-    mocks.agent = { id: "agent-1", signingSecret: null };
+  it("fails closed when the signature header is absent", async () => {
     const { res, status } = response();
     const next = vi.fn() as NextFunction;
 
@@ -107,17 +80,17 @@ describe("verifySpacesSignature", () => {
 
     expect(status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
-    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=no_stored_secret"));
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=no_signature_header"));
   });
 
-  it("warns and passes through an invalid signature by default", async () => {
+  it("fails closed for an invalid signature", async () => {
     const { res, status } = response();
     const next = vi.fn() as NextFunction;
 
     await verifySpacesSignature(request(Buffer.from("{}"), "00".repeat(32)), res, next);
 
-    expect(status).not.toHaveBeenCalled();
-    expect(next).toHaveBeenCalledOnce();
+    expect(status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("reason=mismatch"));
   });
 

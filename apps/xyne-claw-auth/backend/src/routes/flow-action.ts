@@ -22,7 +22,13 @@ import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
-import { clearActivePlanCard, setPlanExecMeta, clearPlanExecMeta, normalizePlanTitle } from "../lib/session-context.js";
+import {
+  clearActivePlanCard,
+  getActivePlanCard,
+  setPlanExecMeta,
+  clearPlanExecMeta,
+  normalizePlanTitle,
+} from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
 import { redisService } from "../redis.js";
@@ -130,6 +136,7 @@ const AGENT_CALL_CONSUMED_TTL_SEC = 24 * 60 * 60;
 const GOAL_ACTION_TTL_SEC = 24 * 60 * 60;
 const LEGACY_WRITE_CARD_TTL_SEC = 24 * 60 * 60;
 const LEGACY_GOAL_CARD_TTL_SEC = 24 * 60 * 60;
+const PLAN_ACTION_CONSUMED_TTL_SEC = 24 * 60 * 60;
 
 async function consumeAgentCallAction(messageId: string): Promise<boolean> {
   if (!messageId) return true;
@@ -155,6 +162,15 @@ async function consumeLegacyGoalCard(messageId: string): Promise<boolean> {
   if (!messageId) return false;
   const key = `flow-action:legacy-goal:${messageId}`;
   const result = await redisService.getConnection().set(key, "1", "EX", LEGACY_GOAL_CARD_TTL_SEC, "NX");
+  return result === "OK";
+}
+
+/** A proposed plan card is single-use. This closes the replay window between
+ * accepting the UI action and replacing the card with its terminal state. */
+async function consumePlanAction(messageId: string): Promise<boolean> {
+  if (!messageId) return false;
+  const key = `flow-action:plan:${messageId}`;
+  const result = await redisService.getConnection().set(key, "1", "EX", PLAN_ACTION_CONSUMED_TTL_SEC, "NX");
   return result === "OK";
 }
 
@@ -1683,20 +1699,48 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     // (Turn 2) with the subset of todos the user kept selected. Never twin (twin
     // uses the approval DM card, not plan mode).
     if (actionType === "plan-approval") {
-      const planAgentSlug = data["agentSlug"] as string | undefined;
-      const planSpacesAppId = data["spacesAppId"] as string | undefined;
-      const planChannelId = data["channelId"] as string | undefined;
-      const planConversationId = data["conversationId"] as string | undefined;
-      const planUserId = data["userId"] as string | undefined;
+      // Flow JSON is a signed transport envelope, but it is still user-visible
+      // mutable state. Use it only to locate the server-side pending plan; all
+      // routing, identity, card metadata, and executable todos below come from
+      // Redis state that claw-auth created when it posted the proposal.
+      const flowAgentSlug = data["agentSlug"] as string | undefined;
+      const flowConversationId = data["conversationId"] as string | undefined;
 
-      if (!planAgentSlug || !planConversationId || !planUserId) {
+      if (!flowAgentSlug || !flowConversationId || !messageId) {
         res.status(400).json({ type: "error", message: "Missing plan-approval fields in flowJSON.data" } satisfies AppActionResponse);
         return;
       }
 
-      // Only the user the plan was proposed to can approve/reject it (fail-closed).
+      const { getSessionByConv } = await import("./webhook.js");
+      const [priorCtx, activePlan] = await Promise.all([
+        getSessionByConv(flowConversationId, flowAgentSlug),
+        getActivePlanCard(flowConversationId, flowAgentSlug),
+      ]);
+      // A plan action must target the exact outstanding server-created card.
+      // This rejects stale/replayed cards and a flow body with substituted plan
+      // text even when the transport itself was validly signed.
+      if (
+        !priorCtx ||
+        !activePlan ||
+        activePlan.messageId !== messageId ||
+        priorCtx.planMessageId !== messageId ||
+        !priorCtx.pendingPlan?.todos?.length
+      ) {
+        log.warn(`[flow-action] plan-approval: stale or missing server plan conv=${flowConversationId} agent=${flowAgentSlug}`);
+        res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
+        return;
+      }
+
+      const planAgentSlug = priorCtx.agentSlug ?? flowAgentSlug;
+      const planSpacesAppId = priorCtx.spacesAppId;
+      const planChannelId = priorCtx.channelId;
+      const planConversationId = priorCtx.conversationId ?? flowConversationId;
+      const planUserId = priorCtx.senderId;
+      const serverTodos = activePlan.todos;
+
+      // Only the user the server recorded for this plan can approve/reject it.
       if (!callerUserId || callerUserId !== planUserId) {
-        log.error(`[flow-action] plan-approval: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${planUserId}`);
+        log.error(`[flow-action] plan-approval: unauthorized — caller ${callerUserId ?? "(none)"} != plan owner ${planUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
       }
@@ -1706,15 +1750,14 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a "Rejected by <name>" audit. NO Turn 2, NO plan-mode/config change, no
       // follow-ups — if they want a new plan they mention the agent again.
       if (actionId === "plan-reject") {
-        const rejectComponent = flowJSON.components?.find((c) => c.type === "plan");
-        const rejectedTodos = (
-          (rejectComponent?.props?.["todos"] as Array<{ id?: string; text?: string }> | undefined) ?? []
-        )
-          .filter((t) => typeof t.id === "string")
-          .map((t) => ({ id: t.id as string, title: (t.text ?? "").toString() }));
-        const rejectTitle = (rejectComponent?.props?.["title"] as string | undefined) ?? "Plan";
-        const rejectDesc = rejectComponent?.props?.["desc"] as string | undefined;
-        const rejectDoc = rejectComponent?.props?.["document"] as string | undefined;
+        if (!(await consumePlanAction(messageId))) {
+          res.status(409).json({ type: "error", message: "This plan has already been acted on." } satisfies AppActionResponse);
+          return;
+        }
+        const rejectedTodos = serverTodos;
+        const rejectTitle = activePlan.title ?? "Plan";
+        const rejectDesc = activePlan.desc;
+        const rejectDoc = activePlan.document;
         const rejecterName = await prisma.user
           .findUnique({ where: { id: callerUserId }, select: { name: true } })
           .then((u) => u?.name?.trim() ?? "")
@@ -1753,30 +1796,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // Resolve the FULL proposed todos (id + text) from the submitted flow's plan
-      // component, then filter to the kept ids → the approved subset. The plan
-      // component's props.todos = [{ id, text, included }].
-      const planComponent = flowJSON.components?.find((c) => c.type === "plan");
-      const proposedTodos = (planComponent?.props?.["todos"] as Array<{ id?: string; text?: string }> | undefined) ?? [];
+      // Selection IDs are the only action data accepted from the client. Resolve
+      // them against the exact server-side card so titles/steps cannot be added,
+      // changed, or recovered from a stale submitted Flow JSON.
       const selectedSet = new Set(selectedIds);
-      let approved = proposedTodos
-        .filter((t) => typeof t.id === "string" && selectedSet.has(t.id))
-        .map((t) => ({ id: t.id as string, title: (t.text ?? "").toString() }));
-
-      // Fallback: if the submitted flow didn't carry the proposed todos, recover
-      // them from the session's pendingPlan (prefer flowJSON above).
-      if (approved.length === 0) {
-        try {
-          const { getSessionByConv } = await import("./webhook.js");
-          const priorCtx = await getSessionByConv(planConversationId, planAgentSlug);
-          const stashed = priorCtx?.pendingPlan?.todos ?? [];
-          approved = stashed
-            .filter((t) => selectedSet.has(t.id))
-            .map((t) => ({ id: t.id, title: t.title }));
-        } catch {
-          // Fall through — empty approved handled below.
-        }
-      }
+      const approved = serverTodos.filter((t) => selectedSet.has(t.id));
 
       if (approved.length === 0) {
         res.status(400).json({ type: "error", message: "Could not resolve the selected steps." } satisfies AppActionResponse);
@@ -1802,6 +1826,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
+      if (!(await consumePlanAction(messageId))) {
+        res.status(409).json({ type: "error", message: "This plan has already been acted on." } satisfies AppActionResponse);
+        return;
+      }
+
       // Close the card immediately, then swap it for the live "executing" plan
       // node (bug 6) — the same rich card the trivial/auto path shows, NOT a bare
       // text line. Turn 2's todo-write updates this SAME card in place
@@ -1809,10 +1838,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // because the whole flow is replaced.
       resp = { type: "close_screen", finalMessage: `▶ Approved — running ${approved.length} step(s)…` };
       res.json(resp);
-      const planTitleForCard =
-        (planComponent?.props?.["title"] as string | undefined) ?? "Plan";
-      const planDescForCard = planComponent?.props?.["desc"] as string | undefined;
-      const planDocForCard = planComponent?.props?.["document"] as string | undefined;
+      const planTitleForCard = activePlan.title ?? "Plan";
+      const planDescForCard = activePlan.desc;
+      const planDocForCard = activePlan.document;
       // Who approved (already authz-checked === planUserId) — resolved once here
       // and reused for BOTH the immediate executing card and the durable exec
       // meta, so the card shows "Approved by <name>" with no flicker. Response is
@@ -1858,23 +1886,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
             : "";
 
-          const { setSession, getSessionByConv } = await import("./webhook.js");
-          let priorCtx = await getSessionByConv(planConversationId, planAgentSlug);
-          // SECURITY: the conversation session index is NOT user-scoped for
-          // conversation-mode (non-twin) agents — its key is only
-          // (conversationId, agentSlug). So if a DIFFERENT user in the same thread
-          // dispatched a plan-mode run after this plan was proposed, it OVERWROTE
-          // the index with their context. Trust priorCtx ONLY when it belongs to
-          // the approver (planUserId, already authz-checked === callerUserId);
-          // otherwise drop it and build a fresh context below with the correct
-          // owner. Without this, User A's approval could run Turn 2 under User B's
-          // identity (the AgentRun + result message are persisted under senderId).
-          if (priorCtx && priorCtx.senderId !== planUserId) {
-            log.warn(
-              `[flow-action] plan-approval: conv-index owner ${priorCtx.senderId} != approver ${planUserId} — building fresh ctx (not trusting stale session)`,
-            );
-            priorCtx = null;
-          }
+          const { setSession } = await import("./webhook.js");
 
           const task =
             "Execute this approved plan:\n" +
