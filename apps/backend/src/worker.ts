@@ -168,7 +168,6 @@ class WorkerService {
         logger.info('Starting social media review sync worker...');
         socialMediaSyncWorker.start();
       }
-
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
       // off — so with it off nothing is produced either, and no backlog builds up.
@@ -416,7 +415,6 @@ class WorkerService {
           await emailClassificationQueue.close();
         }
       }
-
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
       }
