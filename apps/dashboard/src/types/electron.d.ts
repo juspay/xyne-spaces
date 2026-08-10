@@ -109,6 +109,7 @@ export interface ElectronAPI {
     callback: (data: {
       currentVersion: string;
       latestVersion: string;
+      updateAvailable: boolean;
       loadType: 'manual' | 'auto';
     }) => void,
   ) => () => void;

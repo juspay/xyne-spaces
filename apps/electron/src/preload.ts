@@ -244,8 +244,18 @@ const electronAPI = {
   getBundleVersion: () => ipcRenderer.invoke('get-bundle-version'),
 
   // App update APIs
-  onAppUpdateAvailable: (callback: (data: { currentVersion: string; latestVersion: string }) => void) => {
-    const listener = (_event: unknown, data: { currentVersion: string; latestVersion: string }) => callback(data);
+  onAppUpdateAvailable: (callback: (data: {
+    currentVersion: string;
+    latestVersion: string;
+    updateAvailable: boolean;
+    loadType: 'manual' | 'auto';
+  }) => void) => {
+    const listener = (_event: unknown, data: {
+      currentVersion: string;
+      latestVersion: string;
+      updateAvailable: boolean;
+      loadType: 'manual' | 'auto';
+    }) => callback(data);
     ipcRenderer.on('app-update-available', listener);
     return () => ipcRenderer.removeListener('app-update-available', listener);
   },

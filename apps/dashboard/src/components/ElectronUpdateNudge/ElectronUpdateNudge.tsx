@@ -22,6 +22,7 @@ const UPDATE_NUDGE_SLOT_SELECTOR = '[data-electron-update-nudge-slot]';
 interface UpdateAvailableInfo {
   currentVersion: string;
   latestVersion: string;
+  updateAvailable?: boolean;
   loadType: 'manual' | 'auto';
 }
 
@@ -246,7 +247,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
     const attempt = readStorage<UpdateAttempt>(UPDATE_ATTEMPT_STORAGE_KEY);
     let saved = readNudgeState();
     if (attempt) {
-      const succeeded = __APP_VERSION__ !== attempt.currentVersion;
+      const succeeded = __APP_VERSION__ === attempt.latestVersion;
       writeStorage(UPDATE_RESULT_STORAGE_KEY, {
         ...attempt,
         loadedVersion: __APP_VERSION__,
@@ -295,9 +296,15 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       if (
         !data ||
         typeof data.currentVersion !== 'string' ||
-        typeof data.latestVersion !== 'string' ||
-        data.currentVersion === data.latestVersion
+        typeof data.latestVersion !== 'string'
       ) {
+        return;
+      }
+
+      if (data.updateAvailable === false || data.currentVersion === data.latestVersion) {
+        removeStorage(NUDGE_STORAGE_KEY);
+        setNudge(null);
+        setVisible(false);
         return;
       }
 
