@@ -10,12 +10,6 @@ export default {
     './src/**/*.{ts,tsx}',
     './index.html',
   ],
-  safelist: [
-    { pattern: /bg-\[.*\]/ }, // allow arbitrary bg classes
-    { pattern: /bg-\[color:.*\]/ }, // allow color-typed arbitrary values
-    { pattern: /bg-\[color:hsl\(var\(.*\)\)\]/ }, // specific pattern for HSL with CSS variables
-    { pattern: /hljs-.*/ }, // preserve all syntax highlighting classes
-  ],
   prefix: '',
   theme: {
     container: {

@@ -268,7 +268,7 @@ const OnboardingScreen: React.FC = () => {
               <div
                 className={`
             flex flex-col items-center text-center gap-6
-            transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)]
+            transition-all duration-500 [transition-timing-function:cubic-bezier(.22,1,.36,1)]
             ${profileAnim ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'}
           `}
               >
@@ -298,7 +298,7 @@ const OnboardingScreen: React.FC = () => {
                 <div
                   className={`
               relative w-[300px]
-              transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)]
+              transition-all duration-500 [transition-timing-function:cubic-bezier(.22,1,.36,1)]
               ${
                 profileAnim
                   ? 'translate-y-0 scale-100 rotate-0 opacity-100'
