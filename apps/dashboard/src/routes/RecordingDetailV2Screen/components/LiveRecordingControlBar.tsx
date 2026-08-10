@@ -19,8 +19,7 @@
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { StopSmall, Spinner, PauseBig, PlayBig, Flag } from '@xyne/icons';
-import { AlertTriangle } from 'lucide-react';
+import { StopSmall, Spinner, PauseBig, PlayBig, Flag, AlertTriangle } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { cn } from '../../../utils/classNames';
