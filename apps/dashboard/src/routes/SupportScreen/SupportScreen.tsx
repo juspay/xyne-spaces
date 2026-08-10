@@ -1658,6 +1658,8 @@ const SupportScreen = (): ReactElement => {
     onSuccess: () => {
       setShowCreateChannelModal(false);
       toast.success('Channel created successfully');
+      void queryClient.invalidateQueries({ queryKey: ['app-desk-eligible-apps'] });
+      void queryClient.invalidateQueries({ queryKey: ['slack-desk-channels'] });
     },
     onError: (error: Error) => {
       toast.error('Failed to create channel', {
