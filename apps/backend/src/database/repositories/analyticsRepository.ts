@@ -114,16 +114,22 @@ type FilteredMessage = {
   messageId: string;
   senderId: string;
   conversationId: string;
-  metadata: any;
   createdAt: Date;
 };
+const MINUTE_MS = 60 * 1000;
+/**
+ * Quantizes "now" to a whole minute so the ~8 panels of one dashboard resolve and share identical [gte, lte]
+ */
+function floorToMinute(date: Date): Date {
+  return new Date(Math.floor(date.getTime() / MINUTE_MS) * MINUTE_MS);
+}
 
 /**
  * Helper method to get date filter SQL condition
  * ALL DATE OPERATIONS USE UTC TO AVOID TIMEZONE ISSUES
  */
 export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lte?: Date } {
-  const now = new Date();
+  const now = floorToMinute(new Date());
 
   // Handle custom date range
   if (filters.timeRange === 'custom' && filters.startDate) {
@@ -200,18 +206,52 @@ export class AnalyticsRepository {
     'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n','cmlv7gc0a00mrka9fol3ccjrk'
   ];
 
-  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<FilteredMessage[]> {
-    const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
+  /**
+   * Coalesces concurrent identical scans. Every analytics panel calls this
+   * helper with the same (workspace, range) key, and the dashboard fires all
+   * of them in parallel on mount and on every refetch — without this, one
+   * dashboard render issues ~8 copies of the same scan against the replica.
+   *
+   * Relies on ranges being minute-quantized (see floorToMinute) so that panels
+   * resolving their range moments apart still produce the same key.
+   */
+  private static readonly inFlightMessageQueries = new Map<string, Promise<FilteredMessage[]>>();
+
+  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<readonly FilteredMessage[]> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     const gte = dateCondition.gte ? dateCondition.gte.toISOString() : null;
     const lte = dateCondition.lte ? dateCondition.lte.toISOString() : null;
-    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
+
+    const key = `${scopedWorkspaceId}|${gte ?? ''}|${lte ?? ''}`;
+    const inFlight = AnalyticsRepository.inFlightMessageQueries.get(key);
+    if (inFlight) return inFlight;
+
+    const query = this.queryFilteredMessages(gte, lte, scopedWorkspaceId)
+      .finally(() => AnalyticsRepository.inFlightMessageQueries.delete(key));
+
+    AnalyticsRepository.inFlightMessageQueries.set(key, query);
+    return query;
+  }
+
+  private async queryFilteredMessages(gte: string | null, lte: string | null, scopedWorkspaceId: string): Promise<FilteredMessage[]> {
+    const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
+
+    // Emit the date bounds as plain comparisons instead of
+    // `($1::timestamp IS NULL OR m."createdAt" >= $1::timestamp)`. That OR form
+    // is non-sargable: Postgres can only fold the IS NULL branch away while it
+    // still builds custom plans, so once a pooled connection's prepared
+    // statement flips to a generic plan it stops using (msgType, createdAt) and
+    // sequential-scans `messages` regardless of how narrow the range is. That is
+    // what makes the same request succeed on one connection and hit
+    // statement_timeout on the next.
+    const gteClause = gte ? Prisma.sql`AND m."createdAt" >= ${gte}::timestamp` : Prisma.empty;
+    const lteClause = lte ? Prisma.sql`AND m."createdAt" <= ${lte}::timestamp` : Prisma.empty;
 
     const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
       SELECT 
         m."messageId", 
         m."senderId", 
         m."conversationId", 
-        m."metadata", 
         m."createdAt"
       FROM "public"."messages_without_content" m
       INNER JOIN "public"."conversations" c 
@@ -220,8 +260,8 @@ export class AnalyticsRepository {
         ON ch."id" = c."channelId"
       WHERE 
         m."msgType" = 'USER'
-        AND (${gte}::timestamp IS NULL OR m."createdAt" >= ${gte}::timestamp)
-        AND (${lte}::timestamp IS NULL OR m."createdAt" <= ${lte}::timestamp)
+        ${gteClause}
+        ${lteClause}
         AND ch."workspaceId" = ${scopedWorkspaceId}
         AND c."channelId" NOT IN (${Prisma.join(excludedChannels)})
         AND NOT EXISTS (
@@ -2139,8 +2179,9 @@ export class AnalyticsRepository {
    */
   async getMessagesToday(workspaceId?: string): Promise<number> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30)
-    const now = new Date();
+    // Get current time in IST (UTC+5:30), quantized so this range matches the
+    // one getMessagesTodayTimeSeries resolves and the two can share a scan.
+    const now = floorToMinute(new Date());
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
     
     // Get start of today in IST
@@ -2163,8 +2204,9 @@ export class AnalyticsRepository {
    */
   async getMessagesTodayTimeSeries(workspaceId?: string): Promise<{ date: string; value: number }[]> {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
-    // Get current time in IST (UTC+5:30)
-    const now = new Date();
+    // Get current time in IST (UTC+5:30), quantized so this range matches the
+    // one getMessagesToday resolves and the two can share a scan.
+    const now = floorToMinute(new Date());
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
 
     // Get start of today in IST

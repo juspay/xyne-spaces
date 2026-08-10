@@ -9,12 +9,17 @@ import {
   type KanbanCountsRequest,
   type KanbanCountsViewMode,
 } from '../../services/ticketService';
-import { BaseTicketType, FormFieldType, TicketStatusV2 } from '@xyne/shared';
+import {
+  BaseTicketType,
+  FormFieldType,
+  TicketStatusV2,
+  type FlowStepVisibilityOptions,
+} from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import { websocketService } from '../../services/clients/socketClient';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 
-interface UseKanbanCountsOptions {
+interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
   columnType?: 'stage' | 'status';
   projectId?: string;
@@ -560,6 +565,7 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
   if (options.boardId !== undefined) request.boardId = options.boardId;
   if (options.userId !== undefined) request.userId = options.userId;
   if (options.groupId !== undefined) request.groupId = options.groupId;
+  if (options.excludeFlowSteps !== undefined) request.excludeFlowSteps = options.excludeFlowSteps;
 
   const normalizedFilters = normalizeFilters(options.filters);
   if (normalizedFilters) request.filters = normalizedFilters;
@@ -600,6 +606,13 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     let cancelled = false;
     const handleCountsUpdate = (event: TicketCountsUpdateEvent): void => {
       if (cancelled) return;
+
+      // Live count snapshots do not carry rootId. Refetch aggregate-board
+      // counts so materialized flow steps cannot leak into the total.
+      if (request.excludeFlowSteps) {
+        void queryClient.invalidateQueries({ queryKey: ['tickets', 'kanban-counts', request] });
+        return;
+      }
 
       queryClient.setQueryData<{ groups: KanbanCountGroup[] }>(
         ['tickets', 'kanban-counts', request],

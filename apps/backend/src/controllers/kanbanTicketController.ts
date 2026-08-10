@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { TicketPriority } from '@xyne/shared';
+import { flowStepVisibilitySchemaShape, TicketPriority } from '@xyne/shared';
 import { z } from 'zod';
 import { getKanbanCounts } from '@/services/tickets/kanbanCountsService';
 import { logger } from '@/utils/logger';
@@ -12,6 +12,7 @@ const kanbanCountsBodySchema = z.object({
   boardIds: z.array(z.string()).optional(),
   userId: z.string().optional(),
   groupId: z.string().optional(),
+  ...flowStepVisibilitySchemaShape,
   filters: z
     .object({
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),

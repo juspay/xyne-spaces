@@ -131,6 +131,7 @@ model Ticket {
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
   priority         String            @default("LOW")
   metadata         Json?             // Additional metadata - external source tracking, domain-specific context
+  rootId           String?           // FLOW root ticket id for this materialized step ticket.
   closedAt         DateTime?         // When the reporter closed the ticket after verification
   closedBy         String?           // User who closed the ticket
   referenceTicket  String[]          // Array of ticket IDs for related tickets (duplicates, related incidents, etc.)
@@ -682,6 +683,7 @@ model UserGroup {
   autoRotationEnabled  Boolean           @default(false)
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
+  reassignOnUnavailable Boolean?         // When true, a member going unavailable triggers reassignment of their open tickets in this group
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
@@ -1621,6 +1623,7 @@ model Board {
   updatedBy           String?              // User ID (no FK constraint)
   description         String?              // Board description
   metadata            Json?                // Board configuration including ticketFormConfig
+  flowPlan            String?              // Serialized design-time DAG for FLOW boards
   vcsProvider         String?               // Main release board VCS provider
   releaseTrackingMode String?              // Main release board tracking mode
   createdAt           DateTime             @default(now())
@@ -2188,7 +2191,6 @@ model Message {
   messageActs       String?
 
   // Relations
-  messageSearch  MessageSearch? // One-to-one relation with search index
   conversation   Conversation   @relation(fields: [conversationId], references: [conversationId])
   sender         User           @relation("MessageSender", fields: [senderId], references: [id])
   reactions      Reaction[]
@@ -2206,20 +2208,6 @@ model Message {
   @@index([conversationId, createdAt, messageId])
   @@map("messages")
   @@schema("public")
-}
-//Message Search Model
-model MessageSearch {
-  workspaceId String // denormalized tenant key (stamped on insert)
-  messageId        String      @id
-  plaintextContent String
-  searchVector     Unsupported("tsvector")
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  message          Message     @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
-
-  @@map("message_search")
-  @@schema("workflow")
 }
 
 // File Attachment Models

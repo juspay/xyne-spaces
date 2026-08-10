@@ -1,13 +1,11 @@
-import React, { ReactElement, useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import { useActiveUsers } from '../../../hooks/useUsers';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePersistedDeskMetricsFilters } from '../../../hooks/usePersistedDeskMetricsFilters';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import {
   RefreshCw,
   X,
   BarChart3,
+  BarChart4,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
@@ -18,11 +16,21 @@ import {
   Search,
   UserCircle2,
   Users,
-  SlidersHorizontal,
+  ListFilter,
+  Circle,
   Maximize2,
   Layers,
 } from 'lucide-react';
+import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
+import {
+  DynamicFieldSubmenu,
+  PrioritySubmenu,
+  StagesSubmenu,
+  UserSubmenu,
+  UserGroupSubmenu,
+} from '../../Tickets/TicketFilters/Submenus';
+import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
 import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
 import {
   Bar,
@@ -39,21 +47,18 @@ import {
 } from 'recharts';
 import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
+  FormFieldType,
+  parseFieldOptionValues,
   type DeskMetricsAgentRow,
   type DeskMetricsPerDeskRow,
   type DeskMetricsSkippedDesk,
   type DeskMetricsTicketRow,
+  type TicketStatusV2,
 } from '@xyne/shared';
+import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/Select/Select';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/constants';
 
@@ -62,12 +67,24 @@ export interface DeskMetricsSelectableDesk {
   name: string;
 }
 
+interface DeskMetricsStageOption {
+  name: string;
+  status?: TicketStatusV2;
+}
+
+type DeskMetricsCustomFieldDefinition = Pick<
+  ResolvedDisplayFormField,
+  'id' | 'fieldName' | 'fieldType' | 'fieldEnum'
+>;
+
 export interface DeskMetricsDashboardProps {
   open: boolean;
   onClose: () => void;
   channelId: string;
   channelName?: string;
   availableDesks?: DeskMetricsSelectableDesk[];
+  customFieldDefinitions?: readonly ResolvedDisplayFormField[];
+  availableStages?: readonly DeskMetricsStageOption[];
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -112,13 +129,11 @@ const priorityLabel = (p: string): string =>
 
 const formatTrendLabel = (dateStr: string, hourly: boolean): string => {
   if (hourly) {
-    // dateStr = 'YYYY-MM-DD HH:00' in IST
     const hour = parseInt(dateStr.slice(11, 13), 10);
     const suffix = hour >= 12 ? 'pm' : 'am';
     return `${hour % 12 || 12}${suffix}`;
   }
-  // dateStr = 'YYYY-MM-DD' in IST
-  const [, m, d] = dateStr.split('-').map(Number);
+  const [, month, day] = dateStr.split('-').map(Number);
   const months = [
     'Jan',
     'Feb',
@@ -133,7 +148,7 @@ const formatTrendLabel = (dateStr: string, hourly: boolean): string => {
     'Nov',
     'Dec',
   ];
-  return `${months[(m ?? 1) - 1]} ${d}`;
+  return `${months[(month ?? 1) - 1]} ${day}`;
 };
 
 const getCustomFieldKeys = (tickets: DeskMetricsTicketRow[]): string[] =>
@@ -774,18 +789,24 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   channelId,
   channelName,
   availableDesks = [],
+  customFieldDefinitions = [],
+  availableStages = [],
 }) => {
   const { user } = useAuth();
   const {
     dateRange,
     startTime,
     endTime,
-    selectedAssigneeId,
-    selectedCustomFieldKeys,
+    selectedAssigneeIds,
+    selectedStageNames,
+    selectedPriorities,
+    selectedUserGroupIds,
     selectedCustomFieldValues,
     setDateRange: persistDateRange,
-    setSelectedAssigneeId,
-    setSelectedCustomFieldKeys,
+    setSelectedAssigneeIds,
+    setSelectedStageNames,
+    setSelectedPriorities,
+    setSelectedUserGroupIds,
     setSelectedCustomFieldValues,
     comparedChannelIds,
     setComparedChannelIds,
@@ -829,74 +850,135 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
   const timeRangeParam = `${rangeStartMs}_${rangeEndMs}`;
   const isHourly = rangeEndMs - rangeStartMs <= DAY_MS;
-  const [ownerSearch, setOwnerSearch] = useState('');
-  const ownerSearchInputRef = useRef<HTMLInputElement>(null);
-  const [fieldKeySearch, setFieldKeySearch] = useState('');
-  const [fieldKeyPopoverOpen, setFieldKeyPopoverOpen] = useState(false);
-  const [fieldValuePopoverOpen, setFieldValuePopoverOpen] = useState(false);
-  const fieldKeySearchInputRef = useRef<HTMLInputElement>(null);
-  const [customFieldTextSearches, setCustomFieldTextSearches] = useState<Record<string, string[]>>(
-    {},
-  );
-  const [textDraftInputs, setTextDraftInputs] = useState<Record<string, string>>({});
-  const [expandedFieldKeys, setExpandedFieldKeys] = useState<Record<string, boolean>>({});
-  const [valueSearches, setValueSearches] = useState<Record<string, string>>({});
-  const FIELD_VALUE_CAP = 100;
-  // Holds selections to re-apply after time range change triggers an unfiltered fetch
-  const pendingReselectRef = useRef<{
-    keys: string[];
-    perKeyValues: Record<string, string[]>;
-  } | null>(null);
-  // Always-current ref so the timeRangeParam effect never reads stale closure values
-  const selectionsRef = useRef({
-    keys: selectedCustomFieldKeys,
-    perKeyValues: selectedCustomFieldValues,
-  });
-  selectionsRef.current = {
-    keys: selectedCustomFieldKeys,
-    perKeyValues: selectedCustomFieldValues,
-  };
-  // Snapshot of field→values from last unfiltered load; used to populate dropdowns even after filter is applied
-  const [allFieldOptions, setAllFieldOptions] = useState<Record<string, string[]>>({});
+  const [assigneePopoverOpen, setAssigneePopoverOpen] = useState(false);
+  const [customFieldPopoverOpen, setCustomFieldPopoverOpen] = useState(false);
+  const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
 
-  const activeUsers = useActiveUsers();
-  const [participants] = useCachedQuery(queries.channelParticipants({ channelId }), {
-    enabled: open,
-  });
+  useEffect(() => {
+    setCustomFieldPopoverOpen(false);
+    setActiveSubmenu(null);
+    if (!isMultiDesk) setActiveTab(current => (current === 'desks' ? 'overview' : current));
+  }, [isMultiDesk]);
 
-  // Per-key: whether each selected field is high-cardinality (text search mode)
-  const perKeyIsTextSearch = useMemo(
+  const customFieldDefinitionByName = useMemo(() => {
+    const definitions = new Map<string, ResolvedDisplayFormField>();
+    for (const definition of customFieldDefinitions) {
+      if (!definitions.has(definition.fieldName)) {
+        definitions.set(definition.fieldName, definition);
+      }
+    }
+    return definitions;
+  }, [customFieldDefinitions]);
+
+  const unsupportedCustomFieldNames = useMemo(
     () =>
-      Object.fromEntries(
-        selectedCustomFieldKeys.map(k => [k, (allFieldOptions[k]?.length ?? 0) > FIELD_VALUE_CAP]),
+      new Set(
+        customFieldDefinitions
+          .filter(
+            definition =>
+              definition.fieldType === FormFieldType.DATE ||
+              definition.fieldType === FormFieldType.DOC,
+          )
+          .map(definition => definition.fieldName.trim().toLowerCase()),
       ),
-    [selectedCustomFieldKeys, allFieldOptions],
+    [customFieldDefinitions],
+  );
+
+  const activeCustomFieldKeys = useMemo(
+    () =>
+      Object.keys(selectedCustomFieldValues)
+        .filter(
+          key =>
+            !unsupportedCustomFieldNames.has(key.trim().toLowerCase()) &&
+            (selectedCustomFieldValues[key]?.length ?? 0) > 0,
+        )
+        .sort(),
+    [selectedCustomFieldValues, unsupportedCustomFieldNames],
   );
 
   const customFieldFilter =
-    selectedCustomFieldKeys.length > 0
+    !isMultiDesk && activeCustomFieldKeys.length > 0
       ? {
-          keys: selectedCustomFieldKeys,
+          keys: activeCustomFieldKeys,
           perKeyFilters: Object.fromEntries(
-            selectedCustomFieldKeys.map(k => {
-              if (perKeyIsTextSearch[k]) {
-                const terms = customFieldTextSearches[k] ?? [];
-                return [k, terms.length > 0 ? { textTerms: terms } : {}];
-              }
-              const vals = selectedCustomFieldValues[k] ?? [];
-              return [k, vals.length > 0 ? { values: vals } : {}];
+            activeCustomFieldKeys.map(key => {
+              const values = selectedCustomFieldValues[key] ?? [];
+              const definition = customFieldDefinitionByName.get(key);
+              return [
+                key,
+                definition?.fieldType === FormFieldType.STRING ? { textTerms: values } : { values },
+              ];
             }),
           ) as Record<string, { values?: string[]; textTerms?: string[] }>,
         }
       : undefined;
 
+  const hasMoreFiltersActive =
+    (!isMultiDesk && selectedStageNames.length > 0) ||
+    selectedPriorities.length > 0 ||
+    selectedUserGroupIds.length > 0 ||
+    (!isMultiDesk && activeCustomFieldKeys.length > 0);
+  const hasAnyFiltersActive = selectedAssigneeIds.length > 0 || hasMoreFiltersActive;
+
+  const updateCustomFieldValues = useCallback(
+    (key: string, values: string[]): void => {
+      const next = { ...selectedCustomFieldValues };
+      if (values.length > 0) next[key] = values;
+      else delete next[key];
+      setSelectedCustomFieldValues(next);
+    },
+    [selectedCustomFieldValues, setSelectedCustomFieldValues],
+  );
+
+  const clearAllCustomFieldFilters = useCallback((): void => {
+    setSelectedCustomFieldValues({});
+  }, [setSelectedCustomFieldValues]);
+
   const { data, isLoading, isFetching, isError, refetch } = useAggregateDeskMetrics(
     selectedDeskIds,
     timeRangeParam,
     open,
-    selectedAssigneeId,
+    selectedAssigneeIds,
     customFieldFilter,
+    isMultiDesk ? [] : selectedStageNames,
+    selectedPriorities,
+    selectedUserGroupIds,
   );
+
+  const availableCustomFields = useMemo(() => {
+    const fields = new Map<string, DeskMetricsCustomFieldDefinition>();
+    for (const definition of customFieldDefinitions) {
+      const normalizedName = definition.fieldName.trim().toLowerCase();
+      if (!unsupportedCustomFieldNames.has(normalizedName)) {
+        fields.set(normalizedName, definition);
+      }
+    }
+    for (const ticket of data?.tickets ?? []) {
+      for (const fieldName of Object.keys(ticket.customFields ?? {})) {
+        const normalizedName = fieldName.trim().toLowerCase();
+        if (!unsupportedCustomFieldNames.has(normalizedName) && !fields.has(normalizedName)) {
+          fields.set(normalizedName, {
+            id: fieldName,
+            fieldName,
+            fieldType: FormFieldType.STRING,
+          });
+        }
+      }
+    }
+    for (const fieldName of activeCustomFieldKeys) {
+      const normalizedName = fieldName.trim().toLowerCase();
+      if (!fields.has(normalizedName)) {
+        fields.set(normalizedName, {
+          id: fieldName,
+          fieldName,
+          fieldType: FormFieldType.STRING,
+        });
+      }
+    }
+    return [...fields.values()].sort((a, b) => a.fieldName.localeCompare(b.fieldName));
+  }, [activeCustomFieldKeys, customFieldDefinitions, data?.tickets, unsupportedCustomFieldNames]);
+
+  const stageOptions = availableStages;
 
   const skippedDesks: DeskMetricsSkippedDesk[] = data?.skipped ?? [];
   const perDeskRows: DeskMetricsPerDeskRow[] = data?.perDesk ?? [];
@@ -908,72 +990,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     return map;
   }, [channelId, channelName, availableDesks]);
 
-  // When time range changes: save selections, clear filter so unfiltered query fires for new range
-  useEffect(() => {
-    const { keys, perKeyValues } = selectionsRef.current;
-    if (keys.length > 0) {
-      pendingReselectRef.current = { keys: [...keys], perKeyValues: { ...perKeyValues } };
-      setSelectedCustomFieldKeys([]);
-      setSelectedCustomFieldValues({});
-    }
-    setCustomFieldTextSearches({});
-    setTextDraftInputs({});
-    setValueSearches({});
-    setAllFieldOptions({});
-  }, [timeRangeParam]);
-
-  // Rebuild / update snapshot whenever fresh data arrives
-  useEffect(() => {
-    if (!data?.tickets || isFetching) return;
-
-    if (selectedCustomFieldKeys.length === 0) {
-      // No filter active — full replace from current range's unfiltered tickets
-      const seen: Record<string, Set<string>> = {};
-      for (const t of data.tickets) {
-        for (const [k, v] of Object.entries(t.customFields ?? {})) {
-          if (!v) continue;
-          const set = (seen[k] ??= new Set());
-          if (set.size <= FIELD_VALUE_CAP) set.add(v); // cap at FIELD_VALUE_CAP+1 so we know if exceeds
-        }
-      }
-      const opts: Record<string, string[]> = {};
-      for (const [k, s] of Object.entries(seen)) opts[k] = [...s].sort();
-      setAllFieldOptions(opts);
-      const pending = pendingReselectRef.current;
-      if (pending) {
-        pendingReselectRef.current = null;
-        const validKeys = pending.keys.filter(k => k in opts);
-        const newPerKeyValues: Record<string, string[]> = {};
-        for (const k of validKeys) {
-          const validVals = (pending.perKeyValues[k] ?? []).filter(v => opts[k]?.includes(v));
-          if (validVals.length > 0) newPerKeyValues[k] = validVals;
-        }
-        setSelectedCustomFieldKeys(validKeys);
-        setSelectedCustomFieldValues(newPerKeyValues);
-      }
-    } else {
-      // Filter active — merge any new values seen in this response into the snapshot
-      setAllFieldOptions(prev => {
-        let changed = false;
-        const updated = { ...prev };
-        for (const t of data.tickets) {
-          for (const [k, v] of Object.entries(t.customFields ?? {})) {
-            if (!v) continue;
-            const existing = updated[k];
-            if (!existing) {
-              updated[k] = [v];
-              changed = true;
-            } else if (!existing.includes(v) && existing.length <= FIELD_VALUE_CAP) {
-              updated[k] = [...existing, v].sort();
-              changed = true;
-            }
-          }
-        }
-        return changed ? updated : prev;
-      });
-    }
-  }, [data?.tickets, selectedCustomFieldKeys.length, isFetching]);
-
   useEffect(() => {
     if (open) void refetch();
   }, [open, refetch]);
@@ -981,18 +997,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const handleOpenChange = (nextOpen: boolean): void => {
     if (!nextOpen) onClose();
   };
-
-  const channelAssignees = useMemo(() => {
-    const memberIds = new Set((participants ?? []).map(p => p.userId));
-    for (const agent of data?.agents ?? []) {
-      if (agent.assigneeId) memberIds.add(agent.assigneeId);
-    }
-    const members = (activeUsers ?? [])
-      .filter(u => memberIds.has(u.id))
-      .map(u => ({ id: u.id, name: u.displayName ?? u.name ?? u.email ?? u.id }));
-    const q = ownerSearch.trim().toLowerCase();
-    return q ? members.filter(a => a.name.toLowerCase().includes(q)) : members;
-  }, [participants, activeUsers, ownerSearch, data?.agents]);
 
   const priorityData = (data?.priority ?? []).map(p => ({
     name: priorityLabel(p.priority),
@@ -1024,10 +1028,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   const tickInterval = useMemo(() => {
-    const n = trendData.length;
-    if (n <= 8) return 0;
-    if (n <= 31) return 4;
-    return Math.floor(n / 6);
+    const pointCount = trendData.length;
+    if (pointCount <= 8) return 0;
+    if (pointCount <= 31) return 4;
+    return Math.floor(pointCount / 6);
   }, [trendData.length]);
 
   const csatTotal = (data?.csat.good ?? 0) + (data?.csat.bad ?? 0);
@@ -1077,13 +1081,27 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       open={open}
       onOpenChange={handleOpenChange}
       title='Desk Metrics'
-      className='max-w-[95vw] w-[1400px] max-h-[95vh] bg-transparent shadow-none rounded-none'
+      className={cn(
+        'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
+        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
+        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+      )}
     >
-      <div>
-        <div className='isolate flex h-[92vh] max-h-[92vh] flex-col overflow-hidden rounded-[12px] border border-desk-border bg-popover shadow-lg dark:border-border'>
+      <div className='relative h-full w-full'>
+        <button
+          type='button'
+          onClick={onClose}
+          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+          aria-label='Close desk metrics'
+          data-track-category='DeskMetrics'
+          data-track-name='CloseButton'
+        >
+          <X size={16} />
+        </button>
+        <div className='isolate flex h-full w-full flex-col overflow-hidden rounded-l-[16px] border border-desk-border bg-popover shadow-2xl dark:border-border'>
           {/* Header */}
-          <div className='flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-desk-border px-6 py-4 dark:border-border'>
-            <div className='flex items-center gap-4'>
+          <div className='grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-desk-border px-6 pt-4 dark:border-border'>
+            <div className='flex min-w-0 items-center gap-4 pr-12'>
               <div className='flex items-center gap-2'>
                 <BarChart3 size={18} className='text-desk-accent' />
                 <span className='text-base font-semibold text-foreground'>
@@ -1139,645 +1157,454 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ))}
               </div>
             </div>
-            <div className='flex items-center gap-3'>
-              {availableDesks.length > 1 && (
-                <Popover
-                  open={deskPickerOpen}
-                  onOpenChange={openState => {
-                    setDeskPickerOpen(openState);
-                    if (!openState) setDeskSearch('');
-                  }}
-                  align='start'
-                  sideOffset={6}
-                  className='p-0'
-                  trigger={
-                    <button
-                      type='button'
-                      className='flex h-[32px] w-[150px] max-w-[150px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
-                      data-track-category='DeskMetrics'
-                      data-track-name='DeskSelector'
-                    >
-                      <Layers size={14} className='shrink-0 text-muted-foreground' />
-                      <span className='flex-1 truncate text-left text-sm'>
-                        {isMultiDesk ? `${selectedDeskIds.length} desks` : '1 desk'}
-                      </span>
-                      {comparedChannelIds.length > 0 ? (
-                        <X
-                          size={12}
-                          className='shrink-0 text-muted-foreground hover:text-foreground'
-                          onClick={e => {
-                            e.stopPropagation();
-                            setComparedChannelIds([]);
-                            setActiveTab(prev => (prev === 'desks' ? 'overview' : prev));
-                          }}
-                        />
-                      ) : (
-                        <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
-                      )}
-                    </button>
-                  }
-                >
-                  <div className='w-[260px]'>
-                    <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
-                      <Search size={14} className='shrink-0 text-muted-foreground' />
-                      <input
-                        type='text'
-                        value={deskSearch}
-                        onChange={e => setDeskSearch(e.target.value)}
-                        onKeyDown={e => e.stopPropagation()}
-                        placeholder='Search desks…'
-                        className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+            <div className='contents'>
+              <div className='col-span-2 row-start-2 -mx-6 flex min-w-0 flex-wrap items-center justify-start gap-3 border-t border-desk-border bg-muted/20 px-6 py-3 dark:border-border'>
+                {availableDesks.length > 1 && (
+                  <Popover
+                    open={deskPickerOpen}
+                    onOpenChange={openState => {
+                      setDeskPickerOpen(openState);
+                      if (!openState) setDeskSearch('');
+                    }}
+                    align='start'
+                    sideOffset={6}
+                    className='p-0'
+                    trigger={
+                      <button
+                        type='button'
+                        className='flex h-[32px] w-[150px] max-w-[150px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
                         data-track-category='DeskMetrics'
-                        data-track-name='SearchDesks'
-                      />
-                    </div>
-                    <div
-                      className='max-h-[260px] overflow-y-auto py-1'
-                      onWheel={e => e.stopPropagation()}
-                    >
-                      {(() => {
-                        const query = deskSearch.trim().toLowerCase();
-                        const visible = availableDesks.filter(
-                          d => !query || d.name.toLowerCase().includes(query),
-                        );
-                        if (visible.length === 0) {
-                          return (
-                            <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                              No desks match
-                            </div>
-                          );
-                        }
-                        return visible.map(desk => {
-                          const isPrimary = desk.id === channelId;
-                          const isSelected = selectedDeskIds.includes(desk.id);
-                          const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
-                          return (
-                            <label
-                              key={desk.id}
-                              className={cn(
-                                'flex items-center gap-2 px-3 py-1.5 text-sm',
-                                isPrimary && 'cursor-default opacity-70',
-                                isDisabledByLimit && 'cursor-not-allowed opacity-50',
-                                !isPrimary &&
-                                  !isDisabledByLimit &&
-                                  'cursor-pointer hover:bg-accent',
-                              )}
-                              title={
-                                isPrimary
-                                  ? 'The desk this dashboard was opened from is always included'
-                                  : isDisabledByLimit
-                                    ? `You can compare up to ${DESK_METRICS_MAX_AGGREGATE_DESKS} desks at once`
-                                    : undefined
-                              }
-                            >
-                              <input
-                                type='checkbox'
-                                checked={isSelected}
-                                disabled={isPrimary || isDisabledByLimit}
-                                onChange={() => toggleDesk(desk.id)}
-                                className='h-3.5 w-3.5 accent-desk-accent'
-                                data-track-category='DeskMetrics'
-                                data-track-name='ToggleDesk'
-                              />
-                              <span className='flex-1 truncate'>{desk.name}</span>
-                              {isPrimary && (
-                                <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
-                                  current
-                                </span>
-                              )}
-                            </label>
-                          );
-                        });
-                      })()}
-                    </div>
-                    <div
-                      className={cn(
-                        'border-t border-border px-3 py-2 text-xs text-muted-foreground',
-                        isDeskSelectionAtLimit && 'text-amber-600 dark:text-amber-400',
-                      )}
-                    >
-                      {selectedDeskIds.length} of {DESK_METRICS_MAX_AGGREGATE_DESKS} desks selected
-                      {isDeskSelectionAtLimit && ' — limit reached'}
-                    </div>
-                  </div>
-                </Popover>
-              )}
-
-              {/* Assignee filter */}
-              <Select
-                value={selectedAssigneeId ?? '__all__'}
-                onValueChange={v => setSelectedAssigneeId(v === '__all__' ? null : v)}
-                onOpenChange={open => {
-                  if (!open) setOwnerSearch('');
-                }}
-              >
-                <SelectTrigger
-                  className='h-[32px] min-w-[140px] rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none dark:border-border'
-                  data-track-category='DeskMetrics'
-                  data-track-name='AssigneeFilter'
-                >
-                  <div className='flex items-center gap-1.5'>
-                    <UserCircle2 size={14} className='shrink-0 text-muted-foreground' />
-                    <SelectValue placeholder='All assignees' />
-                  </div>
-                </SelectTrigger>
-                <SelectContent
-                  className='rounded-[10px]'
-                  header={
-                    <div className='flex items-center gap-2 border-b border-border bg-popover px-2 py-1.5'>
-                      <Search size={14} className='shrink-0 text-muted-foreground' />
-                      <input
-                        ref={ownerSearchInputRef}
-                        type='text'
-                        value={ownerSearch}
-                        onChange={e => {
-                          setOwnerSearch(e.target.value);
-                          requestAnimationFrame(() => ownerSearchInputRef.current?.focus());
-                        }}
-                        onKeyDown={e => e.stopPropagation()}
-                        onPointerDown={e => e.stopPropagation()}
-                        placeholder='Search assignees…'
-                        autoFocus
-                        className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                        data-track-category='DeskMetrics'
-                        data-track-name='SearchAssignees'
-                      />
-                    </div>
-                  }
-                >
-                  {!ownerSearch && (
-                    <SelectItem value='__all__' className='rounded-[8px]'>
-                      <span className='text-sm'>All assignees</span>
-                    </SelectItem>
-                  )}
-                  {channelAssignees.map(u => (
-                    <SelectItem key={u.id} value={u.id} className='rounded-[8px]'>
-                      <span>{u.name}</span>
-                    </SelectItem>
-                  ))}
-                  {channelAssignees.length === 0 && (
-                    <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                      {selectedAssigneeId ? 'Loading…' : 'No assignees in this period'}
-                    </div>
-                  )}
-                </SelectContent>
-              </Select>
-
-              {/* Custom field filter — field key multi-select */}
-              {Object.keys(allFieldOptions).length > 0 && (
-                <Popover
-                  open={fieldKeyPopoverOpen}
-                  onOpenChange={open => {
-                    setFieldKeyPopoverOpen(open);
-                    if (!open) setFieldKeySearch('');
-                  }}
-                  align='start'
-                  sideOffset={6}
-                  className='p-0'
-                  onOpenAutoFocus={e => {
-                    e.preventDefault();
-                    fieldKeySearchInputRef.current?.focus();
-                  }}
-                  trigger={
-                    <button
-                      type='button'
-                      className='flex h-[32px] w-[160px] max-w-[160px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
-                      data-track-category='DeskMetrics'
-                      data-track-name='CustomFieldKeyFilter'
-                    >
-                      <SlidersHorizontal size={14} className='shrink-0 text-muted-foreground' />
-                      <span className='flex-1 truncate text-left text-sm'>
-                        {selectedCustomFieldKeys.length === 0 ? (
-                          <span className='text-muted-foreground'>Filter by field</span>
-                        ) : selectedCustomFieldKeys.length === 1 ? (
-                          selectedCustomFieldKeys[0]
+                        data-track-name='DeskSelector'
+                      >
+                        <Layers size={14} className='shrink-0 text-muted-foreground' />
+                        <span className='flex-1 truncate text-left text-sm'>
+                          {isMultiDesk ? `${selectedDeskIds.length} desks` : '1 desk'}
+                        </span>
+                        {comparedChannelIds.length > 0 ? (
+                          <X
+                            size={12}
+                            className='shrink-0 text-muted-foreground hover:text-foreground'
+                            onClick={e => {
+                              e.stopPropagation();
+                              setComparedChannelIds([]);
+                              setActiveTab(prev => (prev === 'desks' ? 'overview' : prev));
+                            }}
+                          />
                         ) : (
-                          `${selectedCustomFieldKeys.length} fields`
+                          <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
                         )}
-                      </span>
-                      {selectedCustomFieldKeys.length > 0 ? (
-                        <X
-                          size={12}
-                          className='shrink-0 text-muted-foreground hover:text-foreground'
-                          onClick={e => {
-                            e.stopPropagation();
-                            setSelectedCustomFieldKeys([]);
-                            setSelectedCustomFieldValues({});
-                          }}
+                      </button>
+                    }
+                  >
+                    <div className='w-[260px]'>
+                      <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
+                        <Search size={14} className='shrink-0 text-muted-foreground' />
+                        <input
+                          type='text'
+                          value={deskSearch}
+                          onChange={e => setDeskSearch(e.target.value)}
+                          onKeyDown={e => e.stopPropagation()}
+                          placeholder='Search desks…'
+                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                          data-track-category='DeskMetrics'
+                          data-track-name='SearchDesks'
                         />
-                      ) : (
-                        <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
-                      )}
-                    </button>
-                  }
-                >
-                  <div className='w-[240px]'>
-                    <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
-                      <Search size={14} className='shrink-0 text-muted-foreground' />
-                      <input
-                        ref={fieldKeySearchInputRef}
-                        type='text'
-                        value={fieldKeySearch}
-                        onChange={e => setFieldKeySearch(e.target.value)}
-                        placeholder='Search fields…'
-                        className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                        data-track-category='DeskMetrics'
-                        data-track-name='SearchFieldKeys'
-                      />
-                    </div>
-                    <div
-                      className='max-h-[220px] overflow-y-auto py-1'
-                      onWheel={e => e.stopPropagation()}
-                    >
-                      {(() => {
-                        const allKeys = Object.keys(allFieldOptions).sort();
-                        const allSelected =
-                          allKeys.length > 0 &&
-                          allKeys.every(k => selectedCustomFieldKeys.includes(k));
-                        return (
-                          <label className='flex cursor-pointer items-center gap-2 border-b border-border px-3 py-1.5 text-sm font-medium hover:bg-accent'>
-                            <input
-                              type='checkbox'
-                              checked={allSelected}
-                              onChange={() => {
-                                if (allSelected) {
-                                  setSelectedCustomFieldKeys([]);
-                                  setSelectedCustomFieldValues({});
-                                } else {
-                                  setSelectedCustomFieldKeys(allKeys);
+                      </div>
+                      <div
+                        className='max-h-[260px] overflow-y-auto py-1'
+                        onWheel={e => e.stopPropagation()}
+                      >
+                        {((): ReactElement | ReactElement[] => {
+                          const query = deskSearch.trim().toLowerCase();
+                          const visible = availableDesks.filter(
+                            d => !query || d.name.toLowerCase().includes(query),
+                          );
+                          if (visible.length === 0) {
+                            return (
+                              <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
+                                No desks match
+                              </div>
+                            );
+                          }
+                          return visible.map(desk => {
+                            const isPrimary = desk.id === channelId;
+                            const isSelected = selectedDeskIds.includes(desk.id);
+                            const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
+                            return (
+                              <label
+                                key={desk.id}
+                                className={cn(
+                                  'flex items-center gap-2 px-3 py-1.5 text-sm',
+                                  isPrimary && 'cursor-default opacity-70',
+                                  isDisabledByLimit && 'cursor-not-allowed opacity-50',
+                                  !isPrimary &&
+                                    !isDisabledByLimit &&
+                                    'cursor-pointer hover:bg-accent',
+                                )}
+                                title={
+                                  isPrimary
+                                    ? 'The desk this dashboard was opened from is always included'
+                                    : isDisabledByLimit
+                                      ? `You can compare up to ${DESK_METRICS_MAX_AGGREGATE_DESKS} desks at once`
+                                      : undefined
                                 }
-                              }}
-                              className='h-3.5 w-3.5 rounded accent-desk-accent'
-                              data-track-category='DeskMetrics'
-                              data-track-name='ToggleAllFieldKeys'
-                            />
-                            All fields
-                          </label>
-                        );
-                      })()}
-                      {Object.keys(allFieldOptions)
-                        .sort()
-                        .filter(
-                          k =>
-                            !fieldKeySearch ||
-                            k.toLowerCase().includes(fieldKeySearch.toLowerCase()),
-                        )
-                        .map(k => (
-                          <label
-                            key={k}
-                            className='flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent'
-                          >
-                            <input
-                              type='checkbox'
-                              checked={selectedCustomFieldKeys.includes(k)}
-                              onChange={() => {
-                                const isSelected = selectedCustomFieldKeys.includes(k);
-                                if (isSelected) {
-                                  const newKeys = selectedCustomFieldKeys.filter(x => x !== k);
-                                  setSelectedCustomFieldKeys(newKeys);
-                                  setSelectedCustomFieldValues(
-                                    Object.fromEntries(
-                                      Object.entries(selectedCustomFieldValues).filter(([key]) =>
-                                        newKeys.includes(key),
-                                      ),
-                                    ) as Record<string, string[]>,
-                                  );
-                                  setCustomFieldTextSearches(prev =>
-                                    Object.fromEntries(
-                                      Object.entries(prev).filter(([key]) => newKeys.includes(key)),
-                                    ),
-                                  );
-                                  setTextDraftInputs(prev =>
-                                    Object.fromEntries(
-                                      Object.entries(prev).filter(([key]) => newKeys.includes(key)),
-                                    ),
-                                  );
-                                  setValueSearches(prev =>
-                                    Object.fromEntries(
-                                      Object.entries(prev).filter(([key]) => newKeys.includes(key)),
-                                    ),
-                                  );
-                                } else {
-                                  setSelectedCustomFieldKeys([...selectedCustomFieldKeys, k]);
-                                }
-                              }}
-                              className='h-3.5 w-3.5 rounded accent-desk-accent'
-                              data-track-category='DeskMetrics'
-                              data-track-name='ToggleFieldKey'
-                            />
-                            <span className='truncate' title={k}>
-                              {k}
-                            </span>
-                          </label>
-                        ))}
-                      {fieldKeySearch &&
-                        Object.keys(allFieldOptions).filter(k =>
-                          k.toLowerCase().includes(fieldKeySearch.toLowerCase()),
-                        ).length === 0 && (
-                          <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                            No fields found
-                          </div>
+                              >
+                                <input
+                                  type='checkbox'
+                                  checked={isSelected}
+                                  disabled={isPrimary || isDisabledByLimit}
+                                  onChange={() => toggleDesk(desk.id)}
+                                  className='h-3.5 w-3.5 accent-desk-accent'
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='ToggleDesk'
+                                />
+                                <span className='flex-1 truncate'>{desk.name}</span>
+                                {isPrimary && (
+                                  <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
+                                    current
+                                  </span>
+                                )}
+                              </label>
+                            );
+                          });
+                        })()}
+                      </div>
+                      <div
+                        className={cn(
+                          'border-t border-border px-3 py-2 text-xs text-muted-foreground',
+                          isDeskSelectionAtLimit && 'text-amber-600 dark:text-amber-400',
                         )}
+                      >
+                        {selectedDeskIds.length} of {DESK_METRICS_MAX_AGGREGATE_DESKS} desks
+                        selected
+                        {isDeskSelectionAtLimit && ' — limit reached'}
+                      </div>
                     </div>
-                  </div>
-                </Popover>
-              )}
+                  </Popover>
+                )}
 
-              {/* Custom field filter — field value multi-select (shown only when keys are selected) */}
-              {selectedCustomFieldKeys.length > 0 && (
+                {/* Assignee filter */}
                 <Popover
-                  open={fieldValuePopoverOpen}
-                  onOpenChange={v => setFieldValuePopoverOpen(v)}
+                  open={assigneePopoverOpen}
+                  onOpenChange={setAssigneePopoverOpen}
                   align='start'
                   sideOffset={6}
-                  className='p-0'
-                  onOpenAutoFocus={e => e.preventDefault()}
+                  collisionPadding={12}
+                  className='border-0 bg-transparent p-0 shadow-none'
                   trigger={
                     <button
                       type='button'
-                      className='flex h-[32px] w-[160px] max-w-[160px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
+                      className='flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
                       data-track-category='DeskMetrics'
-                      data-track-name='CustomFieldValueFilter'
+                      data-track-name='AssigneeFilter'
                     >
-                      <span className='flex-1 truncate text-left text-sm'>
-                        {(() => {
-                          const totalSelected = Object.values(selectedCustomFieldValues).reduce(
-                            (s, a) => s + a.length,
-                            0,
-                          );
-                          const totalSearches = Object.values(customFieldTextSearches).reduce(
-                            (s, a) => s + a.length,
-                            0,
-                          );
-                          const active = totalSelected + totalSearches;
-                          if (active === 0)
-                            return <span className='text-muted-foreground'>Filter values</span>;
-                          if (active === 1) {
-                            const v =
-                              Object.values(selectedCustomFieldValues).flat()[0] ??
-                              Object.values(customFieldTextSearches).flat()[0];
-                            return v ?? 'Filter values';
-                          }
-                          return `${active} filters`;
-                        })()}
-                      </span>
-                      {Object.values(selectedCustomFieldValues).some(a => a.length > 0) ||
-                      Object.values(customFieldTextSearches).some(a => a.length > 0) ? (
-                        <X
-                          size={12}
-                          className='shrink-0 text-muted-foreground hover:text-foreground'
-                          onClick={e => {
-                            e.stopPropagation();
-                            setSelectedCustomFieldValues({});
-                            setCustomFieldTextSearches({});
-                            setTextDraftInputs({});
-                          }}
-                        />
-                      ) : (
-                        <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
+                      <UserCircle2 size={14} className='shrink-0 text-muted-foreground' />
+                      <span className='font-medium'>Assignee</span>
+                      {selectedAssigneeIds.length > 0 && (
+                        <span className='ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'>
+                          {selectedAssigneeIds.length}
+                        </span>
                       )}
+                      <ChevronDown
+                        size={12}
+                        className={cn(
+                          'ml-auto shrink-0 text-muted-foreground transition-transform',
+                          assigneePopoverOpen && 'rotate-180',
+                        )}
+                      />
                     </button>
                   }
                 >
-                  {/* Per-key value filter panel — accordion */}
-                  <div
-                    className='w-[300px] max-h-[420px] overflow-y-auto'
-                    onWheel={e => e.stopPropagation()}
+                  <UserSubmenu
+                    selectedUsers={selectedAssigneeIds}
+                    onChange={setSelectedAssigneeIds}
+                    label='Assignee'
+                    channelId={channelId}
+                    demoteDeactivated
+                  />
+                </Popover>
+
+                {/* Kanban-style additional filters */}
+                <>
+                  <Popover
+                    open={customFieldPopoverOpen}
+                    onOpenChange={nextOpen => {
+                      setCustomFieldPopoverOpen(nextOpen);
+                      if (!nextOpen) setActiveSubmenu(null);
+                    }}
+                    align='start'
+                    sideOffset={6}
+                    collisionPadding={12}
+                    className='max-h-[400px] w-56 overflow-y-auto rounded-lg border border-border bg-background p-0 shadow-lg'
+                    onInteractOutside={event => {
+                      const target = event.target;
+                      if (
+                        target instanceof Element &&
+                        target.closest('[data-custom-field-submenu="true"]')
+                      ) {
+                        event.preventDefault();
+                      }
+                    }}
+                    trigger={
+                      <button
+                        type='button'
+                        className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                        data-track-category='DeskMetrics'
+                        data-track-name='OpenCustomFieldFilters'
+                      >
+                        <ListFilter size={13} className='shrink-0' />
+                        <span className='font-medium'>More Filters</span>
+                        {hasMoreFiltersActive && (
+                          <span className='h-1.5 w-1.5 rounded-full bg-blue-500' />
+                        )}
+                      </button>
+                    }
                   >
-                    {selectedCustomFieldKeys.map((k, ki) => {
-                      const isHighCard = perKeyIsTextSearch[k] ?? false;
-                      const keyValues = allFieldOptions[k] ?? [];
-                      const selectedVals = selectedCustomFieldValues[k] ?? [];
-                      const textSearch = customFieldTextSearches[k] ?? [];
-                      const valueSearch = valueSearches[k] ?? '';
-                      const isExpanded = expandedFieldKeys[k] ?? false;
-                      const allSelected =
-                        keyValues.length > 0 && keyValues.every(v => selectedVals.includes(v));
-                      const filteredValues = valueSearch
-                        ? keyValues.filter(v => v.toLowerCase().includes(valueSearch.toLowerCase()))
-                        : keyValues;
-                      return (
-                        <div key={k} className={ki > 0 ? 'border-t border-border' : ''}>
-                          {/* Accordion header */}
-                          <div className='flex items-center gap-1 px-3 py-2'>
+                    <div className='py-1'>
+                      <PopoverPrimitive.Root
+                        open={activeSubmenu === '__priority'}
+                        onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__priority' : null)}
+                      >
+                        <PopoverPrimitive.Trigger asChild>
+                          <button
+                            type='button'
+                            className={cn(
+                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                              activeSubmenu === '__priority' && 'bg-muted font-medium',
+                            )}
+                            data-track-category='DeskMetrics'
+                            data-track-name='OpenPriorityFilterSubmenu'
+                          >
+                            <div className='flex min-w-0 items-center gap-3'>
+                              <BarChart4 size={16} className='shrink-0' />
+                              <span>Priority</span>
+                              {selectedPriorities.length > 0 && (
+                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                              )}
+                            </div>
+                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                          </button>
+                        </PopoverPrimitive.Trigger>
+                        <PopoverPrimitive.Portal>
+                          <PopoverPrimitive.Content
+                            side='right'
+                            align='start'
+                            sideOffset={4}
+                            collisionPadding={12}
+                            className='z-[70] outline-none'
+                            data-custom-field-submenu='true'
+                            onOpenAutoFocus={event => event.preventDefault()}
+                          >
+                            <PrioritySubmenu
+                              selectedPriorities={selectedPriorities}
+                              onChange={setSelectedPriorities}
+                            />
+                          </PopoverPrimitive.Content>
+                        </PopoverPrimitive.Portal>
+                      </PopoverPrimitive.Root>
+
+                      <PopoverPrimitive.Root
+                        open={activeSubmenu === '__userGroups'}
+                        onOpenChange={nextOpen =>
+                          setActiveSubmenu(nextOpen ? '__userGroups' : null)
+                        }
+                      >
+                        <PopoverPrimitive.Trigger asChild>
+                          <button
+                            type='button'
+                            className={cn(
+                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                              activeSubmenu === '__userGroups' && 'bg-muted font-medium',
+                            )}
+                            data-track-category='DeskMetrics'
+                            data-track-name='OpenUserGroupFilterSubmenu'
+                          >
+                            <div className='flex min-w-0 items-center gap-3'>
+                              <Users size={16} className='shrink-0' />
+                              <span>User Groups</span>
+                              {selectedUserGroupIds.length > 0 && (
+                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                              )}
+                            </div>
+                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                          </button>
+                        </PopoverPrimitive.Trigger>
+                        <PopoverPrimitive.Portal>
+                          <PopoverPrimitive.Content
+                            side='right'
+                            align='start'
+                            sideOffset={4}
+                            collisionPadding={12}
+                            className='z-[70] outline-none'
+                            data-custom-field-submenu='true'
+                            onOpenAutoFocus={event => event.preventDefault()}
+                          >
+                            <UserGroupSubmenu
+                              selectedGroups={selectedUserGroupIds}
+                              onChange={setSelectedUserGroupIds}
+                              onClose={() => setActiveSubmenu(null)}
+                            />
+                          </PopoverPrimitive.Content>
+                        </PopoverPrimitive.Portal>
+                      </PopoverPrimitive.Root>
+
+                      {!isMultiDesk && stageOptions.length > 0 && (
+                        <PopoverPrimitive.Root
+                          open={activeSubmenu === '__stages'}
+                          onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__stages' : null)}
+                        >
+                          <PopoverPrimitive.Trigger asChild>
                             <button
                               type='button'
-                              className='flex flex-1 items-center gap-1.5 text-left'
-                              onClick={() =>
-                                setExpandedFieldKeys(prev => ({ ...prev, [k]: !isExpanded }))
-                              }
+                              className={cn(
+                                'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                activeSubmenu === '__stages' && 'bg-muted font-medium',
+                              )}
                               data-track-category='DeskMetrics'
-                              data-track-name='ToggleFieldKeyAccordion'
+                              data-track-name='OpenStageFilterSubmenu'
                             >
-                              <ChevronRight
-                                size={13}
-                                className={`shrink-0 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                              />
-                              <span className='truncate text-sm font-medium'>{k}</span>
-                              {selectedVals.length > 0 && (
-                                <span className='ml-1 shrink-0 text-xs text-muted-foreground'>
-                                  ({selectedVals.length})
-                                </span>
-                              )}
-                              {textSearch.length > 0 && (
-                                <span className='ml-1 shrink-0 text-xs text-muted-foreground'>
-                                  ({textSearch.length})
-                                </span>
-                              )}
-                            </button>
-                            {!isHighCard && keyValues.length > 0 && (
-                              <button
-                                type='button'
-                                className='shrink-0 text-xs text-desk-accent hover:underline'
-                                onClick={() =>
-                                  setSelectedCustomFieldValues({
-                                    ...selectedCustomFieldValues,
-                                    [k]: allSelected ? [] : [...keyValues],
-                                  })
-                                }
-                                data-track-category='DeskMetrics'
-                                data-track-name='ToggleAllFieldValues'
-                              >
-                                {allSelected ? 'Deselect all' : 'Select all'}
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Accordion body */}
-                          {isExpanded &&
-                            (isHighCard ? (
-                              <div className='px-3 pb-3'>
-                                {/* Applied term chips */}
-                                {textSearch.length > 0 && (
-                                  <div className='mb-2 flex flex-wrap gap-1'>
-                                    {textSearch.map(term => (
-                                      <span
-                                        key={term}
-                                        className='flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-foreground'
-                                      >
-                                        {term}
-                                        <X
-                                          size={10}
-                                          className='cursor-pointer text-muted-foreground hover:text-foreground'
-                                          onClick={() =>
-                                            setCustomFieldTextSearches(prev => ({
-                                              ...prev,
-                                              [k]: (prev[k] ?? []).filter(t => t !== term),
-                                            }))
-                                          }
-                                        />
-                                      </span>
-                                    ))}
-                                  </div>
+                              <div className='flex min-w-0 items-center gap-3'>
+                                <Circle size={16} className='shrink-0' />
+                                <span>Stages</span>
+                                {selectedStageNames.length > 0 && (
+                                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
                                 )}
-                                {/* Draft input — Enter to apply */}
-                                <div className='flex items-center gap-2 rounded-[6px] border border-border bg-muted/30 px-2 py-1.5'>
-                                  <Search size={12} className='shrink-0 text-muted-foreground' />
-                                  <input
-                                    type='text'
-                                    value={textDraftInputs[k] ?? ''}
-                                    onChange={e =>
-                                      setTextDraftInputs(prev => ({ ...prev, [k]: e.target.value }))
-                                    }
-                                    onKeyDown={e => {
-                                      if (e.key === 'Enter') {
-                                        const term = (textDraftInputs[k] ?? '').trim();
-                                        if (
-                                          term &&
-                                          !(customFieldTextSearches[k] ?? []).includes(term)
-                                        ) {
-                                          setCustomFieldTextSearches(prev => ({
-                                            ...prev,
-                                            [k]: [...(prev[k] ?? []), term],
-                                          }));
-                                        }
-                                        setTextDraftInputs(prev => ({ ...prev, [k]: '' }));
-                                      }
-                                    }}
-                                    placeholder='Type and press Enter…'
-                                    className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                                    data-track-category='DeskMetrics'
-                                    data-track-name='CustomFieldTextSearch'
-                                  />
-                                  {(textDraftInputs[k] ?? '') && (
-                                    <X
-                                      size={11}
-                                      className='shrink-0 cursor-pointer text-muted-foreground hover:text-foreground'
-                                      onClick={() =>
-                                        setTextDraftInputs(prev => ({ ...prev, [k]: '' }))
-                                      }
-                                    />
-                                  )}
-                                </div>
-                                <p className='mt-1.5 text-[11px] text-muted-foreground'>
-                                  Press Enter to add — matches any term (OR)
-                                </p>
                               </div>
-                            ) : (
-                              <div className='pb-2'>
-                                {keyValues.length > 1 && (
-                                  <div
-                                    className='flex items-center gap-2 border-b border-border px-3 py-1.5'
-                                    data-track-category='DeskMetrics'
-                                    data-track-name='SearchFieldValues'
-                                  >
-                                    <Search size={12} className='shrink-0 text-muted-foreground' />
-                                    <input
-                                      type='text'
-                                      value={valueSearch}
-                                      onChange={e =>
-                                        setValueSearches(prev => ({ ...prev, [k]: e.target.value }))
-                                      }
-                                      placeholder='Search values…'
-                                      className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                                      data-track-category='DeskMetrics'
-                                      data-track-name='SearchFieldValues'
-                                    />
-                                    {valueSearch && (
-                                      <X
-                                        size={11}
-                                        className='shrink-0 cursor-pointer text-muted-foreground hover:text-foreground'
-                                        onClick={() =>
-                                          setValueSearches(prev => ({ ...prev, [k]: '' }))
-                                        }
-                                      />
+                              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                            </button>
+                          </PopoverPrimitive.Trigger>
+                          <PopoverPrimitive.Portal>
+                            <PopoverPrimitive.Content
+                              side='right'
+                              align='start'
+                              sideOffset={4}
+                              collisionPadding={12}
+                              className='z-[70] outline-none'
+                              data-custom-field-submenu='true'
+                              onOpenAutoFocus={event => event.preventDefault()}
+                            >
+                              <StagesSubmenu
+                                selectedStages={selectedStageNames}
+                                onChange={setSelectedStageNames}
+                                availableStages={[...stageOptions]}
+                              />
+                            </PopoverPrimitive.Content>
+                          </PopoverPrimitive.Portal>
+                        </PopoverPrimitive.Root>
+                      )}
+                      {!isMultiDesk &&
+                        availableCustomFields.map(definition => {
+                          const key = definition.fieldName;
+                          const FieldIcon = getIconForFieldType(definition.fieldType);
+                          const isOpen = activeSubmenu === key;
+                          const isActive = activeCustomFieldKeys.includes(key);
+
+                          return (
+                            <PopoverPrimitive.Root
+                              key={key}
+                              open={isOpen}
+                              onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? key : null)}
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    isOpen && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenCustomFieldFilterSubmenu'
+                                  data-track-metadata={JSON.stringify({ fieldName: key })}
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <FieldIcon className='h-4 w-4 shrink-0' />
+                                    <span className='truncate' title={key}>
+                                      {key}
+                                    </span>
+                                    {isActive && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
                                     )}
                                   </div>
-                                )}
-                                {filteredValues.map(v => (
-                                  <label
-                                    key={v}
-                                    className='flex cursor-pointer items-center gap-2 px-3 py-1 text-sm hover:bg-accent'
-                                  >
-                                    <input
-                                      type='checkbox'
-                                      checked={selectedVals.includes(v)}
-                                      onChange={() => {
-                                        const next = selectedVals.includes(v)
-                                          ? selectedVals.filter(x => x !== v)
-                                          : [...selectedVals, v];
-                                        setSelectedCustomFieldValues({
-                                          ...selectedCustomFieldValues,
-                                          [k]: next,
-                                        });
-                                      }}
-                                      className='h-3.5 w-3.5 rounded accent-desk-accent'
-                                      data-track-category='DeskMetrics'
-                                      data-track-name='ToggleFieldValue'
-                                    />
-                                    <span className='block max-w-[230px] truncate' title={v}>
-                                      {v}
-                                    </span>
-                                  </label>
-                                ))}
-                                {filteredValues.length === 0 && (
-                                  <div className='px-3 py-2 text-xs text-muted-foreground'>
-                                    {valueSearch ? 'No matching values' : 'No values found'}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Popover>
-              )}
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <DynamicFieldSubmenu
+                                    fieldId={definition.id}
+                                    fieldName={key}
+                                    fieldType={definition.fieldType}
+                                    fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
+                                    selectedValue={selectedCustomFieldValues[key] ?? []}
+                                    onChange={value => {
+                                      if (!Array.isArray(value)) return;
+                                      updateCustomFieldValues(key, value);
+                                    }}
+                                    onClose={() => setActiveSubmenu(null)}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          );
+                        })}
+                    </div>
+                  </Popover>
 
-              <DeskMetricsDateRangePicker
-                dateRange={dateRange}
-                startTime={startTime}
-                endTime={endTime}
-                onChange={(dr, st, et) => {
-                  persistDateRange(dr, st, et);
-                }}
-              />
+                  {hasAnyFiltersActive && (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setSelectedAssigneeIds([]);
+                        setSelectedStageNames([]);
+                        setSelectedPriorities([]);
+                        setSelectedUserGroupIds([]);
+                        clearAllCustomFieldFilters();
+                      }}
+                      className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                      data-track-category='DeskMetrics'
+                      data-track-name='ClearDeskMetricsFilters'
+                    >
+                      <X size={14} />
+                      <span>Clear Filters</span>
+                    </button>
+                  )}
+                </>
 
-              <button
-                type='button'
-                onClick={() => void refetch()}
-                disabled={isFetching}
-                className={cn(
-                  'rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-                  isFetching && 'cursor-not-allowed opacity-60',
-                )}
-                title='Refresh metrics'
-                data-track-category='DeskMetrics'
-                data-track-name='Refresh'
-              >
-                <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
-              </button>
+                <DeskMetricsDateRangePicker
+                  dateRange={dateRange}
+                  startTime={startTime}
+                  endTime={endTime}
+                  onChange={(dr, st, et) => {
+                    persistDateRange(dr, st, et);
+                  }}
+                />
 
-              {/* Close button */}
-              <button
-                type='button'
-                onClick={onClose}
-                className='flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:border-border'
-                data-track-category='DeskMetrics'
-                data-track-name='CloseButton'
-              >
-                <X size={16} />
-              </button>
+                <button
+                  type='button'
+                  onClick={() => void refetch()}
+                  disabled={isFetching}
+                  className={cn(
+                    'rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+                    isFetching && 'cursor-not-allowed opacity-60',
+                  )}
+                  title='Refresh metrics'
+                  data-track-category='DeskMetrics'
+                  data-track-name='Refresh'
+                >
+                  <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
+                </button>
+              </div>
             </div>
           </div>
 

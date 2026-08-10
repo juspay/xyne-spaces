@@ -13,6 +13,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -74,22 +75,24 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     );
   }, [allUsers, channelParticipantUserIds, currentUser?.id]);
 
-  // Filter channel users by search query
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery.trim()) return channelUsers;
-    const query = searchQuery.toLowerCase();
-    return channelUsers.filter(user => {
-      const name = user.name?.toLowerCase() || '';
-      const email = user.email?.toLowerCase() || '';
-      return name.includes(query) || email.includes(query);
-    });
+  // Normalize the channel-member payload before passing it to the shared
+  // participant matcher. Some channel members have no email, which the raw
+  // `searchUsers` matcher assumes is always present.
+  const rankedChannelUsers = useMemo(() => {
+    const options = channelUsers.map(user => ({
+      ...user,
+      label: getUserDisplayName(user),
+      value: `user:${user.id}`,
+    }));
+
+    return rankParticipantOptions(options, searchQuery);
   }, [channelUsers, searchQuery]);
 
   const inviteUserOptions = useMemo(
     () =>
-      filteredUsers.map(user => ({
-        label: getUserDisplayName(user),
-        value: `user:${user.id}`,
+      rankedChannelUsers.map(user => ({
+        label: user.label,
+        value: user.value,
         icon: (
           <Avatar
             userId={user.id}
@@ -101,7 +104,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
         subtitle: user.email,
         isDeactivated: isUserDeactivated(user),
       })),
-    [filteredUsers],
+    [rankedChannelUsers],
   );
 
   // Get selected users for display
@@ -276,6 +279,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 placeholder='Select participants'
                 searchPlaceholder='Select participants'
                 onSearchChange={setSearchQuery}
+                disableClientFiltering
                 variant='inline'
                 width='100%'
               />

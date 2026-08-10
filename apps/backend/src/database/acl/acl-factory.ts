@@ -422,8 +422,6 @@ export class ACLFactory {
       return new InstalledAppsACL(ctx, prisma)
     case 'knowledgeDocument':
       return new BaseQueryACL(ctx, prisma)
-    case 'messageSearch':
-      return new BaseQueryACL(ctx, prisma)
     case 'prThreadLink':
       return new BaseQueryACL(ctx, prisma)
     case 'projectTag':

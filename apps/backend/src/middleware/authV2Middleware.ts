@@ -57,6 +57,22 @@ class AuthV2Middleware {
   }
 
   /**
+   * Clear authentication cookies when the request can no longer be authenticated.
+   */
+  private clearAuthCookies(req: Request, res: Response): void {
+    res.clearCookie('google_access_token', { path: '/' });
+    res.clearCookie('user_session_id', { path: '/' });
+
+    for (const cookieName of Object.keys(req.cookies || {})) {
+      if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
+        res.clearCookie(cookieName, { path: '/' });
+      }
+    }
+
+    res.clearCookie('xyne_last_workspace', { path: '/' });
+  }
+
+  /**
    * Helper to attempt honest refresh using session cookie
    */
   private attemptRefresh = async (req: Request, res: Response, next: NextFunction): Promise<boolean> => {
@@ -369,6 +385,7 @@ class AuthV2Middleware {
                   effectiveWorkspaceId,
                   effectiveMemberId,
                 });
+                this.clearAuthCookies(req, res);
                 res.status(401).json({
                   error: 'Workspace context missing',
                   message: 'Unable to determine workspace for this session. Please log in again.',
@@ -405,6 +422,7 @@ class AuthV2Middleware {
                     userId: user.id,
                     leftAt: user.leftAt,
                   });
+                  this.clearAuthCookies(req, res);
                   res.status(401).json({
                     error: 'User removed from workspace',
                     message: 'You have been removed from this workspace',
@@ -419,6 +437,7 @@ class AuthV2Middleware {
                     userId: user.id,
                     orgMemberLeftAt: orgMember.leftAt,
                   });
+                  this.clearAuthCookies(req, res);
                   res.status(401).json({
                     error: 'User removed from organization',
                     message: 'You have been removed from this organization',
@@ -518,6 +537,7 @@ class AuthV2Middleware {
         tokenSource,
         tokenPreview,
       });
+      this.clearAuthCookies(req, res);
       res.status(401).json({
         error: 'No session found',
         message: 'Session ID cookie is missing',

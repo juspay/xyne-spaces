@@ -40,7 +40,6 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import type { FocusPosition } from '@tiptap/react';
-import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import type { MentionResult } from '@xyne/shared';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
@@ -284,47 +283,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Whether the agent-progress pill currently has content — lets InputBox flip
     // between the typing indicator and the agent pill when both are active.
     const [agentActive, setAgentActive] = useState(false);
-    // UPDATED: Handle post-ticket creation logic (Workflows & Cleanup only)
-    const handleTicketCreated = (ticket: {
-      id: string;
-      conversationId?: string;
-      createdBy?: string;
-      assignedTo?: string;
-      workflowType?: string;
-      xyneId?: string;
-    }): void => {
-      // Workflow selection
-      const workflowType: string | undefined = ticket.workflowType;
-
-      // Only trigger workflow if one is selected
-      if (workflowType) {
-        // Base workflow data
-        const workflowData: CreateWorkflowRequest = {
-          title: `Ticket: ${ticketDescription.slice(0, 50)}${ticketDescription.length > 50 ? '...' : ''}`,
-          workflowType,
-          description: ticketDescription,
-          ticketId: ticket.id,
-          ...(ticket.conversationId && { conversationId: ticket.conversationId }),
-          ...(ticket.xyneId && { xyneId: ticket.xyneId }),
-        };
-
-        // Add BUG_WORKFLOW specific required fields
-        if (workflowType === 'BUG_WORKFLOW') {
-          const bugWorkflowData = {
-            ...workflowData,
-            bugId: ticket.id,
-            severity: 'medium', // Default severity
-            reportedBy: ticket.createdBy || 'unknown',
-            assignedTo: ticket.assignedTo || ticket.createdBy || 'unknown',
-          };
-
-          void createWorkflow(bugWorkflowData);
-        } else {
-          void createWorkflow(workflowData);
-        }
-      }
-
-      // Close the modal after workflow is triggered
+    // Handle post-ticket creation cleanup (close modal, clear input)
+    const handleTicketCreated = (): void => {
       setIsCreateTicketModalOpen(false);
       setTicketDescription('');
 
