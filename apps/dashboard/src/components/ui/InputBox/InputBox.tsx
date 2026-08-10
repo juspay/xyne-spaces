@@ -349,6 +349,78 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       return () => document.removeEventListener('keydown', onKeyDown, true);
     }, [isVoiceRecording]);
 
+    useEffect(() => {
+      if (disabled) return;
+
+      const HOLD_TO_TALK_MS = 700;
+      let armTimer: number | null = null;
+      let gestureActive = false; // this gesture is the one that started recording
+      const pressed = { mod: false, shift: false, space: false };
+      const comboHeld = (): boolean => pressed.mod && pressed.shift && pressed.space;
+
+      const clearArm = (): void => {
+        if (armTimer !== null) {
+          window.clearTimeout(armTimer);
+          armTimer = null;
+        }
+      };
+
+      const endGesture = (): void => {
+        clearArm();
+        if (gestureActive) {
+          gestureActive = false;
+          voiceInputRef.current?.stopRecording();
+        }
+      };
+
+      const onKeyDown = (e: KeyboardEvent): void => {
+        if (e.key === 'Meta' || e.key === 'Control') pressed.mod = true;
+        if (e.key === 'Shift') pressed.shift = true;
+        if (e.code === 'Space') pressed.space = true;
+
+        if (e.code !== 'Space') return;
+        if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+        if (e.isComposing) return; // don't fight IME composition
+        e.preventDefault();
+        if (e.repeat) return; // ignore auto-repeat — arm once per physical press
+        if (gestureActive || armTimer !== null) return;
+
+        armTimer = window.setTimeout(() => {
+          armTimer = null;
+          if (!comboHeld()) return;
+          gestureActive = true;
+          voiceInputRef.current?.startRecording();
+        }, HOLD_TO_TALK_MS);
+      };
+
+      const onKeyUp = (e: KeyboardEvent): void => {
+        if (e.key === 'Meta' || e.key === 'Control') pressed.mod = false;
+        if (e.key === 'Shift') pressed.shift = false;
+        if (e.code === 'Space') pressed.space = false;
+        if (!comboHeld()) endGesture();
+      };
+
+      const onInterrupt = (): void => {
+        pressed.mod = false;
+        pressed.shift = false;
+        pressed.space = false;
+        endGesture();
+      };
+
+      document.addEventListener('keydown', onKeyDown, true);
+      document.addEventListener('keyup', onKeyUp, true);
+      window.addEventListener('blur', onInterrupt);
+      document.addEventListener('visibilitychange', onInterrupt);
+      return () => {
+        clearArm();
+        if (gestureActive) voiceInputRef.current?.stopRecording();
+        document.removeEventListener('keydown', onKeyDown, true);
+        document.removeEventListener('keyup', onKeyUp, true);
+        window.removeEventListener('blur', onInterrupt);
+        document.removeEventListener('visibilitychange', onInterrupt);
+      };
+    }, [disabled]);
+
     const handleTyping = onTyping;
 
     // Helper function to upload a single file as draft attachment
