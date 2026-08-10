@@ -3349,6 +3349,49 @@ export async function deleteSkill(slug: string): Promise<void> {
   );
 }
 
+// ── Skill version history (Point 3) ──────────────────────────────────
+
+export interface SkillVersion {
+  id: string;
+  version: number;
+  source: string;
+  contentHash: string;
+  authorUserId: string | null;
+  changelog: string | null;
+  isCurrent: boolean;
+  createdAt: string;
+}
+
+export interface SkillVersionFull extends SkillVersion {
+  content: string;
+  filesSnapshot: Array<{ relativePath: string; content: string; contentType?: string | null }>;
+}
+
+/** List a skill's immutable version history, newest first. */
+export async function getSkillVersions(slug: string): Promise<SkillVersion[]> {
+  const data = await request<{ success: boolean; data: SkillVersion[] }>(
+    `${AUTH_API_URL}/api/v1/skills/${encodeURIComponent(slug)}/versions`,
+  );
+  return data.data;
+}
+
+/** Fetch one version's full SKILL.md content (+ files snapshot). */
+export async function getSkillVersion(slug: string, version: number): Promise<SkillVersionFull> {
+  const data = await request<{ success: boolean; data: SkillVersionFull }>(
+    `${AUTH_API_URL}/api/v1/skills/${encodeURIComponent(slug)}/versions/${version}`,
+  );
+  return data.data;
+}
+
+/** Restore the live skill (content + files) to an older version. Returns the updated skill. */
+export async function restoreSkillVersion(slug: string, version: number): Promise<Skill> {
+  const data = await request<{ success: boolean; data: Skill }>(
+    `${AUTH_API_URL}/api/v1/skills/${encodeURIComponent(slug)}/versions/${version}/restore`,
+    { method: "POST" },
+  );
+  return data.data;
+}
+
 // ── Skill file bundle (directory-style skills) ───────────────────────
 
 export interface SkillFileMeta {

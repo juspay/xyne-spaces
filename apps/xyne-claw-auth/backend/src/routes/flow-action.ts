@@ -1497,6 +1497,48 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       return;
     }
 
+    // ── Skill-version adoption ─────────────────────────────────────
+    // The AGENT OWNER (not the skill owner) accepts/keeps when a skill they use
+    // was updated by another admin. Accepting ONLY re-pins that agent to the new
+    // version — it never mutates the skill. Same double authorization as
+    // skill-update: (1) fail-closed callerUserId === approverUserId on the card,
+    // (2) resolveSkillAdoptRequest re-derives the agent owner from the live row.
+    if (actionType === "skill-adopt") {
+      const requestId = data["requestId"] as string | undefined;
+      const approverUserId = data["approverUserId"] as string | undefined;
+      const adoptAgentSlug = data["agentSlug"] as string | undefined;
+      const adoptSpacesAppId = data["spacesAppId"] as string | undefined;
+
+      if (!requestId || !approverUserId) {
+        res.status(400).json({ type: "error", message: "Missing skill-adopt fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+      if (!callerUserId || callerUserId !== approverUserId) {
+        log.error(`[flow-action] skill-adopt: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${approverUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      const { resolveSkillAdoptRequest } = await import("./skills.js");
+      const decision = actionId === "skill-adopt-approve" ? "approve" : "reject";
+      const result = await resolveSkillAdoptRequest(requestId, callerUserId, decision);
+
+      if (!result.ok) {
+        resp = { type: "close_screen", finalMessage: result.error };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, adoptAgentSlug, `⚠️ ${result.error}`, conversationId, undefined, adoptSpacesAppId);
+        return;
+      }
+
+      const adoptText = result.alreadyResolved
+        ? (result.status === "approved" ? "✅ **Update already adopted.**" : "❌ **Update already declined — keeping current version.**")
+        : (result.status === "approved" ? "✅ **Update adopted — your agent now runs the new version.**" : "❌ **Kept current version.**");
+      resp = { type: "close_screen", finalMessage: adoptText };
+      res.json(resp);
+      void replaceFlowCardWithText(messageId, adoptAgentSlug, adoptText, conversationId, undefined, adoptSpacesAppId);
+      return;
+    }
+
     if (actionType === "start-goal") {
       const rawCondition = data["condition"];
       const goalAgentSlug = data["agentSlug"] as string | undefined;

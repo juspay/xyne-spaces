@@ -20,6 +20,7 @@ import {
 } from "../../../lib/api";
 import type { Skill, SkillFileMeta } from "../../../lib/api";
 import { readSkillFilesFromFileList } from "../../../lib/skillFileUtils";
+import { SkillVersionHistory } from "./SkillVersionHistory";
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -487,6 +488,19 @@ export function SkillSlideOver({
             </div>
           )}
         </div>
+
+        {/* ── Version history (Point 3) ───────────────────────────────── */}
+        {!isSeeded && (
+          <SkillVersionHistory
+            slug={skill.slug}
+            readOnly={!canEdit}
+            onRestored={(content) => {
+              setEditContent(content);
+              setEditingContent(false);
+              onUpdated();
+            }}
+          />
+        )}
 
         {/* ── Files ──────────────────────────────────────────────────── */}
         <div className="rounded-[12px] border border-xyne-border-subtle bg-xyne-surface-subtle p-[14px]">

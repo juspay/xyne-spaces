@@ -1154,6 +1154,13 @@ model AgentRequest {
   proposedContentHash String?
   // Free-text summary the proposer supplied ("what changed and why").
   requestNote         String?
+  // ── requestType == "skill_version_adopt" (per-agent version adoption) ─────
+  // Raised when an admin edits a skill that ANOTHER admin's agent uses: that
+  // agent's owner is asked whether to adopt the new version. agentId/agentSlug
+  // identify the TARGET agent; toVersionId is the SkillVersion to pin on accept;
+  // fromVersionId is the agent's current pin (diff base for the card).
+  toVersionId         String?
+  fromVersionId       String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   orgId               String
@@ -1213,6 +1220,14 @@ enum AgentAuditEvent {
   PROVIDER_CREDENTIAL_UNBOUND
   PROVIDER_CREDENTIAL_ADOPTED
   PROVIDER_CREDENTIAL_DELETED
+  // Skill versioning (Point 3/4). A skill edit cuts an immutable SkillVersion
+  // and propagates it to the agents that use it: the editor's own agents
+  // auto-advance; other admins' agents get an adopt request. Added by migration
+  // 20260805200000_skill_versions_and_pins (ALTER TYPE ADD VALUE).
+  SKILL_VERSION_AUTO_ADOPTED
+  SKILL_VERSION_ADOPT_REQUESTED
+  SKILL_VERSION_ADOPTED
+  SKILL_VERSION_ADOPT_DECLINED
 }
 
 model AgentAuditLog {
@@ -1248,6 +1263,10 @@ model Skill {
   agents      AgentSkill[]
   subagents   SubagentSkill[]
   files       SkillFile[]
+  versions    SkillVersion[]
+  // Pointer to the latest immutable version (highest `version`). Kept as a
+  // convenience so callers don't re-derive max(version) on every read.
+  currentVersionId String?
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -1276,14 +1295,56 @@ model SkillFile {
   @@map("skill_files")
 }
 
+/**
+ * Immutable, append-only snapshot of a skill's full artifact (SKILL.md content
+ * + all sibling files) at a point in time. Mirrors AgentPromptVersion.
+ *
+ * Created on every write that changes a skill: initial create (v1), a direct
+ * owner/admin edit, a files replacement, and an approved skill_update proposal.
+ * Agents/subagents run a PINNED version (AgentSkill.pinnedVersionId); the live
+ * `Skill.content`/`Skill.files` stay as the "latest" working copy + the source
+ * that new versions are cut from.
+ */
+model SkillVersion {
+  id           String       @id @default(cuid())
+  skillId      String
+  skill        Skill        @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  version      Int          // monotonic per skill, starts at 1
+  content      String       @db.Text
+  contentHash  String       // hashSkillContent(content) — integrity + no-op detection
+  // Full snapshot of sibling files at this version: an array of
+  // { relativePath, content, contentType, sizeBytes }. JSON (not a child table)
+  // so a version is one immutable row and file+content diff/rollback stay atomic.
+  filesSnapshot Json        @default("[]")
+  authorUserId String?
+  // "initial" | "direct_edit" | "files_edit" | "proposal_approved"
+  source       String
+  changelog    String?      @db.Text
+  createdAt    DateTime     @default(now())
+
+  pinnedByAgents    AgentSkill[]
+  pinnedBySubagents SubagentSkill[]
+
+  @@unique([skillId, version])
+  @@index([skillId])
+  @@map("skill_versions")
+}
+
 model AgentSkill {
   id      String @id @default(cuid())
   agentId String
   agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
   skillId String
   skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  // Version this agent runs. NULL = follow the skill's latest content (legacy /
+  // transition behaviour). Backfilled to the skill's v1 on migration; advanced
+  // automatically when the agent's own admin edits the skill, or on explicit
+  // adopt of another admin's update.
+  pinnedVersionId String?
+  pinnedVersion   SkillVersion? @relation(fields: [pinnedVersionId], references: [id], onDelete: SetNull)
 
   @@unique([agentId, skillId])
+  @@index([pinnedVersionId])
   @@map("agent_skills")
 }
 
@@ -1658,8 +1719,11 @@ model SubagentSkill {
   subagentDefinition   SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
   skillId              String
   skill                Skill              @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  pinnedVersionId      String?
+  pinnedVersion        SkillVersion?      @relation(fields: [pinnedVersionId], references: [id], onDelete: SetNull)
 
   @@unique([subagentDefinitionId, skillId])
+  @@index([pinnedVersionId])
   @@map("subagent_skills")
 }
 

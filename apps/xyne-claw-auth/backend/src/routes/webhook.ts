@@ -55,6 +55,7 @@ import {
 } from "../lib/message-queue.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decrypt } from "../crypto.js";
+import { resolveAgentSkillArtifact } from "../lib/skillArtifact.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
@@ -2113,19 +2114,22 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // inspect-pdf-form get ENOENT because session-skills.ts has nothing to
     // materialize. Files arrive as base64 in SkillFile.content for binary
     // contentTypes; session-skills.ts handles the decode on disk write.
-    const agentSkills = agentRow?.skills?.map((s) => ({
-      name: s.skill.name,
-      content: s.skill.content,
-      ...(s.skill.files && s.skill.files.length > 0
-        ? {
-            files: s.skill.files.map((f) => ({
-              relativePath: f.relativePath,
-              content: f.content,
-              ...(f.contentType ? { contentType: f.contentType } : {}),
-            })),
-          }
-        : {}),
-    }));
+    const agentSkills = agentRow?.skills?.map((s) => {
+      const art = resolveAgentSkillArtifact(s);
+      return {
+        name: s.skill.name,
+        content: art.content,
+        ...(art.files.length > 0
+          ? {
+              files: art.files.map((f) => ({
+                relativePath: f.relativePath,
+                content: f.content,
+                ...(f.contentType ? { contentType: f.contentType } : {}),
+              })),
+            }
+          : {}),
+      };
+    });
 
     // Per-target dispatch unit. Runs provider resolution against the TARGET
     // user's own credentials, downloads attachments, fires /run, and registers

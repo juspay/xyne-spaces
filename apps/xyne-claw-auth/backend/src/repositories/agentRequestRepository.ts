@@ -172,4 +172,70 @@ export const agentRequestRepository = {
       where: { id },
       data: { status: "pending", reviewerId: null, reviewNote: null },
     }),
+
+  // ── Skill-version adoption requests (requestType="skill_version_adopt") ──────
+  // Raised when an admin edits a skill that ANOTHER user's agent uses. Reviewed
+  // by that agent's OWNER via a DM diff card; accepting re-pins ONLY that agent
+  // to the new version (it never mutates the skill). One pending request per
+  // (agent, skill): a newer version supersedes the agent's older pending adopt
+  // so the owner is never asked to adopt a version that is already stale.
+
+  findPendingSkillAdopt: (agentId: string, skillId: string) =>
+    prisma.agentRequest.findFirst({
+      where: { agentId, skillId, requestType: "skill_version_adopt", status: "pending" },
+    }),
+
+  supersedeAndCreateSkillAdopt: (data: {
+    skillId: string;
+    skillSlug: string;
+    agentId: string;
+    agentSlug: string;
+    requesterId: string;
+    orgId: string;
+    toVersionId: string;
+    fromVersionId: string | null;
+    proposedContent: string;
+  }) =>
+    prisma.$transaction(async (tx) => {
+      const superseded = await tx.agentRequest.updateMany({
+        where: {
+          agentId: data.agentId,
+          skillId: data.skillId,
+          requestType: "skill_version_adopt",
+          status: "pending",
+        },
+        data: {
+          status: "rejected",
+          reviewerId: data.requesterId,
+          reviewNote: "Superseded by a newer version of the skill",
+        },
+      });
+      const request = await tx.agentRequest.create({
+        data: {
+          targetType: "agent",
+          requestType: "skill_version_adopt",
+          agentId: data.agentId,
+          agentSlug: data.agentSlug,
+          skillId: data.skillId,
+          skillSlug: data.skillSlug,
+          requesterId: data.requesterId,
+          orgId: data.orgId,
+          toVersionId: data.toVersionId,
+          fromVersionId: data.fromVersionId,
+          proposedContent: data.proposedContent,
+        },
+      });
+      return { request, supersededCount: superseded.count };
+    }),
+
+  /**
+   * Atomically claim a pending adopt request. count===1 → caller won and owns
+   * re-pinning the agent; count===0 → already resolved. Scoped to
+   * requestType="skill_version_adopt" so it can never claim another row kind.
+   */
+  claimPendingSkillAdopt: (id: string, status: "approved" | "rejected", reviewerId: string, reviewNote?: string | null) =>
+    prisma.agentRequest.updateMany({
+      where: { id, requestType: "skill_version_adopt", status: "pending" },
+      data: { status, reviewerId, reviewNote: reviewNote ?? null },
+    }),
 };

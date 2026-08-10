@@ -40,7 +40,9 @@ const INCLUDE_TOOLS_SKILLS = {
   // only SKILL.md content reaches the worker session and any tool needing
   // a sibling file off the skill dir (e.g. fill-pdf-form looking for
   // cam-templates/template.pdf) gets ENOENT.
-  skills: { include: { skill: { include: { files: true } } } },
+  // pinnedVersion resolves the frozen SkillVersion an agent runs (Point 3/4).
+  // NULL pin → runtime falls back to live skill.content (see lib/skillArtifact).
+  skills: { include: { skill: { include: { files: true } }, pinnedVersion: true } },
   // Knowledge Base grants — opaque foreign ids into the spaces backend. We
   // pull them everywhere we pull skills so /mcp/tools and the agent-config
   // editor can both render them without a second query.

@@ -1,6 +1,7 @@
 export { agentRepository } from "./agentRepository.js";
 export { agentShareRepository } from "./agentShareRepository.js";
 export { agentRequestRepository } from "./agentRequestRepository.js";
+export { skillVersionRepository } from "./skillVersionRepository.js";
 export { userRoleRepository } from "./userRoleRepository.js";
 export { auditLogRepository } from "./auditLogRepository.js";
 export { chatMessageRepository } from "./chatMessageRepository.js";

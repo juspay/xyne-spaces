@@ -20,7 +20,7 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildSkillAdoptApprovalFlow } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
