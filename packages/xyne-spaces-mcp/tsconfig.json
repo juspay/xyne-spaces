@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    // fetch, URLSearchParams, AbortController and friends are Node globals here, not DOM.
+    // Naming @types/node explicitly rather than relying on automatic @types discovery:
+    // this package carries its own npm node_modules inside a pnpm isolated workspace, and
+    // editors that resolve types from a stale project root silently lose those globals.
+    "types": ["node"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
