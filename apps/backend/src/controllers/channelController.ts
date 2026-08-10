@@ -3,7 +3,7 @@ import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import {
   buildAppDeskSourceName,
   buildSlackDeskSourceName,
-  extractInstalledAppId,
+  resolveAppDeskInstalledAppId,
   extractSlackChannelId,
 } from '../integrations/core/deskSources';
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
@@ -934,15 +934,6 @@ export class ChannelController {
           res.status(403).json({ error: 'App must have the desk:write permission to back a desk' });
           return;
         }
-        const sourceName = buildAppDeskSourceName(installedAppId);
-        const existingSource = await db.externalSource.findUnique({
-          where: { name: sourceName },
-          select: { id: true, isActive: true },
-        });
-        if (existingSource?.isActive) {
-          res.status(409).json({ error: 'A desk already exists for this app' });
-          return;
-        }
       }
 
       // For DM channels, ensure scopeId is provided (other user's ID)
@@ -1257,30 +1248,18 @@ export class ChannelController {
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
 
-          const sourceName = buildAppDeskSourceName(installedAppId);
-          const appCredentials = encrypt(JSON.stringify({ installedAppId }));
-          const existingAppSource = await db.externalSource.findUnique({
-            where: { name: sourceName },
-            select: { id: true },
+          await db.externalSource.create({
+            data: {
+              name: buildAppDeskSourceName(channel.id),
+              sourceType: 'app-desk',
+              displayName: name!,
+              channelId: channel.id,
+              externalIdentifier: installedAppId,
+              credentials: encrypt(JSON.stringify({ installedAppId })),
+              isActive: true,
+              workspaceId: req.user!.workspaceId!,
+            },
           });
-          if (existingAppSource) {
-            await db.externalSource.update({
-              where: { id: existingAppSource.id },
-              data: { isActive: true, credentials: appCredentials, channelId: channel.id, displayName: name! },
-            });
-          } else {
-            await db.externalSource.create({
-              data: {
-                name: sourceName,
-                sourceType: 'app-desk',
-                displayName: name!,
-                channelId: channel.id,
-                credentials: appCredentials,
-                isActive: true,
-                workspaceId: req.user!.workspaceId!,
-              },
-            });
-          }
 
           await this.channelParticipantRepository.addParticipant(
             channel.id,
@@ -1294,7 +1273,7 @@ export class ChannelController {
           });
           const code = (error as { code?: string })?.code;
           if (code === 'P2002') {
-            res.status(409).json({ error: 'A desk already exists for this app' });
+            res.status(409).json({ error: 'A desk already exists for this channel' });
           } else {
             res.status(500).json({ error: 'Failed to create app desk' });
           }
@@ -1480,7 +1459,7 @@ export class ChannelController {
 
       const source = await db.externalSource.findFirst({
         where: { channelId },
-        select: { name: true, displayName: true, sourceType: true, isActive: true },
+        select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
       const hasSource = !!source;
@@ -1490,7 +1469,7 @@ export class ChannelController {
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
       if (source?.sourceType === 'app-desk') {
-        const installedAppId = extractInstalledAppId(source.name) ?? '';
+        const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
           select: { webhookUrl: true, app: { select: { name: true, signingSecret: true } } },

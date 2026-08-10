@@ -94,6 +94,7 @@ interface EligibleApp {
   appId: string;
   name: string;
   description: string | null;
+  deskCount: number;
 }
 
 interface AddChannelFormProps {
@@ -655,8 +656,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 <div className='font-medium'>No eligible apps found</div>
                 <div className='text-xs text-muted-foreground mt-1'>
                   An app must be installed with the <span className='font-mono'>desk:write</span>{' '}
-                  permission and not already back another desk. Set this up in{' '}
-                  <span className='font-medium'>Xyne Apps</span> first.
+                  permission. Set this up in <span className='font-medium'>Xyne Apps</span> first.
                 </div>
               </div>
             </div>
@@ -675,12 +675,18 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                           {app.description}
                         </span>
                       )}
+                      {!!app.deskCount && (
+                        <span className='ml-2 text-xs text-muted-foreground'>
+                          backs {app.deskCount} desk{app.deskCount === 1 ? '' : 's'}
+                        </span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className='text-xs text-muted-foreground'>
-                Apps already backing a desk are hidden. One app backs one desk.
+                One app can back multiple desks. Your app receives the{' '}
+                <span className='font-mono'>channelId</span> on every event to tell them apart.
               </p>
             </>
           )}
