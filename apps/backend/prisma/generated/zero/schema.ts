@@ -205,6 +205,18 @@ export const ticketTagMappingTable = table("ticket_tag_mappings")
   })
   .primaryKey("id");
 
+export const ticketExportTable = table("ticket_exports")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    requestedBy: string(),
+    status: string(),
+    filters: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const ticketReferenceMappingTable = table("ticket_reference_mappings")
   .columns({
     workspaceId: string(),
@@ -3033,6 +3045,19 @@ export const ticketTagTableRelationships = relationships(ticketTagTable, ({ one 
   })
 }));
 
+export const ticketExportTableRelationships = relationships(ticketExportTable, ({ one }) => ({
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  }),
+  requester: one({
+    sourceField: ["requestedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
 export const ticketReferenceMappingTableRelationships = relationships(ticketReferenceMappingTable, ({ one }) => ({
   sourceTicket: one({
     sourceField: ["sourceTicketId"],
@@ -3437,6 +3462,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["userId"],
     destSchema: collectionPermissionTable,
+  }),
+  requestedTicketExports: many({
+    sourceField: ["id"],
+    destField: ["requestedBy"],
+    destSchema: ticketExportTable,
   })
 }));
 
@@ -3711,6 +3741,11 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     sourceField: ["id"],
     destField: ["workspaceId"],
     destSchema: roleTable,
+  }),
+  ticketExports: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: ticketExportTable,
   })
 }));
 
@@ -4652,6 +4687,7 @@ export const schema = createSchema(
       ticketTagTable,
       projectTagTable,
       ticketTagMappingTable,
+      ticketExportTable,
       ticketReferenceMappingTable,
       ticketStageEtaTable,
       workflowTable,
@@ -4824,6 +4860,7 @@ export const schema = createSchema(
       ticketActivityTableRelationships,
       ticketEntityMappingTableRelationships,
       ticketTagTableRelationships,
+      ticketExportTableRelationships,
       ticketReferenceMappingTableRelationships,
       ticketStageEtaTableRelationships,
       workflowTableRelationships,
@@ -4935,6 +4972,7 @@ export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mapping
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
 export type ProjectTag = Row<typeof schema.tables.project_tags>;
 export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
+export type TicketExport = Row<typeof schema.tables.ticket_exports>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
 export type TicketStageEta = Row<typeof schema.tables.ticket_stage_eta>;
 export type Workflow = Row<typeof schema.tables.workflows>;

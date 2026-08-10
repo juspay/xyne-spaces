@@ -87,6 +87,7 @@ import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
+import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
@@ -402,6 +403,12 @@ export class App {
       authMiddleware.authenticate,
       aclMiddleware.checkAccess,
       ticketRoutes
+    );
+    this.app.use(
+      '/api/ticket-reports',
+      authMiddleware.authenticate,
+      aclMiddleware.checkAccess,
+      ticketReportRoutes
     );
     this.app.use(
       '/api/workflows',

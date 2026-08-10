@@ -421,6 +421,8 @@ export class ACLFactory {
         return new WorkspaceOrganizationsACL(ctx);
       case 'workspaces':
         return new WorkspacesACL(ctx);
+      case 'ticket_exports':
+        return new BaseACL<any>(ctx);
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
     }

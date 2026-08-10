@@ -3129,6 +3129,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  ticketExportsForCurrentUser: defineQuery(() => {
+    return zql.ticket_exports.orderBy('createdAt', 'desc').limit(100);
+  }),
   getAllProjects: defineQuery(() => {
     return zql.projects
       .where('type', '!=', ProjectType.DM)
