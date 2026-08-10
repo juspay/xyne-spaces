@@ -224,6 +224,14 @@ const storageService = getStorageService();
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
 
+async function getCanvasThreadCommentCount(
+  tx: Transaction<Schema>,
+  threadId: string,
+): Promise<number> {
+  const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
+  return comments.filter(comment => comment.deletedAt == null).length;
+}
+
 const XYNE_USER_IDS = new Set([
   'cmhesdd48001ghu4rc6bcb9m0', 'ou9fi7t9tmq2eeiss09km8j3',
   'vj6bzzhi4g1n7q3ikj26f9w1', 'ufvy4nv2jpi55f692hf7kq5e',
@@ -9237,6 +9245,7 @@ export function createMutators(
             blockId,
             anchorText: anchorText || null,
             initialCommentId: commentId,
+            commentCount: 1,
             status: CanvasCommentThreadStatus.OPEN,
             statusUpdatedBy: null,
             statusUpdatedAt: null,
@@ -9288,12 +9297,20 @@ export function createMutators(
             createdAt: timestamp,
           });
 
+          const commentCount = await getCanvasThreadCommentCount(tx, threadId);
+
           if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
             await tx.mutate.canvas_comment_threads.update({
               id: threadId,
+              commentCount,
               status: CanvasCommentThreadStatus.OPEN,
               statusUpdatedBy: authData.sub,
               statusUpdatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.canvas_comment_threads.update({
+              id: threadId,
+              commentCount,
             });
           }
         },
@@ -9348,6 +9365,15 @@ export function createMutators(
             mentionedUserIds: '[]',
             deletedAt: timestamp,
           });
+
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+          if (thread) {
+            const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
+            await tx.mutate.canvas_comment_threads.update({
+              id: comment.threadId,
+              commentCount,
+            });
+          }
         },
       ),
       setThreadStatus: defineMutator(

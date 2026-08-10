@@ -1301,6 +1301,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     blockId: string(),
     anchorText: string().optional(),
     initialCommentId: string().optional(),
+    commentCount: number(),
     status: enumeration<CanvasCommentThreadStatus>(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
