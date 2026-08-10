@@ -41,6 +41,8 @@ import {
 
 export const zql = createBuilder(schema);
 
+export const DM_PREVIEW_CONVERSATION_CANDIDATES = 5;
+
 const kanbanTicketPageFiltersSchema = z.object({
   priority: z.array(z.nativeEnum(TicketPriority)).optional(),
   assignee: z.array(z.string()).optional(),
@@ -3174,7 +3176,9 @@ export const queries = defineQueries({
         .limit(limit)
         .related('channel', channelQuery =>
           channelQuery.related('conversations', conversationQuery =>
-            conversationQuery.orderBy('createdAt', 'desc').limit(1),
+            conversationQuery
+              .orderBy('createdAt', 'desc')
+              .limit(DM_PREVIEW_CONVERSATION_CANDIDATES),
           ),
         );
     },
