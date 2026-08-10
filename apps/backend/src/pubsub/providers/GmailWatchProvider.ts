@@ -13,6 +13,7 @@ import { BaseWatchProvider, WatchResult, SubscriptionRecord } from '../pubsubTyp
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { isPermanentAuthError as isPermanentAuthErrorShared } from '@/integrations/core/authErrors';
 
 export class GmailWatchProvider extends BaseWatchProvider {
   readonly name = 'gmail';
@@ -67,9 +68,7 @@ export class GmailWatchProvider extends BaseWatchProvider {
   }
 
   isPermanentAuthError(error: Error): boolean {
-    return /invalid_grant|unauthorized_client|invalid_token/i.test(
-      error.message
-    );
+    return isPermanentAuthErrorShared(error);
   }
 
   async markError(id: string): Promise<void> {

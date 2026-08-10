@@ -3,6 +3,7 @@ import { ActivityClassification, NotificationType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { isPermanentAuthError } from '@/integrations/core/authErrors';
 import '@/integrations';
 import { notificationService } from '@/notification-service';
 import { activityService } from '@/services/activity/activityService';
@@ -176,7 +177,7 @@ class EmailFetchWorker {
   private async notifyFailure(data: EmailFetchJobData, err: Error): Promise<void> {
     try {
       const raw = err?.message ?? String(err);
-      const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
+      const needsReauth = isPermanentAuthError(raw);
       await notificationService.sendNotification(
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_FAILED,
