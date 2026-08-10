@@ -164,8 +164,13 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-latest'),
+  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-private'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
+  // How long a thread's job sits delayed before it runs. This is the debounce
+  // window: every message on the thread inside it collapses into one job, so a
+  // busy thread costs one extraction per window, not one per message.
+  ENTITY_EXTRACTION_DEBOUNCE_MS: Joi.number().default(15 * 60 * 1000),
   // Org-level framing prepended to the mention-extraction prompt, so the model
   // knows whose data it is reading. Fixes identity-relative errors like listing
   // the org itself as an external ORGANISATION, and sharpens ORG vs MERCHANT.
@@ -670,10 +675,12 @@ export const config = {
     url: envVars.Y_SWEET_URL,
   },
   entityExtraction: {
+    enabled: envVars.ENABLE_ENTITY_EXTRACTION,
     model: envVars.ENTITY_EXTRACTION_MODEL,
     // A single extraction call takes 20-75s on this endpoint. Raising this
     // makes calls contend and time out rather than finish faster.
     concurrency: envVars.ENTITY_EXTRACTION_CONCURRENCY,
+    debounceMs: envVars.ENTITY_EXTRACTION_DEBOUNCE_MS,
     orgContext: envVars.ENTITY_EXTRACTION_ORG_CONTEXT,
   },
 
