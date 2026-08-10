@@ -9,6 +9,9 @@ import { normalizeStoragePath } from '@/services/storage/pathUtils';
 import { setSafeDownloadHeaders } from '@/utils/safeAttachmentDownload';
 import { config } from '@/config/env';
 
+// Mirrors the user-route constant in controllers/attachmentController.ts.
+const ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES = 10;
+
 const UploadFilesBodySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
@@ -109,6 +112,62 @@ export class FilesController {
     } catch (error) {
       logger.error('Error downloading file:', error);
       res.status(500).json({ error: 'Failed to download file' });
+    }
+  };
+
+  /**
+   * Return a short-lived direct storage URL for an attachment.
+   * GET /api/apps/files/signed-url/:attachmentId
+   *
+   * App-token counterpart of the user route
+   * GET /api/attachments/:attachmentId/signed-url. Gated by the `files:read`
+   * scope and scoped to the app token's workspace — the same authorization
+   * model as downloadFile/getFileInfo above. This unblocks headless / automation
+   * agent runs (app identity, no user session) which cannot call the
+   * user-session attachment routes (those 401 on an app token).
+   */
+  getSignedDownloadUrl = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { attachmentId } = req.params;
+      const workspaceId = req.user?.workspaceId;
+
+      const attachment = await this.messageAttachmentRepository.findById(attachmentId);
+      if (!attachment) {
+        res.status(404).json({ error: 'Attachment not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      if (workspaceId && attachment.workspaceId !== workspaceId) {
+        res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+        return;
+      }
+
+      const filePath = normalizeStoragePath(attachment.url);
+      if (!filePath) {
+        res.status(404).json({ error: 'Attachment not yet uploaded', code: 'NOT_FOUND' });
+        return;
+      }
+
+      const meta = attachment.metadata as { type?: string };
+      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript'
+        ? getStorageService(config.gcs.transcriptionBucketName)
+        : storageService;
+
+      const url = await service.generateSignedUrl(
+        filePath,
+        ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES / 60,
+      );
+
+      res.status(200).json({
+        url,
+        filename: attachment.originalFilename,
+        mimeType: attachment.mimetype,
+        size: attachment.size,
+        expiresInMinutes: ATTACHMENT_SIGNED_URL_EXPIRY_MINUTES,
+      });
+    } catch (error) {
+      logger.error('Error generating signed attachment URL:', error);
+      res.status(500).json({ error: 'Failed to generate signed attachment URL' });
     }
   };
 
