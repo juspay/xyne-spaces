@@ -1044,6 +1044,44 @@ model AgentRun {
   @@map("agent_runs")
 }
 
+/// Durable mapping from an agent-authored widget/card to WHERE it lives in a
+/// Spaces thread + the agent identity that posted it. Generic across widget
+/// `kind` ('pr' now; 'plan' etc. later) so ONE table serves every card type.
+///
+/// The load-bearing use: an inbound git-host webhook (e.g. Bitbucket pr:merged /
+/// pr:declined) fires long AFTER the run's SessionContext (Redis, 24h TTL,
+/// deleted on run completion) is gone. It looks the binding up by `externalKey`
+/// (for 'pr': the normalized PR URL) to recover the thread + agent, re-derives
+/// the agent's app token via `spacesAppId`, and posts a FRESH status card.
+///
+/// Written at card-creation time in doRenderPrCard's first-post branch;
+/// COMPLEMENTS (does not replace) the live SessionContext.prMessageIds fast path.
+model AgentWidgetBinding {
+  id              String   @id @default(cuid())
+  orgId           String
+  kind            String /// 'pr' | 'plan' | future widget kinds
+  screenId        String /// deterministic per-widget id (prScreenId / plan screenId)
+  /// External correlate an inbound event is matched on. For 'pr' this is the
+  /// normalized PR URL (lowercase, no protocol, no trailing slash). Null for
+  /// widgets with no external event source (e.g. 'plan').
+  externalKey     String?
+  conversationId  String /// the Spaces thread the card was posted into
+  channelId       String
+  messageId       String? /// the posted flow-card message (informational / future update-in-place)
+  spacesAppId     String /// agent lookup key → findBySpacesAppId → decrypt spacesAppToken
+  spacesAppUserId String /// bot user the card is posted as (postMessage userId)
+  agentSlug       String?
+  status          String? /// last rendered status/state — dedup for provider re-delivery
+  data            Json? /// kind-specific card-rebuild fields (pr: {provider,title,ticketId,url,desc,repo,number})
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([kind, screenId])
+  @@index([kind, externalKey])
+  @@index([orgId])
+  @@map("agent_widget_bindings")
+}
+
 model ChatMessage {
   id             String   @id @default(cuid())
   conversationId String
