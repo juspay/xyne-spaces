@@ -2192,6 +2192,24 @@ model Message {
   @@map("messages")
   @@schema("public")
 }
+
+// Shared lifecycle for structured message artifacts. messageId is deliberately
+// one-way: Message remains the rendering source and does not own artifact state.
+model MessageArtifact {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  messageId      String   @unique
+  type           String
+  command        String
+  status         String
+  callExternalId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([workspaceId, type, status, updatedAt])
+  @@map("message_artifacts")
+  @@schema("public")
+}
 //Message Search Model
 model MessageSearch {
   workspaceId String // denormalized tenant key (stamped on insert)

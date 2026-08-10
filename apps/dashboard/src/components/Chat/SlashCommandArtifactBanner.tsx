@@ -110,7 +110,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
   };
 
   return (
-    <aside className='fixed bottom-[68px] left-2 z-[100] hidden sm:block'>
+    <aside className='fixed bottom-[124px] left-[10px] z-[100] hidden sm:block'>
       <button
         type='button'
         onClick={() => setIsOpen(open => !open)}

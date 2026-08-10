@@ -515,27 +515,16 @@ export const slashCommandArtifactBannerSideEffectSchema = z
     tone: z.literal('orange'),
     status: z.enum(['active', 'completed']).default('active'),
     callExternalId: z.string().min(1).optional(),
+    activity: z
+      .object({
+        audience: z.literal('channel'),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
-/**
- * Request channel-wide notification delivery for an artifact. Delivery uses
- * the same audience/preference tier as an @channel mention, while consumers
- * retain slash-command-specific notification and Activity presentation.
- */
-export const slashCommandArtifactNotifyChannelSideEffectSchema = z
-  .object({
-    type: z.literal('notify_channel'),
-  })
-  .strict();
-
-export const slashCommandArtifactSideEffectSchema = z.discriminatedUnion(
-  'type',
-  [
-    slashCommandArtifactBannerSideEffectSchema,
-    slashCommandArtifactNotifyChannelSideEffectSchema,
-  ],
-);
+export const slashCommandArtifactSideEffectSchema = slashCommandArtifactBannerSideEffectSchema;
 
 export const slashCommandArtifactPropsSchema = z
   .object({
@@ -554,9 +543,6 @@ export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
 
 export type SlashCommandArtifactBannerSideEffect = z.infer<
   typeof slashCommandArtifactBannerSideEffectSchema
->;
-export type SlashCommandArtifactNotifyChannelSideEffect = z.infer<
-  typeof slashCommandArtifactNotifyChannelSideEffectSchema
 >;
 export type SlashCommandArtifactSideEffect = z.infer<
   typeof slashCommandArtifactSideEffectSchema

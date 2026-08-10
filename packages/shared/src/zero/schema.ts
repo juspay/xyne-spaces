@@ -58,6 +58,8 @@ import {
   LinkVisibility,
   LookupType,
   MailboxState,
+  MessageArtifactStatus,
+  MessageArtifactType,
   MeetingStatus,
   MessageType,
   NotificationLevel,
@@ -897,6 +899,20 @@ export const messageTable = table('messages')
     messageActs: string().optional(),
   })
   .primaryKey('messageId');
+
+export const messageArtifactTable = table('message_artifacts') // Prisma model: MessageArtifact
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    type: enumeration<MessageArtifactType>(),
+    command: string(),
+    status: enumeration<MessageArtifactStatus>(),
+    callExternalId: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
 
 export const messageAttachmentTable = table('message_attachments')
   .columns({
@@ -3245,6 +3261,19 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
   }),
 }));
 
+export const messageArtifactTableRelationships = relationships(messageArtifactTable, ({ one }) => ({
+  message: one({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+  call: one({
+    sourceField: ['callExternalId'],
+    destField: ['externalId'],
+    destSchema: callTable,
+  }),
+}));
+
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
   attachments: many({
     sourceField: ['id'],
@@ -4486,6 +4515,7 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
     delayedMessageTable,
@@ -4608,6 +4638,7 @@ export const schema = createSchema({
     channelTableRelationships,
     channelStatsTableRelationships,
     messageTableRelationships,
+    messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
     channelParticipantTableRelationships,

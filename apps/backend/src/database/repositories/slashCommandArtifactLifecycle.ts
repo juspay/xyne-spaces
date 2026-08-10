@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import {
   getSlashCommandArtifactDiagnosticKey,
+  getSlashCommandMessageArtifact,
+  MessageArtifactStatus,
   parseSlashCommandArtifactMessage,
   serializeInitialMessageMd,
   serializeParentMessageMd,
@@ -24,8 +26,9 @@ export type SlashCommandArtifactLifecycleSource =
   | 'call_created';
 
 /**
- * Persist side-effect lifecycle in the artifact's FlowJSON and every denormalized
- * message snapshot in the same transaction. Channel lists render
+ * Persist the queryable lifecycle on the shared artifact row, then update its
+ * FlowJSON rendering snapshot and every denormalized message snapshot in the
+ * same transaction. Channel lists render
  * `initial_message_md`, while threads can render `messages.content`; updating
  * only one is what previously allowed the two surfaces to disagree.
  */
@@ -44,17 +47,57 @@ export const updateArtifactBannerLifecycle = async (
   };
 
   try {
+    // Message insertion side effects normally create this row before an
+    // activity is published. Call creation can race that worker, so bootstrap
+    // the same canonical row here instead of dropping the lifecycle event.
+    const existingArtifact = await tx.messageArtifact.findUnique({
+      where: { messageId: artifactMessageId },
+      select: { id: true },
+    });
+    if (!existingArtifact) {
+      const bootstrapMessage = await tx.message.findUnique({
+        where: { messageId: artifactMessageId },
+        select: { workspaceId: true, content: true },
+      });
+      const bootstrapArtifact = getSlashCommandMessageArtifact(bootstrapMessage?.content);
+      if (!bootstrapMessage || !bootstrapArtifact) {
+        logger.warn('slash_command_artifact_lifecycle_record_missing', logContext);
+        return;
+      }
+      await tx.messageArtifact.upsert({
+        where: { messageId: artifactMessageId },
+        create: {
+          workspaceId: bootstrapMessage.workspaceId,
+          messageId: artifactMessageId,
+          type: bootstrapArtifact.type,
+          command: bootstrapArtifact.command,
+          status: bootstrapArtifact.status,
+          callExternalId: bootstrapArtifact.callExternalId,
+        },
+        update: {},
+      });
+    }
+
     // Call creation and old-call completion webhooks can overlap. Serialize all
     // lifecycle transitions for this artifact so the last transition is based
     // on the latest persisted call link rather than a stale pre-lock read.
-    const [lockedMessage] = await tx.$queryRaw<Array<{ messageId: string }>>`
-      SELECT "messageId"
-      FROM "messages"
+    const [lockedArtifact] = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "message_artifacts"
       WHERE "messageId" = ${artifactMessageId}
       FOR UPDATE
     `;
-    if (!lockedMessage) {
-      logger.warn('slash_command_artifact_lifecycle_message_missing', logContext);
+    if (!lockedArtifact) {
+      logger.warn('slash_command_artifact_lifecycle_record_missing', logContext);
+      return;
+    }
+
+    const artifactRecord = await tx.messageArtifact.findUnique({
+      where: { messageId: artifactMessageId },
+      select: { status: true, callExternalId: true },
+    });
+    if (!artifactRecord) {
+      logger.warn('slash_command_artifact_lifecycle_record_missing', logContext);
       return;
     }
 
@@ -91,17 +134,14 @@ export const updateArtifactBannerLifecycle = async (
       logger.warn('slash_command_artifact_lifecycle_content_invalid', logContext);
       return;
     }
-    const linkedBannerCallIds = artifact.props.sideEffects.flatMap((sideEffect) =>
-      sideEffect.type === 'banner' && sideEffect.callExternalId ? [sideEffect.callExternalId] : []
-    );
     if (
       status === 'completed' &&
-      linkedBannerCallIds.length > 0 &&
-      !linkedBannerCallIds.includes(callExternalId)
+      artifactRecord.callExternalId &&
+      artifactRecord.callExternalId !== callExternalId
     ) {
       logger.info('slash_command_artifact_stale_lifecycle_ignored', {
         ...logContext,
-        currentCallKey: getSlashCommandArtifactDiagnosticKey(linkedBannerCallIds[0]),
+        currentCallKey: getSlashCommandArtifactDiagnosticKey(artifactRecord.callExternalId),
         reason: 'completion_call_link_mismatch',
       });
       return;
@@ -117,11 +157,21 @@ export const updateArtifactBannerLifecycle = async (
       return;
     }
 
+    const nextArtifactStatus =
+      status === 'completed' ? MessageArtifactStatus.COMPLETED : MessageArtifactStatus.ACTIVE;
     const messageContentUpdated = content !== message.content;
+    const artifactStatusUpdated = artifactRecord.status !== nextArtifactStatus;
+    const artifactCallUpdated = artifactRecord.callExternalId !== callExternalId;
     if (messageContentUpdated) {
       await tx.message.update({
         where: { messageId: artifactMessageId },
         data: { content },
+      });
+    }
+    if (artifactStatusUpdated || artifactCallUpdated) {
+      await tx.messageArtifact.update({
+        where: { messageId: artifactMessageId },
+        data: { status: nextArtifactStatus, callExternalId },
       });
     }
 
@@ -199,6 +249,8 @@ export const updateArtifactBannerLifecycle = async (
       ...logContext,
       transactional: true,
       messageContentUpdated,
+      artifactStatusUpdated,
+      artifactCallUpdated,
       initialSnapshotUpdates,
       parentSnapshotUpdates,
     });

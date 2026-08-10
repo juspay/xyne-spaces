@@ -32,6 +32,8 @@ import {
   TicketPriority,
   TicketStageRequestStatus,
   MailboxState,
+  MessageArtifactStatus,
+  MessageArtifactType,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -522,6 +524,40 @@ const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
 
 
 export const queries = defineQueries({
+  activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
+    zql.message_artifacts
+      .where('workspaceId', ctx.workspaceId)
+      .where('type', MessageArtifactType.SLASH_COMMAND)
+      .where('status', MessageArtifactStatus.ACTIVE)
+      // Banner delivery is participant-only even when public channel messages are readable.
+      .whereExists('message', message =>
+        message.where('isDeleted', false).whereExists('conversation', conversation =>
+          conversation.whereExists('channel', channel =>
+            channel.whereExists('participants', participant =>
+              participant.where('userId', ctx.userID),
+            ),
+          ),
+        ),
+      )
+      .orderBy('updatedAt', 'desc')
+      .related('message', message =>
+        message
+          .related('conversation', conversation => conversation.related('channel'))
+          .related('sender'),
+      )
+      .related('call', call => call.related('participants')),
+  ),
+
+  slashCommandArtifactByMessageId: defineQuery(
+    z.object({ messageId: z.string() }),
+    ({ ctx, args: { messageId } }) =>
+      zql.message_artifacts
+        .where('workspaceId', ctx.workspaceId)
+        .where('messageId', messageId)
+        .related('call', call => call.related('participants'))
+        .one(),
+  ),
+
   userChannelSections: defineQuery(z.object({}), () => {
     return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
   }),
@@ -643,28 +679,6 @@ export const queries = defineQueries({
         );
     },
   ),
-
-  userSlashCommandArtifactMessages: defineQuery(({ ctx }) => {
-    return zql.messages
-      .where('content', 'ILIKE', '%data-flow-json=%')
-      .where(
-        'content',
-        'ILIKE',
-        '%&quot;type&quot;:&quot;slash_command_artifact&quot;%',
-      )
-      .where('isDeleted', false)
-      .whereExists('conversation', conversation =>
-        conversation.whereExists('channel', channel =>
-          channel.whereExists('participants', participant =>
-            participant.where('userId', ctx.userID),
-          ),
-        ),
-      )
-      .orderBy('createdAt', 'desc')
-      .limit(100)
-      .related('conversation', conversation => conversation.related('channel'))
-      .related('sender');
-  }),
 
   messagesByIds: defineQuery(
     z.object({ messageIds: z.array(z.string()) }),
@@ -1898,16 +1912,6 @@ export const queries = defineQueries({
       .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
       .where('status', CallStatus.ACTIVE)
       .orderBy('startedAt', 'desc')
-      .related('participants');
-  }),
-  slashCommandArtifactCalls: defineQuery(() => {
-    return zql.calls
-      .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
-      .where(helpers =>
-        helpers.cmp('status', 'NOT IN', [CallStatus.SCHEDULED, CallStatus.CANCELLED]),
-      )
-      .orderBy('startedAt', 'desc')
-      .limit(200)
       .related('participants');
   }),
   activeCallsInChannel: defineQuery(

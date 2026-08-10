@@ -5,10 +5,10 @@ import { toast } from 'sonner';
 import {
   CallStatus,
   InvitationResponse,
+  MessageArtifactStatus,
   buildSlashCommandArtifactFlowMessage,
   getSlashCommandArtifactDiagnosticKey,
   parseSlashCommandArtifactMessage,
-  resolveSlashCommandArtifactCallLifecycle,
   slashCommandArtifactPropsSchema,
   type FlowComponent,
   type SlashCommandArtifactBannerSideEffect,
@@ -28,7 +28,6 @@ import { callLobbyService } from '../../services/Call/callLobbyService';
 import { roomActor } from '../../machines/roomMachine';
 import { queries } from '../../zero/queries';
 import { useFlow } from '../flowUI/FlowContext';
-import { useCanonicalSlashCommandArtifactBannerSideEffect } from './SlashCommandArtifactSideEffects';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -83,9 +82,9 @@ export const SLASH_COMMAND_ARTIFACT_DEFINITIONS: Record<
         viewActionLabel: 'View incident',
         tone: 'orange',
         status: 'active',
-      },
-      {
-        type: 'notify_channel',
+        activity: {
+          audience: 'channel',
+        },
       },
     ],
   },
@@ -260,42 +259,45 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
 }) => {
   const sender = useUser(senderId ?? '');
   const { user } = useAuthContext();
-  const [artifactCalls = []] = useCachedQuery(queries.slashCommandArtifactCalls());
-  const canonicalBannerSideEffect = useCanonicalSlashCommandArtifactBannerSideEffect(messageId);
+  const [messageArtifact] = useCachedQuery(
+    queries.slashCommandArtifactByMessageId({ messageId: messageId ?? '' }),
+  );
+  const canonicalBannerSideEffect = useMemo(
+    () =>
+      messageArtifact && bannerSideEffect
+        ? {
+            ...bannerSideEffect,
+            status:
+              messageArtifact.status === MessageArtifactStatus.ACTIVE
+                ? ('active' as const)
+                : ('completed' as const),
+            callExternalId: messageArtifact.callExternalId ?? undefined,
+          }
+        : undefined,
+    [bannerSideEffect, messageArtifact],
+  );
   const effectiveBannerSideEffect = canonicalBannerSideEffect ?? bannerSideEffect;
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
   const { initiateCall, joinCall, isInCall } = useCallJoinOrInitiate();
   const [isCopying, setIsCopying] = useState(false);
   const lastStateDiagnosticSignature = useRef<string | null>(null);
 
-  const callLifecycle = useMemo(
-    () =>
-      messageId
-        ? resolveSlashCommandArtifactCallLifecycle(artifactCalls, { messageId })
-        : { status: 'pending' as const },
-    [artifactCalls, messageId],
-  );
-
-  const persistedCall = effectiveBannerSideEffect?.callExternalId
-    ? artifactCalls.find(call => call.externalId === effectiveBannerSideEffect.callExternalId)
-    : undefined;
-  const latestCall = effectiveBannerSideEffect?.callExternalId ? persistedCall : callLifecycle.call;
-  const lifecycleCompletedInFlow = effectiveBannerSideEffect?.status === 'completed';
+  const latestCall = messageArtifact?.call;
+  const lifecycleCompleted = effectiveBannerSideEffect?.status === 'completed';
   const activeCall =
-    !lifecycleCompletedInFlow && latestCall?.status === CallStatus.ACTIVE ? latestCall : undefined;
+    !lifecycleCompleted && latestCall?.status === CallStatus.ACTIVE ? latestCall : undefined;
   const endedCall = latestCall && latestCall.status !== CallStatus.ACTIVE ? latestCall : undefined;
-  const inferredActiveCallExternalId =
+  const activeCallExternalIdFallback =
     !latestCall &&
     effectiveBannerSideEffect?.status === 'active' &&
     effectiveBannerSideEffect.callExternalId
       ? effectiveBannerSideEffect.callExternalId
       : undefined;
-  const activeCallExternalId = activeCall?.externalId ?? inferredActiveCallExternalId;
+  const activeCallExternalId = activeCall?.externalId ?? activeCallExternalIdFallback;
   const hasActiveCall = !!activeCallExternalId;
   const showEndedState =
     !hasActiveCall &&
-    (lifecycleCompletedInFlow ||
-      (!effectiveBannerSideEffect?.callExternalId && callLifecycle.status === 'completed'));
+    (lifecycleCompleted || (!!latestCall && latestCall.status !== CallStatus.ACTIVE));
   const isInSev2Call = hasActiveCall && currentCallId === activeCallExternalId;
   const activeDuration = useCallDuration(activeCall?.startedAt, !!activeCall);
   const senderName = getUserDisplayName(sender) || 'Someone';
@@ -398,7 +400,7 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
       ),
       snapshotCallKey: getSlashCommandArtifactDiagnosticKey(bannerSideEffect?.callExternalId),
       callRecordStatus: latestCall?.status ?? 'missing',
-      activeCallResolvedFromFlow: !!inferredActiveCallExternalId,
+      activeCallResolvedFromLinkedId: !!activeCallExternalIdFallback,
     });
     if (lastStateDiagnosticSignature.current === diagnosticSignature) return;
     lastStateDiagnosticSignature.current = diagnosticSignature;
@@ -409,10 +411,10 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
       channelKey: getSlashCommandArtifactDiagnosticKey(channelId),
       surface: surface ?? 'unknown',
       resolvedState,
-      canonicalMessageLifecycleAvailable: !!canonicalBannerSideEffect,
-      flowCallLinkAvailable: !!effectiveBannerSideEffect?.callExternalId,
+      artifactLifecycleAvailable: !!messageArtifact,
+      callLinkAvailable: !!effectiveBannerSideEffect?.callExternalId,
       callRecordAvailable: !!latestCall,
-      activeCallResolvedFromFlow: !!inferredActiveCallExternalId,
+      activeCallResolvedFromLinkedId: !!activeCallExternalIdFallback,
     });
 
     if (
@@ -438,8 +440,9 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
     channelId,
     conversationId,
     effectiveBannerSideEffect?.callExternalId,
-    inferredActiveCallExternalId,
+    activeCallExternalIdFallback,
     latestCall,
+    messageArtifact,
     resolvedState,
     surface,
   ]);

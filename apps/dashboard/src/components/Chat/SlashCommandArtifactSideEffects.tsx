@@ -10,7 +10,6 @@ import type { QueryResultType } from '@rocicorp/zero';
 import {
   CallStatus,
   parseSlashCommandArtifactMessage,
-  resolveSlashCommandArtifactCallLifecycle,
   type SlashCommandArtifactBannerSideEffect,
 } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -18,10 +17,10 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Event, logger } from '../../utils/logger';
 import { queries } from '../../zero/queries';
 
-type SlashCommandArtifactCall = QueryResultType<typeof queries.slashCommandArtifactCalls>[number];
-type SlashCommandArtifactMessage = QueryResultType<
-  typeof queries.userSlashCommandArtifactMessages
+type ActiveSlashCommandArtifact = QueryResultType<
+  typeof queries.activeSlashCommandArtifacts
 >[number];
+type SlashCommandArtifactCall = NonNullable<ActiveSlashCommandArtifact['call']>;
 
 export interface SlashCommandArtifactBannerItem {
   id: string;
@@ -37,7 +36,7 @@ export interface SlashCommandArtifactBannerItem {
   isInitialMessage: boolean;
   banner: SlashCommandArtifactBannerSideEffect;
   activeCall?: SlashCommandArtifactCall;
-  /** Durable FlowJSON fallback when the calls subscription is delayed or ACL-filtered. */
+  /** Durable linked id fallback when the related call is delayed or ACL-filtered. */
   activeCallExternalId?: string;
   activeCallStartedAt?: number;
 }
@@ -45,15 +44,12 @@ export interface SlashCommandArtifactBannerItem {
 export interface SlashCommandArtifactSideEffectContextValue {
   bannerItems: SlashCommandArtifactBannerItem[];
   channelIdsWithActiveSideEffects: ReadonlySet<string>;
-  /** Canonical message-row lifecycle used to override stale conversation snapshots. */
-  bannerSideEffectsByMessageId: ReadonlyMap<string, SlashCommandArtifactBannerSideEffect>;
 }
 
 const SlashCommandArtifactSideEffectContext =
   createContext<SlashCommandArtifactSideEffectContextValue>({
     bannerItems: [],
     channelIdsWithActiveSideEffects: new Set(),
-    bannerSideEffectsByMessageId: new Map(),
   });
 
 /**
@@ -62,12 +58,13 @@ const SlashCommandArtifactSideEffectContext =
  * testable from Zero/React subscription timing.
  */
 export const deriveSlashCommandArtifactSideEffects = (
-  artifactMessages: readonly SlashCommandArtifactMessage[],
-  artifactCalls: readonly SlashCommandArtifactCall[],
+  activeArtifacts: readonly ActiveSlashCommandArtifact[],
 ): SlashCommandArtifactSideEffectContextValue => {
   const bannerItems: SlashCommandArtifactBannerItem[] = [];
-  const bannerSideEffectsByMessageId = new Map<string, SlashCommandArtifactBannerSideEffect>();
-  for (const message of artifactMessages) {
+  for (const activeArtifact of activeArtifacts) {
+    const message = activeArtifact.message;
+    if (!message) continue;
+
     const artifact = parseSlashCommandArtifactMessage(message.content);
     if (!artifact) continue;
 
@@ -75,37 +72,22 @@ export const deriveSlashCommandArtifactSideEffects = (
       (sideEffect): sideEffect is SlashCommandArtifactBannerSideEffect =>
         sideEffect.type === 'banner',
     );
-    const canonicalBanner = bannerSideEffects[0];
-    if (canonicalBanner) {
-      bannerSideEffectsByMessageId.set(message.messageId, canonicalBanner);
-    }
-
     const conversation = message.conversation;
     const channel = conversation?.channel;
     if (!conversation || !channel) continue;
 
-    const lifecycle = resolveSlashCommandArtifactCallLifecycle(artifactCalls, {
-      messageId: message.messageId,
-    });
+    const linkedCall = activeArtifact.call;
+    if (linkedCall && linkedCall.status !== CallStatus.ACTIVE) continue;
 
     for (const sideEffect of bannerSideEffects) {
-      const persistedCall = sideEffect.callExternalId
-        ? artifactCalls.find(call => call.externalId === sideEffect.callExternalId)
-        : undefined;
-      // FlowJSON is the durable lifecycle. When it carries a specific call id,
-      // never let an older call for the same artifact override a restarted one.
-      if (sideEffect.status === 'completed') continue;
-      if (persistedCall && persistedCall.status !== CallStatus.ACTIVE) continue;
-      if (!sideEffect.callExternalId && lifecycle.status === 'completed') continue;
-      const activeCall =
-        persistedCall?.status === CallStatus.ACTIVE
-          ? persistedCall
-          : lifecycle.status === 'active'
-            ? lifecycle.call
-            : undefined;
+      const canonicalSideEffect: SlashCommandArtifactBannerSideEffect = {
+        ...sideEffect,
+        status: 'active',
+        callExternalId: activeArtifact.callExternalId ?? undefined,
+      };
+      const activeCall = linkedCall?.status === CallStatus.ACTIVE ? linkedCall : undefined;
       const activeCallExternalId =
-        activeCall?.externalId ??
-        (sideEffect.status === 'active' ? sideEffect.callExternalId : undefined);
+        activeCall?.externalId ?? activeArtifact.callExternalId ?? undefined;
       bannerItems.push({
         id: `${message.messageId}:banner`,
         type: artifact.props.command,
@@ -118,7 +100,7 @@ export const deriveSlashCommandArtifactSideEffects = (
         createdAt: message.createdAt,
         conversationCreatedAt: conversation.createdAt,
         isInitialMessage: conversation.initialMessageId === message.messageId,
-        banner: sideEffect,
+        banner: canonicalSideEffect,
         ...(activeCall ? { activeCall } : {}),
         ...(activeCallExternalId && { activeCallExternalId }),
         ...(activeCall ? { activeCallStartedAt: activeCall.startedAt } : {}),
@@ -129,7 +111,6 @@ export const deriveSlashCommandArtifactSideEffects = (
   return {
     bannerItems,
     channelIdsWithActiveSideEffects: new Set(bannerItems.map(item => item.channelId)),
-    bannerSideEffectsByMessageId,
   };
 };
 
@@ -138,29 +119,34 @@ export const SlashCommandArtifactSideEffectProvider = ({
 }: {
   children: ReactNode;
 }): React.JSX.Element => {
-  const [artifactMessages = [], artifactMessageQuery] = useCachedQuery(
-    queries.userSlashCommandArtifactMessages(),
-  );
-  const [artifactCalls = [], artifactCallQuery] = useCachedQuery(
-    queries.slashCommandArtifactCalls(),
+  const [activeArtifacts = [], activeArtifactQuery] = useCachedQuery(
+    queries.activeSlashCommandArtifacts(),
   );
   const lastDiagnosticSignature = useRef<string | null>(null);
 
   const value = useMemo(
-    () => deriveSlashCommandArtifactSideEffects(artifactMessages, artifactCalls),
-    [artifactCalls, artifactMessages],
+    () => deriveSlashCommandArtifactSideEffects(activeArtifacts),
+    [activeArtifacts],
   );
 
   const diagnostics = useMemo(() => {
     let parsedArtifactRows = 0;
     let invalidArtifactRows = 0;
+    let missingMessageRelations = 0;
     let activeBannerSideEffects = 0;
     let completedBannerSideEffects = 0;
     let bannerSideEffectsWithCallLink = 0;
     let missingConversationRelations = 0;
     let missingChannelRelations = 0;
+    let linkedCallRows = 0;
+    let missingLinkedCallRelations = 0;
 
-    for (const message of artifactMessages) {
+    for (const activeArtifact of activeArtifacts) {
+      const message = activeArtifact.message;
+      if (!message) {
+        missingMessageRelations += 1;
+        continue;
+      }
       const artifact = parseSlashCommandArtifactMessage(message.content);
       if (!artifact) {
         invalidArtifactRows += 1;
@@ -169,6 +155,8 @@ export const SlashCommandArtifactSideEffectProvider = ({
       parsedArtifactRows += 1;
       if (!message.conversation) missingConversationRelations += 1;
       else if (!message.conversation.channel) missingChannelRelations += 1;
+      if (activeArtifact.call) linkedCallRows += 1;
+      else if (activeArtifact.callExternalId) missingLinkedCallRelations += 1;
       for (const sideEffect of artifact.props.sideEffects) {
         if (sideEffect.type !== 'banner') continue;
         if (sideEffect.status === 'completed') completedBannerSideEffects += 1;
@@ -178,22 +166,22 @@ export const SlashCommandArtifactSideEffectProvider = ({
     }
 
     return {
-      messageQueryState: artifactMessageQuery.type,
-      callQueryState: artifactCallQuery.type,
-      artifactRows: artifactMessages.length,
+      artifactQueryState: activeArtifactQuery.type,
+      artifactRows: activeArtifacts.length,
       parsedArtifactRows,
       invalidArtifactRows,
+      missingMessageRelations,
       activeBannerSideEffects,
       completedBannerSideEffects,
       bannerSideEffectsWithCallLink,
       missingConversationRelations,
       missingChannelRelations,
-      callRows: artifactCalls.length,
-      activeCallRows: artifactCalls.filter(call => call.status === CallStatus.ACTIVE).length,
+      linkedCallRows,
+      missingLinkedCallRelations,
       resolvedBannerItems: value.bannerItems.length,
       resolvedChannelIndicators: value.channelIdsWithActiveSideEffects.size,
     };
-  }, [artifactCallQuery.type, artifactCalls, artifactMessageQuery.type, artifactMessages, value]);
+  }, [activeArtifacts, activeArtifactQuery.type, value]);
 
   useEffect(() => {
     const signature = JSON.stringify(diagnostics);
@@ -203,12 +191,14 @@ export const SlashCommandArtifactSideEffectProvider = ({
     logger.info(Event.SLASH_COMMAND_ARTIFACT_SIDE_EFFECTS_RECONCILED, diagnostics);
     if (
       diagnostics.invalidArtifactRows > 0 ||
+      diagnostics.missingMessageRelations > 0 ||
       diagnostics.missingConversationRelations > 0 ||
       diagnostics.missingChannelRelations > 0
     ) {
       logger.warn(Event.SLASH_COMMAND_ARTIFACT_INVARIANT_FAILED, {
         reason: 'artifact_subscription_rows_incomplete',
         invalidArtifactRows: diagnostics.invalidArtifactRows,
+        missingMessageRelations: diagnostics.missingMessageRelations,
         missingConversationRelations: diagnostics.missingConversationRelations,
         missingChannelRelations: diagnostics.missingChannelRelations,
       });
@@ -228,11 +218,4 @@ export const useSlashCommandArtifactSideEffects = (): SlashCommandArtifactSideEf
 export const useChannelHasSlashCommandArtifactSideEffect = (channelId: string): boolean => {
   const { channelIdsWithActiveSideEffects } = useSlashCommandArtifactSideEffects();
   return channelIdsWithActiveSideEffects.has(channelId);
-};
-
-export const useCanonicalSlashCommandArtifactBannerSideEffect = (
-  messageId: string | undefined,
-): SlashCommandArtifactBannerSideEffect | undefined => {
-  const { bannerSideEffectsByMessageId } = useSlashCommandArtifactSideEffects();
-  return messageId ? bannerSideEffectsByMessageId.get(messageId) : undefined;
 };

@@ -35,7 +35,7 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType, parseSlashCommandArtifactMessage } from '@xyne/shared';
+  UserType, MessageType, getSlashCommandMessageArtifact, parseSlashCommandArtifactMessage, resolveSlashCommandArtifactAudience } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -264,6 +264,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       select: {
         messageId: true,
         senderId: true,
+        workspaceId: true,
         content: true,
         conversationId: true,
         msgType: true,
@@ -401,13 +402,38 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const senderName = sender?.displayName || sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
     const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
-    const hasNotifyChannelSideEffect =
+    const artifactRecord = getSlashCommandMessageArtifact(content);
+    if (artifactRecord) {
+      await db.messageArtifact.upsert({
+        where: { messageId },
+        create: {
+          workspaceId: message.workspaceId,
+          messageId,
+          type: artifactRecord.type,
+          command: artifactRecord.command,
+          status: artifactRecord.status,
+          callExternalId: artifactRecord.callExternalId,
+        },
+        update: {
+          type: artifactRecord.type,
+          command: artifactRecord.command,
+          status: artifactRecord.status,
+          callExternalId: artifactRecord.callExternalId,
+        },
+      });
+    }
+    const hasChannelArtifactActivity =
       slashCommandArtifact?.props.sideEffects.some(
-        sideEffect => sideEffect.type === 'notify_channel',
+        sideEffect =>
+          sideEffect.type === 'banner' && sideEffect.activity?.audience === 'channel',
       ) ?? false;
     const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
     const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
     const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
+    const {
+      activityUserIds: slashCommandActivityUserIds,
+      notificationUserIds: slashCommandNotificationUserIds,
+    } = resolveSlashCommandArtifactAudience(users, senderId, hasChannelArtifactActivity);
     const allowThreadBroadcastMentions = userPreference?.allowThreadBroadcastMentions ?? false;
 
     // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
@@ -499,6 +525,27 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
+    // The Activity row is the per-user audience record used by the global
+    // active-artifact subscription. Create it before the DM branch so slash
+    // artifacts behave consistently in channels, group DMs, and one-to-one DMs.
+    if (slashCommandActivityUserIds.length > 0) {
+      const isThreadActivity = conversation.initialMessageId !== messageId;
+      await activityService.createActivities(
+        slashCommandActivityUserIds.map(userId => ({
+          id: uuidv4(),
+          userId,
+          actorId: senderId,
+          actorAction: 'slash_command_artifact' as const,
+          actionSource: 'message' as const,
+          actionSourceId: messageId,
+          messageId,
+          channelId,
+          isThreadActivity,
+          classification: ActivityClassification.FYI,
+        })),
+      );
+    }
+
     if (isDMChannel && channel) {
       const memberNames = channelParticipants
         .filter(p => channel.scopeType === ChannelScopeType.DM ? p.userId !== senderId : true)
@@ -551,17 +598,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         userId: u.userId,
         mentionSource: u.mentionSource
       }))
-
-    const slashCommandNotificationUserIds = hasNotifyChannelSideEffect
-      ? users
-          .filter(
-            user =>
-              user.id !== senderId &&
-              user.userType !== UserType.APP &&
-              user.status === UserStatus.ACTIVE,
-          )
-          .map(user => user.id)
-      : [];
 
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
 
@@ -631,7 +667,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const finalMentionedUserIds = validMentionedUsers
       .map(user => user.userId);
 
-    const notificationUserIds = hasNotifyChannelSideEffect
+    const notificationUserIds = hasChannelArtifactActivity
       ? []
       : [
           ...new Set(
@@ -645,7 +681,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           ),
         ];
 
-    if (!hasNotifyChannelSideEffect && validMentionedUsers.length > 0) {
+    if (!hasChannelArtifactActivity && validMentionedUsers.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
       const activities = validMentionedUsers.map(user => ({
         id: uuidv4(),
@@ -677,24 +713,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         })
       : undefined;
 
-    if (slashCommandNotificationUserIds.length > 0) {
-      const isThreadActivity = conversation.initialMessageId !== messageId;
-      await activityService.createActivities(
-        slashCommandNotificationUserIds.map(userId => ({
-          id: uuidv4(),
-          userId,
-          actorId: senderId,
-          actorAction: 'slash_command_artifact' as const,
-          actionSource: 'message' as const,
-          actionSourceId: messageId,
-          messageId,
-          channelId,
-          isThreadActivity,
-          classification: ActivityClassification.FYI,
-        })),
-      );
-    }
-
     // Keyword-notification matching: scan the message's plain text against
     // every participant's configured keywords (already loaded by
     // prefetchFilterData). Mentioned users are excluded so a mention+keyword
@@ -704,7 +722,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // subscription. DM channels never reach this point (early return above).
     const keywordScanText = getKeywordScanText(content);
     let keywordMatchesByUser = new Map<string, string[]>();
-    if (!hasNotifyChannelSideEffect && keywordScanText && prefetchedData) {
+    if (!hasChannelArtifactActivity && keywordScanText && prefetchedData) {
       const candidateKeywords = new Map<string, string[]>();
       for (const participant of channelParticipants) {
         const userId = participant.userId;
@@ -720,8 +738,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const keywordUserIds = [...keywordMatchesByUser.keys()];
     const keywordUserIdSet = new Set(keywordUserIds);
 
-    if (hasNotifyChannelSideEffect || !isReply) {
-      const channelMessageRecipientIds = hasNotifyChannelSideEffect
+    if (hasChannelArtifactActivity || !isReply) {
+      const channelMessageRecipientIds = hasChannelArtifactActivity
         ? slashCommandNotificationUserIds
         : channelParticipants
             .map(participant => participant.userId)
@@ -744,7 +762,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             sender?.picture ?? '',
             prefetchedData,
             {
-              channelWide: hasNotifyChannelSideEffect,
+              channelWide: hasChannelArtifactActivity,
               isThreadMessage: !!isReply,
             },
           );
@@ -871,7 +889,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       );
     }
 
-    if (!hasNotifyChannelSideEffect) {
+    if (!hasChannelArtifactActivity) {
       await this.handleSpecialMentionActivities(
         channelId,
         messageId,
@@ -891,7 +909,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       channelParticipants
     );
 
-    if (isReply && conversationId && !hasNotifyChannelSideEffect) {
+    if (isReply && conversationId && !hasChannelArtifactActivity) {
       // Exclude already-notified mention recipients from thread replies.
       const replyExcludedUserIds = [
         ...new Set([

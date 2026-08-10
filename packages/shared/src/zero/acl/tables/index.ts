@@ -33,6 +33,7 @@ export { ConversationParticipantsACL } from './conversation-participants-acl';
 export { ConversationsACL } from './conversations-acl';
 export { MessageAttachmentsACL } from './message-attachments-acl';
 export { MessagesACL } from './messages-acl';
+export { MessageArtifactsACL } from './message-artifacts-acl';
 export { NotificationPreferencesACL } from './notification-preferences-acl';
 export { OrgMembersACL } from './org-members-acl';
 export { OrganizationsACL } from './organizations-acl';

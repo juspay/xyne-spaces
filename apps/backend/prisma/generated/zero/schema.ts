@@ -515,6 +515,7 @@ export const userPreferenceTable = table("user_preferences")
     channelSortOrder: string(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
+    showThreadTags: boolean(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
@@ -1136,6 +1137,7 @@ export const conversationTable = table("conversations")
     parent_message_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
+    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
@@ -1341,8 +1343,23 @@ export const messageTable = table("messages")
     isSent: boolean(),
     reactions_md: string().optional(),
     link_preview_md: string().optional(),
+    messageActs: string().optional(),
   })
   .primaryKey("messageId");
+
+export const messageArtifactTable = table("message_artifacts")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    type: string(),
+    command: string(),
+    status: string(),
+    callExternalId: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const messageSearchTable = table("message_search")
   .columns({
@@ -4737,6 +4754,7 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
+      messageArtifactTable,
       messageSearchTable,
       messageAttachmentTable,
       reactionTable,
@@ -5022,6 +5040,7 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
+export type MessageArtifact = Row<typeof schema.tables.message_artifacts>;
 export type MessageSearch = Row<typeof schema.tables.message_search>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;

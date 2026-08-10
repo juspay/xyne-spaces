@@ -1,5 +1,9 @@
 import type { FlowComponent, FlowDefinition } from "../types/flowUI";
 import {
+  MessageArtifactStatus,
+  MessageArtifactType,
+} from "../zero/types";
+import {
   flowDefinitionSchema,
   slashCommandArtifactPropsSchema,
   type SlashCommandArtifactProps,
@@ -61,6 +65,42 @@ export interface ParsedSlashCommandArtifact {
   props: SlashCommandArtifactProps;
   body: string;
 }
+
+export interface SlashCommandMessageArtifact {
+  type: MessageArtifactType.SLASH_COMMAND;
+  command: string;
+  status: MessageArtifactStatus;
+  callExternalId: string | null;
+}
+
+interface SlashCommandArtifactAudienceUser {
+  id: string;
+  status: string;
+  userType: string;
+}
+
+export interface SlashCommandArtifactAudience {
+  activityUserIds: string[];
+  notificationUserIds: string[];
+}
+
+/** Include the creator in banner visibility without notifying them about their own message. */
+export const resolveSlashCommandArtifactAudience = (
+  users: readonly SlashCommandArtifactAudienceUser[],
+  senderId: string,
+  enabled: boolean,
+): SlashCommandArtifactAudience => {
+  if (!enabled) return { activityUserIds: [], notificationUserIds: [] };
+
+  const activityUserIds = users
+    .filter((user) => user.userType !== "APP" && user.status === "ACTIVE")
+    .map((user) => user.id);
+
+  return {
+    activityUserIds,
+    notificationUserIds: activityUserIds.filter((userId) => userId !== senderId),
+  };
+};
 
 export interface BuildSlashCommandArtifactFlowMessageInput {
   command: string;
@@ -169,15 +209,37 @@ export const parseSlashCommandArtifactMessage = (
   };
 };
 
+/**
+ * Return the normalized shared row stored in message_artifacts. FlowJSON stays
+ * on messages as the rendering contract; this record is the queryable lifecycle.
+ */
+export const getSlashCommandMessageArtifact = (
+  content: string | null | undefined,
+): SlashCommandMessageArtifact | null => {
+  const artifact = parseSlashCommandArtifactMessage(content);
+  if (!artifact) return null;
+
+  const banner = artifact.props.sideEffects.find(
+    (sideEffect) => sideEffect.type === "banner",
+  );
+  return {
+    type: MessageArtifactType.SLASH_COMMAND,
+    command: artifact.props.command,
+    status:
+      banner?.status === "completed"
+        ? MessageArtifactStatus.COMPLETED
+        : MessageArtifactStatus.ACTIVE,
+    callExternalId: banner?.callExternalId ?? null,
+  };
+};
+
 export type SlashCommandArtifactSideEffectLifecycleStatus =
   | "active"
   | "completed";
 
 /**
- * Persist banner lifecycle in the FlowJSON itself. This is deliberately a
- * content transformation rather than message-metadata state: every channel
- * member receives the same durable side-effect record through normal message
- * replication, even after the associated call falls out of recent-call queries.
+ * Update the rendering snapshot stored in FlowJSON. The queryable lifecycle is
+ * persisted atomically in message_artifacts by the backend lifecycle repository.
  */
 export const updateSlashCommandArtifactBannerLifecycle = (
   content: string,
@@ -225,76 +287,4 @@ export const updateSlashCommandArtifactBannerLifecycle = (
     components: patchComponents(parsed.flow.components),
   };
   return updated ? serializeFlowDefinitionMessageContent(flow) : null;
-};
-
-export interface SlashCommandArtifactCallLike {
-  status: string;
-  startedAt: number;
-  metadata?: unknown;
-}
-
-export interface SlashCommandArtifactCallIdentity {
-  messageId: string;
-}
-
-const getCallLink = (
-  metadata: unknown,
-): { conversationId?: string; artifactMessageId?: string } => {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
-    return {};
-  const value = metadata as Record<string, unknown>;
-  return {
-    ...(typeof value["conversationId"] === "string" && {
-      conversationId: value["conversationId"],
-    }),
-    ...(typeof value["artifactMessageId"] === "string" && {
-      artifactMessageId: value["artifactMessageId"],
-    }),
-  };
-};
-
-/** Resolve the newest call explicitly linked to an artifact message. */
-export const findLatestSlashCommandArtifactCall = <
-  T extends SlashCommandArtifactCallLike,
->(
-  calls: readonly T[],
-  artifact: SlashCommandArtifactCallIdentity,
-): T | undefined => {
-  const candidates = calls.filter(
-    (call) =>
-      getCallLink(call.metadata).artifactMessageId === artifact.messageId,
-  );
-
-  return candidates.reduce<T | undefined>(
-    (latest, call) =>
-      !latest || call.startedAt > latest.startedAt ? call : latest,
-    undefined,
-  );
-};
-
-export type SlashCommandArtifactCallLifecycleStatus =
-  | "pending"
-  | "active"
-  | "completed";
-
-export interface SlashCommandArtifactCallLifecycle<
-  T extends SlashCommandArtifactCallLike,
-> {
-  status: SlashCommandArtifactCallLifecycleStatus;
-  call?: T;
-}
-
-/** Side-effect lifecycle shared by the card, banner, and channel indicator. */
-export const resolveSlashCommandArtifactCallLifecycle = <
-  T extends SlashCommandArtifactCallLike,
->(
-  calls: readonly T[],
-  artifact: SlashCommandArtifactCallIdentity,
-): SlashCommandArtifactCallLifecycle<T> => {
-  const call = findLatestSlashCommandArtifactCall(calls, artifact);
-  if (!call) return { status: "pending" };
-  return {
-    status: call.status === "ACTIVE" ? "active" : "completed",
-    call,
-  };
 };
