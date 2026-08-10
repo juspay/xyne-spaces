@@ -86,8 +86,6 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import { useCanvasExitTitleGuard } from '../../../hooks/useCanvasExitTitleGuard';
-import { CanvasExitTitleDialog } from '../CanvasExitTitleDialog';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -800,47 +798,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     },
   );
 
-  const exitTitleGuard = useCanvasExitTitleGuard({
-    getTitle: () => titleRef.current,
-    getContent: () => editorRef.current?.getBlocks() ?? latestContentRef.current,
-    enabled: !isCreating,
-    canEdit,
-    canDelete:
-      selectedCanvas?.createdBy === user?.id || selectedCanvas?.accessLevel === CanvasRole.OWNER,
-    onExit: () => {
-      saveCanvasExitSnapshot();
-      handleBack();
-    },
-    onSaveTitle: async nextTitle => {
-      if (!selectedCanvas?.id) throw new Error('Canvas is not ready to be titled');
-
-      const result = z.mutate(
-        mutators.canvas.update({
-          id: selectedCanvas.id,
-          title: nextTitle,
-          timestamp: Date.now(),
-        }),
-      );
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to save canvas title');
-      }
-
-      setCurrentTitle(nextTitle);
-      titleRef.current = nextTitle;
-    },
-    onDeleteAndExit: async () => {
-      if (!selectedCanvas?.id) throw new Error('Canvas is not ready to be deleted');
-
-      const result = z.mutate(mutators.canvas.delete({ id: selectedCanvas.id }));
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to delete canvas');
-      }
-    },
-  });
-
-  const handleLeaveCanvas = exitTitleGuard.requestExit;
+  const handleLeaveCanvas = useCallback((): void => {
+    saveCanvasExitSnapshot();
+    handleBack();
+  }, [handleBack, saveCanvasExitSnapshot]);
 
   // Check if this is a knowledge canvas
   const isKnowledgeCanvas =
@@ -1658,7 +1619,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         onRename={handleRenameVersion}
         onMakeCopy={version => void handleMakeCopyVersion(version)}
       />
-      <CanvasExitTitleDialog {...exitTitleGuard.dialogProps} />
       <Dialog open={showSendConfirmation} onOpenChange={setShowSendConfirmation}>
         <div className='p-6'>
           <h2 className='text-lg font-semibold mb-2'>Send to Channel?</h2>

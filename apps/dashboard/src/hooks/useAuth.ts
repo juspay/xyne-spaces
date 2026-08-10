@@ -12,6 +12,7 @@ import type {
 } from '../machines/authMachine';
 import { Context } from '@xyne/shared/index';
 import { apiInstance } from '../services/clients/apiClient';
+import { hashPasswordForAuth } from '../utils/passwordHash';
 
 export interface UseAuthReturn {
   // State
@@ -35,6 +36,19 @@ export interface UseAuthReturn {
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
   signInWithEmail: (email: string, password: string, invitationId?: string) => Promise<void>;
+  registerWithEmail: (
+    email: string,
+    password: string,
+    name: string,
+    workspaceId?: string,
+  ) => Promise<{ success: boolean; message?: string; error?: string }>;
+  verifyEmailCode: (
+    email: string,
+    code: string,
+  ) => Promise<{ success: boolean; status?: string; error?: string }>;
+  resendVerificationCode: (
+    email: string,
+  ) => Promise<{ success: boolean; message?: string; error?: string }>;
   logout: () => void;
   clearError: () => void;
   startEnterpriseLogin: () => void;
@@ -152,6 +166,132 @@ export const useAuth = (): UseAuthReturn => {
     [send],
   );
 
+  const registerWithEmail = useCallback(
+    async (
+      email: string,
+      password: string,
+      name: string,
+      workspaceId?: string,
+    ): Promise<{ success: boolean; message?: string; error?: string }> => {
+      try {
+        const hashedPassword = await hashPasswordForAuth(password);
+        const response = await apiInstance.post(
+          '/v2/auth/email/register',
+          { email, hashedPassword, name, ...(workspaceId ? { workspaceId } : {}) },
+          { timeout: 30000 },
+        );
+        const data = response.data as { success: boolean; message?: string };
+        return { success: true, message: data.message ?? 'Verification code sent.' };
+      } catch (err) {
+        if (axios.isAxiosError(err)) {
+          const data = err.response?.data as { error?: string; message?: string } | undefined;
+          return { success: false, error: data?.message ?? data?.error ?? 'Registration failed' };
+        }
+        const errWithResponse = err as { responseData?: { message?: string; error?: string } };
+        const errMessage =
+          errWithResponse.responseData?.message ??
+          errWithResponse.responseData?.error ??
+          (err instanceof Error ? err.message : '');
+        return { success: false, error: errMessage || 'Registration failed. Please try again.' };
+      }
+    },
+    [],
+  );
+
+  const verifyEmailCode = useCallback(
+    async (
+      email: string,
+      code: string,
+    ): Promise<{ success: boolean; status?: string; error?: string }> => {
+      try {
+        const response = await apiInstance.post(
+          '/v2/auth/email/verify',
+          { email, code },
+          { timeout: 15000 },
+        );
+        const data = response.data as {
+          success: boolean;
+          status?: string;
+          user?: User;
+          workspaces?: Workspace[];
+          pendingUserData?: { email: string; name: string; picture?: string };
+          userExistsButRemoved?: boolean;
+          autoLoginWorkspace?: string;
+          domainConflictError?: string;
+          publicEmailDomainError?: string;
+          enterpriseJoinOrgName?: string;
+          enterpriseJoinWorkspaces?: string;
+        };
+
+        if (!data.success) {
+          return { success: false, error: 'Verification failed' };
+        }
+
+        // Dispatch to auth machine — same as OAuth callback.
+        // The auth machine will check hasPendingWorkspace (from localStorage)
+        // and trigger the joinWorkspace actor, which handles community OPEN,
+        // community REQUEST_TO_JOIN, and enterprise join flows identically
+        // to Google/Microsoft SSO. If no workspaceId is pending, the auth
+        // machine shows the create-org / workspace-selection / domain-conflict
+        // UI — exactly like the OAuth callback flow.
+        authActor.send({
+          type: 'OAUTH_CALLBACK_COMPLETE',
+          output: {
+            ...(data.user ? { user: data.user } : {}),
+            workspaces: data.workspaces ?? [],
+            pendingUserData: data.pendingUserData ?? { email, name: '' },
+            userExistsButRemoved: data.userExistsButRemoved ?? false,
+            autoLoginWorkspace: data.autoLoginWorkspace,
+            domainConflictError: data.domainConflictError,
+            publicEmailDomainError: data.publicEmailDomainError,
+            enterpriseJoinOrgName: data.enterpriseJoinOrgName,
+            enterpriseJoinWorkspaces: data.enterpriseJoinWorkspaces,
+          } as OAuthCallbackOutput,
+        });
+
+        return { success: true, status: data.status ?? 'JOINED' };
+      } catch (err) {
+        if (axios.isAxiosError(err)) {
+          const data = err.response?.data as { error?: string; message?: string } | undefined;
+          return { success: false, error: data?.message ?? data?.error ?? 'Verification failed' };
+        }
+        const errWithResponse = err as { responseData?: { message?: string; error?: string } };
+        const errMessage =
+          errWithResponse.responseData?.message ??
+          errWithResponse.responseData?.error ??
+          (err instanceof Error ? err.message : '');
+        return { success: false, error: errMessage || 'Verification failed. Please try again.' };
+      }
+    },
+    [],
+  );
+
+  const resendVerificationCode = useCallback(
+    async (email: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+      try {
+        const response = await apiInstance.post(
+          '/v2/auth/email/resend-code',
+          { email },
+          { timeout: 30000 },
+        );
+        const data = response.data as { success: boolean; message?: string };
+        return { success: true, message: data.message ?? 'A new verification code has been sent.' };
+      } catch (err) {
+        if (axios.isAxiosError(err)) {
+          const data = err.response?.data as { error?: string; message?: string } | undefined;
+          return { success: false, error: data?.message ?? data?.error ?? 'Failed to resend code' };
+        }
+        const errWithResponse = err as { responseData?: { message?: string; error?: string } };
+        const errMessage =
+          errWithResponse.responseData?.message ??
+          errWithResponse.responseData?.error ??
+          (err instanceof Error ? err.message : '');
+        return { success: false, error: errMessage || 'Failed to resend code. Please try again.' };
+      }
+    },
+    [],
+  );
+
   return {
     // State
     user: state.context.user,
@@ -183,6 +323,9 @@ export const useAuth = (): UseAuthReturn => {
     signInWithGoogle,
     signInWithMicrosoft,
     signInWithEmail,
+    registerWithEmail,
+    verifyEmailCode,
+    resendVerificationCode,
     logout,
     clearError,
     startEnterpriseLogin,

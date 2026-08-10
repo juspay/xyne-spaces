@@ -9,6 +9,7 @@ import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { buildInvitationLink } from '@/controllers/invitationController';
+import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -203,6 +204,14 @@ export class OrganizationController {
           workspaceId: workspace.id,
           role: WorkspaceRole.ADMIN,
         },
+      });
+
+      // 4b. Seed general channel + default project + board/stages
+      await createCommunityWorkspaceDefaults({
+        db,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        createdBy: userId,
       });
 
       // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
