@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { config as appConfig } from '@/config/env';
 
 /**
  * Strip markdown code fences (```json ... ``` or ``` ... ```) and leading
@@ -508,13 +509,40 @@ const DEFAULT_SECTION_CONCURRENCY: Record<TeamIntelligenceSectionScope, SectionC
   org: 3,
 };
 
+function parseSectionConcurrency(value: string | undefined, maxConcurrency: number): number | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'all' || normalized === 'max' || normalized === 'full') {
+    return maxConcurrency;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return null;
+  }
+  return parsed;
+}
+
 export function getTeamIntelligenceSectionConcurrency(
   scope: TeamIntelligenceSectionScope,
   maxConcurrency: number
 ): number {
   const max = Math.max(1, Math.floor(maxConcurrency));
+  const scopedValue =
+    scope === 'user'
+      ? appConfig.teamIntelligence.userSectionConcurrency
+      : scope === 'team'
+        ? appConfig.teamIntelligence.teamSectionConcurrency
+        : appConfig.teamIntelligence.orgSectionConcurrency;
+  const configured =
+    parseSectionConcurrency(appConfig.teamIntelligence.sectionConcurrency, max) ??
+    parseSectionConcurrency(scopedValue, max);
+  if (configured !== null) {
+    return configured;
+  }
   const defaultValue = DEFAULT_SECTION_CONCURRENCY[scope];
-  return defaultValue === 'all' ? max : Math.min(defaultValue, max);
+  return defaultValue === 'all' ? max : defaultValue;
 }
 
 type LlmGateContext = {
@@ -534,7 +562,10 @@ let activeTeamIntelligenceLlmCalls = 0;
 const pendingTeamIntelligenceLlmCalls: LlmGateWaiter[] = [];
 
 function getTeamIntelligenceLlmGlobalConcurrency(): number {
-  return DEFAULT_LLM_GLOBAL_CONCURRENCY;
+  const configured = Number(appConfig.teamIntelligence.llmGlobalConcurrency);
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_LLM_GLOBAL_CONCURRENCY;
 }
 
 function releaseTeamIntelligenceLlmSlot(): void {

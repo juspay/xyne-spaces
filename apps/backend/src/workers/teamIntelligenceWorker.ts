@@ -78,9 +78,9 @@ class TeamIntelligenceWorker {
       throw new Error('[TEAM-INTEL-WORKER] Queue not available after initialization');
     }
 
-    const userJobConcurrency = 2;
-    const teamJobConcurrency = 2;
-    const orgJobConcurrency = 1;
+    const userJobConcurrency = appConfig.teamIntelligence.userJobConcurrency;
+    const teamJobConcurrency = appConfig.teamIntelligence.teamJobConcurrency;
+    const orgJobConcurrency = appConfig.teamIntelligence.orgJobConcurrency;
 
     queue.process('ingest-user', userJobConcurrency, async (job: Bull.Job<TeamIntelligenceQueuedJobData>) => {
       return this.processJob(job);
@@ -101,6 +101,10 @@ class TeamIntelligenceWorker {
       userJobConcurrency,
       teamJobConcurrency,
       orgJobConcurrency,
+      userSectionConcurrency: appConfig.teamIntelligence.userSectionConcurrency || 'default',
+      teamSectionConcurrency: appConfig.teamIntelligence.teamSectionConcurrency || 'default',
+      orgSectionConcurrency: appConfig.teamIntelligence.orgSectionConcurrency || 'default',
+      fallbackSectionConcurrency: appConfig.teamIntelligence.sectionConcurrency || 'default',
     });
   }
 

@@ -103,7 +103,7 @@ async function llmGenerate(
       { scope: 'org', purpose: options.purpose, promptChars: prompt.length },
       async () => {
     const response = await llmClient.generateStream({
-      model: appConfig.workflow.defaultModelName,
+      model: appConfig.teamIntelligence.model,
       messages: [createUserMessage(prompt)],
     });
     const finalMessagePromise = response.finalMessage.catch((error) => {
