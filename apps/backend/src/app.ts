@@ -844,9 +844,17 @@ export class App {
     await configSyncService.syncConfigWithDatabase();
 
     // Initialize and start model sync queue (Bull-based scheduling)
-    logger.info('Initializing model sync queue...');
-    await modelSyncQueue.initialize();
-    await modelSyncQueue.runInitialSync();
+    // Only run when LiteLLM is configured; otherwise there is nothing to sync
+    // and we must not fire requests to LiteLLM (e.g. local `pnpm run dev`).
+    if (config.litellm.apiKey && config.litellm.baseUrl) {
+      logger.info('Initializing model sync queue...');
+      await modelSyncQueue.initialize();
+      await modelSyncQueue.runInitialSync();
+    } else {
+      logger.info(
+        'Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
+      );
+    }
 
     // Initialize calendar sync queues
     logger.info('Initializing Microsoft Calendar sync queue...');
