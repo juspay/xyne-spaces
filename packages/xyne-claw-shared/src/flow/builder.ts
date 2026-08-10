@@ -8,6 +8,7 @@
  */
 
 import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
+import type { UserQuestion } from "../tools/types.js";
 
 // ── Inlined FlowUI types (mirrors @xyne/shared) ──────────────────────────────
 
@@ -27,7 +28,8 @@ type FlowComponentType =
   | 'divider'
   | 'image'
   | 'link'
-  | 'plan';
+  | 'plan'
+  | 'user_question';
 
 interface FlowComponentStyle {
   padding?: string;
@@ -552,8 +554,7 @@ export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefin
  * User question — radio group with the agent's options + submit button.
  */
 export function buildUserQuestionFlow(
-  question: string,
-  options: string[],
+  questions: UserQuestion[],
   context: {
     questionId: string;
     agentSlug: string;
@@ -561,15 +562,31 @@ export function buildUserQuestionFlow(
     conversationId: string;
     userId: string;
   },
+  opts?: {
+    phase?: 'pending' | 'answered' | 'declined';
+    answers?: Record<string, string | string[]>;
+    notes?: Record<string, string>;
+    decidedAt?: string;
+  },
 ): FlowDefinition {
-  return new FlowBuilder(`user-question-${crypto.randomUUID()}`)
-    .addText('q', question)
-    .addSelect('answer', 'answer', {
-      label: 'Choose an option',
-      required: true,
-      options: options.map((opt) => ({ label: opt, value: opt })),
+  const phase = opts?.phase ?? 'pending';
+  return new FlowBuilder(`user-question-${context.questionId}`)
+    .addComponent({
+      id: 'questions',
+      type: 'user_question',
+      props: {
+        title: questions.length === 1 ? 'Question' : 'Questions',
+        questions,
+        phase,
+        ...(opts?.answers ? { answers: opts.answers } : {}),
+        ...(opts?.notes ? { notes: opts.notes } : {}),
+        ...(opts?.decidedAt ? { decidedAt: opts.decidedAt } : {}),
+        ...(phase === 'pending' ? {
+          submitAction: { type: 'submit', actionId: 'user-answer' },
+          dismissAction: { type: 'submit', actionId: 'dismiss-user-question' },
+        } : {}),
+      },
     })
-    .addButton('submit', 'Submit', { type: 'submit', actionId: 'user-answer' }, { variant: 'primary' })
     .setData({
       actionType: 'user-answer',
       questionId: context.questionId,

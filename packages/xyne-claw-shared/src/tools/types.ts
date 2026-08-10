@@ -21,9 +21,23 @@ export interface ConfigField {
 
 export interface PendingQuestion {
   questionId: string;
-  question: string;
-  options: string[];
+  questions?: UserQuestion[];
+  /** Legacy follow-up suggestion chips still use this compact shape. */
+  question?: string;
+  options?: string[];
   purpose?: "clarification" | "follow_up_suggestions";
+}
+
+export type UserQuestionType = "single_choice" | "multiple_choice" | "open_ended";
+
+export interface UserQuestion {
+  id: string;
+  label?: string;
+  question: string;
+  type: UserQuestionType;
+  options?: string[];
+  required?: boolean;
+  placeholder?: string;
 }
 
 export interface PendingResponse {
