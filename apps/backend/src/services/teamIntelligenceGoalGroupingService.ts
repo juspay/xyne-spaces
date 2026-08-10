@@ -17,6 +17,13 @@ export interface TeamGoalGroupsResponse {
   to: string;
   totalTeams: number;
   groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
+  warnings: TeamGoalGroupsWarning[];
+}
+
+export interface TeamGoalGroupsWarning {
+  code: 'GOAL_FETCH_FAILED';
+  teamId: string;
+  teamName: string;
 }
 
 export interface StoredGoalAlignment {
@@ -102,12 +109,29 @@ class TeamIntelligenceGoalGroupingService {
     const sortedTeams = [...(teams ?? [])].sort((a, b) => a.name.localeCompare(b.name));
     const teamIds = sortedTeams.map((team) => team.id);
 
-    const [goalsByTeamEntries, summaryRows] = await Promise.all([
+    const [goalFetchResults, summaryRows] = await Promise.all([
       mapWithConcurrency(sortedTeams, 5, async (team) => {
-        const goals = await mettleTeamGoalsService.fetchActiveTeamGoals(team.id, {
-          throwOnError: true,
-        });
-        return [team.id, goals] as const;
+        try {
+          const goals = await mettleTeamGoalsService.fetchActiveTeamGoals(team.id, {
+            throwOnError: true,
+          });
+          return { team, goals, warning: null };
+        } catch (error) {
+          logger.warn('[TeamIntelligenceGoalGrouping] Could not fetch goals for team', {
+            teamId: team.id,
+            teamName: team.name,
+            error,
+          });
+          return {
+            team,
+            goals: [],
+            warning: {
+              code: 'GOAL_FETCH_FAILED' as const,
+              teamId: team.id,
+              teamName: team.name,
+            },
+          };
+        }
       }),
       teamIds.length === 0
         ? Promise.resolve([])
@@ -122,7 +146,12 @@ class TeamIntelligenceGoalGroupingService {
             select: { teamId: true, contentUrl: true },
           }),
     ]);
-    const goalsByTeam = new Map(goalsByTeamEntries);
+    const goalsByTeam = new Map(
+      goalFetchResults.map(({ team, goals }) => [team.id, goals] as const)
+    );
+    const warnings = goalFetchResults
+      .map(({ warning }) => warning)
+      .filter((warning): warning is TeamGoalGroupsWarning => warning !== null);
 
     const alignmentEntries = await mapWithConcurrency(summaryRows, 8, async (row) => {
       try {
@@ -173,6 +202,7 @@ class TeamIntelligenceGoalGroupingService {
       to: to.toISOString().slice(0, 10),
       totalTeams: sortedTeams.length,
       groups,
+      warnings,
     };
   }
 }

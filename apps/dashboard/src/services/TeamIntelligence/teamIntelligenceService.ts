@@ -385,6 +385,11 @@ export interface TeamGoalGroupsResponse {
   to: string;
   totalTeams: number;
   groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
+  warnings: Array<{
+    code: 'GOAL_FETCH_FAILED';
+    teamId: string;
+    teamName: string;
+  }>;
 }
 
 export interface TeamMember {
