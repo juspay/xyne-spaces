@@ -526,6 +526,30 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+export const userQuestionItemSchema = z.discriminatedUnion('type', [
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('single_choice'), options: z.array(z.string().min(1)).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('multiple_choice'), options: z.array(z.string().min(1)).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('open_ended'), placeholder: z.string().optional(), required: z.boolean().optional() }).strict(),
+]);
+
+export const userQuestionPropsSchema = z.object({
+  title: z.string().min(1),
+  questions: z.array(userQuestionItemSchema).min(1).max(8),
+  // Absent on cards posted before terminal question states were introduced;
+  // the renderer interprets absence as `pending`.
+  phase: z.enum(['pending', 'answered', 'declined']).optional(),
+  answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
+  /** Optional notes are scoped to the individual prompt id. */
+  notes: z.record(z.string()).optional(),
+  decidedAt: z.string().optional(),
+  submitAction: flowActionSchema.optional(),
+  dismissAction: flowActionSchema.optional(),
+}).strict();
+
+export const userQuestionComponentSchema = baseComponentSchema.extend({ type: z.literal('user_question'), props: userQuestionPropsSchema });
+export type UserQuestionItem = z.infer<typeof userQuestionItemSchema>;
+export type UserQuestionProps = z.infer<typeof userQuestionPropsSchema>;
+
 // ── Agent artifact ────────────────────────────────────────────────────────────
 // ONE node renders every agent surface. The identity block (name / slug /
 // description / model / capabilities / system prompt) is INVARIANT across
@@ -668,6 +692,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    userQuestionComponentSchema,
     agentComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
