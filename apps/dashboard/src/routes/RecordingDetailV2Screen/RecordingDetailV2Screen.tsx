@@ -93,6 +93,10 @@ const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<RecordingSummaryTemplate> = [
 
 const AUDIO_POLL_INTERVAL_MS = 10_000;
 const AUDIO_POLL_MAX_ATTEMPTS = 30;
+// Audio is stitched shortly after a call ends. If a recording ended longer ago than
+// the whole poll window and still has no audio, stitching is not pending — the
+// recording simply has no playable audio, so we skip polling and mark it unavailable.
+const AUDIO_STITCH_GRACE_MS = AUDIO_POLL_INTERVAL_MS * AUDIO_POLL_MAX_ATTEMPTS;
 
 const POST_SPLIT_BUTTON_CLASS =
   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
@@ -393,6 +397,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     if (!recordingId || isLive || !recording || recording.hasRecording) return;
 
+    // A recording that ended long ago and still has no audio is never going to get
+    // one — mark playback unavailable immediately instead of polling for minutes.
+    const endedAtMs = recording.endedAt ? new Date(recording.endedAt).getTime() : null;
+    if (endedAtMs !== null && Date.now() - endedAtMs > AUDIO_STITCH_GRACE_MS) {
+      setAudioPollExhausted(true);
+      return;
+    }
+
     setAudioPollExhausted(false);
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -421,7 +433,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     }, AUDIO_POLL_INTERVAL_MS);
 
     return (): void => window.clearInterval(timer);
-  }, [recordingId, isLive, recording?.hasRecording]);
+  }, [recordingId, isLive, recording?.hasRecording, recording?.endedAt]);
 
   const loadRecording = async (id: string): Promise<void> => {
     try {
@@ -670,6 +682,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   // The player replaces the read-only timeline once there is audio to scrub.
   const showAudioPlayer = !isLive && !!recording.hasRecording;
+  // Polling has given up (or was skipped for an old recording) and there is still no
+  // stitched audio, so the control bar shows an unavailable indicator, not a spinner.
+  const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const isOwner = recording.createdByUserId === currentUser?.id;
   const selectedSummaryTemplate =
@@ -741,6 +756,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 isLive={isLive}
                 onStopped={() => void loadRecording(recording.externalId)}
                 isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
+                isAudioUnavailable={audioUnavailable}
                 {...(showAudioPlayer
                   ? {
                       onLoadAudio: (signal: AbortSignal) =>
