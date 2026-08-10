@@ -29,12 +29,15 @@ import {
   type ClawStreamMeta,
   type ClawDoneStatus,
   type Todo,
+  type ToolExecutionContext,
+  cleanupSdlcSandboxCredentialsForContext,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
+import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
@@ -1409,6 +1412,7 @@ async function processTask(
   // the run — without explicit cleanup, up-to-1GB screen captures accumulate
   // under <cwd>/.context/recordings/ forever.
   const stagedRecordingAbsPaths: string[] = [];
+  let sdlcSandboxCleanupContext: ToolExecutionContext | undefined;
   const tid = traceId ?? sessionId.slice(0, 8);
   const log = (msg: string) => clog.info(`[run] [${tid}] ${msg}`);
   const logErr = (msg: string, err?: unknown) =>
@@ -1542,6 +1546,7 @@ async function processTask(
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
   let callbackModel = LITELLM.model;
+  let requiresStructuredDelivery = false;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
   const followUpsEnabled = followUpsEnabledByFlag;
   const followUpAgentContext = normalizeFollowUpAgentContext(
@@ -1784,11 +1789,61 @@ async function processTask(
     // sandbox-routing gate in claw-shared honors it too — otherwise the tools
     // stay but the sandbox is still routed read-only. Default-off.
     if (agentConfig?.["allowWriteInReadOnlyJob"] === true) meta["allowWriteInReadOnlyJob"] = "true";
+    if (agentConfig?.["requireSdlcRepository"] === true) meta["requireSdlcRepository"] = "true";
+    const sdlcContext = agentConfig?.["sdlcContext"];
+    const trustedSdlcContext =
+      sdlcContext && typeof sdlcContext === "object" && !Array.isArray(sdlcContext)
+        ? (sdlcContext as Record<string, unknown>)
+        : undefined;
+    const trustedSdlcRepository =
+      trustedSdlcContext?.["repository"] &&
+      typeof trustedSdlcContext["repository"] === "object" &&
+      !Array.isArray(trustedSdlcContext["repository"])
+        ? (trustedSdlcContext["repository"] as Record<string, unknown>)
+        : undefined;
+    const trustedSdlcPermissions =
+      trustedSdlcContext?.["permissions"] &&
+      typeof trustedSdlcContext["permissions"] === "object" &&
+      !Array.isArray(trustedSdlcContext["permissions"])
+        ? (trustedSdlcContext["permissions"] as Record<string, unknown>)
+        : undefined;
+    const trustedSdlcGates =
+      trustedSdlcContext?.["gates"] &&
+      typeof trustedSdlcContext["gates"] === "object" &&
+      !Array.isArray(trustedSdlcContext["gates"])
+        ? (trustedSdlcContext["gates"] as Record<string, unknown>)
+        : undefined;
+    const trustedSdlcExecution =
+      trustedSdlcContext?.["execution"] &&
+      typeof trustedSdlcContext["execution"] === "object" &&
+      !Array.isArray(trustedSdlcContext["execution"])
+        ? (trustedSdlcContext["execution"] as Record<string, unknown>)
+        : undefined;
+    if (trustedSdlcRepository) {
+      if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
+      if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
+      if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
+      if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
+      if (trustedSdlcPermissions?.["writeRequested"] === true) meta["sdlcRepositoryWrite"] = "true";
+      if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
+        meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
+      }
+      if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
+        meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
+      }
+      if (typeof trustedSdlcGates?.["accessCredentialRevision"] === "number") {
+        meta["sdlcRuntimeCredentialOperation"] =
+          trustedSdlcPermissions?.["writeRequested"] === true ? "PUSH" : "CLONE";
+      }
+    }
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
     // Surfaced to the read-only sandbox message so the agent focuses on these repos.
     const sbxGitRepos = agentConfig?.["sbxGitRepos"];
     if (Array.isArray(sbxGitRepos) && sbxGitRepos.length > 0) {
       meta["sbxGitRepos"] = JSON.stringify(sbxGitRepos.filter((r) => typeof r === "string"));
+    }
+    if (trustedSdlcContext) {
+      sdlcSandboxCleanupContext = { config: {}, meta };
     }
     const spacesConversationId = agentConfig?.["SPACES_CONVERSATION_ID"];
     if (spacesConversationId && typeof spacesConversationId === "string")
@@ -2704,6 +2759,7 @@ async function processTask(
     const outputFormat = parseOutputFormat(agentConfig);
     const structuredOutputRef: StructuredOutputRef = {};
     const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode && !isDailyBrief;
+    requiresStructuredDelivery = structuredOutputActive;
     if (outputFormat && isCopilot) {
       log(
         "outputFormat configured but provider is copilot — structured output skipped (respond-to-user owns delivery)",
@@ -3398,9 +3454,12 @@ async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
+    const authoritativeSdlcContext = trustedSdlcContext
+      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify(trustedSdlcContext, null, 2)}\n\`\`\``
+      : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + twinMandate) + experimentGuide;
+      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs
@@ -4311,22 +4370,20 @@ async function processTask(
       });
     } else if (isTransientProviderError(err)) {
       // Terminal transient failure — every provider (incl. the spaces fallback)
-      // was unreachable/stalled. claw-auth only posts thread messages for
-      // status="completed" with a non-empty result (status="failed" is silent),
-      // so deliver a short user-visible notice instead of dropping the request
-      // with no reply. This is the release-announcer silent-drop guard.
+      // was unreachable/stalled. Interactive chat keeps a user-visible notice;
+      // structured jobs fail closed because their deliverable/tool contract was
+      // not completed (for example, an SDLC draft was never finalized).
       logErr(
         `Session failed (transient — all providers unavailable): ${err instanceof Error ? err.message : String(err)}`,
       );
+      const terminal = transientProviderCallback(requiresStructuredDelivery);
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
-        status: "completed",
-        result:
-          "⚠️ The model provider was temporarily unavailable and your request couldn't be completed. Please try again in a moment.",
+        ...terminal,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4353,6 +4410,9 @@ async function processTask(
       });
     }
   } finally {
+    if (sdlcSandboxCleanupContext) {
+      await cleanupSdlcSandboxCredentialsForContext(sdlcSandboxCleanupContext).catch(() => {});
+    }
     if (mcpCleanup) {
       await mcpCleanup().catch(() => {});
     }

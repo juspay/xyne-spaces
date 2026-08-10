@@ -5,7 +5,15 @@
  * Handlers call the Spaces HTTP client and return MCP-formatted results.
  */
 
-import { interact, search, memorySearch, spacesFetch, spacesFetchBuffer, spacesFetchText, appFetch } from "./xyne-spaces-client.js";
+import {
+  interact,
+  search,
+  memorySearch,
+  spacesFetch,
+  spacesFetchBuffer,
+  spacesFetchText,
+  appFetch,
+} from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
@@ -118,20 +126,29 @@ function prefixChunk(chunkIndex: number, title: string, lines: string[]): string
  * (returned === requested limit). The agent should re-call with the suggested
  * `offset` and the SAME filters to page forward.
  */
-function paginationFooter(p: { returned: number; limit: number; offset: number; total?: number | undefined }): string {
+function paginationFooter(p: {
+  returned: number;
+  limit: number;
+  offset: number;
+  total?: number | undefined;
+}): string {
   const { returned, limit, offset, total } = p;
   const next = offset + returned;
   if (typeof total === "number") {
     if (next < total) {
       return `\n\n[Showing ${offset + 1}-${next} of ${total}. More results available — call again with offset=${next} and the same filters/query for the next page.]`;
     }
-    return offset > 0 || total > limit ? `\n\n[Showing ${offset + 1}-${next} of ${total} — end of results.]` : "";
+    return offset > 0 || total > limit
+      ? `\n\n[Showing ${offset + 1}-${next} of ${total} — end of results.]`
+      : "";
   }
   // No exact total: a full page almost always means there's more behind it.
   if (returned >= limit) {
     return `\n\n[Showing ${returned} result(s) starting at offset ${offset}. There may be more — call again with offset=${next} and the same filters to continue paginating.]`;
   }
-  return offset > 0 ? `\n\n[Showing ${returned} result(s) starting at offset ${offset} — end of results.]` : "";
+  return offset > 0
+    ? `\n\n[Showing ${returned} result(s) starting at offset ${offset} — end of results.]`
+    : "";
 }
 
 /** Append text to a ToolResult's first text block (e.g. a pagination footer). */
@@ -230,7 +247,9 @@ function pushCanvasCitation(
  * citation block renders as e.g. "Ticket XYNE-123 in #testing-claw (TICKET)"
  * instead of an opaque "Spaces thread".
  */
-async function resolveChannelInfo(channelIds: Iterable<string>): Promise<Map<string, { name?: string; scopeType?: string; type?: string }>> {
+async function resolveChannelInfo(
+  channelIds: Iterable<string>,
+): Promise<Map<string, { name?: string; scopeType?: string; type?: string }>> {
   const ids = [...new Set(Array.from(channelIds).filter(Boolean))];
   if (ids.length === 0) return new Map();
   try {
@@ -267,7 +286,9 @@ async function resolveChannelInfo(channelIds: Iterable<string>): Promise<Map<str
  * relations from the response (verified 2026-06-15). Querying the Conversation
  * model directly returns channelId as a base scalar field, which works.
  */
-async function resolveChannelIdForConversation(conversationId: string | undefined | null): Promise<string | undefined> {
+async function resolveChannelIdForConversation(
+  conversationId: string | undefined | null,
+): Promise<string | undefined> {
   if (!conversationId) return undefined;
   try {
     const rows = (await interact({
@@ -291,7 +312,9 @@ async function resolveChannelIdForConversation(conversationId: string | undefine
  * when the lookup fails or no ticket exists — caller falls back to the
  * regular chat thread URL in that case.
  */
-async function resolveTicketByConversation(conversationId: string | undefined | null): Promise<string | undefined> {
+async function resolveTicketByConversation(
+  conversationId: string | undefined | null,
+): Promise<string | undefined> {
   if (!conversationId) return undefined;
   try {
     const rows = (await interact({
@@ -341,8 +364,10 @@ async function resolveMailLinks(mailDocIds: string[]): Promise<Map<string, Direc
       where: { id: { in: ids } },
       take: ids.length,
     })) as Array<{ id: string; conversationId?: string; channelId?: string }>;
-    const convIds = [...new Set(emails.map((e) => e.conversationId).filter((v): v is string => !!v))]
-      .slice(0, GATEWAY_MAX_TAKE);
+    const convIds = [...new Set(emails.map((e) => e.conversationId).filter((v): v is string => !!v))].slice(
+      0,
+      GATEWAY_MAX_TAKE,
+    );
     const tickets = convIds.length
       ? ((await interact({
           model: "ticket",
@@ -453,7 +478,9 @@ function applyChannelInfo(
  * reliable id→name path. Non-fatal; unresolved ids fall back to the raw id at
  * the render site. `user` is gateway-allowlisted (validator.ts).
  */
-async function resolveUserInfo(userIds: Iterable<string>): Promise<Map<string, { name?: string; email?: string }>> {
+async function resolveUserInfo(
+  userIds: Iterable<string>,
+): Promise<Map<string, { name?: string; email?: string }>> {
   const ids = [...new Set(Array.from(userIds).filter(Boolean))];
   if (ids.length === 0) return new Map();
   try {
@@ -495,7 +522,9 @@ function formatUserRef(
  */
 async function resolveConversationMeta(
   conversationId: string | undefined | null,
-): Promise<{ channelId?: string; replyCount?: number; createdBy?: string; lastActivityAt?: string } | undefined> {
+): Promise<
+  { channelId?: string; replyCount?: number; createdBy?: string; lastActivityAt?: string } | undefined
+> {
   if (!conversationId) return undefined;
   try {
     const rows = (await interact({
@@ -532,7 +561,10 @@ function parseReactions(md: string | undefined | null): Array<{ emoji: string; u
     if (!m) continue;
     const emoji = m[1]!.trim();
     if (!emoji || emoji === ":::reactions") continue;
-    const userIds = m[2]!.split(",").map((s) => s.trim()).filter(Boolean);
+    const userIds = m[2]!
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (userIds.length > 0) out.push({ emoji, userIds });
   }
   return out;
@@ -543,7 +575,10 @@ function parseReactions(md: string | undefined | null): Array<{ emoji: string; u
  * supplied (WHO reacted), or "👍 2 · 🔥 1" (counts only) when it isn't. Reactor
  * ids that don't resolve fall back to the raw id. Returns "" when there are none.
  */
-function formatReactions(md: string | undefined | null, userInfo?: Map<string, { name?: string; email?: string }>): string {
+function formatReactions(
+  md: string | undefined | null,
+  userInfo?: Map<string, { name?: string; email?: string }>,
+): string {
   const groups = parseReactions(md);
   if (groups.length === 0) return "";
   return groups
@@ -663,25 +698,76 @@ const spacesSearch: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      query: { type: "string", description: "Search query text. OPTIONAL — omit it (or leave empty) to search by filters alone (type/from/in/range/etc.); the tool handles filter-only mode for you." },
-      apps: { type: "string", description: "Comma-separated apps to search: chat, ticket, user, file (default: all). Prefer `type` over this." },
+      query: {
+        type: "string",
+        description:
+          "Search query text. OPTIONAL — omit it (or leave empty) to search by filters alone (type/from/in/range/etc.); the tool handles filter-only mode for you.",
+      },
+      apps: {
+        type: "string",
+        description:
+          "Comma-separated apps to search: chat, ticket, user, file (default: all). Prefer `type` over this.",
+      },
       type: {
         type: "string",
-        enum: ["messages", "attachments", "channels", "tickets", "files", "transcript", "canvas", "rca", "emails", "users", "people"],
-        description: "Narrow to one surface. messages | attachments | channels | tickets | files | emails | users. transcript, canvas, rca are file sub-surfaces.",
+        enum: [
+          "messages",
+          "attachments",
+          "channels",
+          "tickets",
+          "files",
+          "transcript",
+          "canvas",
+          "rca",
+          "emails",
+          "users",
+          "people",
+        ],
+        description:
+          "Narrow to one surface. messages | attachments | channels | tickets | files | emails | users. transcript, canvas, rca are file sub-surfaces.",
       },
-      from: { type: "string", description: "Filter by SENDER/AUTHOR user ID(s), comma-separated — a user id ONLY. NEVER pass a channel/conversation id here (use `in` for those); resolve names → ids via spaces-users first. A wrong id type here can produce a bad request." },
-      in: { type: "string", description: "Channel ID(s) to scope into, comma-separated. ALWAYS set this when the user is asking about a specific channel or has a channel attached as context. This is the ONLY place a channel id goes." },
-      status: { type: "string", description: "Filter by ticket status(es), comma-separated. Prefer spaces-tickets for ticket queries." },
-      priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW", "CRITICAL"], description: "Filter by ticket priority. Prefer spaces-tickets." },
+      from: {
+        type: "string",
+        description:
+          "Filter by SENDER/AUTHOR user ID(s), comma-separated — a user id ONLY. NEVER pass a channel/conversation id here (use `in` for those); resolve names → ids via spaces-users first. A wrong id type here can produce a bad request.",
+      },
+      in: {
+        type: "string",
+        description:
+          "Channel ID(s) to scope into, comma-separated. ALWAYS set this when the user is asking about a specific channel or has a channel attached as context. This is the ONLY place a channel id goes.",
+      },
+      status: {
+        type: "string",
+        description:
+          "Filter by ticket status(es), comma-separated. Prefer spaces-tickets for ticket queries.",
+      },
+      priority: {
+        type: "string",
+        enum: ["HIGH", "MEDIUM", "LOW", "CRITICAL"],
+        description: "Filter by ticket priority. Prefer spaces-tickets.",
+      },
       board: { type: "string", description: "Filter by board name. Prefer spaces-tickets." },
       tags: { type: "string", description: "Filter by tags, comma-separated." },
       stage: { type: "string", description: "Filter by ticket stage. Prefer spaces-tickets." },
       assignee: { type: "string", description: "Filter by assigned user ID. Prefer spaces-tickets." },
-      before: { type: "string", description: "Created before date — ISO 8601 or '15 Mar 26'. Prefer `range` for natural windows." },
-      after: { type: "string", description: "Created after date — ISO 8601 or '15 Mar 26'. Prefer `range` for natural windows." },
-      range: { type: "string", description: "Natural time window: today | yesterday | this week | last 7 days | last 30 days." },
-      orderBy: { type: "string", enum: ["newest", "oldest", "relevance"], description: "Sort order: newest (latest first), oldest (earliest first), relevance (default). Use newest for 'latest message', 'most recent' queries." },
+      before: {
+        type: "string",
+        description: "Created before date — ISO 8601 or '15 Mar 26'. Prefer `range` for natural windows.",
+      },
+      after: {
+        type: "string",
+        description: "Created after date — ISO 8601 or '15 Mar 26'. Prefer `range` for natural windows.",
+      },
+      range: {
+        type: "string",
+        description: "Natural time window: today | yesterday | this week | last 7 days | last 30 days.",
+      },
+      orderBy: {
+        type: "string",
+        enum: ["newest", "oldest", "relevance"],
+        description:
+          "Sort order: newest (latest first), oldest (earliest first), relevance (default). Use newest for 'latest message', 'most recent' queries.",
+      },
       groupBy: {
         type: "string",
         enum: ["createdBy", "channelId", "senderId", "docType"],
@@ -695,7 +781,13 @@ const spacesSearch: ToolDef = {
           "Each group returns a real total count (all matching docs, not just the returned sample) plus up to 5 representative results. " +
           "Example: type=tickets + groupBy=createdBy answers 'who reported the most issues'.",
       },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results per group (default 100, max 100)." },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results per group (default 100, max 100).",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0)." },
     },
     // required: ["query"],
@@ -770,7 +862,11 @@ const spacesSearch: ToolDef = {
 
       if (!data.success || !data.data) {
         return debugBlock
-          ? { content: [{ type: "text", text: "Search failed." }], isError: true, _meta: { debug: debugBlock } }
+          ? {
+              content: [{ type: "text", text: "Search failed." }],
+              isError: true,
+              _meta: { debug: debugBlock },
+            }
           : err("Search failed.");
       }
 
@@ -778,8 +874,10 @@ const spacesSearch: ToolDef = {
       const harvest = (r: SearchResult, chunkIndex: number): void => {
         const sc = r.searchContext ?? {};
         const meta = r.metadata ?? {};
-        const channelId = (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
-        const conversationId = (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
+        const channelId =
+          (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
+        const conversationId =
+          (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
         // Pull the per-row deep-link ids that searchContext exposes (matches
         // dashboard/src/utils/searchNavigation.ts which reads the same
         // fields). Each is optional — only present on result types that
@@ -819,30 +917,39 @@ const spacesSearch: ToolDef = {
           }
           parts.push("");
         }
-        const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+        const channelInfo = await resolveChannelInfo(
+          citations.map((c) => c.channelId).filter((v): v is string => !!v),
+        );
         applyChannelInfo(citations, channelInfo);
         // Grouped: `limit` is per-group, so an exact total isn't meaningful.
         // Signal "more" when any group filled its page.
         const groupLimit = Number(args["limit"] ?? 100);
         const groupOffset = Number(args["offset"] ?? 0);
         const maxReturned = groups.reduce((m, g) => Math.max(m, g.results.length), 0);
-        const groupFooter = maxReturned >= groupLimit
-          ? `\n\n[Results are grouped; each group shows up to ${groupLimit}. More may exist — call again with offset=${groupOffset + groupLimit} and the same query/filters to page deeper.]`
-          : "";
+        const groupFooter =
+          maxReturned >= groupLimit
+            ? `\n\n[Results are grouped; each group shows up to ${groupLimit}. More may exist — call again with offset=${groupOffset + groupLimit} and the same query/filters to page deeper.]`
+            : "";
         return withDebug(okCited(parts.join("\n") + groupFooter, citations));
       }
 
       const results = data.data.results ?? [];
       if (results.length === 0) return withDebug(ok(`No results found for "${args["query"]}".`));
       results.forEach((r, idx) => harvest(r, idx + 1));
-      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
+      );
       applyChannelInfo(citations, channelInfo);
-      return withDebug(okCited(
-        `Found ${data.data.totalCount ?? results.length} result(s):\n\n${results
-          .map((r, idx) => formatSearchResult(r, idx + 1))
-          .join("\n\n")}${paginationFooter({ returned: results.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0), total: data.data.totalCount })}`,
-        citations,
-      ));
+      return withDebug(
+        okCited(
+          `Found ${data.data.totalCount ?? results.length} result(s):\n\n${results
+            .map((r, idx) => formatSearchResult(r, idx + 1))
+            .join(
+              "\n\n",
+            )}${paginationFooter({ returned: results.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0), total: data.data.totalCount })}`,
+          citations,
+        ),
+      );
     } catch (e) {
       return err(`Search error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -880,17 +987,17 @@ const spacesSearchV2: ToolDef = {
     "- For ticket free-text only (not status/priority — those go to spaces-tickets): combine `type=tickets` with `query`.\n\n" +
     "## Empty-query searches\n" +
     "- To search by filters alone, just OMIT `query` (e.g. \"latest 10 files in #design\" → `in=<channelId>, type=attachments, range='last 7 days'`). Leaving `query` empty switches to filter-only mode automatically — there is no flag to set.\n\n" +
-    "## Counting — \"how many X\"\n" +
-    "- Do NOT count the snippets this tool returns. A single call returns a capped PAGE; in grouped mode the per-group \"(N)\" can be the capped page size, not the true total. Tallying visible rows is the #1 cause of undercounts.\n" +
-    "- Pass `type=<surface>` to run UNGROUPED — the result then leads with \"Found N result(s)\", the count for that surface. For ticket counts specifically, prefer **spaces-tickets**.\n" +
-    "- A concept can span more than one surface (e.g. \"issues\" = tickets, support-desk items, AND messages raised in-channel) — count each relevant `type` and sum; one grouped call is not a count.\n" +
-    "- If a surface is still capped, PAGINATE TO EXHAUSTION (below) and count what you page through. Never report the visible row count from one grouped call as \"how many\".\n\n" +
+    '## Counting — "how many X"\n' +
+    '- Do NOT count the snippets this tool returns. A single call returns a capped PAGE; in grouped mode the per-group "(N)" can be the capped page size, not the true total. Tallying visible rows is the #1 cause of undercounts.\n' +
+    '- Pass `type=<surface>` to run UNGROUPED — the result then leads with "Found N result(s)", the count for that surface. For ticket counts specifically, prefer **spaces-tickets**.\n' +
+    '- A concept can span more than one surface (e.g. "issues" = tickets, support-desk items, AND messages raised in-channel) — count each relevant `type` and sum; one grouped call is not a count.\n' +
+    '- If a surface is still capped, PAGINATE TO EXHAUSTION (below) and count what you page through. Never report the visible row count from one grouped call as "how many".\n\n' +
     "## Pagination\n" +
     "- `limit` (1–50, default 10) is the PAGE SIZE — and it is PER GROUP when results are grouped — NOT a total. A page (or group) that comes back FULL (results == `limit`) means THERE ARE MORE.\n" +
     "- To cover a whole set, LOOP: repeat the call with `offset` += `limit` until a page returns FEWER than `limit`. What you've paged through is then the complete set. (Paging returns a FLAT ranked list — grouping is dropped once offset>0.)\n" +
     "- Bump `limit` to 25–50 to cut round-trips, but one bumped call is still ONE page — keep paging until a page comes back short. Don't treat a single page as the whole set.\n\n" +
-    "## Empty results — verify before concluding \"none\"\n" +
-    "- An empty result under a filter (especially a date `range`/`before`/`after`, or an `in=<channelId>` scope) is ambiguous: truly nothing, or the scope/filter is wrong. Before answering \"none\", re-run WITHOUT the time filter: still empty → re-check the channel/scope (right channelId? right `type`?); non-empty → the window is genuinely empty, say so with context. Never report a bare \"none\" off one empty filtered call.\n\n" +
+    '## Empty results — verify before concluding "none"\n' +
+    '- An empty result under a filter (especially a date `range`/`before`/`after`, or an `in=<channelId>` scope) is ambiguous: truly nothing, or the scope/filter is wrong. Before answering "none", re-run WITHOUT the time filter: still empty → re-check the channel/scope (right channelId? right `type`?); non-empty → the window is genuinely empty, say so with context. Never report a bare "none" off one empty filtered call.\n\n' +
     "## Dates\n" +
     "- Prefer `range` for natural windows (today, yesterday, this week, last 7 days, last 30 days). Use `before`/`after` (ISO 8601 or '15 Mar 26' style) only when you need a specific cutoff.",
 };
@@ -912,10 +1019,7 @@ const toIST = (d: Date | string | number): string => {
   // new Date(<numeric string>) parses it as a date string and returns Invalid
   // Date — coerce all-digit strings back to a number first (10 digits = seconds).
   const s = typeof d === "string" ? d.trim() : d;
-  const v =
-    typeof s === "string" && /^\d{10,}$/.test(s)
-      ? Number(s) * (s.length === 10 ? 1000 : 1)
-      : s;
+  const v = typeof s === "string" && /^\d{10,}$/.test(s) ? Number(s) * (s.length === 10 ? 1000 : 1) : s;
   const date = new Date(v);
   const ms = date.getTime();
   // Guard against a bad value silently rendering as a wrong/absurd date. Sane
@@ -936,8 +1040,20 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#0*39;|&apos;/gi, "'")
-    .replace(/&#(\d+);/g, (m, n: string) => { try { return String.fromCodePoint(Number(n)); } catch { return m; } })
-    .replace(/&#x([0-9a-fA-F]+);/g, (m, h: string) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return m; } })
+    .replace(/&#(\d+);/g, (m, n: string) => {
+      try {
+        return String.fromCodePoint(Number(n));
+      } catch {
+        return m;
+      }
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, h: string) => {
+      try {
+        return String.fromCodePoint(parseInt(h, 16));
+      } catch {
+        return m;
+      }
+    })
     .replace(/&amp;/gi, "&");
 }
 
@@ -991,15 +1107,21 @@ function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let n = bytes;
   let i = 0;
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
   return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
 }
 
 function formatSearchResult(r: SearchResult, chunkIndex: number | null): string {
   const subApp = (r.searchContext?.["subApp"] as string | undefined)?.toUpperCase();
-  const displayType = r.type === 'transcript' || subApp === 'TRANSCRIPT' ? 'call'
-                    : r.type === 'canvas' || subApp === 'CANVAS' ? 'canvas'
-                    : r.type;
+  const displayType =
+    r.type === "transcript" || subApp === "TRANSCRIPT"
+      ? "call"
+      : r.type === "canvas" || subApp === "CANVAS"
+        ? "canvas"
+        : r.type;
   const lines = [`[${displayType}] ${r.title}${r.subtitle ? ` — ${r.subtitle}` : ""}`];
   if (r.context && typeof r.context === "string") lines.push(`  ${cleanSnippet(r.context)}`);
   const meta = r.metadata;
@@ -1011,7 +1133,8 @@ function formatSearchResult(r: SearchResult, chunkIndex: number | null): string 
     if (meta["priority"]) detail.push(`priority: ${meta["priority"]}`);
     if (meta["stage"]) detail.push(`stage: ${meta["stage"]}`);
     // messageType only when it's not the default USER (BOT/SYSTEM/FORWARDED matter).
-    if (meta["messageType"] && meta["messageType"] !== "USER") detail.push(String(meta["messageType"]).toLowerCase());
+    if (meta["messageType"] && meta["messageType"] !== "USER")
+      detail.push(String(meta["messageType"]).toLowerCase());
     if (meta["visibility"]) detail.push(`visibility: ${meta["visibility"]}`);
     if (typeof meta["memberCount"] === "number") detail.push(`${meta["memberCount"]} members`);
     if (meta["lastActivityAt"]) detail.push(`last active ${toIST(meta["lastActivityAt"] as string)}`);
@@ -1031,13 +1154,16 @@ function formatSearchResult(r: SearchResult, chunkIndex: number | null): string 
     }
     // People hits: the userId so the agent can reuse it (from=<id>, assignee, …).
     if (sc["userId"]) lines.push(`  userId: ${sc["userId"]}`);
-    if (typeof sc["replyCount"] === "number") lines.push(`  ${sc["replyCount"]} repl${sc["replyCount"] === 1 ? "y" : "ies"}`);
+    if (typeof sc["replyCount"] === "number")
+      lines.push(`  ${sc["replyCount"]} repl${sc["replyCount"] === 1 ? "y" : "ies"}`);
     // Ticket hits: creator/assignee/closer names the transform always computed
     // but this renderer never printed. Skip the "Unknown Creator" fallback so an
     // unresolved createdBy doesn't render a misleading line.
-    if (sc["creatorName"] && sc["creatorName"] !== "Unknown Creator") lines.push(`  Created by: ${sc["creatorName"]}${sc["createdBy"] ? ` (${sc["createdBy"]})` : ""}`);
+    if (sc["creatorName"] && sc["creatorName"] !== "Unknown Creator")
+      lines.push(`  Created by: ${sc["creatorName"]}${sc["createdBy"] ? ` (${sc["createdBy"]})` : ""}`);
     else if (sc["createdBy"]) lines.push(`  createdBy: ${sc["createdBy"]}`);
-    if (sc["assigneeName"]) lines.push(`  Assigned to: ${sc["assigneeName"]}${sc["assignedTo"] ? ` (${sc["assignedTo"]})` : ""}`);
+    if (sc["assigneeName"])
+      lines.push(`  Assigned to: ${sc["assigneeName"]}${sc["assignedTo"] ? ` (${sc["assignedTo"]})` : ""}`);
     else if (sc["assignedTo"]) lines.push(`  assignedTo: ${sc["assignedTo"]}`);
     if (sc["closedByName"]) lines.push(`  Closed by: ${sc["closedByName"]}`);
     const bp: string[] = [];
@@ -1072,7 +1198,10 @@ function formatSearchResult(r: SearchResult, chunkIndex: number | null): string 
     if (sc["ownerEmail"] || sc["ownerId"]) lines.push(`  Owner: ${sc["ownerEmail"] || sc["ownerId"]}`);
     const ff: string[] = [];
     if (sc["mimeType"]) ff.push(String(sc["mimeType"]));
-    if (typeof sc["fileSize"] === "number") { const b = formatBytes(sc["fileSize"] as number); if (b) ff.push(b); }
+    if (typeof sc["fileSize"] === "number") {
+      const b = formatBytes(sc["fileSize"] as number);
+      if (b) ff.push(b);
+    }
     if (ff.length > 0) lines.push(`  ${ff.join(" · ")}`);
     if (sc["xyneId"]) lines.push(`  ID: ${sc["xyneId"]}`);
     if (sc["conversationId"]) lines.push(`  conversationId: ${sc["conversationId"]}`);
@@ -1108,12 +1237,36 @@ const spacesTickets: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      ticketId: { type: "string", description: "Fetch ONE specific ticket directly. Accepts EITHER the internal DB id (cm…, shown as 'id:' in results) OR the human ticket key (xyneId, e.g. 'XYNE-1234') — whichever you have. When set, all other filters are ignored and only that single ticket is returned." },
-      xyneId: { type: "string", description: "Fetch ONE ticket by its human ticket key (xyneId, e.g. 'XYNE-1234'). Same direct single-ticket fetch as `ticketId`; provided for clarity when you specifically have the human key." },
-      status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "Filter by status" },
-      priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Filter by priority" },
-      assignedTo: { type: "string", description: "Filter by assigned user — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query." },
-      createdBy: { type: "string", description: "Filter by ticket creator — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query." },
+      ticketId: {
+        type: "string",
+        description:
+          "Fetch ONE specific ticket directly. Accepts EITHER the internal DB id (cm…, shown as 'id:' in results) OR the human ticket key (xyneId, e.g. 'XYNE-1234') — whichever you have. When set, all other filters are ignored and only that single ticket is returned.",
+      },
+      xyneId: {
+        type: "string",
+        description:
+          "Fetch ONE ticket by its human ticket key (xyneId, e.g. 'XYNE-1234'). Same direct single-ticket fetch as `ticketId`; provided for clarity when you specifically have the human key.",
+      },
+      status: {
+        type: "string",
+        enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"],
+        description: "Filter by status",
+      },
+      priority: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        description: "Filter by priority",
+      },
+      assignedTo: {
+        type: "string",
+        description:
+          "Filter by assigned user — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query.",
+      },
+      createdBy: {
+        type: "string",
+        description:
+          "Filter by ticket creator — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query.",
+      },
       createdByIn: {
         type: "array",
         items: { type: "string" },
@@ -1126,29 +1279,107 @@ const spacesTickets: ToolDef = {
       boardId: { type: "string", description: "Filter by board ID" },
       projectId: { type: "string", description: "Filter by project ID" },
       stageName: { type: "string", description: "Filter by stage name" },
-      tags: { type: "string", description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')" },
+      tags: {
+        type: "string",
+        description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')",
+      },
       channelId: { type: "string", description: "Filter to tickets in this channel only" },
       // ── Multi-select variants (mirror the Spaces tickets UI, which is multi-select
       //    on every dropdown). Each is an array → Prisma `in`; when both a singular
       //    field above and its plural form are passed, the plural (array) wins. ──
-      statusIn: { type: "array", items: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"] }, description: "Filter by MULTIPLE statuses (matches any). Multi-select form of `status`." },
-      priorityIn: { type: "array", items: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] }, description: "Filter by MULTIPLE priorities (matches any). Multi-select form of `priority`." },
-      boardIdIn: { type: "array", items: { type: "string" }, description: "Filter by MULTIPLE board ids (matches any). Multi-select form of `boardId`." },
-      stageNameIn: { type: "array", items: { type: "string" }, description: "Filter by MULTIPLE stage names (matches any). Multi-select form of `stageName`." },
-      assignedToIn: { type: "array", items: { type: "string" }, description: "Filter by assignee across MANY users (matches any) — array of emails or userIds (mix allowed); emails resolved server-side. Multi-select form of `assignedTo` (strict assignee match, no assigned-or-created union). If set, singular `assignedTo` is ignored." },
-      userGroupIds: { type: "array", items: { type: "string" }, description: "Filter by owning user group — one or more user-group ids (matches any)." },
-      ticketTypes: { type: "array", items: { type: "string" }, description: "Filter by ticket type(s) — the ticketType lookup string, e.g. 'Bug', 'Feature' (matches any)." },
-      aiCategory: { type: "array", items: { type: "string" }, description: "Filter by AI-classified category label(s), e.g. 'Mandate', 'Refund' (matches any)." },
-      prReviewers: { type: "array", items: { type: "string" }, description: "Filter to tickets where ANY of these users is a PR reviewer (a ticket_assignments participant with responsibility PR_REVIEWER). Array of emails or userIds; emails resolved server-side." },
-      qaAssigned: { type: "array", items: { type: "string" }, description: "Filter to tickets where ANY of these users is QA-assigned (a ticket_assignments participant with responsibility QA). Array of emails or userIds; emails resolved server-side." },
-      dueAfter: { type: "string", description: "ISO 8601 timestamp — only tickets whose due date (ETA) is at or after this time." },
-      dueBefore: { type: "string", description: "ISO 8601 timestamp — only tickets whose due date (ETA) is at or before this time." },
-      createdAfter: { type: "string", description: "ISO 8601 timestamp — only tickets created at or after this time (e.g. '2026-04-20T00:00:00Z')" },
-      createdBefore: { type: "string", description: "ISO 8601 timestamp — only tickets created strictly before this time" },
-      limit: { type: "number", minimum: 1, maximum: 500, default: 100, description: "Max tickets (default 100, max 500). Use higher values with createdByIn for team-wide reports." },
+      statusIn: {
+        type: "array",
+        items: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"] },
+        description: "Filter by MULTIPLE statuses (matches any). Multi-select form of `status`.",
+      },
+      priorityIn: {
+        type: "array",
+        items: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        description: "Filter by MULTIPLE priorities (matches any). Multi-select form of `priority`.",
+      },
+      boardIdIn: {
+        type: "array",
+        items: { type: "string" },
+        description: "Filter by MULTIPLE board ids (matches any). Multi-select form of `boardId`.",
+      },
+      stageNameIn: {
+        type: "array",
+        items: { type: "string" },
+        description: "Filter by MULTIPLE stage names (matches any). Multi-select form of `stageName`.",
+      },
+      assignedToIn: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter by assignee across MANY users (matches any) — array of emails or userIds (mix allowed); emails resolved server-side. Multi-select form of `assignedTo` (strict assignee match, no assigned-or-created union). If set, singular `assignedTo` is ignored.",
+      },
+      userGroupIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Filter by owning user group — one or more user-group ids (matches any).",
+      },
+      ticketTypes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter by ticket type(s) — the ticketType lookup string, e.g. 'Bug', 'Feature' (matches any).",
+      },
+      aiCategory: {
+        type: "array",
+        items: { type: "string" },
+        description: "Filter by AI-classified category label(s), e.g. 'Mandate', 'Refund' (matches any).",
+      },
+      prReviewers: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter to tickets where ANY of these users is a PR reviewer (a ticket_assignments participant with responsibility PR_REVIEWER). Array of emails or userIds; emails resolved server-side.",
+      },
+      qaAssigned: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter to tickets where ANY of these users is QA-assigned (a ticket_assignments participant with responsibility QA). Array of emails or userIds; emails resolved server-side.",
+      },
+      dueAfter: {
+        type: "string",
+        description: "ISO 8601 timestamp — only tickets whose due date (ETA) is at or after this time.",
+      },
+      dueBefore: {
+        type: "string",
+        description: "ISO 8601 timestamp — only tickets whose due date (ETA) is at or before this time.",
+      },
+      createdAfter: {
+        type: "string",
+        description:
+          "ISO 8601 timestamp — only tickets created at or after this time (e.g. '2026-04-20T00:00:00Z')",
+      },
+      createdBefore: {
+        type: "string",
+        description: "ISO 8601 timestamp — only tickets created strictly before this time",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 500,
+        default: 100,
+        description:
+          "Max tickets (default 100, max 500). Use higher values with createdByIn for team-wide reports.",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
-      orderBy: { type: "string", enum: ["updatedAt", "createdAt"], default: "updatedAt", description: "Sort field: updatedAt (default, most recently changed) or createdAt (when the ticket was opened)." },
-      sortOrder: { type: "string", enum: ["desc", "asc"], default: "desc", description: "Sort direction: desc (default, newest first) or asc (oldest first)." },
+      orderBy: {
+        type: "string",
+        enum: ["updatedAt", "createdAt"],
+        default: "updatedAt",
+        description:
+          "Sort field: updatedAt (default, most recently changed) or createdAt (when the ticket was opened).",
+      },
+      sortOrder: {
+        type: "string",
+        enum: ["desc", "asc"],
+        default: "desc",
+        description: "Sort direction: desc (default, newest first) or asc (oldest first).",
+      },
       classifyActionable: {
         type: "boolean",
         description:
@@ -1186,11 +1417,24 @@ const spacesTickets: ToolDef = {
       // OR clause: the gateway validator rejects OR arrays-of-objects.
       const directRef = String(args["ticketId"] ?? args["xyneId"] ?? "").trim();
       if (directRef) {
-        let hit = (await interact({ model: "ticket", operation: "findMany", where: { id: { equals: directRef } }, take: 1, include })) as TicketRow[];
+        let hit = (await interact({
+          model: "ticket",
+          operation: "findMany",
+          where: { id: { equals: directRef } },
+          take: 1,
+          include,
+        })) as TicketRow[];
         if (!hit?.length) {
-          hit = (await interact({ model: "ticket", operation: "findMany", where: { xyneId: { equals: directRef } }, take: 1, include })) as TicketRow[];
+          hit = (await interact({
+            model: "ticket",
+            operation: "findMany",
+            where: { xyneId: { equals: directRef } },
+            take: 1,
+            include,
+          })) as TicketRow[];
         }
-        if (!hit?.length) return ok(`No ticket found for '${directRef}' (looked up by internal id and xyneId).`);
+        if (!hit?.length)
+          return ok(`No ticket found for '${directRef}' (looked up by internal id and xyneId).`);
         return await formatTickets(hit, {
           classifyActionable: args["classifyActionable"] === true,
           summary: args["summary"] === true,
@@ -1208,7 +1452,10 @@ const spacesTickets: ToolDef = {
       if (args["stageName"]) baseWhere["stageName"] = { equals: args["stageName"] };
       if (args["channelId"]) baseWhere["channelId"] = { equals: args["channelId"] };
       if (args["tags"]) {
-        const tagNames = (args["tags"] as string).split(",").map((t) => t.trim()).filter(Boolean);
+        const tagNames = (args["tags"] as string)
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
         if (tagNames.length > 0) {
           baseWhere["tags"] = { some: { name: { in: tagNames } } };
         }
@@ -1227,7 +1474,10 @@ const spacesTickets: ToolDef = {
         Array.isArray(v)
           ? v.map((x) => String(x).trim()).filter(Boolean)
           : typeof v === "string"
-            ? v.split(",").map((s) => s.trim()).filter(Boolean)
+            ? v
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
             : [];
 
       // Multi-select scalar filters (array → Prisma `in`). Set AFTER the singular
@@ -1286,7 +1536,9 @@ const spacesTickets: ToolDef = {
         const { userIds, unresolved } = await resolveUserIdentifiersBatch(assignedToInRaw);
         participantUnresolved.push(...unresolved);
         if (userIds.length === 0) {
-          return ok(`No matching users found for any of the ${assignedToInRaw.length} assignedToIn entries. Unresolved: ${unresolved.join(", ")}.`);
+          return ok(
+            `No matching users found for any of the ${assignedToInRaw.length} assignedToIn entries. Unresolved: ${unresolved.join(", ")}.`,
+          );
         }
         baseWhere["assignedTo"] = { in: userIds };
       }
@@ -1299,7 +1551,10 @@ const spacesTickets: ToolDef = {
       // resolve each to its matching ticket-id set and intersect, constraining the
       // main query by `id IN (…)`.
       const participantSomes: Array<{ responsibility: "PR_REVIEWER" | "QA"; userIds: string[] }> = [];
-      const collectParticipant = async (raw: string[], responsibility: "PR_REVIEWER" | "QA"): Promise<void> => {
+      const collectParticipant = async (
+        raw: string[],
+        responsibility: "PR_REVIEWER" | "QA",
+      ): Promise<void> => {
         if (!raw.length) return;
         const { userIds, unresolved } = await resolveUserIdentifiersBatch(raw);
         participantUnresolved.push(...unresolved);
@@ -1310,12 +1565,17 @@ const spacesTickets: ToolDef = {
 
       // De-duplicated note appended to whichever success path returns, so unresolved
       // participant emails are never silently dropped.
-      const participantNote = participantUnresolved.length > 0
-        ? `\n\n_Note: ${participantUnresolved.length} participant email(s) did not match any user and were excluded: ${[...new Set(participantUnresolved)].join(", ")}_`
-        : "";
+      const participantNote =
+        participantUnresolved.length > 0
+          ? `\n\n_Note: ${participantUnresolved.length} participant email(s) did not match any user and were excluded: ${[...new Set(participantUnresolved)].join(", ")}_`
+          : "";
 
-      const participantSome = (p: { responsibility: "PR_REVIEWER" | "QA"; userIds: string[] }): Record<string, unknown> =>
-        ({ some: { userResponsibility: { equals: p.responsibility }, userId: { in: p.userIds } } });
+      const participantSome = (p: {
+        responsibility: "PR_REVIEWER" | "QA";
+        userIds: string[];
+      }): Record<string, unknown> => ({
+        some: { userResponsibility: { equals: p.responsibility }, userId: { in: p.userIds } },
+      });
 
       if (participantSomes.length === 1) {
         // Single relation filter — validates and composes with every other filter.
@@ -1369,7 +1629,8 @@ const spacesTickets: ToolDef = {
       let createdByUserId: string | null = null;
       if (!bulkActive) {
         createdByUserId = await resolveUserIdentifier(args["createdBy"] as string | undefined);
-        if (args["createdBy"] && !createdByUserId) return ok(`No user found for createdBy='${args["createdBy"]}'.`);
+        if (args["createdBy"] && !createdByUserId)
+          return ok(`No user found for createdBy='${args["createdBy"]}'.`);
       }
 
       // Single-user merged fetch (assigned OR created by the same person) only
@@ -1377,13 +1638,32 @@ const spacesTickets: ToolDef = {
       // multi-assignee `assignedToIn` filter isn't driving the assignee match.
       if (assignedToUserId && !bulkActive && !createdByUserId && !assignedToInApplied) {
         const [assigned, created] = await Promise.all([
-          interact({ model: "ticket", operation: "findMany", where: { ...baseWhere, assignedTo: { equals: assignedToUserId } }, orderBy: orderByClause, take, skip, include }) as Promise<TicketRow[]>,
-          interact({ model: "ticket", operation: "findMany", where: { ...baseWhere, createdBy: { equals: assignedToUserId } }, orderBy: orderByClause, take, skip, include }) as Promise<TicketRow[]>,
+          interact({
+            model: "ticket",
+            operation: "findMany",
+            where: { ...baseWhere, assignedTo: { equals: assignedToUserId } },
+            orderBy: orderByClause,
+            take,
+            skip,
+            include,
+          }) as Promise<TicketRow[]>,
+          interact({
+            model: "ticket",
+            operation: "findMany",
+            where: { ...baseWhere, createdBy: { equals: assignedToUserId } },
+            orderBy: orderByClause,
+            take,
+            skip,
+            include,
+          }) as Promise<TicketRow[]>,
         ]);
         const seen = new Set<string>();
         const merged: TicketRow[] = [];
         for (const t of [...(assigned ?? []), ...(created ?? [])]) {
-          if (!seen.has(t.id)) { seen.add(t.id); merged.push(t); }
+          if (!seen.has(t.id)) {
+            seen.add(t.id);
+            merged.push(t);
+          }
         }
         // Re-sort the merged (assigned ∪ created) set by the same field/direction.
         merged.sort((a, b) => {
@@ -1399,7 +1679,10 @@ const spacesTickets: ToolDef = {
             ? (args["expectedUserGroup"] as unknown[]).map((v) => String(v))
             : [],
         });
-        appendText(mergedResult, paginationFooter({ returned: mergedPage.length, limit: take, offset: skip }));
+        appendText(
+          mergedResult,
+          paginationFooter({ returned: mergedPage.length, limit: take, offset: skip }),
+        );
         if (participantNote) appendText(mergedResult, participantNote);
         return mergedResult;
       }
@@ -1409,7 +1692,15 @@ const spacesTickets: ToolDef = {
         baseWhere["createdBy"] = { equals: createdByUserId };
       }
 
-      const rows = (await interact({ model: "ticket", operation: "findMany", where: baseWhere, orderBy: orderByClause, take, skip, include })) as TicketRow[];
+      const rows = (await interact({
+        model: "ticket",
+        operation: "findMany",
+        where: baseWhere,
+        orderBy: orderByClause,
+        take,
+        skip,
+        include,
+      })) as TicketRow[];
 
       const classifyActionable = args["classifyActionable"] === true;
       const wantSummary = args["summary"] === true;
@@ -1447,7 +1738,9 @@ const spacesTickets: ToolDef = {
  * didn't match any user. Inputs that don't contain '@' are passed through as
  * userIds without DB lookup.
  */
-async function resolveUserIdentifiersBatch(raw: string[]): Promise<{ userIds: string[]; unresolved: string[] }> {
+async function resolveUserIdentifiersBatch(
+  raw: string[],
+): Promise<{ userIds: string[]; unresolved: string[] }> {
   const trimmed = raw.map((s) => s.trim()).filter((s) => s.length > 0);
   if (trimmed.length === 0) return { userIds: [], unresolved: [] };
 
@@ -1595,7 +1888,7 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     if (!t.createdByUser?.name && t.createdBy) missingIds.add(t.createdBy);
     if (!t.assignedToUser?.name && t.assignedTo) missingIds.add(t.assignedTo);
     if (t.updatedBy && t.updatedBy !== t.createdBy) missingIds.add(t.updatedBy); // editor (only when it differs from creator)
-    if (t.closedBy) missingIds.add(t.closedBy);   // resolver
+    if (t.closedBy) missingIds.add(t.closedBy); // resolver
   }
   let nameMap = new Map<string, { name: string; email?: string }>();
   if (missingIds.size > 0) {
@@ -1641,7 +1934,10 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
   // fetch both with two batched gateway calls and join by fieldId in memory.
   // Non-fatal: any failure (e.g. gateway rejects the model) falls through to
   // rendering tickets without a Form fields line.
-  const formValuesByTicket = new Map<string, Array<{ fieldId: string; fieldValue: string; actualFieldValue?: unknown }>>();
+  const formValuesByTicket = new Map<
+    string,
+    Array<{ fieldId: string; fieldValue: string; actualFieldValue?: unknown }>
+  >();
   let fieldNameMap = new Map<string, string>();
   try {
     const ticketIds = rows.map((t) => t.id);
@@ -1697,7 +1993,9 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     const ticketUrl = buildTicketUrl(t.channelId, t.conversationId);
     const idCell = ticketUrl ? `[${t.xyneId}](${ticketUrl})` : `[${t.xyneId}]`;
     const parts = [`${idCell} ${t.title} (id: ${t.id})`];
-    parts.push(`  Board Status: ${t.statusV2} (workflow state, not PR verification) · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`);
+    parts.push(
+      `  Board Status: ${t.statusV2} (workflow state, not PR verification) · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`,
+    );
     // Assignee: prefer the joined user (name + email); fall back to the raw
     // assignedTo userId when the relation isn't populated. Always emit the
     // line if EITHER field is present so bulk callers (e.g. user-tickets
@@ -1735,9 +2033,12 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
       const rendered = formVals
         .map((fv) => {
           const label = fieldNameMap.get(fv.fieldId) ?? fv.fieldId;
-          const raw = fv.actualFieldValue !== undefined && fv.actualFieldValue !== null
-            ? (typeof fv.actualFieldValue === "string" ? fv.actualFieldValue : JSON.stringify(fv.actualFieldValue))
-            : fv.fieldValue;
+          const raw =
+            fv.actualFieldValue !== undefined && fv.actualFieldValue !== null
+              ? typeof fv.actualFieldValue === "string"
+                ? fv.actualFieldValue
+                : JSON.stringify(fv.actualFieldValue)
+              : fv.fieldValue;
           return `${label}: ${raw}`;
         })
         .join(" · ");
@@ -1755,7 +2056,9 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     parts.push(`  Created: ${toIST(t.createdAt)} IST · Updated: ${toIST(t.updatedAt)} IST`);
     if (t.firstRespondedAt) parts.push(`  First response: ${toIST(t.firstRespondedAt)} IST`);
     if (t.closedAt || t.closedBy) {
-      parts.push(`  Closed: ${t.closedAt ? `${toIST(t.closedAt)} IST` : "(time n/a)"}${t.closedBy ? ` by ${userLabel(t.closedBy)}` : ""}`);
+      parts.push(
+        `  Closed: ${t.closedAt ? `${toIST(t.closedAt)} IST` : "(time n/a)"}${t.closedBy ? ` by ${userLabel(t.closedBy)}` : ""}`,
+      );
     }
     if (t.isArchived) parts.push(`  Archived: yes`);
     if (opts.classifyActionable) {
@@ -1765,17 +2068,14 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     // Carry xyneId on the citation so the FE can route desk-typed tickets
     // (EMAIL/SLACK channels) to `/support/<channelId>/<xyneId>` — mirrors
     // `navigateToTicket` in dashboard/src/utils/searchNavigation.ts.
-    pushThreadCitation(
-      citations,
-      t.channelId,
-      t.conversationId,
-      idx + 1,
-      `Ticket ${t.xyneId}`,
-      { xyneId: t.xyneId },
-    );
+    pushThreadCitation(citations, t.channelId, t.conversationId, idx + 1, `Ticket ${t.xyneId}`, {
+      xyneId: t.xyneId,
+    });
     return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
   });
-  const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+  const channelInfo = await resolveChannelInfo(
+    citations.map((c) => c.channelId).filter((v): v is string => !!v),
+  );
   applyChannelInfo(citations, channelInfo);
 
   // Render order matters: a large response (200+ tickets) can exceed claw's
@@ -1785,7 +2085,13 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
   // model.
   const bodyParts: string[] = [];
   if (opts.summary) {
-    const summary = buildSummary(rows, reasons, nameMap, opts.expectedUserGroup ?? [], opts.classifyActionable === true);
+    const summary = buildSummary(
+      rows,
+      reasons,
+      nameMap,
+      opts.expectedUserGroup ?? [],
+      opts.classifyActionable === true,
+    );
     bodyParts.push(renderSummaryBlock(summary));
     bodyParts.push(""); // blank separator
   }
@@ -1903,8 +2209,12 @@ function renderSummaryBlock(s: SummaryShape): string {
   if (s.byUser.length > 0) {
     L.push(`  ByUser:`);
     for (const u of s.byUser) {
-      const status = Object.entries(u.byStatus).map(([k, v]) => `${k}=${v}`).join(",");
-      const prio = Object.entries(u.byPriority).map(([k, v]) => `${k}=${v}`).join(",");
+      const status = Object.entries(u.byStatus)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(",");
+      const prio = Object.entries(u.byPriority)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(",");
       const actionableField = s.hasActionableInfo ? ` actionable=${u.actionable}` : "";
       L.push(
         `    - ${u.name}${u.email ? ` <${u.email}>` : ""} (id: ${u.userId}) — total=${u.total}${actionableField} status=[${status}] priority=[${prio}]`,
@@ -1944,16 +2254,16 @@ interface TicketRow {
   createdBy?: string;
   // More scalar columns the gateway returns by default (it drops `select`), so
   // spaces-tickets can surface the full audit/lifecycle without extra calls.
-  updatedBy?: string;          // last editor
-  closedBy?: string;           // resolver
-  closedAt?: string;           // resolution time
-  firstRespondedAt?: string;   // SLA: first response
-  userGroupId?: string;        // owning group (id; name is gateway-blocked)
-  ticketType?: string;         // categorization (e.g. Bug/Fix)
-  isArchived?: boolean;        // live PG archived state
-  aiCategory?: string;         // AI triage label
-  aiSubCategory?: string;      // AI triage sub-label
-  referenceTicket?: string[];  // related/duplicate ticket ids → resolved to xyneIds
+  updatedBy?: string; // last editor
+  closedBy?: string; // resolver
+  closedAt?: string; // resolution time
+  firstRespondedAt?: string; // SLA: first response
+  userGroupId?: string; // owning group (id; name is gateway-blocked)
+  ticketType?: string; // categorization (e.g. Bug/Fix)
+  isArchived?: boolean; // live PG archived state
+  aiCategory?: string; // AI triage label
+  aiSubCategory?: string; // AI triage sub-label
+  referenceTicket?: string[]; // related/duplicate ticket ids → resolved to xyneIds
   assignedToUser?: { name: string; email?: string } | null;
   createdByUser?: { name: string; email?: string } | null;
   board?: { name: string } | null;
@@ -1980,9 +2290,23 @@ const spacesMessages: ToolDef = {
       conversationId: { type: "string", description: "Exact conversationId — from prior tool results, or extracted from a pasted Spaces URL (#origin=<id>, or the path segment after the channelId)." },
       limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max messages (default 100)" },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
-      sortOrder: { type: "string", enum: ["asc", "desc"], default: "asc", description: "Order by message time: asc (default, oldest→newest, normal reading order) or desc (newest first — pair with limit to grab the latest replies)." },
-      hasAttachment: { type: "boolean", description: "Only messages that carry a file attachment (the thread 'Files' view)." },
-      msgType: { type: "array", items: { type: "string", enum: ["USER", "BOT", "SYSTEM", "FORWARDED"] }, description: "Restrict to these message types (matches any). USER = human replies; BOT/SYSTEM = automation & workflow posts (the thread 'Workflows' view); FORWARDED = forwarded messages." },
+      sortOrder: {
+        type: "string",
+        enum: ["asc", "desc"],
+        default: "asc",
+        description:
+          "Order by message time: asc (default, oldest→newest, normal reading order) or desc (newest first — pair with limit to grab the latest replies).",
+      },
+      hasAttachment: {
+        type: "boolean",
+        description: "Only messages that carry a file attachment (the thread 'Files' view).",
+      },
+      msgType: {
+        type: "array",
+        items: { type: "string", enum: ["USER", "BOT", "SYSTEM", "FORWARDED"] },
+        description:
+          "Restrict to these message types (matches any). USER = human replies; BOT/SYSTEM = automation & workflow posts (the thread 'Workflows' view); FORWARDED = forwarded messages.",
+      },
     },
     required: ["conversationId"],
   },
@@ -2069,7 +2393,9 @@ const spacesMessages: ToolDef = {
       return okCited(
         `${rows.length} message(s):\n\n${header}${lines
           .map((line, idx) => prefixChunk(idx + 1, line, []))
-          .join("\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+          .join(
+            "\n",
+          )}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
     } catch (e) {
@@ -2183,7 +2509,6 @@ interface MessageDetailRow {
   senderId?: string;
 }
 
-
 // ── spaces-channels ──────────────────────────────────────────────────
 
 const spacesChannels: ToolDef = {
@@ -2199,38 +2524,94 @@ const spacesChannels: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      name: { type: "string", description: "Filter by channel name (case-insensitive partial match). Use this to find a specific channel." },
-      description: { type: "string", description: "Filter by channel description / topic (case-insensitive partial match)." },
+      name: {
+        type: "string",
+        description:
+          "Filter by channel name (case-insensitive partial match). Use this to find a specific channel.",
+      },
+      description: {
+        type: "string",
+        description: "Filter by channel description / topic (case-insensitive partial match).",
+      },
       visibility: { type: "string", enum: ["PUBLIC", "PRIVATE"], description: "Filter by visibility" },
-      scopeType: { type: "string", enum: ["DEFAULT", "DM", "TICKET", "DOCUMENT", "GROUP_DM"], description: "Filter by scope type" },
+      scopeType: {
+        type: "string",
+        enum: ["DEFAULT", "DM", "TICKET", "DOCUMENT", "GROUP_DM"],
+        description: "Filter by scope type",
+      },
       channelType: {
         type: "string",
         enum: ["DEFAULT", "EMAIL", "SUPPORT", "SLACK", "APP"],
-        description: "Filter by channel TYPE (distinct from scopeType). DEFAULT = regular chat channels (what the chat directory shows); EMAIL/SUPPORT/SLACK/APP = desk / integration channels. Set DEFAULT to exclude desk/integration channels.",
+        description:
+          "Filter by channel TYPE (distinct from scopeType). DEFAULT = regular chat channels (what the chat directory shows); EMAIL/SUPPORT/SLACK/APP = desk / integration channels. Set DEFAULT to exclude desk/integration channels.",
       },
       participantName: { type: "string", description: "Filter channels by participant name (partial match)" },
-      includeMembers: { type: "boolean", default: false, description: "List participant NAMES (not just the count). Off by default to keep results compact — a busy channel can have hundreds of members. Prefer narrowing to one channel (via name) before turning this on. Names are paged with membersLimit / membersOffset." },
-      membersLimit: { type: "number", minimum: 1, maximum: 100, default: 20, description: "When includeMembers=true, max member names to show per channel (default 20). The count is always exact regardless of this." },
-      membersOffset: { type: "number", minimum: 0, default: 0, description: "When includeMembers=true, skip this many member names per channel before listing (pagination). Raise it to page through a large member list." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max channels (default 100)" },
-      orderBy: { type: "string", enum: ["lastActivityAt", "createdAt", "name"], default: "lastActivityAt", description: "Sort field: lastActivityAt (default, most recently active first), createdAt (newest channels), or name (alphabetical)." },
-      sortOrder: { type: "string", enum: ["desc", "asc"], default: "desc", description: "Sort direction: desc (default) or asc. For name, asc = A→Z." },
-      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with a higher offset for more channels." },
+      includeMembers: {
+        type: "boolean",
+        default: false,
+        description:
+          "List participant NAMES (not just the count). Off by default to keep results compact — a busy channel can have hundreds of members. Prefer narrowing to one channel (via name) before turning this on. Names are paged with membersLimit / membersOffset.",
+      },
+      membersLimit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 20,
+        description:
+          "When includeMembers=true, max member names to show per channel (default 20). The count is always exact regardless of this.",
+      },
+      membersOffset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description:
+          "When includeMembers=true, skip this many member names per channel before listing (pagination). Raise it to page through a large member list.",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max channels (default 100)",
+      },
+      orderBy: {
+        type: "string",
+        enum: ["lastActivityAt", "createdAt", "name"],
+        default: "lastActivityAt",
+        description:
+          "Sort field: lastActivityAt (default, most recently active first), createdAt (newest channels), or name (alphabetical).",
+      },
+      sortOrder: {
+        type: "string",
+        enum: ["desc", "asc"],
+        default: "desc",
+        description: "Sort direction: desc (default) or asc. For name, asc = A→Z.",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description: "Pagination offset (default 0). Call again with a higher offset for more channels.",
+      },
     },
   },
   async handler(args) {
     try {
       const where: Record<string, unknown> = {};
       if (args["name"]) where["name"] = { contains: args["name"] as string, mode: "insensitive" };
-      if (args["description"]) where["description"] = { contains: args["description"] as string, mode: "insensitive" };
+      if (args["description"])
+        where["description"] = { contains: args["description"] as string, mode: "insensitive" };
       if (args["visibility"]) where["visibility"] = { equals: args["visibility"] };
       if (args["scopeType"]) where["scopeType"] = { equals: args["scopeType"] };
       if (args["channelType"]) where["type"] = { equals: args["channelType"] };
-      if (args["participantName"]) where["participants"] = { some: { user: { name: { contains: args["participantName"] as string } } } };
+      if (args["participantName"])
+        where["participants"] = { some: { user: { name: { contains: args["participantName"] as string } } } };
 
       // Caller-controlled sort, clamped to known columns; defaults preserve the
       // prior most-recently-active-first behaviour.
-      const sortField = ["createdAt", "name"].includes(String(args["orderBy"])) ? String(args["orderBy"]) : "lastActivityAt";
+      const sortField = ["createdAt", "name"].includes(String(args["orderBy"]))
+        ? String(args["orderBy"])
+        : "lastActivityAt";
       const sortDir: "asc" | "desc" = args["sortOrder"] === "asc" ? "asc" : "desc";
 
       const rows = (await interact({
@@ -2264,7 +2645,9 @@ const spacesChannels: ToolDef = {
       // creator). Off by default so a broad listing never dumps hundreds of
       // names into the model's context.
       const memberNameIds = includeMembers
-        ? rows.flatMap((c) => (participantsByChannel.get(c.id) ?? []).slice(membersOffset, membersOffset + membersLimit))
+        ? rows.flatMap((c) =>
+            (participantsByChannel.get(c.id) ?? []).slice(membersOffset, membersOffset + membersLimit),
+          )
         : [];
       const creatorInfo = await resolveUserInfo([
         ...rows.map((c) => c.createdBy).filter((v): v is string => !!v),
@@ -2287,9 +2670,10 @@ const spacesChannels: ToolDef = {
           if (page.length > 0) {
             const names = page.map((uid) => creatorInfo.get(uid)?.name ?? uid);
             const shownTo = membersOffset + page.length;
-            const pager = membersOffset > 0 || shownTo < memberIds.length
-              ? ` [members ${membersOffset + 1}-${shownTo} of ${countLabel}; raise membersOffset for more]`
-              : "";
+            const pager =
+              membersOffset > 0 || shownTo < memberIds.length
+                ? ` [members ${membersOffset + 1}-${shownTo} of ${countLabel}; raise membersOffset for more]`
+                : "";
             parts.push(`  Members (${countLabel}): ${names.join(", ")}${pager}`);
           } else {
             parts.push(`  Members: ${countLabel} [membersOffset ${membersOffset} is past the last member]`);
@@ -2309,10 +2693,15 @@ const spacesChannels: ToolDef = {
         pushThreadCitation(citations, c.id, convId, idx + 1, `#${c.name}`);
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
-      const channelInfo = await resolveChannelInfo(citations.map((cc) => cc.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        citations.map((cc) => cc.channelId).filter((v): v is string => !!v),
+      );
       applyChannelInfo(citations, channelInfo);
 
-      return okCited(`${rows.length} channel(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`, citations);
+      return okCited(
+        `${rows.length} channel(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Channels error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -2342,9 +2731,10 @@ const spacesChannels: ToolDef = {
       // App route is cursor-based (no offset); signal "more" heuristically so
       // the agent can refine filters or raise the limit.
       const appLimit = Number(args["limit"] ?? 100);
-      const moreNote = items.length >= appLimit
-        ? `\n\n[Showing ${items.length} channel(s) — more may exist. Raise limit or refine with name/scopeType filters.]`
-        : "";
+      const moreNote =
+        items.length >= appLimit
+          ? `\n\n[Showing ${items.length} channel(s) — more may exist. Raise limit or refine with name/scopeType filters.]`
+          : "";
       return ok(`${items.length} channel(s):\n\n${lines.join("\n\n")}${moreNote}`);
     } catch (e) {
       return err(`Channels error: ${e instanceof Error ? e.message : String(e)}`);
@@ -2385,13 +2775,48 @@ const spacesUsers: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      nameOrEmail: { type: "string", description: "Person's name to search by name, or email address (with @ or .) to search by email. Optional when groupId is given (to list a whole group)." },
-      groupId: { type: "string", description: "List members of this user group (team). Can be used alone to enumerate a group, or combined with nameOrEmail/status to narrow within it." },
-      status: { type: "string", enum: ["ACTIVE", "INACTIVE"], description: "Filter by account status. Omit to include departed/deactivated users (the default, so you can answer 'did this person leave?'); set ACTIVE to list only current members." },
-      orderBy: { type: "string", enum: ["name", "createdAt", "lastActiveAt"], description: "Sort field: name (A→Z with sortOrder=asc), createdAt (join date), or lastActiveAt (recency). Omit to keep default relevance order." },
-      sortOrder: { type: "string", enum: ["asc", "desc"], default: "asc", description: "Sort direction for orderBy (default asc; use desc for newest/most-recent first)." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results (default 100, max 100)" },
-      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with the same query and a higher offset for more matches." },
+      nameOrEmail: {
+        type: "string",
+        description:
+          "Person's name to search by name, or email address (with @ or .) to search by email. Optional when groupId is given (to list a whole group).",
+      },
+      groupId: {
+        type: "string",
+        description:
+          "List members of this user group (team). Can be used alone to enumerate a group, or combined with nameOrEmail/status to narrow within it.",
+      },
+      status: {
+        type: "string",
+        enum: ["ACTIVE", "INACTIVE"],
+        description:
+          "Filter by account status. Omit to include departed/deactivated users (the default, so you can answer 'did this person leave?'); set ACTIVE to list only current members.",
+      },
+      orderBy: {
+        type: "string",
+        enum: ["name", "createdAt", "lastActiveAt"],
+        description:
+          "Sort field: name (A→Z with sortOrder=asc), createdAt (join date), or lastActiveAt (recency). Omit to keep default relevance order.",
+      },
+      sortOrder: {
+        type: "string",
+        enum: ["asc", "desc"],
+        default: "asc",
+        description: "Sort direction for orderBy (default asc; use desc for newest/most-recent first).",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results (default 100, max 100)",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description:
+          "Pagination offset (default 0). Call again with the same query and a higher offset for more matches.",
+      },
     },
   },
   async handler(args) {
@@ -2431,11 +2856,15 @@ const spacesUsers: ToolDef = {
       })) as UserRow[];
 
       if (!rows || rows.length === 0) {
-        return ok(nameOrEmail ? `No users found matching "${nameOrEmail}".` : "No users found in that group.");
+        return ok(
+          nameOrEmail ? `No users found matching "${nameOrEmail}".` : "No users found in that group.",
+        );
       }
 
       const lines = rows.map((u, idx) => prefixChunk(idx + 1, userTitle(u), userDetailLines(u)));
-      return ok(`${rows.length} user(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`);
+      return ok(
+        `${rows.length} user(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+      );
     } catch (e) {
       return err(`Users error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -2473,9 +2902,7 @@ interface UserAffinityResponse {
 }
 
 interface VespaTensor {
-  cells?:
-    | Record<string, number>
-    | Array<{ address?: { key?: string }; value?: number }>;
+  cells?: Record<string, number> | Array<{ address?: { key?: string }; value?: number }>;
 }
 
 interface AffinityEntry {
@@ -2484,17 +2911,13 @@ interface AffinityEntry {
   lastSignalAt?: number;
 }
 
-type AffinityOrder = 'weight' | 'recent' | 'stale';
+type AffinityOrder = "weight" | "recent" | "stale";
 
-function affinityTensorToRecord(
-  tensor: VespaTensor | undefined,
-  prefix: string,
-): Record<string, number> {
+function affinityTensorToRecord(tensor: VespaTensor | undefined, prefix: string): Record<string, number> {
   const result: Record<string, number> = {};
   if (!tensor?.cells) return result;
 
-  const stripPrefix = (key: string): string =>
-    key.startsWith(prefix) ? key.slice(prefix.length) : key;
+  const stripPrefix = (key: string): string => (key.startsWith(prefix) ? key.slice(prefix.length) : key);
 
   if (Array.isArray(tensor.cells)) {
     for (const cell of tensor.cells) {
@@ -2528,10 +2951,10 @@ function buildAffinityEntries(
   });
 
   entries.sort((a, b) => {
-    if (orderBy === 'recent') {
+    if (orderBy === "recent") {
       return (b.lastSignalAt ?? 0) - (a.lastSignalAt ?? 0) || b.weight - a.weight;
     }
-    if (orderBy === 'stale') {
+    if (orderBy === "stale") {
       // Missing timestamps are unknown, not evidence of staleness, so keep
       // them after entries with a known old signal time.
       const aTime = a.lastSignalAt ?? Number.POSITIVE_INFINITY;
@@ -2545,11 +2968,11 @@ function buildAffinityEntries(
 }
 
 function formatSignalTime(timestamp: number | undefined): string {
-  if (!timestamp) return 'last signal: unknown';
+  if (!timestamp) return "last signal: unknown";
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return 'last signal: unknown';
+  if (Number.isNaN(date.getTime())) return "last signal: unknown";
   const ageDays = Math.max(0, (Date.now() - timestamp) / (24 * 60 * 60 * 1000));
-  const age = ageDays < 1 ? 'today' : `${ageDays.toFixed(ageDays < 10 ? 1 : 0)} days ago`;
+  const age = ageDays < 1 ? "today" : `${ageDays.toFixed(ageDays < 10 ? 1 : 0)} days ago`;
   return `last signal: ${date.toISOString()} (${age})`;
 }
 
@@ -2557,24 +2980,24 @@ async function renderUserActivityContext(
   args: Record<string, unknown>,
   ctx: HandlerContext,
 ): Promise<ToolResult> {
-  const userId = String(args['userId'] ?? '').trim();
-  if (!userId) return err('userId is required. Resolve it with spaces-users or spaces-whoami.');
+  const userId = String(args["userId"] ?? "").trim();
+  if (!userId) return err("userId is required. Resolve it with spaces-users or spaces-whoami.");
 
-  const limit = Math.min(Math.max(Number(args['limit'] ?? 10), 1), 50);
-  const requestedOrder = String(args['orderBy'] ?? 'weight');
+  const limit = Math.min(Math.max(Number(args["limit"] ?? 10), 1), 50);
+  const requestedOrder = String(args["orderBy"] ?? "weight");
   const orderBy: AffinityOrder =
-    requestedOrder === 'recent' || requestedOrder === 'stale' ? requestedOrder : 'weight';
+    requestedOrder === "recent" || requestedOrder === "stale" ? requestedOrder : "weight";
 
   try {
     const yql = `select * from sources user where docId contains "${esc(userId)}" limit 1`;
     const response = await queryDirect(
       yql,
-      '',
+      "",
       ctx.userId,
       1,
       0,
       CONFIG.vespaQueryEndpoint,
-      'unranked',
+      "unranked",
       undefined,
       undefined,
       true,
@@ -2584,56 +3007,37 @@ async function renderUserActivityContext(
 
     const data: UserAffinityResponse = {
       userId,
-      ...(fields['name'] ? { name: String(fields['name']) } : {}),
-      ...(fields['email'] ? { email: String(fields['email']) } : {}),
-      channelWeights: affinityTensorToRecord(
-        fields['channelWeights'] as VespaTensor | undefined,
-        'channel:',
-      ),
-      userWeights: affinityTensorToRecord(
-        fields['userWeights'] as VespaTensor | undefined,
-        'user:',
-      ),
+      ...(fields["name"] ? { name: String(fields["name"]) } : {}),
+      ...(fields["email"] ? { email: String(fields["email"]) } : {}),
+      channelWeights: affinityTensorToRecord(fields["channelWeights"] as VespaTensor | undefined, "channel:"),
+      userWeights: affinityTensorToRecord(fields["userWeights"] as VespaTensor | undefined, "user:"),
       channelTimestamps: affinityTensorToRecord(
-        fields['channelTimestamps'] as VespaTensor | undefined,
-        'channel:',
+        fields["channelTimestamps"] as VespaTensor | undefined,
+        "channel:",
       ),
-      userTimestamps: affinityTensorToRecord(
-        fields['userTimestamps'] as VespaTensor | undefined,
-        'user:',
-      ),
-      personalizationLastUpdated: Number(fields['personalizationLastUpdated'] ?? 0),
+      userTimestamps: affinityTensorToRecord(fields["userTimestamps"] as VespaTensor | undefined, "user:"),
+      personalizationLastUpdated: Number(fields["personalizationLastUpdated"] ?? 0),
     };
-    const channels = buildAffinityEntries(
-      data.channelWeights,
-      data.channelTimestamps,
-      orderBy,
-      limit,
-    );
-    const collaborators = buildAffinityEntries(
-      data.userWeights,
-      data.userTimestamps,
-      orderBy,
-      limit,
-    );
+    const channels = buildAffinityEntries(data.channelWeights, data.channelTimestamps, orderBy, limit);
+    const collaborators = buildAffinityEntries(data.userWeights, data.userTimestamps, orderBy, limit);
 
     const [channelInfo, userInfo] = await Promise.all([
       resolveChannelInfo(channels.map((entry) => entry.id)),
       resolveUserInfo(collaborators.map((entry) => entry.id)),
     ]);
 
-    const profile = [data.name, data.email ? `<${data.email}>` : '', `(id: ${data.userId})`]
+    const profile = [data.name, data.email ? `<${data.email}>` : "", `(id: ${data.userId})`]
       .filter(Boolean)
-      .join(' ');
+      .join(" ");
     const updatedAt = data.personalizationLastUpdated
       ? new Date(data.personalizationLastUpdated).toISOString()
-      : 'unknown';
+      : "unknown";
     const orderLabel =
-      orderBy === 'recent'
-        ? 'most recent signal first'
-        : orderBy === 'stale'
-          ? 'oldest known signal first'
-          : 'strongest affinity first';
+      orderBy === "recent"
+        ? "most recent signal first"
+        : orderBy === "stale"
+          ? "oldest known signal first"
+          : "strongest affinity first";
 
     const channelLines = channels.map((entry) => {
       const channel = channelInfo.get(entry.id);
@@ -2642,59 +3046,61 @@ async function renderUserActivityContext(
     });
     const userLines = collaborators.map((entry) => {
       const user = userInfo.get(entry.id);
-      const label = user?.name
-        ? `${user.name}${user.email ? ` <${user.email}>` : ''}`
-        : entry.id;
+      const label = user?.name ? `${user.name}${user.email ? ` <${user.email}>` : ""}` : entry.id;
       return `- ${label} — weight: ${entry.weight.toFixed(3)}; ${formatSignalTime(entry.lastSignalAt)}; userId: ${entry.id}`;
     });
 
-    return ok([
-      `Activity context for ${profile}`,
-      `Profile computed at: ${updatedAt}`,
-      `Ordering: ${orderLabel}`,
-      '',
-      `Channels (${channels.length} of ${Object.keys(data.channelWeights ?? {}).length} signals):`,
-      ...(channelLines.length > 0 ? channelLines : ['- No channel signals recorded.']),
-      '',
-      `Collaborators (${collaborators.length} of ${Object.keys(data.userWeights ?? {}).length} signals):`,
-      ...(userLines.length > 0 ? userLines : ['- No collaborator signals recorded.']),
-      '',
-      'Interpretation: weights and signal times show where this user has interacted, not whether a particular fact is current. For freshness-sensitive answers, use these IDs to search the relevant channels/users, then compare the timestamps of the returned messages or documents.',
-    ].join('\n'));
+    return ok(
+      [
+        `Activity context for ${profile}`,
+        `Profile computed at: ${updatedAt}`,
+        `Ordering: ${orderLabel}`,
+        "",
+        `Channels (${channels.length} of ${Object.keys(data.channelWeights ?? {}).length} signals):`,
+        ...(channelLines.length > 0 ? channelLines : ["- No channel signals recorded."]),
+        "",
+        `Collaborators (${collaborators.length} of ${Object.keys(data.userWeights ?? {}).length} signals):`,
+        ...(userLines.length > 0 ? userLines : ["- No collaborator signals recorded."]),
+        "",
+        "Interpretation: weights and signal times show where this user has interacted, not whether a particular fact is current. For freshness-sensitive answers, use these IDs to search the relevant channels/users, then compare the timestamps of the returned messages or documents.",
+      ].join("\n"),
+    );
   } catch (e) {
     return err(`User activity context error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 const spacesUserActivityContext: ToolDef = {
-  name: 'spaces-user-activity-context',
+  name: "spaces-user-activity-context",
   description:
-    'Fetch a user activity/affinity profile by Spaces userId without changing search ranking. ' +
-    'Returns compact, name-resolved channel and collaborator signals with affinity weights and last-signal timestamps. ' +
-    'Use orderBy=recent to find currently active sources, orderBy=stale to find old relationship signals, or orderBy=weight for strongest sources. ' +
-    'This identifies likely sources of fresh or stale information; it does not prove a message or fact is stale, so follow up with spaces-search/spaces-messages and compare content timestamps.',
+    "Fetch a user activity/affinity profile by Spaces userId without changing search ranking. " +
+    "Returns compact, name-resolved channel and collaborator signals with affinity weights and last-signal timestamps. " +
+    "Use orderBy=recent to find currently active sources, orderBy=stale to find old relationship signals, or orderBy=weight for strongest sources. " +
+    "This identifies likely sources of fresh or stale information; it does not prove a message or fact is stale, so follow up with spaces-search/spaces-messages and compare content timestamps.",
   inputSchema: {
-    type: 'object',
+    type: "object",
     properties: {
       userId: {
-        type: 'string',
-        description: 'Spaces user ID whose activity context should be fetched. Resolve with spaces-users or spaces-whoami; never invent it.',
+        type: "string",
+        description:
+          "Spaces user ID whose activity context should be fetched. Resolve with spaces-users or spaces-whoami; never invent it.",
       },
       orderBy: {
-        type: 'string',
-        enum: ['weight', 'recent', 'stale'],
-        default: 'weight',
-        description: 'weight = strongest affinity first; recent = newest interaction signal first; stale = oldest known interaction signal first.',
+        type: "string",
+        enum: ["weight", "recent", "stale"],
+        default: "weight",
+        description:
+          "weight = strongest affinity first; recent = newest interaction signal first; stale = oldest known interaction signal first.",
       },
       limit: {
-        type: 'number',
+        type: "number",
         minimum: 1,
         maximum: 50,
         default: 10,
-        description: 'Maximum channels and maximum collaborators to return (default 10 each, max 50).',
+        description: "Maximum channels and maximum collaborators to return (default 10 each, max 50).",
       },
     },
-    required: ['userId'],
+    required: ["userId"],
   },
   async handler(args, ctx) {
     return renderUserActivityContext(args, ctx);
@@ -2738,12 +3144,33 @@ const ACTIVITY_TAB_ACTIONS: Record<string, string[]> = {
   reactions: ["added", "added_v2", "removed"],
   group_mentions: ["group_mention"],
   tickets: [
-    "eta_warning", "eta_breach", "stage_eta_breach", "ticket_assigned", "ticket_status",
-    "ticket_eta", "ticket_board", "ticket_assigned_to", "ticket_pr_created", "ticket_pr_updated",
-    "ticket_pr_merged", "ticket_pr_declined", "ticket_pr_reviewer_assigned", "ticket_qa_assigned",
-    "ticket_priority", "ticket_user_group", "ticket_title", "ticket_description", "ticket_rca_created",
-    "ticket_rca_updated", "ticket_subticket_added", "ticket_reference_added", "ticket_reference_removed",
-    "ticket_multi_updated", "workflow_question", "stage_approval_requested", "stage_approval_approved",
+    "eta_warning",
+    "eta_breach",
+    "stage_eta_breach",
+    "ticket_assigned",
+    "ticket_status",
+    "ticket_eta",
+    "ticket_board",
+    "ticket_assigned_to",
+    "ticket_pr_created",
+    "ticket_pr_updated",
+    "ticket_pr_merged",
+    "ticket_pr_declined",
+    "ticket_pr_reviewer_assigned",
+    "ticket_qa_assigned",
+    "ticket_priority",
+    "ticket_user_group",
+    "ticket_title",
+    "ticket_description",
+    "ticket_rca_created",
+    "ticket_rca_updated",
+    "ticket_subticket_added",
+    "ticket_reference_added",
+    "ticket_reference_removed",
+    "ticket_multi_updated",
+    "workflow_question",
+    "stage_approval_requested",
+    "stage_approval_approved",
     "stage_approval_rejected",
   ],
   canvas: ["canvas_shared", "canvas_role_changed", "canvas_access_revoked", "mentioned_user"],
@@ -2763,18 +3190,40 @@ const spacesActivity: ToolDef = {
       tab: {
         type: "string",
         enum: ["your_mentions", "replies", "reactions", "group_mentions", "tickets", "canvas"],
-        description: "Filter to one of the activity-feed tabs (mirrors the dashboard): your_mentions | replies | reactions | group_mentions | tickets | canvas. Each maps to the set of activity action types that tab shows.",
+        description:
+          "Filter to one of the activity-feed tabs (mirrors the dashboard): your_mentions | replies | reactions | group_mentions | tickets | canvas. Each maps to the set of activity action types that tab shows.",
       },
       actorActions: {
         type: "array",
         items: { type: "string" },
-        description: "Advanced: filter to these raw activity action types (matches any), e.g. ['ticket_assigned','ticket_status']. Use `tab` for the common groupings instead. If both are given, actorActions wins.",
+        description:
+          "Advanced: filter to these raw activity action types (matches any), e.g. ['ticket_assigned','ticket_status']. Use `tab` for the common groupings instead. If both are given, actorActions wins.",
       },
-      classification: { type: "string", description: "Filter by classification (e.g. 'ACTIONABLE', 'FYI', 'PENDING')" },
+      classification: {
+        type: "string",
+        description: "Filter by classification (e.g. 'ACTIONABLE', 'FYI', 'PENDING')",
+      },
       unreadOnly: { type: "boolean", description: "Show only unread activity" },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max entries (default 100)" },
-      sortOrder: { type: "string", enum: ["desc", "asc"], default: "desc", description: "Order by activity time: desc (default, newest first) or asc (oldest first)." },
-      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with the same filters and a higher offset to page through older activity." },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max entries (default 100)",
+      },
+      sortOrder: {
+        type: "string",
+        enum: ["desc", "asc"],
+        default: "desc",
+        description: "Order by activity time: desc (default, newest first) or asc (oldest first).",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description:
+          "Pagination offset (default 0). Call again with the same filters and a higher offset to page through older activity.",
+      },
     },
   },
   async handler(args, ctx) {
@@ -2789,7 +3238,8 @@ const spacesActivity: ToolDef = {
       const rawActions = Array.isArray(args["actorActions"])
         ? (args["actorActions"] as unknown[]).map((v) => String(v).trim()).filter(Boolean)
         : [];
-      const actions = rawActions.length > 0 ? rawActions : (ACTIVITY_TAB_ACTIONS[String(args["tab"] ?? "")] ?? []);
+      const actions =
+        rawActions.length > 0 ? rawActions : (ACTIVITY_TAB_ACTIONS[String(args["tab"] ?? "")] ?? []);
       if (actions.length > 0) where["actorAction"] = { in: actions };
 
       const sortDir: "asc" | "desc" = args["sortOrder"] === "asc" ? "asc" : "desc";
@@ -2831,9 +3281,14 @@ const spacesActivity: ToolDef = {
         );
       });
 
-      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
+      );
       applyChannelInfo(citations, channelInfo);
-      return okCited(`${rows.length} activity entries:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`, citations);
+      return okCited(
+        `${rows.length} activity entries:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Activity error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -2864,8 +3319,17 @@ const spacesProjects: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      search: { type: "string", description: "Filter by project name OR code/shortcode (case-insensitive partial match)." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results (default 100, max 100)" },
+      search: {
+        type: "string",
+        description: "Filter by project name OR code/shortcode (case-insensitive partial match).",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results (default 100, max 100)",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
@@ -2881,11 +3345,25 @@ const spacesProjects: ToolDef = {
         // the two `contains` queries separately and union client-side, then
         // paginate the merged set (projects are few, so fetching broadly is fine).
         const [byName, byCode] = await Promise.all([
-          interact({ model: "project", operation: "findMany", where: { name: { contains: search, mode: "insensitive" } }, orderBy: [{ createdAt: "desc" }], take: 1000 }) as Promise<ProjectRow[]>,
-          interact({ model: "project", operation: "findMany", where: { code: { contains: search, mode: "insensitive" } }, orderBy: [{ createdAt: "desc" }], take: 1000 }) as Promise<ProjectRow[]>,
+          interact({
+            model: "project",
+            operation: "findMany",
+            where: { name: { contains: search, mode: "insensitive" } },
+            orderBy: [{ createdAt: "desc" }],
+            take: 1000,
+          }) as Promise<ProjectRow[]>,
+          interact({
+            model: "project",
+            operation: "findMany",
+            where: { code: { contains: search, mode: "insensitive" } },
+            orderBy: [{ createdAt: "desc" }],
+            take: 1000,
+          }) as Promise<ProjectRow[]>,
         ]);
         const seen = new Set<string>();
-        const merged = [...(byName ?? []), ...(byCode ?? [])].filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+        const merged = [...(byName ?? []), ...(byCode ?? [])].filter((p) =>
+          seen.has(p.id) ? false : (seen.add(p.id), true),
+        );
         merged.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
         rows = merged.slice(offset, offset + limit);
       } else {
@@ -2899,7 +3377,8 @@ const spacesProjects: ToolDef = {
         })) as ProjectRow[];
       }
 
-      if (!rows || rows.length === 0) return ok(search ? `No projects found matching "${search}".` : "No projects found.");
+      if (!rows || rows.length === 0)
+        return ok(search ? `No projects found matching "${search}".` : "No projects found.");
 
       const lines = rows.map((p, idx) => {
         const parts = [`${p.name}${p.code ? ` [${p.code}]` : ""}`];
@@ -2909,7 +3388,9 @@ const spacesProjects: ToolDef = {
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
 
-      return ok(`${rows.length} project(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`);
+      return ok(
+        `${rows.length} project(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
+      );
     } catch (e) {
       return err(`Projects error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -2963,7 +3444,8 @@ const spacesProjectTeamMembers: ToolDef = {
       })) as Array<{ userId: string }>;
 
       const uniqueUserIds = [...new Set(participants.map((p) => p.userId))];
-      if (uniqueUserIds.length === 0) return ok(`No team members found in any channel for project ${projectId}.`);
+      if (uniqueUserIds.length === 0)
+        return ok(`No team members found in any channel for project ${projectId}.`);
 
       const users = (await interact({
         model: "user",
@@ -2998,15 +3480,28 @@ const spacesProjectTeamMembers: ToolDef = {
 // RCA / PRD / summary / migration docs). Kept in lockstep with the frontend's
 // EXCLUDED_CALL_GENERATED_SOURCES (dashboard/src/components/Canvas/canvasFilters.ts).
 const EXCLUDED_CALL_GENERATED_SOURCES = new Set([
-  "call_prd", "call_detailed_summary", "genius_dm_response", "genius_canvas_long_response",
-  "jira_migration_report", "release_notes", "workflow_knowledge", "commit_analysis",
-  "genius_investigation", "xyne_auto_rca",
+  "call_prd",
+  "call_detailed_summary",
+  "genius_dm_response",
+  "genius_canvas_long_response",
+  "jira_migration_report",
+  "release_notes",
+  "workflow_knowledge",
+  "commit_analysis",
+  "genius_investigation",
+  "xyne_auto_rca",
 ]);
 
 /** True when a canvas row's metadata.source marks it auto/call-generated. */
 function isCallGeneratedCanvas(metadata: unknown): boolean {
   let meta = metadata;
-  if (typeof meta === "string") { try { meta = JSON.parse(meta); } catch { return false; } }
+  if (typeof meta === "string") {
+    try {
+      meta = JSON.parse(meta);
+    } catch {
+      return false;
+    }
+  }
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
   const source = (meta as Record<string, unknown>)["source"];
   return typeof source === "string" && EXCLUDED_CALL_GENERATED_SOURCES.has(source);
@@ -3025,12 +3520,30 @@ const spacesCanvases: ToolDef = {
       search: { type: "string", description: "Filter by canvas title (case-insensitive partial match)" },
       channelId: { type: "string", description: "Filter by channel ID" },
       projectId: { type: "string", description: "Filter to canvases in this project" },
-      folderId: { type: "string", description: "Filter to canvases in this folder. Pass the literal 'none' to list ungrouped/personal canvases (folderId is null)." },
-      visibility: { type: "string", enum: ["PUBLIC", "PRIVATE"], description: "Filter by visibility (canvases are PUBLIC or PRIVATE)." },
+      folderId: {
+        type: "string",
+        description:
+          "Filter to canvases in this folder. Pass the literal 'none' to list ungrouped/personal canvases (folderId is null).",
+      },
+      visibility: {
+        type: "string",
+        enum: ["PUBLIC", "PRIVATE"],
+        description: "Filter by visibility (canvases are PUBLIC or PRIVATE).",
+      },
       createdBy: { type: "string", description: "Filter by creator user ID" },
       starredOnly: { type: "boolean", description: "Only canvases you have starred." },
-      excludeCallGenerated: { type: "boolean", description: "Hide auto-generated call/RCA/PRD/summary/migration canvases (matches the dashboard's default view). Default false (returns everything)." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results (default 100, max 100)" },
+      excludeCallGenerated: {
+        type: "boolean",
+        description:
+          "Hide auto-generated call/RCA/PRD/summary/migration canvases (matches the dashboard's default view). Default false (returns everything).",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results (default 100, max 100)",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
@@ -3040,7 +3553,8 @@ const spacesCanvases: ToolDef = {
       if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
       if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
       if (args["projectId"]) where["projectId"] = { equals: args["projectId"] };
-      if (args["folderId"]) where["folderId"] = String(args["folderId"]) === "none" ? null : { equals: args["folderId"] };
+      if (args["folderId"])
+        where["folderId"] = String(args["folderId"]) === "none" ? null : { equals: args["folderId"] };
       if (args["visibility"]) where["visibility"] = { equals: args["visibility"] };
       if (args["createdBy"]) where["createdBy"] = { equals: args["createdBy"] };
       // Single relation-'some' object — gateway-legal. Scopes to canvases the
@@ -3065,7 +3579,9 @@ const spacesCanvases: ToolDef = {
           orderBy: [{ updatedAt: "desc" }],
           take: 1000,
         })) as CanvasRow[];
-        rows = (fetched ?? []).filter((c) => !isCallGeneratedCanvas(c.metadata)).slice(offset, offset + limit);
+        rows = (fetched ?? [])
+          .filter((c) => !isCallGeneratedCanvas(c.metadata))
+          .slice(offset, offset + limit);
       } else {
         rows = (await interact({
           model: "canvas",
@@ -3077,7 +3593,8 @@ const spacesCanvases: ToolDef = {
         })) as CanvasRow[];
       }
 
-      if (!rows || rows.length === 0) return ok(args["search"] ? `No canvases found matching "${args["search"]}".` : "No canvases found.");
+      if (!rows || rows.length === 0)
+        return ok(args["search"] ? `No canvases found matching "${args["search"]}".` : "No canvases found.");
 
       const citations: Citation[] = [];
       const lines = rows.map((c, idx) => {
@@ -3094,7 +3611,10 @@ const spacesCanvases: ToolDef = {
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
 
-      return okCited(`${rows.length} canvas(es):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`, citations);
+      return okCited(
+        `${rows.length} canvas(es):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Canvases error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -3133,18 +3653,56 @@ const spacesCalls: ToolDef = {
     properties: {
       search: { type: "string", description: "Filter by call title (case-insensitive partial match)" },
       channelId: { type: "string", description: "Filter by channel ID" },
-      status: { type: "string", enum: ["ACTIVE", "IN_PROGRESS", "ENDED", "SCHEDULED", "CANCELLED"], description: "Filter by a single call status." },
-      statusIn: { type: "array", items: { type: "string", enum: ["ACTIVE", "IN_PROGRESS", "ENDED", "SCHEDULED", "CANCELLED"] }, description: "Filter by MULTIPLE statuses (matches any). e.g. ['ACTIVE','IN_PROGRESS','ENDED'] for the Recents view. Overrides `status` when both are set." },
-      callType: { type: "string", enum: ["VIDEO", "AUDIO", "HEADLESS"], description: "Filter by call type. HEADLESS = xyne-automation recordings (the '/recordings' page) — pass callType='HEADLESS' to list recordings, combinable with any other filter." },
-      callOrigin: { type: "string", enum: ["CHANNEL", "CONVERSATION", "GOOGLE_CALENDAR", "MICROSOFT_CALENDAR"], description: "Filter by where the call originated: channel/conversation calls vs Google/Microsoft calendar meetings." },
+      status: {
+        type: "string",
+        enum: ["ACTIVE", "IN_PROGRESS", "ENDED", "SCHEDULED", "CANCELLED"],
+        description: "Filter by a single call status.",
+      },
+      statusIn: {
+        type: "array",
+        items: { type: "string", enum: ["ACTIVE", "IN_PROGRESS", "ENDED", "SCHEDULED", "CANCELLED"] },
+        description:
+          "Filter by MULTIPLE statuses (matches any). e.g. ['ACTIVE','IN_PROGRESS','ENDED'] for the Recents view. Overrides `status` when both are set.",
+      },
+      callType: {
+        type: "string",
+        enum: ["VIDEO", "AUDIO", "HEADLESS"],
+        description:
+          "Filter by call type. HEADLESS = xyne-automation recordings (the '/recordings' page) — pass callType='HEADLESS' to list recordings, combinable with any other filter.",
+      },
+      callOrigin: {
+        type: "string",
+        enum: ["CHANNEL", "CONVERSATION", "GOOGLE_CALENDAR", "MICROSOFT_CALENDAR"],
+        description:
+          "Filter by where the call originated: channel/conversation calls vs Google/Microsoft calendar meetings.",
+      },
       organizerId: { type: "string", description: "Filter by organizer user ID" },
-      createdByUserId: { type: "string", description: "Filter by creator user ID (outgoing calls when set to yourself)." },
-      notCreatedByUserId: { type: "string", description: "Filter to calls NOT created by this user ID (incoming calls when set to yourself). Ignored if createdByUserId is also set." },
-      participantId: { type: "string", description: "Filter to calls this user attended / was invited to (a participant). Accepts a userId." },
-      after: { type: "string", description: "ISO 8601 — only calls that started at or after this time (by actual start time)." },
+      createdByUserId: {
+        type: "string",
+        description: "Filter by creator user ID (outgoing calls when set to yourself).",
+      },
+      notCreatedByUserId: {
+        type: "string",
+        description:
+          "Filter to calls NOT created by this user ID (incoming calls when set to yourself). Ignored if createdByUserId is also set.",
+      },
+      participantId: {
+        type: "string",
+        description: "Filter to calls this user attended / was invited to (a participant). Accepts a userId.",
+      },
+      after: {
+        type: "string",
+        description: "ISO 8601 — only calls that started at or after this time (by actual start time).",
+      },
       before: { type: "string", description: "ISO 8601 — only calls that started at or before this time." },
       isRecurring: { type: "boolean", description: "Filter recurring calls only" },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results (default 100, max 100)" },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results (default 100, max 100)",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
@@ -3164,7 +3722,8 @@ const spacesCalls: ToolDef = {
       if (args["createdByUserId"]) where["createdByUserId"] = { equals: args["createdByUserId"] };
       else if (args["notCreatedByUserId"]) where["createdByUserId"] = { not: args["notCreatedByUserId"] };
       // Single relation-'some' object — gateway-legal — for participant scoping.
-      if (args["participantId"]) where["participants"] = { some: { userId: { equals: args["participantId"] } } };
+      if (args["participantId"])
+        where["participants"] = { some: { userId: { equals: args["participantId"] } } };
       // Date range on actual start time (startedAt is always present; startsAt is
       // only the scheduled time and is null for many calls/recordings).
       const startedAt: Record<string, string> = {};
@@ -3182,7 +3741,8 @@ const spacesCalls: ToolDef = {
         skip: (args["offset"] as number | undefined) ?? 0,
       })) as CallRow[];
 
-      if (!rows || rows.length === 0) return ok(args["search"] ? `No calls found matching "${args["search"]}".` : "No calls found.");
+      if (!rows || rows.length === 0)
+        return ok(args["search"] ? `No calls found matching "${args["search"]}".` : "No calls found.");
 
       // Cite each call's Spaces conversation THREAD — that's where the call
       // summary + transcript live, and it stays readable after the call ends.
@@ -3222,7 +3782,8 @@ const spacesCalls: ToolDef = {
         if (c.organizerId) userIds.add(c.organizerId);
         if (c.createdByUserId) userIds.add(c.createdByUserId);
       }
-      for (const list of participantsByCall.values()) for (const p of list) if (p.userId) userIds.add(p.userId);
+      for (const list of participantsByCall.values())
+        for (const p of list) if (p.userId) userIds.add(p.userId);
       const userInfo = await resolveUserInfo(userIds);
 
       const citations: Citation[] = [];
@@ -3248,7 +3809,7 @@ const spacesCalls: ToolDef = {
               ? `${p.displayName || "Guest"} (external)`
               : p.userId
                 ? (userInfo.get(p.userId)?.name ?? p.displayName ?? p.userId)
-                : (p.displayName || "unknown");
+                : p.displayName || "unknown";
             const state = p.response || p.meetingStatus;
             return state ? `${name} [${state}]` : name;
           });
@@ -3260,16 +3821,24 @@ const spacesCalls: ToolDef = {
         // is indexed as searchable chunks in Vespa (file schema, subApp=TRANSCRIPT),
         // so point the agent at the tools that read it rather than dumping a URL.
         if (c.aiSummary) parts.push(`  Summary: ${cleanSnippet(c.aiSummary)}`);
-        if (c.transcript) parts.push(`  Transcript: available — search/read it with spaces-meeting-insights, or spaces-search type=transcript`);
+        if (c.transcript)
+          parts.push(
+            `  Transcript: available — search/read it with spaces-meeting-insights, or spaces-search type=transcript`,
+          );
         parts.push(`  ID: ${c.id}`);
         const conversationId = (c.metadata as { conversationId?: string } | null | undefined)?.conversationId;
         pushThreadCitation(citations, c.channelId, conversationId, idx + 1, c.title ?? "Call");
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
-      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
+      );
       applyChannelInfo(citations, channelInfo);
 
-      return okCited(`${rows.length} call(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`, citations);
+      return okCited(
+        `${rows.length} call(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Calls error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -3324,8 +3893,17 @@ const spacesBoards: ToolDef = {
     type: "object",
     properties: {
       search: { type: "string", description: "Filter by board name (partial match)" },
-      projectId: { type: "string", description: "Filter by project ID (use spaces-projects to find project IDs)" },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results (default 100, max 100)" },
+      projectId: {
+        type: "string",
+        description: "Filter by project ID (use spaces-projects to find project IDs)",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results (default 100, max 100)",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
@@ -3347,7 +3925,8 @@ const spacesBoards: ToolDef = {
         },
       })) as BoardRow[];
 
-      if (!rows || rows.length === 0) return ok(args["search"] ? `No boards found matching "${args["search"]}".` : "No boards found.");
+      if (!rows || rows.length === 0)
+        return ok(args["search"] ? `No boards found matching "${args["search"]}".` : "No boards found.");
 
       const lines = rows.map((b) => {
         const parts = [b.name];
@@ -3358,7 +3937,9 @@ const spacesBoards: ToolDef = {
         return parts.join("\n");
       });
 
-      return ok(`${rows.length} board(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`);
+      return ok(
+        `${rows.length} board(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+      );
     } catch (e) {
       return err(`Boards error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -3393,12 +3974,20 @@ const spacesCreateTicket: ToolDef = {
       description: { type: "string", description: "Ticket description" },
       projectId: { type: "string", description: "Project ID (use spaces-projects to find)" },
       boardId: { type: "string", description: "Board ID (use spaces-boards to find)" },
-      channelId: { type: "string", description: "Channel ID where the ticket will live (use spaces-channels to find)." },
+      channelId: {
+        type: "string",
+        description: "Channel ID where the ticket will live (use spaces-channels to find).",
+      },
       attachConversationId: {
         type: "string",
-        description: "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
+        description:
+          "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
       },
-      priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Ticket priority" },
+      priority: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        description: "Ticket priority",
+      },
       assignedTo: { type: "string", description: "User ID to assign (use spaces-users to find)" },
       eta: { type: "string", description: "Due date as ISO 8601 string" },
       tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
@@ -3441,7 +4030,14 @@ const spacesCreateTicket: ToolDef = {
       const data = (await spacesFetch("/api/tickets/claw", {
         method: "POST",
         body: JSON.stringify(body),
-      })) as { id: string; xyneId: string; conversationId: string; title: string; priority: string; status: string };
+      })) as {
+        id: string;
+        xyneId: string;
+        conversationId: string;
+        title: string;
+        priority: string;
+        status: string;
+      };
 
       // Step 2: if the caller wants attachments carried over from another
       // conversation, transfer them via the existing standalone endpoint.
@@ -3460,9 +4056,10 @@ const spacesCreateTicket: ToolDef = {
             },
           )) as { count?: number };
           const count = typeof attachResp?.count === "number" ? attachResp.count : 0;
-          attachLine = count > 0
-            ? `  Attachments: ${count} file(s) carried over`
-            : `  Attachments: 0 files found on source conversation`;
+          attachLine =
+            count > 0
+              ? `  Attachments: ${count} file(s) carried over`
+              : `  Attachments: 0 files found on source conversation`;
         } catch (e) {
           attachLine = `  Attachments: transfer failed — ${e instanceof Error ? e.message : String(e)}`;
         }
@@ -3472,15 +4069,12 @@ const spacesCreateTicket: ToolDef = {
       const citations: Citation[] = [];
       // Pass xyneId so the FE routes desk-typed (EMAIL/SLACK) ticket-create
       // citations to the Support view rather than the chat thread panel.
-      pushThreadCitation(
-        citations,
-        channelId,
-        data.conversationId,
-        1,
-        `Ticket ${data.xyneId}`,
-        { xyneId: data.xyneId },
+      pushThreadCitation(citations, channelId, data.conversationId, 1, `Ticket ${data.xyneId}`, {
+        xyneId: data.xyneId,
+      });
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
       );
-      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
       applyChannelInfo(citations, channelInfo);
 
       const bodyLines = [
@@ -3672,16 +4266,36 @@ const spacesUpdateTicket: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      ticketId: { type: "string", description: "Internal database ID of the ticket to update (use spaces-tickets to find — use 'Internal ID', not 'Xyne ID')" },
-      assigneeId: { type: "string", description: "User ID to assign the ticket to (use spaces-users to find)" },
-      stage: { type: "string", description: "Stage name to move the ticket to (must be a valid stage on the ticket's board)" },
+      ticketId: {
+        type: "string",
+        description:
+          "Internal database ID of the ticket to update (use spaces-tickets to find — use 'Internal ID', not 'Xyne ID')",
+      },
+      assigneeId: {
+        type: "string",
+        description: "User ID to assign the ticket to (use spaces-users to find)",
+      },
+      stage: {
+        type: "string",
+        description: "Stage name to move the ticket to (must be a valid stage on the ticket's board)",
+      },
       groupId: { type: "string", description: "User group ID to assign to the ticket" },
       title: { type: "string", description: "New title for the ticket" },
       description: { type: "string", description: "New description for the ticket" },
       priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "New priority" },
-      status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "New status. Note: changing the stage may also change the status to the stage's default — provide this field to override." },
+      status: {
+        type: "string",
+        enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"],
+        description:
+          "New status. Note: changing the stage may also change the status to the stage's default — provide this field to override.",
+      },
       eta: { type: "string", description: "New due date as ISO 8601 string (e.g. '2026-06-01T00:00:00Z')" },
-      tags: { type: "array", items: { type: "string" }, description: "Replace the ticket's tags with this list of tag names. Pass an empty array to remove all tags." },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Replace the ticket's tags with this list of tag names. Pass an empty array to remove all tags.",
+      },
     },
     required: ["ticketId"],
   },
@@ -3704,8 +4318,20 @@ const spacesUpdateTicket: ToolDef = {
       const tags = tagsProvided ? (rawTags as unknown[]).map((t) => String(t)) : undefined;
 
       if (!ticketId) return err("ticketId is required.");
-      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta && !tagsProvided) {
-        return err("At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags).");
+      if (
+        !assigneeId &&
+        !stage &&
+        !groupId &&
+        !title &&
+        !description &&
+        !priority &&
+        !status &&
+        !eta &&
+        !tagsProvided
+      ) {
+        return err(
+          "At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags).",
+        );
       }
 
       const body: Record<string, unknown> = {};
@@ -3741,10 +4367,17 @@ const spacesScheduleCall: ToolDef = {
     type: "object",
     properties: {
       title: { type: "string", description: "Call title" },
-      startsAt: { type: "string", description: "Start time as ISO 8601 string (e.g. '2026-03-28T10:00:00Z')" },
+      startsAt: {
+        type: "string",
+        description: "Start time as ISO 8601 string (e.g. '2026-03-28T10:00:00Z')",
+      },
       endsAt: { type: "string", description: "End time as ISO 8601 string" },
       channelId: { type: "string", description: "Channel ID to schedule the call in" },
-      targetUserIds: { type: "array", items: { type: "string" }, description: "User IDs to invite (use spaces-users to find)" },
+      targetUserIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "User IDs to invite (use spaces-users to find)",
+      },
     },
     required: ["title", "startsAt", "endsAt"],
   },
@@ -3768,18 +4401,19 @@ const spacesScheduleCall: ToolDef = {
       })) as { success: boolean; callId?: string; externalId?: string; channelId?: string };
 
       if (!data.success) return err("Failed to schedule call.");
-      return ok([
-        `Call scheduled:`,
-        `  callId: ${data.callId}`,
-        `  externalId: ${data.externalId}`,
-        `  channelId: ${data.channelId}`,
-      ].join("\n"));
+      return ok(
+        [
+          `Call scheduled:`,
+          `  callId: ${data.callId}`,
+          `  externalId: ${data.externalId}`,
+          `  channelId: ${data.channelId}`,
+        ].join("\n"),
+      );
     } catch (e) {
       return err(`Schedule call error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
-
 
 // ── spaces-whoami ─────────────────────────────────────────────────────
 
@@ -3800,7 +4434,9 @@ const spacesWhoami: ToolDef = {
       })) as Array<{ id: string; name: string; email: string; workspaceId: string }>;
       const u = rows?.[0];
       if (!u) return ok(`Current user ID: ${ctx.userId} (profile not found)`);
-      return ok(`Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}\n- Workspace ID: ${u.workspaceId}`);
+      return ok(
+        `Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}\n- Workspace ID: ${u.workspaceId}`,
+      );
     } catch (e) {
       return err(`Whoami error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -3837,7 +4473,7 @@ const spacesReadCanvas: ToolDef = {
           method: "GET",
           headers: { "x-user-id": ctx.userId },
         },
-        { s2sKey }
+        { s2sKey },
       )) as { title?: string; markdown?: string; url?: string; error?: string };
 
       if (result.error) return err(result.error);
@@ -3847,10 +4483,7 @@ const spacesReadCanvas: ToolDef = {
 
       const citations: Citation[] = [];
       pushCanvasCitation(citations, viewAccessId, 1, title);
-      return okCited(
-        prefixChunk(1, `# ${title}`, [``, `URL: ${url}`, ``, markdown]),
-        citations,
-      );
+      return okCited(prefixChunk(1, `# ${title}`, [``, `URL: ${url}`, ``, markdown]), citations);
     } catch (e) {
       return err(`Read canvas error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -3896,8 +4529,14 @@ const spacesEditCanvas: ToolDef = {
           body: JSON.stringify({ markdown: content, ...(title ? { title } : {}) }),
           headers: { "x-user-id": ctx.userId },
         },
-        { s2sKey }
-      )) as { url?: string | null; title?: string; viewAccessId?: string; error?: string; updatedAt?: string };
+        { s2sKey },
+      )) as {
+        url?: string | null;
+        title?: string;
+        viewAccessId?: string;
+        error?: string;
+        updatedAt?: string;
+      };
 
       if (result.error) return err(result.error);
       const citations: Citation[] = [];
@@ -3930,8 +4569,14 @@ const spacesTriggerAgent: ToolDef = {
     properties: {
       targetAgent: { type: "string", description: "Slug of the agent to trigger (e.g. 'doctor-agent')" },
       task: { type: "string", description: "Task description for the target agent" },
-      conversationId: { type: "string", description: "Conversation thread to continue in (from Session Metadata)" },
-      channelId: { type: "string", description: "Channel where the conversation is happening (from Session Metadata)" },
+      conversationId: {
+        type: "string",
+        description: "Conversation thread to continue in (from Session Metadata)",
+      },
+      channelId: {
+        type: "string",
+        description: "Channel where the conversation is happening (from Session Metadata)",
+      },
     },
     required: ["targetAgent", "task"],
   },
@@ -3958,16 +4603,51 @@ const spacesMeetingInsights: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      query: { type: "string", description: "The topic or question to search for in meeting insights — e.g. 'sales targets', 'action items', 'pain points', 'merchant feedback'. Can be empty if using filters only." },
-      callType: { type: "string", description: "Filter by call type: VIDEO, AUDIO, or HEADLESS (HEADLESS = the '/recordings' recordings)." },
-      platform: { type: "string", description: "Legacy alias — folded into the same call-type filter as `callType`. Prefer `callType` (VIDEO/AUDIO/HEADLESS)." },
-      participants: { type: "string", description: "Filter by the transcript's owner/creator user id (the person who ran/recorded the call)." },
-      before: { type: "string", description: "Filter meetings before this date (e.g. '2024-01-01' or '15 Mar 26')" },
+      query: {
+        type: "string",
+        description:
+          "The topic or question to search for in meeting insights — e.g. 'sales targets', 'action items', 'pain points', 'merchant feedback'. Can be empty if using filters only.",
+      },
+      callType: {
+        type: "string",
+        description:
+          "Filter by call type: VIDEO, AUDIO, or HEADLESS (HEADLESS = the '/recordings' recordings).",
+      },
+      platform: {
+        type: "string",
+        description:
+          "Legacy alias — folded into the same call-type filter as `callType`. Prefer `callType` (VIDEO/AUDIO/HEADLESS).",
+      },
+      participants: {
+        type: "string",
+        description:
+          "Filter by the transcript's owner/creator user id (the person who ran/recorded the call).",
+      },
+      before: {
+        type: "string",
+        description: "Filter meetings before this date (e.g. '2024-01-01' or '15 Mar 26')",
+      },
       after: { type: "string", description: "Filter meetings after this date" },
       on: { type: "string", description: "Filter meetings on this specific date" },
-      range: { type: "string", description: "Filter by time keyword: today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, recent" },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max results (default 100, max 100)" },
-      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with the same query/filters and a higher offset for more insights." },
+      range: {
+        type: "string",
+        description:
+          "Filter by time keyword: today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, recent",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max results (default 100, max 100)",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description:
+          "Pagination offset (default 0). Call again with the same query/filters and a higher offset for more insights.",
+      },
     },
     required: [],
   },
@@ -4013,42 +4693,49 @@ const spacesMeetingInsights: ToolDef = {
       }
 
       const citations: Citation[] = [];
-      const formatted = results.map((r, idx) => {
-        const chunkIndex = idx + 1;
-        const subLines: string[] = [];
-        if (r.subtitle) subLines.push(`**${r.subtitle}**`);
+      const formatted = results
+        .map((r, idx) => {
+          const chunkIndex = idx + 1;
+          const subLines: string[] = [];
+          if (r.subtitle) subLines.push(`**${r.subtitle}**`);
 
-        const context = r.context ?? "";
-        if (context) {
-          // Full context — no cap; highlights preserved. Oversized output is
-          // handled centrally by claw's promoteIfOversized().
-          subLines.push(cleanSnippet(context));
-        }
+          const context = r.context ?? "";
+          if (context) {
+            // Full context — no cap; highlights preserved. Oversized output is
+            // handled centrally by claw's promoteIfOversized().
+            subLines.push(cleanSnippet(context));
+          }
 
-        const meta = r.metadata ?? {};
-        const sc = r.searchContext ?? {};
-        const metaParts: string[] = [];
-        if (meta["timestamp"]) metaParts.push(`Date: ${meta["timestamp"]}`);
-        if (meta["channelName"]) metaParts.push(`Channel: #${meta["channelName"]}`);
-        if (sc["senderName"]) metaParts.push(`Participants: ${sc["senderName"]}`);
-        if (meta["platform"]) metaParts.push(`Platform: ${meta["platform"]}`);
-        if (metaParts.length > 0) subLines.push(metaParts.join(" · "));
+          const meta = r.metadata ?? {};
+          const sc = r.searchContext ?? {};
+          const metaParts: string[] = [];
+          if (meta["timestamp"]) metaParts.push(`Date: ${meta["timestamp"]}`);
+          if (meta["channelName"]) metaParts.push(`Channel: #${meta["channelName"]}`);
+          if (sc["senderName"]) metaParts.push(`Participants: ${sc["senderName"]}`);
+          if (meta["platform"]) metaParts.push(`Platform: ${meta["platform"]}`);
+          if (metaParts.length > 0) subLines.push(metaParts.join(" · "));
 
-        // Harvest a thread citation when the search row carries channel +
-        // conversation IDs (matches what spaces-search:harvest does at :241).
-        const channelId =
-          (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
-        const conversationId =
-          (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
-        pushThreadCitation(citations, channelId, conversationId, chunkIndex, r.title || "Meeting");
+          // Harvest a thread citation when the search row carries channel +
+          // conversation IDs (matches what spaces-search:harvest does at :241).
+          const channelId =
+            (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
+          const conversationId =
+            (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
+          pushThreadCitation(citations, channelId, conversationId, chunkIndex, r.title || "Meeting");
 
-        return prefixChunk(chunkIndex, `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`, subLines);
-      }).join("\n\n---\n\n");
+          return prefixChunk(chunkIndex, `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`, subLines);
+        })
+        .join("\n\n---\n\n");
 
-      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
+      );
       applyChannelInfo(citations, channelInfo);
 
-      return okCited(`Found ${data.data.totalCount ?? results.length} meeting insight(s):\n\n${formatted}${paginationFooter({ returned: results.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0), total: data.data.totalCount })}`, citations);
+      return okCited(
+        `Found ${data.data.totalCount ?? results.length} meeting insight(s):\n\n${formatted}${paginationFooter({ returned: results.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0), total: data.data.totalCount })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Meeting insights search error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -4123,6 +4810,184 @@ const spacesCreateCanvas: ToolDef = {
   },
 };
 
+// ── spaces-sdlc-update-baseline ───────────────────────────────────
+const spacesSdlcUpdateBaseline: ToolDef = {
+  name: "spaces-sdlc-update-baseline",
+  description:
+    "Persist an SDLC baseline incrementally. Begin one draft canvas, upsert one evidence-backed " +
+    "section after each focused repository inspection, then finalize only after every required section exists. " +
+    "Retries resume the existing draft for the same setup execution. In SDLC automation runs, repository and " +
+    "execution identifiers are server-pinned and injected automatically; never search Spaces to rediscover them.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string" },
+      baselineKind: {
+        type: "string",
+        enum: ["CORE_CODE_MAP", "FRONTEND_DESIGN_SYSTEM", "CODE_LINT_STANDARDS", "RUN_GUIDE", "TEST_GUIDE"],
+      },
+      setupExecutionId: { type: "string" },
+      workflowExecutionId: { type: "string" },
+      title: { type: "string" },
+      action: { type: "string", enum: ["begin", "upsert_section", "finalize"] },
+      sectionKey: { type: "string" },
+      sectionTitle: { type: "string" },
+      markdown: { type: "string", description: "Complete Markdown for one section." },
+    },
+    required: ["action"],
+  },
+  async handler(args, ctx) {
+    return updateSdlcBaseline(args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return updateSdlcBaseline(args, ctx);
+  },
+};
+
+async function updateSdlcBaseline(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = (await spacesFetch("/api/sdlc/claw/baseline-drafts", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    })) as {
+      artifact: {
+        canvasId: string;
+        viewAccessId?: string;
+        url?: string;
+        kind: string;
+      };
+    };
+    const artifact = data.artifact;
+    const citations: Citation[] = [];
+    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC baseline"));
+    return okCited(
+      prefixChunk(1, `SDLC baseline ${String(args["action"] ?? "updated")}`, [
+        `Canvas ID: ${artifact.canvasId}`,
+        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
+      ]),
+      citations,
+    );
+  } catch (e) {
+    return err(`Update SDLC baseline error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+// ── spaces-sdlc-create-artifact ────────────────────────────────────
+const spacesSdlcCreateArtifact: ToolDef = {
+  name: "spaces-sdlc-create-artifact",
+  description:
+    "Create a repository-scoped SDLC Baseline, PRD, or Tech Doc canvas. " +
+    "Use only when an SDLC run or an explicit user request supplies the repository and lifecycle context. " +
+    "The Spaces backend chooses the folder, validates access, and creates lifecycle relationships.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string", description: "Attached SDLC repository id from the run context." },
+      kind: { type: "string", enum: ["BASELINE", "PRD", "TECH_DOC"] },
+      title: { type: "string" },
+      markdown: { type: "string", description: "Complete editable artifact content in Markdown." },
+      baselineKind: {
+        type: "string",
+        enum: ["CORE_CODE_MAP", "FRONTEND_DESIGN_SYSTEM", "CODE_LINT_STANDARDS", "RUN_GUIDE", "TEST_GUIDE"],
+      },
+      setupExecutionId: { type: "string" },
+      workflowExecutionId: { type: "string" },
+      parentCanvasId: { type: "string" },
+      generationCommit: { type: "string" },
+    },
+    required: ["repoId", "kind", "title", "markdown"],
+  },
+  async handler(args, ctx) {
+    return createSdlcArtifact(args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return createSdlcArtifact(args, ctx);
+  },
+};
+
+async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    })) as {
+      artifact: {
+        canvasId: string;
+        viewAccessId?: string;
+        url?: string;
+        kind: string;
+      };
+    };
+    const artifact = data.artifact;
+    const citations: Citation[] = [];
+    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));
+    return okCited(
+      prefixChunk(1, "SDLC artifact created", [
+        `Canvas ID: ${artifact.canvasId}`,
+        `Kind: ${artifact.kind}`,
+        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
+      ]),
+      citations,
+    );
+  } catch (e) {
+    return err(`Create SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+// ── spaces-sdlc-create-pull-request ───────────────────────────────
+const spacesSdlcCreatePullRequest: ToolDef = {
+  name: "spaces-sdlc-create-pull-request",
+  description:
+    "Create the run-bound draft pull request after a convention-derived safe feature branch has been pushed. " +
+    "The Spaces backend resolves its backend-only authorization and verifies execution/session/repository, " +
+    "remote commit, exact head/base, and draft state. Never use generic GitHub credentials for SDLC work.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" },
+      sessionId: { type: "string" },
+      repoId: { type: "string" },
+      title: { type: "string" },
+      body: { type: "string" },
+      head: { type: "string" },
+      base: { type: "string" },
+      commitHash: { type: "string" },
+    },
+    required: ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"],
+  },
+  async handler(args) {
+    try {
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+      if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
+      const data = (await spacesFetch(
+        "/api/internal/sdlc/vcs/pull-requests",
+        { method: "POST", body: JSON.stringify(args) },
+        { s2sKey },
+      )) as {
+        pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string };
+      };
+      if (!data.pullRequest?.url || data.pullRequest.draft !== true) {
+        return err("Spaces returned an invalid draft pull request result.");
+      }
+      return ok(
+        [
+          "Draft pull request created and verified.",
+          `URL: ${data.pullRequest.url}`,
+          `Number: ${data.pullRequest.number ?? "unknown"}`,
+          `Head: ${data.pullRequest.head ?? "unknown"}`,
+          `Base: ${data.pullRequest.base ?? "unknown"}`,
+        ].join("\n"),
+      );
+    } catch (e) {
+      return err(`Create SDLC pull request error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+  async appHandler(args) {
+    return spacesSdlcCreatePullRequest.handler(args, { userId: "sdlc", authMode: "app" });
+  },
+};
 
 // ── spaces-emails ──────────────────────────────────────────────────
 
@@ -4136,9 +5001,24 @@ const spacesEmails: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      conversationId: { type: "string", description: "The conversationId from a spaces-tickets desk ticket." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max emails to return (default 100)" },
-      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with a higher offset for older emails in a long thread." },
+      conversationId: {
+        type: "string",
+        description: "The conversationId from a spaces-tickets desk ticket.",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 100,
+        description: "Max emails to return (default 100)",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description:
+          "Pagination offset (default 0). Call again with a higher offset for older emails in a long thread.",
+      },
     },
     required: ["conversationId"],
   },
@@ -4170,7 +5050,10 @@ const spacesEmails: ToolDef = {
         // Full body — strip HTML / collapse whitespace for readability, but no
         // length cap (claw's promoteIfOversized() handles oversized results).
         const body = e.body
-          ? e.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+          ? e.body
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
           : "(no body)";
         parts.push(`  Body: ${body}`);
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
@@ -4186,24 +5069,20 @@ const spacesEmails: ToolDef = {
       const channelId = rows.find((r) => r.channelId)?.channelId;
       const ticketXyneId = await resolveTicketByConversation(conversationId);
       rows.forEach((e, idx) => {
-        pushThreadCitation(
-          citations,
-          channelId,
-          conversationId,
-          idx + 1,
-          "Desk email thread",
-          {
-            ...(ticketXyneId ? { xyneId: ticketXyneId } : {}),
-            ...(e.id ? { mailId: e.id } : {}),
-          },
-        );
+        pushThreadCitation(citations, channelId, conversationId, idx + 1, "Desk email thread", {
+          ...(ticketXyneId ? { xyneId: ticketXyneId } : {}),
+          ...(e.id ? { mailId: e.id } : {}),
+        });
       });
       const channelInfo = await resolveChannelInfo(
         citations.map((c) => c.channelId).filter((v): v is string => !!v),
       );
       applyChannelInfo(citations, channelInfo);
 
-      return okCited(`${rows.length} email(s) in thread:\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: take, offset: skip })}`, citations);
+      return okCited(
+        `${rows.length} email(s) in thread:\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: take, offset: skip })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Emails error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -4238,7 +5117,7 @@ interface MessageAttachmentRow {
   size: number;
   createdAt: string;
   uploadedByUserId: string;
-  entityId: string;          // messageId for CHAT entityType
+  entityId: string; // messageId for CHAT entityType
   url?: string;
 }
 
@@ -4385,9 +5264,24 @@ const spacesThreadAttachments: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      conversationId: { type: "string", description: "Thread/conversation id (from Session Metadata or spaces-messages results)." },
-      limit: { type: "number", minimum: 1, maximum: 200, default: 100, description: "Max attachments to return (default 100, max 200)." },
-      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with a higher offset to page through a thread with many attachments." },
+      conversationId: {
+        type: "string",
+        description: "Thread/conversation id (from Session Metadata or spaces-messages results).",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 200,
+        default: 100,
+        description: "Max attachments to return (default 100, max 200).",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description:
+          "Pagination offset (default 0). Call again with a higher offset to page through a thread with many attachments.",
+      },
     },
     required: ["conversationId"],
   },
@@ -4449,23 +5343,24 @@ const spacesThreadAttachments: ToolDef = {
         take: fetchCap,
       })) as MessageAttachmentRow[];
 
-      const byEntity = messageIds.length > 0
-        ? ((await interact({
-            model: "messageAttachment",
-            operation: "findMany",
-            where: { entityId: { in: messageIds }, isDeleted: { equals: false } },
-            orderBy: [{ createdAt: "asc" }],
-            take: fetchCap,
-          })) as MessageAttachmentRow[])
-        : [];
+      const byEntity =
+        messageIds.length > 0
+          ? ((await interact({
+              model: "messageAttachment",
+              operation: "findMany",
+              where: { entityId: { in: messageIds }, isDeleted: { equals: false } },
+              orderBy: [{ createdAt: "asc" }],
+              take: fetchCap,
+            })) as MessageAttachmentRow[])
+          : [];
 
-      const rowsRaw = [...(byConversation ?? []), ...(byEntity ?? [])]
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const rowsRaw = [...(byConversation ?? []), ...(byEntity ?? [])].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
 
       // De-dupe by id, then page the requested window (offset → offset+limit).
       const seen = new Set<string>();
-      const deduped = (rowsRaw ?? [])
-        .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+      const deduped = (rowsRaw ?? []).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
       const rows = deduped.slice(offset, offset + limit);
 
       console.error(
@@ -4478,8 +5373,7 @@ const spacesThreadAttachments: ToolDef = {
 
       const citations: Citation[] = [];
       const lines = rows.map((r, idx) => {
-        const channelIdForChunk =
-          messageIdToChannelId.get(r.entityId) ?? fallbackChannelId;
+        const channelIdForChunk = messageIdToChannelId.get(r.entityId) ?? fallbackChannelId;
         // entityId here IS the messageId the attachment was posted on, so the
         // citation chip can deep-link straight to that message in the thread
         // panel instead of dropping the user at the top.
@@ -4497,9 +5391,14 @@ const spacesThreadAttachments: ToolDef = {
           [],
         );
       });
-      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
+      );
       applyChannelInfo(citations, channelInfo);
-      return okCited(`${rows.length} attachment(s) in ${conversationId}:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit, offset, total: deduped.length })}`, citations);
+      return okCited(
+        `${rows.length} attachment(s) in ${conversationId}:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit, offset, total: deduped.length })}`,
+        citations,
+      );
     } catch (e) {
       return err(`Thread attachments error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -4650,13 +5549,42 @@ const spacesUploadToKb: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      attachmentId: { type: "string", description: "A SINGLE existing attachment id from spaces-thread-attachments. For multiple files use attachmentIds instead. Provide attachment(s) OR content, not both." },
-      attachmentIds: { type: "array", items: { type: "string" }, description: "MANY existing attachment ids to upload as a batch behind one approval. Provide attachment(s) OR content, not both. attachmentId and attachmentIds are merged/deduped if both are given." },
-      content: { type: "string", description: "Inline text/markdown to save as a NEW KB document (e.g. this session's learnings or a summary). Provide this OR attachment(s), not both." },
-      fileName: { type: "string", description: "File name for content mode (e.g. 'session-learnings.md'). Defaults to session-learning-<timestamp>.md. Ignored when attachment(s) are given." },
-      collectionId: { type: "string", description: "Target KB collection id. If omitted, provide channelId and the tool resolves the channel's KB collection." },
-      channelId: { type: "string", description: "Channel id whose Knowledge Base collection should receive the file(s). Used only when collectionId is not given." },
-      duplicateStrategy: { type: "string", enum: ["skip", "rename", "overwrite"], description: "How to handle a filename clash in the collection. Default 'rename'." },
+      attachmentId: {
+        type: "string",
+        description:
+          "A SINGLE existing attachment id from spaces-thread-attachments. For multiple files use attachmentIds instead. Provide attachment(s) OR content, not both.",
+      },
+      attachmentIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "MANY existing attachment ids to upload as a batch behind one approval. Provide attachment(s) OR content, not both. attachmentId and attachmentIds are merged/deduped if both are given.",
+      },
+      content: {
+        type: "string",
+        description:
+          "Inline text/markdown to save as a NEW KB document (e.g. this session's learnings or a summary). Provide this OR attachment(s), not both.",
+      },
+      fileName: {
+        type: "string",
+        description:
+          "File name for content mode (e.g. 'session-learnings.md'). Defaults to session-learning-<timestamp>.md. Ignored when attachment(s) are given.",
+      },
+      collectionId: {
+        type: "string",
+        description:
+          "Target KB collection id. If omitted, provide channelId and the tool resolves the channel's KB collection.",
+      },
+      channelId: {
+        type: "string",
+        description:
+          "Channel id whose Knowledge Base collection should receive the file(s). Used only when collectionId is not given.",
+      },
+      duplicateStrategy: {
+        type: "string",
+        enum: ["skip", "rename", "overwrite"],
+        description: "How to handle a filename clash in the collection. Default 'rename'.",
+      },
     },
     required: [],
   },
@@ -4685,17 +5613,23 @@ const spacesUploadToKb: ToolDef = {
       const hasAttachment = attachmentIds.length > 0;
       const hasContent = content.trim().length > 0;
       if (hasAttachment === hasContent) {
-        return err("Provide exactly one source: attachment(s) (attachmentId or attachmentIds) OR content (inline text to save). Not both, not neither.");
+        return err(
+          "Provide exactly one source: attachment(s) (attachmentId or attachmentIds) OR content (inline text to save). Not both, not neither.",
+        );
       }
       if (!explicitCollectionId && !channelId) {
-        return err("Provide either collectionId (explicit target) or channelId (to resolve the channel's KB collection).");
+        return err(
+          "Provide either collectionId (explicit target) or channelId (to resolve the channel's KB collection).",
+        );
       }
 
       // Bound the batch: an unconstrained caller could otherwise enqueue an
       // arbitrary number of uploads behind a single approval.
       const MAX_ATTACHMENTS = 25;
       if (attachmentIds.length > MAX_ATTACHMENTS) {
-        return err(`Too many attachments (${attachmentIds.length} > ${MAX_ATTACHMENTS}). Upload in batches of ${MAX_ATTACHMENTS} or fewer.`);
+        return err(
+          `Too many attachments (${attachmentIds.length} > ${MAX_ATTACHMENTS}). Upload in batches of ${MAX_ATTACHMENTS} or fewer.`,
+        );
       }
 
       // Bound inline content: an unconstrained model could generate a many-MB
@@ -4703,7 +5637,9 @@ const spacesUploadToKb: ToolDef = {
       // by what Spaces already accepted, so only content mode needs the cap.
       const MAX_INLINE_CONTENT_BYTES = 5 * 1024 * 1024;
       if (hasContent && Buffer.byteLength(content, "utf8") > MAX_INLINE_CONTENT_BYTES) {
-        return err(`Inline content is too large (${Buffer.byteLength(content, "utf8")}B > ${MAX_INLINE_CONTENT_BYTES}B / 5MB). Trim the document or upload it as a thread attachment first.`);
+        return err(
+          `Inline content is too large (${Buffer.byteLength(content, "utf8")}B > ${MAX_INLINE_CONTENT_BYTES}B / 5MB). Trim the document or upload it as a thread attachment first.`,
+        );
       }
 
       // 1) Resolve the target collection + verify the user can write to it.
@@ -4714,24 +5650,29 @@ const spacesUploadToKb: ToolDef = {
         // Channel -> KB collection. `/accessible` returns only ROOT collections
         // (parentId null), each carrying the acting user's effectiveRole.
         const qs = new URLSearchParams({ scopeType: "CHANNEL", scopeId: channelId }).toString();
-        const resp = (await spacesFetch(`/api/collections/accessible?${qs}`)) as
-          | { success?: boolean; collections?: AccessibleKbCollection[] }
-          | null;
+        const resp = (await spacesFetch(`/api/collections/accessible?${qs}`)) as {
+          success?: boolean;
+          collections?: AccessibleKbCollection[];
+        } | null;
         const all = resp?.collections ?? [];
         const writable = all.filter((c) => c.effectiveRole === "OWNER" || c.effectiveRole === "EDITOR");
         if (all.length === 0) {
           return err(
             "No Knowledge Base collection is attached to this channel yet. Create one in Spaces " +
-            "(channel -> Knowledge Base) first, then retry — or pass an explicit collectionId.",
+              "(channel -> Knowledge Base) first, then retry — or pass an explicit collectionId.",
           );
         }
         if (writable.length === 0) {
           const names = all.map((c) => `${c.name} (${c.id}, role=${c.effectiveRole ?? "none"})`).join("; ");
-          return err(`You do not have EDITOR/OWNER access to this channel's KB collection(s): ${names}. Cannot upload.`);
+          return err(
+            `You do not have EDITOR/OWNER access to this channel's KB collection(s): ${names}. Cannot upload.`,
+          );
         }
         if (writable.length > 1) {
           const names = writable.map((c) => `${c.name} -> collectionId=${c.id}`).join("; ");
-          return err(`This channel has multiple KB collections you can write to: ${names}. Re-call with an explicit collectionId.`);
+          return err(
+            `This channel has multiple KB collections you can write to: ${names}. Re-call with an explicit collectionId.`,
+          );
         }
         collectionId = writable[0]!.id;
         collectionLabel = writable[0]!.name;
@@ -4743,7 +5684,10 @@ const spacesUploadToKb: ToolDef = {
       //    its own multipart boundary. Auth is replicated from the client:
       //    bearer + session/workspace via both header AND cookie (the refresh
       //    middleware reads user_session_id).
-      const baseUrl = (process.env["XYNE_SPACES_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "").replace(/\/+$/, "");
+      const baseUrl = (process.env["XYNE_SPACES_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "").replace(
+        /\/+$/,
+        "",
+      );
       // NOTE: env name split to dodge a credential-pattern linter false
       // positive, NOT to hide the read. This is process.env.XYNE_SPACES_TOKEN —
       // the per-user Spaces token this stdio server was spawned with.
@@ -4789,7 +5733,10 @@ const spacesUploadToKb: ToolDef = {
           if (!response.ok) {
             const text = await response.text().catch(() => "");
             if (response.status === 403) {
-              return { ok: false, error: `403 — you need EDITOR or OWNER on collection ${collectionId}. ${text.slice(0, 150)}` };
+              return {
+                ok: false,
+                error: `403 — you need EDITOR or OWNER on collection ${collectionId}. ${text.slice(0, 150)}`,
+              };
             }
             return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
           }
@@ -4841,7 +5788,12 @@ const spacesUploadToKb: ToolDef = {
       }).catch(() => [])) as MessageAttachmentRow[];
       const metaById = new Map(metaRows.map((m) => [m.id, m]));
 
-      const results: Array<{ attachmentId: string; fileName: string; status: "uploaded" | "failed"; error?: string }> = [];
+      const results: Array<{
+        attachmentId: string;
+        fileName: string;
+        status: "uploaded" | "failed";
+        error?: string;
+      }> = [];
       for (const attId of attachmentIds) {
         // Download the attachment bytes AS THE USER (same route the UI uses).
         // This IS the access check: Spaces 403/404s ids the user can't see,
@@ -4850,7 +5802,12 @@ const spacesUploadToKb: ToolDef = {
         try {
           dl = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(attId)}/download`);
         } catch {
-          results.push({ attachmentId: attId, fileName: attId, status: "failed", error: "not found, deleted, or not accessible to you" });
+          results.push({
+            attachmentId: attId,
+            fileName: attId,
+            status: "failed",
+            error: "not found, deleted, or not accessible to you",
+          });
           continue;
         }
         const att = metaById.get(attId);
@@ -4924,7 +5881,8 @@ const spacesWorkflowStats: ToolDef = {
     properties: {
       workflowName: {
         type: "string",
-        description: "Name of the workflow. Matched case-insensitively, and partial matches are accepted; if nothing matches (or the match is ambiguous), the tool returns a `candidates` list of real workflow names — re-call with one of those. Mutually exclusive with workflowType.",
+        description:
+          "Name of the workflow. Matched case-insensitively, and partial matches are accepted; if nothing matches (or the match is ambiguous), the tool returns a `candidates` list of real workflow names — re-call with one of those. Mutually exclusive with workflowType.",
       },
       workflowType: {
         type: "string",
@@ -4936,7 +5894,8 @@ const spacesWorkflowStats: ToolDef = {
       },
       includeChildren: {
         type: "boolean",
-        description: "If true, count nested/child executions too. Defaults false (top-level invocations only).",
+        description:
+          "If true, count nested/child executions too. Defaults false (top-level invocations only).",
       },
     },
   },
@@ -4999,23 +5958,35 @@ const spacesWorkflowStats: ToolDef = {
             take: 30,
           })) as WfRow[];
           const candidates = [...new Set(recent.map((r) => r.workflowName).filter((n): n is string => !!n))];
-          return ok(JSON.stringify({
-            resolved: false,
-            message: `No workflow matched "${workflowName}". Re-call with one of the exact names below, or pass workflowType.`,
-            candidates,
-          }, null, 2));
+          return ok(
+            JSON.stringify(
+              {
+                resolved: false,
+                message: `No workflow matched "${workflowName}". Re-call with one of the exact names below, or pass workflowType.`,
+                candidates,
+              },
+              null,
+              2,
+            ),
+          );
         }
         // workflowName is non-unique. If a contains-match spans >1 DISTINCT name,
         // it's ambiguous — return those names rather than silently merging stats
         // across unrelated workflows.
         const distinctNames = [...new Set(wfRows.map((r) => r.workflowName).filter((n): n is string => !!n))];
         if (distinctNames.length > 1) {
-          return ok(JSON.stringify({
-            resolved: false,
-            ambiguous: true,
-            message: `"${workflowName}" matched ${distinctNames.length} different workflows. Re-call with one exact name.`,
-            candidates: distinctNames,
-          }, null, 2));
+          return ok(
+            JSON.stringify(
+              {
+                resolved: false,
+                ambiguous: true,
+                message: `"${workflowName}" matched ${distinctNames.length} different workflows. Re-call with one exact name.`,
+                candidates: distinctNames,
+              },
+              null,
+              2,
+            ),
+          );
         }
         // Same name can span multiple rows (no unique constraint) — aggregate all.
         workflowIds = wfRows.map((r) => r.id);
@@ -5071,9 +6042,7 @@ const spacesWorkflowStats: ToolDef = {
         includeChildren,
         totalRuns: rows.length,
         truncated,
-        byStatus: Object.fromEntries(
-          [...byStatus.entries()].sort((a, b) => b[1] - a[1]),
-        ),
+        byStatus: Object.fromEntries([...byStatus.entries()].sort((a, b) => b[1] - a[1])),
         topUsersByRunCount: [...byUser.entries()]
           .sort((a, b) => b[1] - a[1])
           .slice(0, 10)
@@ -5136,11 +6105,13 @@ const userSendMessage: ToolDef = {
     properties: {
       conversationId: {
         type: "string",
-        description: "Reply into this existing conversation/thread ID. Provide exactly one of conversationId or channelId.",
+        description:
+          "Reply into this existing conversation/thread ID. Provide exactly one of conversationId or channelId.",
       },
       channelId: {
         type: "string",
-        description: "Post a new top-level message into this channel ID. Provide exactly one of conversationId or channelId.",
+        description:
+          "Post a new top-level message into this channel ID. Provide exactly one of conversationId or channelId.",
       },
       content: {
         type: "string",
@@ -5159,7 +6130,9 @@ const userSendMessage: ToolDef = {
       const channelId = String(args["channelId"] ?? "").trim();
       const rawContent = String(args["content"] ?? "");
       if (!!conversationId === !!channelId) {
-        return err("Provide exactly one target: use conversationId for an existing thread or channelId to post into a channel.");
+        return err(
+          "Provide exactly one target: use conversationId for an existing thread or channelId to post into a channel.",
+        );
       }
       if (!rawContent.trim()) return err("content cannot be empty");
 
@@ -5181,28 +6154,31 @@ const userSendMessage: ToolDef = {
         return ok(`Message sent as user to conversation ${conversationId}${msgId}.`);
       }
 
-      const result = (await spacesFetch(
-        `/api/channels/${encodeURIComponent(channelId)}/conversations`,
-        {
-          method: "POST",
-          body: JSON.stringify({ content }),
-        },
-      )) as {
-        conversationId?: string;
-        channelId?: string;
-        initialMessage?: { messageId?: string };
-      } | undefined;
+      const result = (await spacesFetch(`/api/channels/${encodeURIComponent(channelId)}/conversations`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      })) as
+        | {
+            conversationId?: string;
+            channelId?: string;
+            initialMessage?: { messageId?: string };
+          }
+        | undefined;
 
       const resultConversationId = result?.conversationId ?? "";
       const resultMessageId = result?.initialMessage?.messageId ?? "";
       const ids = [
         resultConversationId ? `conversationId=${resultConversationId}` : "",
         resultMessageId ? `messageId=${resultMessageId}` : "",
-      ].filter(Boolean).join(", ");
+      ]
+        .filter(Boolean)
+        .join(", ");
       return ok(`Message sent as user to channel ${channelId}${ids ? ` (${ids})` : ""}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return err(`user-send-message error: ${msg}. Use conversationId for an existing thread or channelId to post into a channel.`);
+      return err(
+        `user-send-message error: ${msg}. Use conversationId for an existing thread or channelId to post into a channel.`,
+      );
     }
   },
 };
@@ -5229,7 +6205,7 @@ const spacesVespaSchema: ToolDef = {
     "- Filter by sender: chat_message.userId, ticket.createdBy\n" +
     "- Filter by channel: chat_message.channelId, ticket.channelId\n" +
     "- Filter by time: chat_message.createdAtTimestamp, ticket.createdAtTimestamp, file.createdAtTimestamp, sam_transcript.dateTime (all in ms)\n" +
-    "- Access control: always include permissions contains \"<userId>\" for chat/ticket/file unless scoping by channelId\n" +
+    '- Access control: always include permissions contains "<userId>" for chat/ticket/file unless scoping by channelId\n' +
     "- Ticket status: ticket.status (TODO|STARTED|PAUSED|CANCELLED|COMPLETED)\n" +
     "- File sub-type: file.subApp (CANVAS|TRANSCRIPT|CHAT_ATTACHMENT|TICKET_ATTACHMENT|RCA)",
   inputSchema: {
@@ -5237,7 +6213,20 @@ const spacesVespaSchema: ToolDef = {
     properties: {
       schema: {
         type: "string",
-        enum: ["chat_message", "chat_attachment", "chat_container", "attachment", "ticket", "user", "file", "sam_transcript", "mail", "mail_attachment", "project", "memory"],
+        enum: [
+          "chat_message",
+          "chat_attachment",
+          "chat_container",
+          "attachment",
+          "ticket",
+          "user",
+          "file",
+          "sam_transcript",
+          "mail",
+          "mail_attachment",
+          "project",
+          "memory",
+        ],
         description: "Schema name to fetch field definitions for.",
       },
     },
@@ -5248,7 +6237,8 @@ const spacesVespaSchema: ToolDef = {
       const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
 
       const text = await spacesFetchText(`/api/vespaSearch/schema${qs}`);
-      if (!text || !text.trim()) return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
+      if (!text || !text.trim())
+        return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
       return ok(text);
     } catch (e) {
       return err(`vespa-schema error: ${e instanceof Error ? e.message : String(e)}`);
@@ -5282,7 +6272,7 @@ async function renderDirectResult(
   const allRows: SearchResult[] =
     data.data.grouped && data.data.groups
       ? data.data.groups.flatMap((g) => g.results)
-      : data.data.results ?? [];
+      : (data.data.results ?? []);
   const scOf = (r: SearchResult): Record<string, unknown> => r.searchContext ?? {};
   const subAppOf = (r: SearchResult): string | undefined =>
     (scOf(r)["subApp"] as string | undefined)?.toUpperCase();
@@ -5290,9 +6280,7 @@ async function renderDirectResult(
 
   const [mailLinks, ticketLinks, canvasViewIds] = await Promise.all([
     resolveMailLinks(allRows.filter((r) => r.type.toLowerCase() === "mail").map((r) => r.id)),
-    resolveTicketLinks(
-      allRows.filter(isFile).map((r) => scOf(r)["ticketId"] as string | undefined),
-    ),
+    resolveTicketLinks(allRows.filter(isFile).map((r) => scOf(r)["ticketId"] as string | undefined)),
     resolveCanvasViewIds(
       allRows
         .filter((r) => isFile(r) && subAppOf(r) === "CANVAS" && !scOf(r)["viewAccessId"])
@@ -5362,8 +6350,14 @@ async function renderDirectResult(
     }
     // Non-routable docTypes: no citation kind maps to them. (memory docTypes
     // are stored uppercase FACT/SOP — `type` is lowercased above.)
-    if (type === "user" || type === "project" || type === "sam_transcript" ||
-        type === "memory" || type === "fact" || type === "sop") {
+    if (
+      type === "user" ||
+      type === "project" ||
+      type === "sam_transcript" ||
+      type === "memory" ||
+      type === "fact" ||
+      type === "sop"
+    ) {
       return false;
     }
     // Desk mail → thread citation on the owning ticket's conversation.
@@ -5385,9 +6379,8 @@ async function renderDirectResult(
     // ticket reference (TICKET_ATTACHMENT without a channelRef) borrow the
     // resolved ticket's thread — and its xyneId, so desk attachments route to
     // /support like their parent ticket.
-    const ticketLink = type === "file"
-      ? ticketLinks.get((sc["ticketId"] as string | undefined) ?? "")
-      : undefined;
+    const ticketLink =
+      type === "file" ? ticketLinks.get((sc["ticketId"] as string | undefined) ?? "") : undefined;
     const xyneId = (sc["xyneId"] as string | undefined) ?? ticketLink?.xyneId;
     pushThreadCitation(
       citations,
@@ -5404,7 +6397,7 @@ async function renderDirectResult(
   };
 
   const finish = async (text: string): Promise<ToolResult> => {
-    const channelIds = citations.map(c => c.channelId).filter((v): v is string => !!v);
+    const channelIds = citations.map((c) => c.channelId).filter((v): v is string => !!v);
     if (channelIds.length > 0) {
       applyChannelInfo(citations, await resolveChannelInfo(channelIds));
     }
@@ -5446,9 +6439,11 @@ async function renderDirectResult(
       return formatSearchResult(r, cited ? idx + 1 : null);
     })
     .join("\n\n");
-  return finalize(await finish(
-    `Found ${data.data.totalCount ?? results.length} result(s):\n\n${rendered}${paginationFooter({ returned: results.length, limit: hits, offset, total: data.data.totalCount })}`,
-  ));
+  return finalize(
+    await finish(
+      `Found ${data.data.totalCount ?? results.length} result(s):\n\n${rendered}${paginationFooter({ returned: results.length, limit: hits, offset, total: data.data.totalCount })}`,
+    ),
+  );
 }
 
 // On failure, queryDirect attaches the query it actually sent to Vespa as
@@ -5478,18 +6473,18 @@ const spacesVespaQuery: ToolDef = {
     "3. Call this tool with the YQL.\n\n" +
     "## ACL — include the correct guard per schema\n" +
     "Always include the access control condition for the schema you query. ACL is auto-injected if omitted, but you should write it explicitly.\n" +
-    "- message / attachment / ticket / sam_transcript / mail / mail_attachment / memory: `permissions contains \"<userId>\"`\n" +
-    "- file: `(ownerId contains \"<userId>\" or permissions contains \"<userId>\" or isPrivate contains \"false\")` for CANVAS; `(ownerId contains \"<userId>\" or channelPermissions contains \"<userId>\" or isPrivate contains \"false\")` for CHAT_ATTACHMENT/TRANSCRIPT; no guard for RCA\n" +
+    '- message / attachment / ticket / sam_transcript / mail / mail_attachment / memory: `permissions contains "<userId>"`\n' +
+    '- file: `(ownerId contains "<userId>" or permissions contains "<userId>" or isPrivate contains "false")` for CANVAS; `(ownerId contains "<userId>" or channelPermissions contains "<userId>" or isPrivate contains "false")` for CHAT_ATTACHMENT/TRANSCRIPT; no guard for RCA\n' +
     "- user / channel: no ACL needed (public)\n" +
     "Use the `userId` field from **spaces-whoami** if you need your own id.\n\n" +
     "## YQL examples (use the YQL source name, NOT the schema name from spaces-vespa-schema)\n" +
     "```\n" +
     "-- tickets assigned to a user, open only (source: ticket)\n" +
-    "select * from sources ticket where userInput(@query) and status contains \"OPEN\" and assignedTo contains \"<userId>\" and permissions contains \"<userId>\"\n\n" +
+    'select * from sources ticket where userInput(@query) and status contains "OPEN" and assignedTo contains "<userId>" and permissions contains "<userId>"\n\n' +
     "-- messages in a channel since a date (source: message) — write dates as dd/mm/yy, NOT epoch ms\n" +
-    "select * from sources message where channelId contains \"<channelId>\" and createdAtTimestamp > 01/06/26 and permissions contains \"<userId>\"\n\n" +
+    'select * from sources message where channelId contains "<channelId>" and createdAtTimestamp > 01/06/26 and permissions contains "<userId>"\n\n' +
     "-- files of subApp CANVAS owned by user (source: file)\n" +
-    "select * from sources file where subApp contains \"CANVAS\" and ownerId contains \"<userId>\"\n\n" +
+    'select * from sources file where subApp contains "CANVAS" and ownerId contains "<userId>"\n\n' +
     "-- channels by name (source: channel, no ACL needed)\n" +
     "select * from sources channel where userInput(@query)\n" +
     "```\n\n" +
@@ -5504,7 +6499,7 @@ const spacesVespaQuery: ToolDef = {
     "## Notes\n" +
     "- Only available when DIRECT_VESPA_SEARCH is enabled.\n" +
     "- Pass free-text as `query` (bound to `@query` in YQL via `userInput(@query)`), not embedded in the YQL string.\n" +
-    "- Write date filters as dd/mm/yy (e.g. `createdAtTimestamp > 01/06/26`) — do NOT compute epoch ms yourself. The tool converts each literal to milliseconds before running the query. A bare date is treated as IST midnight of that day; to filter on a specific IST time add `HH:MM` (or `HH:MM:SS`), e.g. `createdAtTimestamp > \"01/06/26 14:30\"`. dd/mm/yyyy is also accepted. Dates are only converted when they follow a comparison operator (> < >= <=), so a date inside a text match stays literal.\n" +
+    '- Write date filters as dd/mm/yy (e.g. `createdAtTimestamp > 01/06/26`) — do NOT compute epoch ms yourself. The tool converts each literal to milliseconds before running the query. A bare date is treated as IST midnight of that day; to filter on a specific IST time add `HH:MM` (or `HH:MM:SS`), e.g. `createdAtTimestamp > "01/06/26 14:30"`. dd/mm/yyyy is also accepted. Dates are only converted when they follow a comparison operator (> < >= <=), so a date inside a text match stays literal.\n' +
     "- Result rows come back citation-ready: each routable row (message/thread, ticket, channel, canvas, chat file, desk mail, RCA) is auto-tagged with a clickable source token. You do NOT need to project specific columns for this — the tool normalizes your `select` list to `select *` and returns a curated field set, so just write the `from`/`where`/`order by` you need.",
   inputSchema: {
     type: "object",
@@ -5515,14 +6510,16 @@ const spacesVespaQuery: ToolDef = {
       },
       query: {
         type: "string",
-        description: "Free-text query bound to @query in the YQL. Pass this separately — do not embed it in the yql string.",
+        description:
+          "Free-text query bound to @query in the YQL. Pass this separately — do not embed it in the yql string.",
       },
       hits: {
         type: "number",
         minimum: 0,
         maximum: 100,
         default: 20,
-        description: "Max document hits to return (default 20, max 100). Pass 0 for grouping/count queries that only need the group aggregation, not the documents themselves.",
+        description:
+          "Max document hits to return (default 20, max 100). Pass 0 for grouping/count queries that only need the group aggregation, not the documents themselves.",
       },
       offset: {
         type: "number",
@@ -5543,7 +6540,7 @@ const spacesVespaQuery: ToolDef = {
         description:
           "Optional inputs for the chosen rank profile, read from its `inputs { query(...) }` block in the .sd. " +
           "Keys may be bare (`alpha`) or wrapped (`query(alpha)`); each is sent as `input.query(<name>)`. " +
-          "For an embedding input use `{ \"e\": \"embed(hf-embedder, @query)\" }` (the embedder id is required — the cluster defines more than one). Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.",
+          'For an embedding input use `{ "e": "embed(hf-embedder, @query)" }` (the embedder id is required — the cluster defines more than one). Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.',
       },
     },
     required: ["yql"],
@@ -5566,11 +6563,23 @@ const spacesVespaQuery: ToolDef = {
 
       const workspaceId = await getWorkspaceIdForUser(ctx.userId);
       if (!workspaceId) {
-        log.error(`[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`);
+        log.error(
+          `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
+        );
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped raw Vespa query.");
       }
 
-      const data = await queryDirect(yql, query, ctx.userId, hits, offset, CONFIG.vespaQueryEndpoint, rankProfile, rankInputs, workspaceId);
+      const data = await queryDirect(
+        yql,
+        query,
+        ctx.userId,
+        hits,
+        offset,
+        CONFIG.vespaQueryEndpoint,
+        rankProfile,
+        rankInputs,
+        workspaceId,
+      );
       return renderDirectResult(data, hits, offset);
     } catch (e) {
       return directError("vespa-query error", e);
@@ -5597,11 +6606,11 @@ const spacesVespaSearch: ToolDef = {
     describeAreasForPrompt() +
     "\n\n## Examples\n" +
     "- Open tickets assigned to a user:\n" +
-    "  `{ \"searchArea\": \"ticket\", \"filters\": { \"status\": { \"in\": [\"TODO\", \"STARTED\"] }, \"assignedTo\": { \"contains\": \"<userId>\" } } }`\n" +
+    '  `{ "searchArea": "ticket", "filters": { "status": { "in": ["TODO", "STARTED"] }, "assignedTo": { "contains": "<userId>" } } }`\n' +
     "- Canvases in a channel created since a date:\n" +
-    "  `{ \"searchArea\": \"canvas\", \"filters\": { \"channelId\": { \"contains\": \"<channelId>\" }, \"createdDate\": { \"gte\": \"01/06/26\" } } }`\n" +
+    '  `{ "searchArea": "canvas", "filters": { "channelId": { "contains": "<channelId>" }, "createdDate": { "gte": "01/06/26" } } }`\n' +
     "- Messages about a topic in a channel:\n" +
-    "  `{ \"searchArea\": \"message\", \"query\": \"launch checklist\", \"filters\": { \"channelId\": { \"contains\": \"<channelId>\" } } }`\n\n" +
+    '  `{ "searchArea": "message", "query": "launch checklist", "filters": { "channelId": { "contains": "<channelId>" } } }`\n\n' +
     "Only available when DIRECT_VESPA_SEARCH is enabled. Results come back citation-ready.",
   inputSchema: {
     type: "object",
@@ -5609,30 +6618,36 @@ const spacesVespaSearch: ToolDef = {
       searchArea: {
         type: "string",
         enum: [...AREA_NAMES, ...Object.keys(AREA_ALIASES)],
-        description: "The scope to search. Resolves to the Vespa source, baseline constraints, ACL guard, and timestamp field.",
+        description:
+          "The scope to search. Resolves to the Vespa source, baseline constraints, ACL guard, and timestamp field.",
       },
       query: {
         type: "string",
-        description: "Free-text query (topical keyword/semantic match), bound to @query. Omit for pure-filter lookups.",
+        description:
+          "Free-text query (topical keyword/semantic match), bound to @query. Omit for pure-filter lookups.",
       },
       filters: {
         type: "object",
         additionalProperties: true,
-        description: "Nested operator bags: { <field>: { <op>: <value> } }. Only the fields/ops listed for the chosen area are accepted (else an error is returned). Dates are dd/mm/yy (IST).",
+        description:
+          "Nested operator bags: { <field>: { <op>: <value> } }. Only the fields/ops listed for the chosen area are accepted (else an error is returned). Dates are dd/mm/yy (IST).",
       },
       docType: {
         type: "string",
-        description: "Optional docType narrowing (only areas whose docType is not fixed accept this, e.g. memory → FACT/SOP).",
+        description:
+          "Optional docType narrowing (only areas whose docType is not fixed accept this, e.g. memory → FACT/SOP).",
       },
       groupBy: {
         type: "string",
-        description: "Group results by an allowed field for the area (see the field list). Returns per-group counts. Cannot be combined with sort.",
+        description:
+          "Group results by an allowed field for the area (see the field list). Returns per-group counts. Cannot be combined with sort.",
       },
       groupOrder: {
         type: "string",
         enum: ["desc", "asc"],
         default: "desc",
-        description: "Order groups by count: desc (largest first, default) or asc (smallest first). Only used with groupBy.",
+        description:
+          "Order groups by count: desc (largest first, default) or asc (smallest first). Only used with groupBy.",
       },
       maxGroups: {
         type: "number",
@@ -5646,24 +6661,36 @@ const spacesVespaSearch: ToolDef = {
         minimum: 1,
         maximum: 5,
         default: 5,
-        description: "Sample documents to include per group (default 5, min 1, cap 5). Only used with groupBy.",
+        description:
+          "Sample documents to include per group (default 5, min 1, cap 5). Only used with groupBy.",
       },
       sort: {
         type: "object",
         additionalProperties: false,
         properties: {
-          by: { type: "string", description: "Field to order by — one of the area's sortBy fields (see the field list; typically date fields like createdDate/updatedDate)." },
-          dir: { type: "string", enum: ["asc", "desc"], default: "desc", description: "Sort direction (default desc = newest/highest first)." },
+          by: {
+            type: "string",
+            description:
+              "Field to order by — one of the area's sortBy fields (see the field list; typically date fields like createdDate/updatedDate).",
+          },
+          dir: {
+            type: "string",
+            enum: ["asc", "desc"],
+            default: "desc",
+            description: "Sort direction (default desc = newest/highest first).",
+          },
         },
         required: ["by"],
-        description: "Order results by a sortable field, e.g. {by:\"createdDate\", dir:\"desc\"} for newest-first. Cannot be combined with groupBy.",
+        description:
+          'Order results by a sortable field, e.g. {by:"createdDate", dir:"desc"} for newest-first. Cannot be combined with groupBy.',
       },
       hits: {
         type: "number",
         minimum: 0,
         maximum: 100,
         default: 20,
-        description: "Max document hits to return (default 20, max 100). Pass 0 for grouping/count-only queries.",
+        description:
+          "Max document hits to return (default 20, max 100). Pass 0 for grouping/count-only queries.",
       },
       offset: {
         type: "number",
@@ -5673,7 +6700,8 @@ const spacesVespaSearch: ToolDef = {
       },
       rankProfile: {
         type: "string",
-        description: "Optional Vespa rank profile — one of default_native or unranked. Defaults to default_native for free-text searches, and unranked for filter-only/grouping (nothing to rank). An invalid profile returns an error listing the allowed set. Rank inputs are supplied automatically.",
+        description:
+          "Optional Vespa rank profile — one of default_native or unranked. Defaults to default_native for free-text searches, and unranked for filter-only/grouping (nothing to rank). An invalid profile returns an error listing the allowed set. Rank inputs are supplied automatically.",
       },
     },
     required: ["searchArea"],
@@ -5692,15 +6720,24 @@ const spacesVespaSearch: ToolDef = {
           : undefined;
       const docType = args["docType"] != null ? String(args["docType"]) : undefined;
       const groupBy = args["groupBy"] != null ? String(args["groupBy"]) : undefined;
-      const groupOrder = args["groupOrder"] === "asc" ? ("asc" as const) : args["groupOrder"] === "desc" ? ("desc" as const) : undefined;
+      const groupOrder =
+        args["groupOrder"] === "asc"
+          ? ("asc" as const)
+          : args["groupOrder"] === "desc"
+            ? ("desc" as const)
+            : undefined;
       const maxGroups = args["maxGroups"] != null ? Number(args["maxGroups"]) : undefined;
       const hitsPerGroup = args["hitsPerGroup"] != null ? Number(args["hitsPerGroup"]) : undefined;
       const rawSort = args["sort"];
       const sort =
-        rawSort && typeof rawSort === "object" && !Array.isArray(rawSort) && (rawSort as Record<string, unknown>)["by"]
+        rawSort &&
+        typeof rawSort === "object" &&
+        !Array.isArray(rawSort) &&
+        (rawSort as Record<string, unknown>)["by"]
           ? {
               by: String((rawSort as Record<string, unknown>)["by"]),
-              dir: (rawSort as Record<string, unknown>)["dir"] === "asc" ? ("asc" as const) : ("desc" as const),
+              dir:
+                (rawSort as Record<string, unknown>)["dir"] === "asc" ? ("asc" as const) : ("desc" as const),
             }
           : undefined;
       const hits = Math.min(Math.max(Number(args["hits"] ?? 20), 0), 100);
@@ -5711,18 +6748,41 @@ const spacesVespaSearch: ToolDef = {
       // workspace, resolved from the user record (public.users). Refuse to run
       // unscoped rather than risk crossing tenants.
       const workspaceId = await getWorkspaceIdForUser(ctx.userId);
-      if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped search.");
+      if (!workspaceId)
+        return err("Could not resolve your workspaceId — cannot run a workspace-scoped search.");
 
       // Build the YQL from structured params in CODE — throws on any validation
       // failure (unknown area/field/op, bad date, invalid rankProfile), surfaced
       // as a tool error. rankInputs are auto-supplied by queryDirect.
       const built = buildYqlFromParams(
-        { searchArea, query, ...(filters ? { filters } : {}), ...(docType ? { docType } : {}), ...(groupBy ? { groupBy } : {}), ...(groupOrder ? { groupOrder } : {}), ...(maxGroups != null ? { maxGroups } : {}), ...(hitsPerGroup != null ? { hitsPerGroup } : {}), ...(sort ? { sort } : {}), ...(rankProfile ? { rankProfile } : {}), hits },
+        {
+          searchArea,
+          query,
+          ...(filters ? { filters } : {}),
+          ...(docType ? { docType } : {}),
+          ...(groupBy ? { groupBy } : {}),
+          ...(groupOrder ? { groupOrder } : {}),
+          ...(maxGroups != null ? { maxGroups } : {}),
+          ...(hitsPerGroup != null ? { hitsPerGroup } : {}),
+          ...(sort ? { sort } : {}),
+          ...(rankProfile ? { rankProfile } : {}),
+          hits,
+        },
         ctx.userId,
         workspaceId,
       );
 
-      const data = await queryDirect(built.yql, built.query, ctx.userId, hits, offset, CONFIG.vespaQueryEndpoint, built.rankProfile, undefined, workspaceId);
+      const data = await queryDirect(
+        built.yql,
+        built.query,
+        ctx.userId,
+        hits,
+        offset,
+        CONFIG.vespaQueryEndpoint,
+        built.rankProfile,
+        undefined,
+        workspaceId,
+      );
       return renderDirectResult(data, hits, offset);
     } catch (e) {
       return directError("vespa-search error", e);
@@ -5751,7 +6811,8 @@ const spacesMyItems: ToolDef = {
       type: {
         type: "string",
         enum: ["drafts", "scheduled", "email-drafts", "bookmarks", "pinned"],
-        description: "Which surface to list: drafts, scheduled, email-drafts, bookmarks (saved items), or pinned (pinned messages/threads).",
+        description:
+          "Which surface to list: drafts, scheduled, email-drafts, bookmarks (saved items), or pinned (pinned messages/threads).",
       },
       entityType: {
         type: "string",
@@ -5760,10 +6821,21 @@ const spacesMyItems: ToolDef = {
       },
       completed: {
         type: "boolean",
-        description: "For type=bookmarks only: true → only bookmarks marked complete; false → only open bookmarks. Omit for all.",
+        description:
+          "For type=bookmarks only: true → only bookmarks marked complete; false → only open bookmarks. Omit for all.",
       },
-      channelId: { type: "string", description: "Limit to one channel. Applies to type=pinned (threads), type=scheduled (scheduled sends), and type=email-drafts (desk drafts)." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max items (default 50)." },
+      channelId: {
+        type: "string",
+        description:
+          "Limit to one channel. Applies to type=pinned (threads), type=scheduled (scheduled sends), and type=email-drafts (desk drafts).",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 50,
+        description: "Max items (default 50).",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
     },
     required: ["type"],
@@ -5794,44 +6866,110 @@ const spacesMyItems: ToolDef = {
         // Batch-resolve each bookmarked target → title + deep-link, per type. Each
         // lookup is ACL-scoped (Conversations/Messages/Tickets/CanvasesACL), so a
         // target the user can no longer access just renders as an unresolved id.
-        const ids = (t: string) => rows.filter((b) => b.entityType === t && b.entityId).map((b) => b.entityId!) as string[];
-        type Target = { title?: string | undefined; channelId?: string | undefined; conversationId?: string | undefined; messageId?: string | undefined; xyneId?: string | undefined; viewAccessId?: string | undefined };
+        const ids = (t: string) =>
+          rows.filter((b) => b.entityType === t && b.entityId).map((b) => b.entityId!) as string[];
+        type Target = {
+          title?: string | undefined;
+          channelId?: string | undefined;
+          conversationId?: string | undefined;
+          messageId?: string | undefined;
+          xyneId?: string | undefined;
+          viewAccessId?: string | undefined;
+        };
         const target = new Map<string, Target>(); // key `TYPE:entityId`
 
         const convIds = ids("CONVERSATION");
         if (convIds.length > 0) {
-          const cs = (await interact({ model: "conversation", operation: "findMany", where: { conversationId: { in: convIds } }, take: convIds.length })) as Array<{ conversationId?: string; channelId?: string }>;
-          for (const c of cs) if (c.conversationId) target.set(`CONVERSATION:${c.conversationId}`, { conversationId: c.conversationId, channelId: c.channelId });
+          const cs = (await interact({
+            model: "conversation",
+            operation: "findMany",
+            where: { conversationId: { in: convIds } },
+            take: convIds.length,
+          })) as Array<{ conversationId?: string; channelId?: string }>;
+          for (const c of cs)
+            if (c.conversationId)
+              target.set(`CONVERSATION:${c.conversationId}`, {
+                conversationId: c.conversationId,
+                channelId: c.channelId,
+              });
         }
         const msgIds = ids("MESSAGE");
         if (msgIds.length > 0) {
-          const ms = (await interact({ model: "message", operation: "findMany", where: { messageId: { in: msgIds } }, take: msgIds.length })) as Array<{ messageId?: string; conversationId?: string; content?: string }>;
+          const ms = (await interact({
+            model: "message",
+            operation: "findMany",
+            where: { messageId: { in: msgIds } },
+            take: msgIds.length,
+          })) as Array<{ messageId?: string; conversationId?: string; content?: string }>;
           const needConv = new Set<string>();
-          for (const m of ms) if (m.messageId) { target.set(`MESSAGE:${m.messageId}`, { messageId: m.messageId, conversationId: m.conversationId, title: m.content ? cleanSnippet(m.content).slice(0, 80) : undefined }); if (m.conversationId) needConv.add(m.conversationId); }
+          for (const m of ms)
+            if (m.messageId) {
+              target.set(`MESSAGE:${m.messageId}`, {
+                messageId: m.messageId,
+                conversationId: m.conversationId,
+                title: m.content ? cleanSnippet(m.content).slice(0, 80) : undefined,
+              });
+              if (m.conversationId) needConv.add(m.conversationId);
+            }
           if (needConv.size > 0) {
-            const cs = (await interact({ model: "conversation", operation: "findMany", where: { conversationId: { in: [...needConv] } }, take: needConv.size })) as Array<{ conversationId?: string; channelId?: string }>;
-            const chOf = new Map(cs.filter((c) => c.conversationId).map((c) => [c.conversationId!, c.channelId] as const));
-            for (const t of target.values()) if (t.messageId && t.conversationId) t.channelId = chOf.get(t.conversationId);
+            const cs = (await interact({
+              model: "conversation",
+              operation: "findMany",
+              where: { conversationId: { in: [...needConv] } },
+              take: needConv.size,
+            })) as Array<{ conversationId?: string; channelId?: string }>;
+            const chOf = new Map(
+              cs.filter((c) => c.conversationId).map((c) => [c.conversationId!, c.channelId] as const),
+            );
+            for (const t of target.values())
+              if (t.messageId && t.conversationId) t.channelId = chOf.get(t.conversationId);
           }
         }
         const ticketIds = ids("TICKET");
         if (ticketIds.length > 0) {
-          const ts = (await interact({ model: "ticket", operation: "findMany", where: { id: { in: ticketIds } }, take: ticketIds.length })) as Array<{ id?: string; xyneId?: string; title?: string; channelId?: string; convId?: string }>;
-          for (const t of ts) if (t.id) target.set(`TICKET:${t.id}`, { title: t.title, xyneId: t.xyneId, channelId: t.channelId, conversationId: t.convId });
+          const ts = (await interact({
+            model: "ticket",
+            operation: "findMany",
+            where: { id: { in: ticketIds } },
+            take: ticketIds.length,
+          })) as Array<{ id?: string; xyneId?: string; title?: string; channelId?: string; convId?: string }>;
+          for (const t of ts)
+            if (t.id)
+              target.set(`TICKET:${t.id}`, {
+                title: t.title,
+                xyneId: t.xyneId,
+                channelId: t.channelId,
+                conversationId: t.convId,
+              });
         }
         const canvasIds = ids("CANVAS");
         if (canvasIds.length > 0) {
-          const cvs = (await interact({ model: "canvas", operation: "findMany", where: { id: { in: canvasIds } }, take: canvasIds.length })) as Array<{ id?: string; title?: string; viewAccessId?: string; channelId?: string }>;
-          for (const c of cvs) if (c.id) target.set(`CANVAS:${c.id}`, { title: c.title, viewAccessId: c.viewAccessId, channelId: c.channelId });
+          const cvs = (await interact({
+            model: "canvas",
+            operation: "findMany",
+            where: { id: { in: canvasIds } },
+            take: canvasIds.length,
+          })) as Array<{ id?: string; title?: string; viewAccessId?: string; channelId?: string }>;
+          for (const c of cvs)
+            if (c.id)
+              target.set(`CANVAS:${c.id}`, {
+                title: c.title,
+                viewAccessId: c.viewAccessId,
+                channelId: c.channelId,
+              });
         }
 
-        const channelInfo = await resolveChannelInfo([...target.values()].map((t) => t.channelId).filter((v): v is string => !!v));
+        const channelInfo = await resolveChannelInfo(
+          [...target.values()].map((t) => t.channelId).filter((v): v is string => !!v),
+        );
         const citations: Citation[] = [];
         const lines = rows.map((b, idx) => {
           const t = b.entityId && b.entityType ? target.get(`${b.entityType}:${b.entityId}`) : undefined;
           const ch = t?.channelId ? channelInfo.get(t.channelId)?.name : undefined;
           const label = t?.title || t?.xyneId || `${b.entityType} ${b.entityId}`;
-          const parts = [`[${(b.entityType ?? "item").toLowerCase()}] ${label}${b.isCompleted ? " [completed]" : ""}`];
+          const parts = [
+            `[${(b.entityType ?? "item").toLowerCase()}] ${label}${b.isCompleted ? " [completed]" : ""}`,
+          ];
           if (ch) parts.push(`  Channel: #${ch}`);
           if (b.entityType === "CANVAS") {
             pushCanvasCitation(citations, t?.viewAccessId, idx + 1, label);
@@ -5844,7 +6982,10 @@ const spacesMyItems: ToolDef = {
           return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
         });
         applyChannelInfo(citations, channelInfo);
-        return okCited(`${rows.length} bookmark(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`, citations);
+        return okCited(
+          `${rows.length} bookmark(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
+          citations,
+        );
       }
 
       if (type === "pinned") {
@@ -5858,16 +6999,29 @@ const spacesMyItems: ToolDef = {
           orderBy: [{ lastActivityAt: "desc" }],
           take: limit,
           skip: offset,
-        })) as Array<{ conversationId?: string; channelId?: string; ticketId?: string; initialMessageId?: string }>;
-        if (rows.length === 0) return ok(chFilter ? "No pinned messages in that channel." : "No pinned messages.");
+        })) as Array<{
+          conversationId?: string;
+          channelId?: string;
+          ticketId?: string;
+          initialMessageId?: string;
+        }>;
+        if (rows.length === 0)
+          return ok(chFilter ? "No pinned messages in that channel." : "No pinned messages.");
         // Preview the pinned thread's first message.
         const initIds = rows.map((r) => r.initialMessageId).filter((v): v is string => !!v);
         const preview = new Map<string, string>();
         if (initIds.length > 0) {
-          const ms = (await interact({ model: "message", operation: "findMany", where: { messageId: { in: initIds } }, take: initIds.length })) as Array<{ messageId?: string; content?: string }>;
+          const ms = (await interact({
+            model: "message",
+            operation: "findMany",
+            where: { messageId: { in: initIds } },
+            take: initIds.length,
+          })) as Array<{ messageId?: string; content?: string }>;
           for (const m of ms) if (m.messageId && m.content) preview.set(m.messageId, cleanSnippet(m.content));
         }
-        const channelInfo = await resolveChannelInfo(rows.map((r) => r.channelId).filter((v): v is string => !!v));
+        const channelInfo = await resolveChannelInfo(
+          rows.map((r) => r.channelId).filter((v): v is string => !!v),
+        );
         const citations: Citation[] = [];
         const lines = rows.map((r, idx) => {
           const ch = r.channelId ? channelInfo.get(r.channelId)?.name : undefined;
@@ -5876,11 +7030,21 @@ const spacesMyItems: ToolDef = {
           if (body) parts.push(`  ${body}`);
           if (r.conversationId) parts.push(`  conversationId: ${r.conversationId}`);
           if (r.channelId) parts.push(`  channelId: ${r.channelId}`);
-          pushThreadCitation(citations, r.channelId, r.conversationId, idx + 1, ch ? `Pinned in #${ch}` : "Pinned thread", r.initialMessageId ? { messageId: r.initialMessageId } : undefined);
+          pushThreadCitation(
+            citations,
+            r.channelId,
+            r.conversationId,
+            idx + 1,
+            ch ? `Pinned in #${ch}` : "Pinned thread",
+            r.initialMessageId ? { messageId: r.initialMessageId } : undefined,
+          );
           return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
         });
         applyChannelInfo(citations, channelInfo);
-        return okCited(`${rows.length} pinned message(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`, citations);
+        return okCited(
+          `${rows.length} pinned message(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
+          citations,
+        );
       }
 
       if (type === "scheduled") {
@@ -5892,9 +7056,19 @@ const spacesMyItems: ToolDef = {
           orderBy: [{ updatedAt: "desc" }],
           take: limit,
           skip: offset,
-        })) as Array<{ id: string; title?: string; messageContent?: string; channelId?: string; daysOfWeek?: unknown; scheduledTime?: string; isActive?: boolean }>;
+        })) as Array<{
+          id: string;
+          title?: string;
+          messageContent?: string;
+          channelId?: string;
+          daysOfWeek?: unknown;
+          scheduledTime?: string;
+          isActive?: boolean;
+        }>;
         if (rows.length === 0) return ok("No scheduled messages.");
-        const channelInfo = await resolveChannelInfo(rows.map((r) => r.channelId).filter((v): v is string => !!v));
+        const channelInfo = await resolveChannelInfo(
+          rows.map((r) => r.channelId).filter((v): v is string => !!v),
+        );
         const citations: Citation[] = [];
         const lines = rows.map((r, idx) => {
           const ch = r.channelId ? channelInfo.get(r.channelId)?.name : undefined;
@@ -5902,7 +7076,8 @@ const spacesMyItems: ToolDef = {
           if (r.messageContent) parts.push(`  ${cleanSnippet(r.messageContent)}`);
           const sched: string[] = [];
           if (r.scheduledTime) sched.push(`at ${r.scheduledTime}`);
-          if (Array.isArray(r.daysOfWeek) && r.daysOfWeek.length > 0) sched.push(`on ${(r.daysOfWeek as unknown[]).join(", ")}`);
+          if (Array.isArray(r.daysOfWeek) && r.daysOfWeek.length > 0)
+            sched.push(`on ${(r.daysOfWeek as unknown[]).join(", ")}`);
           if (sched.length > 0) parts.push(`  Schedule: ${sched.join(" ")}`);
           if (ch) parts.push(`  Channel: #${ch}`);
           if (r.channelId) parts.push(`  channelId: ${r.channelId}`);
@@ -5910,7 +7085,10 @@ const spacesMyItems: ToolDef = {
           return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
         });
         applyChannelInfo(citations, channelInfo);
-        return okCited(`${rows.length} scheduled message(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`, citations);
+        return okCited(
+          `${rows.length} scheduled message(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
+          citations,
+        );
       }
 
       // drafts | email-drafts — both are thread-scoped unsent bodies owned by userId.
@@ -5924,9 +7102,20 @@ const spacesMyItems: ToolDef = {
         orderBy: [{ updatedAt: "desc" }],
         take: limit,
         skip: offset,
-      })) as Array<{ id: string; channelId?: string; conversationId?: string; content?: string; draftContent?: string; hasAttachment?: boolean; autoDraftStatus?: string; updatedAt?: string }>;
+      })) as Array<{
+        id: string;
+        channelId?: string;
+        conversationId?: string;
+        content?: string;
+        draftContent?: string;
+        hasAttachment?: boolean;
+        autoDraftStatus?: string;
+        updatedAt?: string;
+      }>;
       if (rows.length === 0) return ok(isEmail ? "No email drafts." : "No drafts.");
-      const channelInfo = await resolveChannelInfo(rows.map((r) => r.channelId).filter((v): v is string => !!v));
+      const channelInfo = await resolveChannelInfo(
+        rows.map((r) => r.channelId).filter((v): v is string => !!v),
+      );
       const citations: Citation[] = [];
       const lines = rows.map((r, idx) => {
         const ch = r.channelId ? channelInfo.get(r.channelId)?.name : undefined;
@@ -5937,11 +7126,20 @@ const spacesMyItems: ToolDef = {
         if (body) parts.push(`  ${body}`);
         if (r.conversationId) parts.push(`  conversationId: ${r.conversationId}`);
         if (r.channelId) parts.push(`  channelId: ${r.channelId}`);
-        pushThreadCitation(citations, r.channelId, r.conversationId, idx + 1, ch ? `Draft in #${ch}` : "Draft");
+        pushThreadCitation(
+          citations,
+          r.channelId,
+          r.conversationId,
+          idx + 1,
+          ch ? `Draft in #${ch}` : "Draft",
+        );
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
       applyChannelInfo(citations, channelInfo);
-      return okCited(`${rows.length} ${isEmail ? "email draft" : "draft"}(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`, citations);
+      return okCited(
+        `${rows.length} ${isEmail ? "email draft" : "draft"}(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
+        citations,
+      );
     } catch (e) {
       return err(`my-items error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -5972,10 +7170,23 @@ const spacesSavedViews: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      contextId: { type: "string", description: "Limit to views saved on ONE board. SavedUserConfiguration.contextId === boardId (use spaces-boards to resolve a board)." },
-      name: { type: "string", description: "Case-insensitive substring match on the view name (e.g. 'Created By')." },
+      contextId: {
+        type: "string",
+        description:
+          "Limit to views saved on ONE board. SavedUserConfiguration.contextId === boardId (use spaces-boards to resolve a board).",
+      },
+      name: {
+        type: "string",
+        description: "Case-insensitive substring match on the view name (e.g. 'Created By').",
+      },
       starredOnly: { type: "boolean", description: "If true, only return starred/favourite views." },
-      limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max views (default 50)." },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 50,
+        description: "Max views (default 50).",
+      },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
     },
   },
@@ -6024,7 +7235,10 @@ const spacesSavedViews: ToolDef = {
         take: 1000,
       })) as Array<{ configId?: string; entityName?: string; fieldName?: string; fieldValue?: string }>;
 
-      const valuesByConfig = new Map<string, Array<{ entityName?: string; fieldName?: string; fieldValue?: string }>>();
+      const valuesByConfig = new Map<
+        string,
+        Array<{ entityName?: string; fieldName?: string; fieldValue?: string }>
+      >();
       for (const v of values) {
         if (!v.configId) continue;
         const list = valuesByConfig.get(v.configId) ?? [];
@@ -6044,7 +7258,8 @@ const spacesSavedViews: ToolDef = {
         const vals = valuesByConfig.get(view.id) ?? [];
         if (vals.length > 0) {
           parts.push(`  Filters (${vals.length}):`);
-          for (const v of vals) parts.push(`    - ${v.entityName ?? "?"}.${v.fieldName ?? "?"} = ${v.fieldValue ?? ""}`);
+          for (const v of vals)
+            parts.push(`    - ${v.entityName ?? "?"}.${v.fieldName ?? "?"} = ${v.fieldValue ?? ""}`);
         } else {
           parts.push(`  Filters: (none stored)`);
         }
@@ -6052,7 +7267,9 @@ const spacesSavedViews: ToolDef = {
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
 
-      return ok(`${views.length} saved view(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: views.length, limit, offset })}`);
+      return ok(
+        `${views.length} saved view(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: views.length, limit, offset })}`,
+      );
     } catch (e) {
       return err(`saved-views error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -6070,9 +7287,9 @@ const spacesCorpusScan: ToolDef = {
   description:
     "Count documents matching each term, bucketed by year or month, over EVERYTHING the asker can see — " +
     "plus the total corpus size per bucket in the same response. Use for trend and share questions: " +
-    "\"how many X per year\", \"is X growing\", \"what share of tickets mention X\".\n\n" +
+    '"how many X per year", "is X growing", "what share of tickets mention X".\n\n' +
     "## When to use which counting tool\n" +
-    "- Single-entity aggregates (\"who filed the most\", \"which channel has the most X\") → " +
+    '- Single-entity aggregates ("who filed the most", "which channel has the most X") → ' +
     "spaces-vespa-search with groupBy + hits:0.\n" +
     "- Counts OVER TIME, trends, or anything needing a fair denominator → THIS tool.\n" +
     "- NEVER answer a how-many question by counting a page of search hits — that is a ranked sample, not a total.\n\n" +
@@ -6085,8 +7302,8 @@ const spacesCorpusScan: ToolDef = {
     "time, so raw counts read as fake growth.\n\n" +
     "## Notes\n" +
     `- Up to ${MAX_SCAN_TERMS} terms per call; each term is matched lexically, no semantic expansion — ` +
-    "so a count means \"documents containing this term\". Cover phrasing variants by passing them as extra terms.\n" +
-    "- A multi-word term counts the exact PHRASE (\"refund complaint\" = docs containing that phrase). " +
+    'so a count means "documents containing this term". Cover phrasing variants by passing them as extra terms.\n' +
+    '- A multi-word term counts the exact PHRASE ("refund complaint" = docs containing that phrase). ' +
     "To count documents matching ANY of several words, pass the words as separate terms — do NOT put them in one term.\n" +
     "- Month buckets key as yyyymm (e.g. 202403). A month scan with no scope.after is auto-bounded to the " +
     "last 24 months — pass scope.after explicitly for a longer window.\n" +
@@ -6113,11 +7330,19 @@ const spacesCorpusScan: ToolDef = {
         type: "object",
         additionalProperties: false,
         properties: {
-          channels: { type: "array", items: { type: "string" }, description: "Channel ids to confine the scan to (OR'd)." },
-          after: { type: "string", description: "Inclusive lower bound, dd/mm/yy (IST, optional \" HH:MM\")." },
-          before: { type: "string", description: "Exclusive upper bound, dd/mm/yy (IST, optional \" HH:MM\")." },
+          channels: {
+            type: "array",
+            items: { type: "string" },
+            description: "Channel ids to confine the scan to (OR'd).",
+          },
+          after: { type: "string", description: 'Inclusive lower bound, dd/mm/yy (IST, optional " HH:MM").' },
+          before: {
+            type: "string",
+            description: 'Exclusive upper bound, dd/mm/yy (IST, optional " HH:MM").',
+          },
         },
-        description: "Optional filters applied IDENTICALLY to the term counts and the corpus totals, so the share is always apples-to-apples.",
+        description:
+          "Optional filters applied IDENTICALLY to the term counts and the corpus totals, so the share is always apples-to-apples.",
       },
       bucket: { type: "string", enum: ["year", "month"], description: "Time bucket for the counts." },
     },
@@ -6150,7 +7375,8 @@ const spacesCorpusScan: ToolDef = {
       });
 
       const workspaceId = await getWorkspaceIdForUser(ctx.userId);
-      if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped scan.");
+      if (!workspaceId)
+        return err("Could not resolve your workspaceId — cannot run a workspace-scoped scan.");
 
       // One YQL per role: the per-term census (same YQL for every term, only the
       // @query binding differs) and the term-free denominator.
@@ -6162,7 +7388,17 @@ const spacesCorpusScan: ToolDef = {
       const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
 
       const runCount = async (stage: string, yql: string, query: string): Promise<Record<number, number>> => {
-        const res = await queryDirect(yql, query, ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const res = await queryDirect(
+          yql,
+          query,
+          ctx.userId,
+          0,
+          0,
+          CONFIG.vespaQueryEndpoint,
+          "unranked",
+          undefined,
+          workspaceId,
+        );
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({
           stage,
@@ -6179,7 +7415,7 @@ const spacesCorpusScan: ToolDef = {
 
       const [corpusTotals, ...termBuckets] = await Promise.all([
         runCount("corpus-scan: totals (denominator)", totalsYql, ""),
-        ...scan.terms.map(term => runCount(`corpus-scan: term "${term}"`, termYql, termToQuery(term))),
+        ...scan.terms.map((term) => runCount(`corpus-scan: term "${term}"`, termYql, termToQuery(term))),
       ]);
 
       const counts: Record<string, Record<number, number>> = {};
@@ -6435,4 +7671,7 @@ export const tools: ToolDef[] = [
   spacesEditCanvas,
   spacesTriggerAgent,
   spacesCreateCanvas,
+  spacesSdlcCreateArtifact,
+  spacesSdlcUpdateBaseline,
+  spacesSdlcCreatePullRequest,
 ];

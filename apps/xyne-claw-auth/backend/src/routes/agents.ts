@@ -1063,7 +1063,7 @@ router.get("/delegation-requests/pending-for-me", async (req: Request, res: Resp
 router.get(
   "/:slug/delegation-grants",
   requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const caller = req.agentContext!.agent;
       const grants = await prisma.agentDelegationGrant.findMany({

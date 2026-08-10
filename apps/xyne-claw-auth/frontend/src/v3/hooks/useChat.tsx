@@ -32,6 +32,8 @@ export interface SendOptions {
   /** Per-chat LiteLLM model override — pins this model (off the agent's shared
    *  admin key) for this turn via the backend providerOverride. */
   modelOverride?: string;
+  /** Repository selected in the SDLC Agent composer. */
+  researchContext?: { type: "repository"; id: string; name?: string };
 }
 
 /** A live event delivered by the /live SSE for a conversation being viewed. */
@@ -568,6 +570,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ...(opts?.designArtifactAttachmentId ? { designArtifactAttachmentId: opts.designArtifactAttachmentId } : {}),
             ...(opts?.designSelection ? { designSelection: opts.designSelection } : {}),
             ...(opts?.modelOverride ? { providerOverride: { provider: "litellm", model: opts.modelOverride } } : {}),
+            ...(opts?.researchContext ? { researchContext: opts.researchContext } : {}),
           },
         );
 

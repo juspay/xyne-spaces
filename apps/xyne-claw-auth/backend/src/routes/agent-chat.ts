@@ -30,6 +30,7 @@ import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
+import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
@@ -772,8 +773,12 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
     }
 
     const rawType = String(req.query["type"] ?? "all").trim() as ContextSearchType;
-    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call") {
-      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call" });
+    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call" && rawType !== "repository") {
+      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
+      return;
+    }
+    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+      res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
 
@@ -863,6 +868,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       studioMode,
       designArtifactAttachmentId,
       designSelection,
+      researchContext,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -886,6 +892,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       studioMode?: "design";
       designArtifactAttachmentId?: string;
       designSelection?: unknown;
+      researchContext?: { type?: unknown; id?: unknown; name?: unknown } | null;
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
 
@@ -966,6 +973,15 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    const conversationId = existingConvId ?? `chat-${randomUUID()}`;
+
+    const sdlcResolution = slug === "sdlc-agent"
+      ? await resolveSdlcRepositoryForUser(userId, researchContext, conversationId)
+      : { ok: true as const, repository: undefined };
+    if (!sdlcResolution.ok) {
+      res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
+      return;
+    }
 
     // Eval runs pin the generation LLM per request. Validate up-front (clean
     // 400) — once the SSE stream opens we can only fail mid-stream.
@@ -989,7 +1005,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
-    const conversationId = existingConvId ?? `chat-${randomUUID()}`;
     const normalized = normalizeAttachedContext(attachedContext);
     if (normalized.error) {
       res.status(400).json({ success: false, error: normalized.error });
@@ -1347,6 +1362,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // their config's model. providerOrder is cleared so a quota fallback can't
     // silently swap providers mid-eval.
     let runAgentConfig = agent?.config as Record<string, unknown> | undefined;
+    if (sdlcResolution.repository) {
+      runAgentConfig = {
+        ...(runAgentConfig ?? {}),
+        sdlcContext: sdlcResolution.repository.agentContext,
+      };
+    }
     if (override?.provider) {
       if (override.provider === "spaces") {
         resolvedParentProvider = "spaces";
@@ -1416,6 +1437,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
               .join("\n\n"),
           }
         : {}),
+      ...(researchContext ? { researchContext } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled, toolPermissions,
       // skillTriggers, promptInjections, custom-tool config values.

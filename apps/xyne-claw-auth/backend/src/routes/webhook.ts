@@ -80,6 +80,7 @@ import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
@@ -3458,26 +3459,39 @@ async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
 //     and need the final callback to resume the workflow step.
 //   - The target agent must be path-bound. The old bare `/webhook` route took
 //     `agentSlug` from the body, which made the endpoint too broad.
-export async function handleAutomationWebhook(req: Request, res: Response, pathAgentSlug: string, pathAgentOrgId?: string | null): Promise<void> {
+export async function handleAutomationWebhook(
+  req: Request,
+  res: Response,
+  pathAgentSlug: string,
+  pathAgentOrgId?: string | null,
+): Promise<void> {
   const payload = req.body as {
     sessionId?: string;
     agentSlug?: string;
     task?: string;
     userId?: string;
+    userName?: string;
+    userEmail?: string;
     callbackUrl?: string;
+    callbackSecret?: string;
     context?: string;
     conversationId?: string | null;
     channelId?: string | null;
     channelName?: string | null;
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
+    executionProfile?: "sdlc";
+    sdlcOperation?: "baseline" | "artifact" | "work";
+    sdlcContext?: Record<string, unknown>;
   };
 
-  const { sessionId, userId, callbackUrl, context } = payload;
+  const { sessionId, userId, callbackUrl, callbackSecret, context } = payload;
   let task = payload.task;
   const agentSlug = pathAgentSlug;
   if (payload.agentSlug && payload.agentSlug !== pathAgentSlug) {
-    res.status(400).json({ success: false, error: `body agentSlug does not match path agent "${pathAgentSlug}"` });
+    res
+      .status(400)
+      .json({ success: false, error: `body agentSlug does not match path agent "${pathAgentSlug}"` });
     return;
   }
 
@@ -3492,6 +3506,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
     res.status(400).json({ success: false, error: `missing required fields: ${missing.join(", ")}` });
     return;
   }
+  if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
+    res.status(400).json({
+      success: false,
+      error: "callbackSecret must be a string of at most 256 characters",
+    });
+    return;
+  }
+  const externalResultCallback: ExternalResultCallbackConfig | undefined =
+    callbackUrl && callbackSecret
+      ? { url: callbackUrl, encryptedSecret: encryptSurfaceSecret(callbackSecret) }
+      : undefined;
 
   // Agent existence + enabled check. Without this, spaces fires the run and
   // only finds out it was rejected when the (never-arriving) callback never
@@ -3500,13 +3525,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // unresolved).
   const automationOrgId = await orgIdForSpacesUser(userId, "scheduled-job", pathAgentOrgId ?? undefined);
   if (!automationOrgId) {
-    clog.error(`[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`);
+    clog.error(
+      `[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`,
+    );
     res.status(400).json({ success: false, error: "orgId is required" });
     return;
   }
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);
   if (!agent) {
-    clog.warn(`[webhook/automation-run] agent org-scoped miss slug=${agentSlug} orgId=${automationOrgId ?? "none"} userId=${userId} sessionId=${sessionId}`);
+    clog.warn(
+      `[webhook/automation-run] agent org-scoped miss slug=${agentSlug} orgId=${automationOrgId ?? "none"} userId=${userId} sessionId=${sessionId}`,
+    );
     res.status(404).json({ success: false, error: `agent "${agentSlug}" not found` });
     return;
   }
@@ -3542,13 +3571,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       if (acquiredStep !== "OK") {
         const holder = await redis.get(stepKey);
         if (holder && holder !== sessionId) {
-          clog.info(`[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`);
+          clog.info(
+            `[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`,
+          );
           res.status(200).json({ success: true, sessionId: holder, deduplicated: true });
           return;
         }
       }
     } catch (err) {
-      clog.warn(`[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -3560,7 +3593,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       if (acquired !== "OK") {
         const holder = await redis.get(dedupKey);
         if (holder && holder !== sessionId) {
-          clog.warn(`[webhook/automation-run] duplicate automation run rejected conversationId=${payload.conversationId} agentSlug=${agentSlug} incomingSessionId=${sessionId} holderSessionId=${holder}`);
+          clog.warn(
+            `[webhook/automation-run] duplicate automation run rejected conversationId=${payload.conversationId} agentSlug=${agentSlug} incomingSessionId=${sessionId} holderSessionId=${holder}`,
+          );
           res.status(409).json({
             success: false,
             error: "duplicate automation run for this conversation and agent already in progress",
@@ -3570,7 +3605,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         }
       }
     } catch (err) {
-      clog.warn(`[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -3588,10 +3625,7 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // creates the conversation). Without a bot identity we keep the original
   // direct-callback behavior (no interposition, no mention resolution).
   const interpose = Boolean(
-    callbackUrl &&
-    agent.spacesAppUserId &&
-    agent.spacesAppToken &&
-    agent.spacesAppId,
+    callbackUrl && agent.spacesAppUserId && agent.spacesAppToken && agent.spacesAppId,
   );
   let automationSlotToken: string | null = null;
   const releaseAutomationSlot = async (): Promise<void> => {
@@ -3620,11 +3654,18 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
-      clog.info(`[webhook/automation-run] conv ${payload.conversationId} busy — queued automation session=${sessionId} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`);
+      clog.info(
+        `[webhook/automation-run] conv ${payload.conversationId} busy — queued automation session=${sessionId} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`,
+      );
       if (enq.enqueued || enq.deduped) {
         res.status(202).json({ success: true, queued: true, sessionId });
       } else {
-        res.status(enq.full ? 429 : 503).json({ success: false, error: enq.full ? "conversation queue is full" : "failed to queue automation run" });
+        res
+          .status(enq.full ? 429 : 503)
+          .json({
+            success: false,
+            error: enq.full ? "conversation queue is full" : "failed to queue automation run",
+          });
       }
       return;
     }
@@ -3659,15 +3700,15 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
-      resultForwardUrl: callbackUrl!,
-      resolveMentions: true,
+      ...(externalResultCallback
+        ? { externalResultCallback }
+        : { resultForwardUrl: callbackUrl!, resolveMentions: true }),
     };
     await setSession(sessionId!, sessionContext);
   }
 
-  // Do NOT create an AgentRun row here. /internal/run mints its OWN
-  // authoritative sessionId (ours is ignored — see the recovery comment below)
-  // and inserts the run row itself, deriving triggerSource="automation" from
+  // Do NOT create an AgentRun row here. /internal/run preserves this trusted
+  // sessionId and inserts the run row itself, deriving triggerSource="automation" from
   // eventType. A pre-insert under OUR sessionId created a SECOND row that no
   // execution or result callback ever referenced — it sat "running" forever
   // (the Control Center double-run report, 2026-07-08, and the ~1,400 zombie
@@ -3680,7 +3721,8 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // requireResultToken-gated, so we mint a per-run token and pass it; claw
   // echoes it as `x-session-token` on the callback. When NOT interposing we
   // pass the automation's callbackUrl straight through, as before.
-  const clawCallbackUrl = interpose ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result` : callbackUrl;
+  const clawCallbackUrl =
+    interpose || externalResultCallback ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result` : callbackUrl;
 
   // Read-only enforcement for automation runs lives in CODE (isReadOnlyJob), so
   // the write EXCEPTION is code-driven too — the CALLER declares it. When the
@@ -3689,11 +3731,86 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // agentConfig; claw already honors that flag on both gates (tool-palette strip
   // + sbx-git routing). Any caller that doesn't send it stays read-only, and no
   // per-agent DB flag is needed.
-  const forwardedAgentConfig: Record<string, unknown> | undefined =
-    agent.config || payload.allowWriteInReadOnlyJob
+  const sdlcProfile =
+    payload.executionProfile === "sdlc" &&
+    agentSlug === "sdlc-agent" &&
+    s2sKeyMatches(req.headers["x-s2s-key"]);
+  const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
+  const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+  const directTools = Array.isArray(baseTools["direct"]) ? (baseTools["direct"] as string[]) : [];
+  const customTools = Array.isArray(baseTools["custom"]) ? (baseTools["custom"] as string[]) : [];
+  const subagents = Array.isArray(baseTools["subagents"]) ? (baseTools["subagents"] as string[]) : [];
+  const sdlcCustomTools = [
+    "sandbox-repo-setup",
+    "sandbox-run",
+    "sandbox-run-detached",
+    "sandbox-poll-job",
+    "sandbox-read-file",
+    "sandbox-destroy",
+  ];
+  const sdlcOutputFormat =
+    payload.sdlcOperation === "work"
       ? {
-          ...((agent.config as Record<string, unknown> | null) ?? {}),
-          ...(payload.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              branchName: { type: "string" },
+              commitHash: { type: "string" },
+              pullRequestUrl: { type: "string" },
+            },
+            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
+          },
+          requireToolsBeforeSubmit: ["sandbox-repo-setup", "sandbox-run", "spaces-sdlc-create-pull-request"],
+        }
+      : {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              created: { type: "boolean" },
+              canvasId: { type: "string" },
+              artifactKind: { type: "string" },
+            },
+            required: ["created", "canvasId", "artifactKind"],
+          },
+          requireToolsBeforeSubmit: [
+            payload.sdlcOperation === "baseline"
+              ? "spaces-sdlc-update-baseline"
+              : "spaces-sdlc-create-artifact",
+          ],
+        };
+  const forwardedAgentConfig: Record<string, unknown> | undefined =
+    agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
+      ? {
+          ...baseAgentConfig,
+          ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
+          ...(sdlcProfile
+            ? {
+                tools: {
+                  ...baseTools,
+                  direct: [
+                    ...new Set([
+                      ...directTools,
+                      "spaces-sdlc-create-artifact",
+                      "spaces-sdlc-update-baseline",
+                      "spaces-sdlc-create-pull-request",
+                    ]),
+                  ],
+                  custom: [...new Set([...customTools, ...sdlcCustomTools])],
+                  subagents,
+                },
+                toolPermissions: {
+                  ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
+                  "xyne-spaces__spaces-sdlc-create-artifact": "allow",
+                  "xyne-spaces__spaces-sdlc-update-baseline": "allow",
+                  "xyne-spaces__spaces-sdlc-create-pull-request": "allow",
+                },
+                outputFormat: sdlcOutputFormat,
+                sdlcContext: payload.sdlcContext,
+              }
+            : {}),
         }
       : undefined;
   const resultToken = interpose
@@ -3712,7 +3829,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // [AUTODBG] instrument the whole dispatch window — automations were observed
   // stalling silently right after [agent-run] start (no forward, no error).
-  clog.info(`[webhook] AUTODBG ${sessionId}: after AgentRun.start — resolving provider configs (agent=${agentSlug}, interpose=${interpose})`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: after AgentRun.start — resolving provider configs (agent=${agentSlug}, interpose=${interpose})`,
+  );
   const __t0 = process.hrtime.bigint();
   let providerConfigs: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerConfigs"] = {};
   let providerOrder: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerOrder"] = [];
@@ -3721,15 +3840,23 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
     // headlessBulk: this handler serves automations, external webhooks, and
     // the error-pipeline runner — the per-agent automationProvider downgrade
     // applies here (never to human chat/mention dispatches).
-    ({ providerConfigs, providerOrder, parent: providerParent } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
+    ({
+      providerConfigs,
+      providerOrder,
+      parent: providerParent,
+    } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
   } catch (provErr) {
-    clog.error(`[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`);
+    clog.error(
+      `[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`,
+    );
     await releaseAutomationSlot();
     res.status(502).json({ success: false, error: "provider config resolution failed" });
     return;
   }
   const __provMs = Number((process.hrtime.bigint() - __t0) / 1_000_000n);
-  clog.info(`[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`,
+  );
 
   let runRes: Response | undefined;
   try {
@@ -3745,14 +3872,22 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         orgId: agent.orgId,
         task,
         userId,
+        ...(payload.userName ? { userName: payload.userName } : {}),
+        ...(payload.userEmail ? { userEmail: payload.userEmail } : {}),
         eventType: "automation",
+        // SDLC callers are callback-driven and only need the accepted session
+        // id here. Without detached mode this request enters the SSE bridge,
+        // whose event-consumption loop can delay flushing the outer webhook
+        // response during event-heavy setup runs. The Spaces backend then
+        // times out even though Claw continues successfully.
+        ...(sdlcProfile ? { detached: true } : {}),
         callbackUrl: clawCallbackUrl,
         ...(resultToken ? { sessionToken: resultToken } : {}),
         ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
         fastMode: fastModeEnabled,
         // Primary provider — the pod keys its model off `provider` (defaults to
         // "spaces"/kimi when unset), so without this every automation ran on
-        // private-large regardless of the agent's configured provider.
+        // the platform default regardless of the agent's configured provider.
         ...(providerParent ? { provider: providerParent } : {}),
         ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
         ...(providerOrder.length > 1 ? { providerOrder } : {}),
@@ -3766,7 +3901,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       signal: AbortSignal.timeout(180_000),
     })) as unknown as Response;
   } catch (err) {
-    clog.error(`[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+    clog.error(
+      `[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+    );
     await releaseAutomationSlot();
     res.status(502).json({ success: false, error: "failed to reach claw-pod" });
     return;
@@ -3776,28 +3913,45 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // can distinguish "claw rejected" from "claw-auth rejected".
   const status = (runRes as unknown as { status: number }).status;
   const text = await (runRes as unknown as { text: () => Promise<string> }).text();
-  clog.info(`[webhook] AUTODBG ${sessionId}: /internal/run responded status=${status} bodyLen=${text.length} body=${text.slice(0, 200)}`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: /internal/run responded status=${status} bodyLen=${text.length} body=${text.slice(0, 200)}`,
+  );
   if (status < 200 || status >= 300) {
     await releaseAutomationSlot();
+  }
+  let runSessionId = sessionId!;
+  try {
+    const parsed = JSON.parse(text) as { sessionId?: string };
+    if (parsed.sessionId) runSessionId = parsed.sessionId;
+  } catch {
+    // Non-JSON body — retain the caller-provided session id.
+  }
+  if (externalResultCallback && status >= 200 && status < 300) {
+    const storedRun = await prisma.agentRun.findUnique({
+      where: { sessionId: runSessionId },
+      select: { metadata: true },
+    });
+    const metadata =
+      storedRun?.metadata && typeof storedRun.metadata === "object" && !Array.isArray(storedRun.metadata)
+        ? (storedRun.metadata as Record<string, unknown>)
+        : {};
+    await prisma.agentRun.update({
+      where: { sessionId: runSessionId },
+      data: { metadata: { ...metadata, externalResultCallback } },
+    });
   }
 
   // Crash/stall resilience — ONLY for interposed runs. When interposing, the
   // result routes through claw-auth's /webhook/result (so recovery's stored
   // SessionContext + exhausted-notice poster apply) and we hold the agent's app
-  // identity. We key recovery off claw-auth's authoritative sessionId (it mints
-  // its own; ours is ignored) so the GCS idempotency marker and the
+  // identity. We key recovery off the preserved authoritative sessionId so the
+  // GCS idempotency marker and the
   // progress-heartbeat → root mapping line up. If claw-pod stalls without a
   // completed-result marker, the worker replays this payload under a fresh
   // session — idempotency-keyed, so a finished run is never re-forwarded (no
   // double workflow-step advance). Non-interpose runs callback straight to the
   // automation engine, which owns its own retry; we deliberately don't layer on.
   if (interpose && status >= 200 && status < 300) {
-    let runSessionId = sessionId!;
-    try {
-      const parsed = JSON.parse(text) as { sessionId?: string };
-      if (parsed.sessionId) runSessionId = parsed.sessionId;
-    } catch { /* non-JSON body — fall back to our local id */ }
-
     const recoveryPayload = {
       userId: userId!,
       task: task!,
@@ -3839,7 +3993,11 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       // id), so /webhook/result resolves ctx from THIS recovery context. Mirror
       // the interpose session (line ~2252): forward the result to the
       // automation's callback instead of posting to a (nonexistent) channel.
-      ...(interpose ? { resultForwardUrl: callbackUrl!, resolveMentions: true } : {}),
+      ...(externalResultCallback
+        ? { externalResultCallback }
+        : interpose
+          ? { resultForwardUrl: callbackUrl!, resolveMentions: true }
+          : {}),
     };
     await registerRunRecovery({
       rootSessionId: runSessionId,
@@ -3849,7 +4007,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       dispatchPayload: recoveryPayload,
       sessionContext: recoveryCtx,
     }).catch((err) => {
-      clog.warn(`[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     });
   }
 

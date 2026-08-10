@@ -239,3 +239,30 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
 
   return null;
 });
+
+register("xyne-spaces", "spaces-sdlc-update-baseline", async (params) => {
+  const action = String(params["action"] ?? "");
+  if (!["begin", "upsert_section", "finalize"].includes(action)) {
+    return "action must be begin, upsert_section, or finalize";
+  }
+  for (const key of ["repoId", "baselineKind", "setupExecutionId", "workflowExecutionId", "title"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (action === "upsert_section") {
+    for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
+    }
+  }
+  return null;
+});
+
+register("xyne-spaces", "spaces-sdlc-create-pull-request", async (params) => {
+  for (const key of ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
+    return "commitHash must be a full 40-character Git commit SHA";
+  }
+  if (params["head"] === params["base"]) return "head must differ from base";
+  return null;
+});
