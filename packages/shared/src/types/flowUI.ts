@@ -28,6 +28,10 @@ export type FlowComponentType =
   | 'pr_approval'
   | 'call_schedule'
   | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart'
   | 'agent'
   | 'mcpConfigure';
 
