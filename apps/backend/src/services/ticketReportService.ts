@@ -299,7 +299,7 @@ export class TicketReportService {
         email: user.email,
         workspaceId: user.workspaceId,
         name: user.name ?? undefined,
-        role: user.role ?? undefined,
+        role: user.role ? (user.role as WorkspaceRole) : undefined,
       };
       const permissionLevel = await this.assertCanCreateExport(exportUser, exportRecord.workspaceId);
       await this.assertWorkspaceExportEnabled(exportRecord.workspaceId);
