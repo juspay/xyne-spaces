@@ -524,6 +524,104 @@ export const userQuestionComponentSchema = baseComponentSchema.extend({ type: z.
 export type UserQuestionItem = z.infer<typeof userQuestionItemSchema>;
 export type UserQuestionProps = z.infer<typeof userQuestionPropsSchema>;
 
+export const codePropsSchema = z
+  .object({
+    code: z.string().min(1),
+    language: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const codeComponentSchema = baseComponentSchema.extend({
+  type: z.literal('code'),
+  props: codePropsSchema,
+});
+
+export const diffPropsSchema = z
+  .object({
+    path: z.string().min(1),
+    patch: z.string().min(1),
+  })
+  .strict();
+
+export const diffComponentSchema = baseComponentSchema.extend({
+  type: z.literal('diff'),
+  props: diffPropsSchema,
+});
+
+export const ticketStatusSchema = z.enum(['TODO', 'STARTED', 'PAUSED', 'CANCELLED', 'COMPLETED']);
+export const ticketPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+
+export const ticketPropsSchema = z
+  .object({
+    xyneId: z.string().min(1),
+    title: z.string().min(1),
+    status: ticketStatusSchema,
+    priority: ticketPrioritySchema,
+    eta: z.string().optional(),
+    url: z.string().min(1),
+  })
+  .strict();
+
+export const ticketComponentSchema = baseComponentSchema.extend({
+  type: z.literal('ticket'),
+  props: ticketPropsSchema,
+});
+
+export const chartPointSchema = z
+  .object({ label: z.string().min(1), value: z.number().finite() })
+  .strict();
+
+export const chartSeriesPointSchema = z
+  .object({
+    x: z.string().min(1),
+    y: z.number().finite(),
+    series: z.string().min(1).optional(),
+  })
+  .strict();
+
+const CHART_MAX_POINTS = 200;
+
+const categoryChartSchema = <T extends 'bar' | 'pie' | 'donut'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      points: z.array(chartPointSchema).min(1).max(24),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+const seriesChartSchema = <T extends 'line' | 'area'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      series: z.array(chartSeriesPointSchema).min(1).max(CHART_MAX_POINTS),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+export const chartPropsSchema = z.discriminatedUnion('type', [
+  categoryChartSchema('bar'),
+  categoryChartSchema('pie'),
+  categoryChartSchema('donut'),
+  seriesChartSchema('line'),
+  seriesChartSchema('area'),
+]);
+
+export const chartComponentSchema = baseComponentSchema.extend({
+  type: z.literal('chart'),
+  props: chartPropsSchema,
+});
+
+export type CodeProps = z.infer<typeof codePropsSchema>;
+export type DiffProps = z.infer<typeof diffPropsSchema>;
+export type TicketProps = z.infer<typeof ticketPropsSchema>;
+export type TicketArtifactStatus = z.infer<typeof ticketStatusSchema>;
+export type TicketArtifactPriority = z.infer<typeof ticketPrioritySchema>;
+export type ChartProps = z.infer<typeof chartPropsSchema>;
+export type ChartType = ChartProps['type'];
+export type ChartPoint = z.infer<typeof chartPointSchema>;
+export type ChartSeriesPoint = z.infer<typeof chartSeriesPointSchema>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -545,6 +643,10 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prApprovalComponentSchema,
     callScheduleComponentSchema,
     userQuestionComponentSchema,
+    codeComponentSchema,
+    diffComponentSchema,
+    ticketComponentSchema,
+    chartComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),

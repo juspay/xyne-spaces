@@ -20,8 +20,8 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
-export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildChartFlow } from "./flow/builder.js";
+export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
