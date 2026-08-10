@@ -21,7 +21,7 @@
   /* Classic theme - default light theme */
   [data-theme="classic"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper.png");
+    --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -155,7 +155,7 @@
   /* Classic theme - default theme with current design */
   [data-theme="summer_breeze"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper.png");
+    --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
