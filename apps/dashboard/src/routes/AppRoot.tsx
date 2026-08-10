@@ -159,6 +159,7 @@ import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
+import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
@@ -1113,6 +1114,14 @@ export const router = createBrowserRouter([
                 element: (
                   <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
                     <ProductInsightsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'ticket-reports',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
+                    <TicketReportsScreen />
                   </ResourceProtectedRoute>
                 ),
               },
