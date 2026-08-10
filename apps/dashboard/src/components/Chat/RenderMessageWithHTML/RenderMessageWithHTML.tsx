@@ -126,7 +126,8 @@ const InternalXyneLink = ({
   const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     onClick?.(event);
     if (event.defaultPrevented) return;
-    if (parsedLink?.kind !== 'call' || !parsedLink.callId || !isElectronApp()) return;
+    if (parsedLink?.kind !== 'call' || !parsedLink.callId) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
     event.preventDefault();
     void navigate(`/call/${parsedLink.callId}`);

@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { InvitationResponse } from '@xyne/shared';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { callInviteRoutingService } from '@/services/callInviteRoutingService';
 import { repositories } from '@/database/repositories';
 import {
   livekitService,
@@ -55,7 +54,12 @@ export const callLobbyController = {
     try {
       const { call, callSession } = req as CallLobbyRequest;
 
-      const base = { title: call.title, callType: call.callType, status: call.status };
+      const base = {
+        title: call.title,
+        callType: call.callType,
+        status: call.status,
+        internalCallUrl: `${config.frontendUrl}/call/${req.params.externalId}?type=${call.callType}`,
+      };
 
       if (callSession) {
         res.json({ ...base, hasSession: true });
@@ -438,38 +442,10 @@ export const callLobbyController = {
     try {
       const { externalId } = req.params;
       const url = buildCallInviteUrl(externalId);
-      res.json({
-        url,
-        unifiedCallInviteLinkEnabled: config.enableUnifiedCallInviteLink,
-      });
+      res.json({ url });
     } catch (err) {
       logger.error(`[call-lobby] getInviteUrl failed | error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * POST /api/call-lobby/:externalId/detect-internal
-   *
-   * Unified Smart Call Invite Link router. Public, unauthenticated, and
-   * INTENTIONALLY opaque: expected outcomes return HTTP 200 with an
-   * internal/external result and never reveal whether the call exists, its
-   * workspace, or a denial reason. Unexpected failures return 500.
-   *
-   * When `internal` is true the response also carries `redirectUrl`, the internal
-   * deep link the external page should bounce the browser to. Deliberately NOT
-   * mounted behind `resolveCallSession` (which would 404 / leak "ended" state and
-   * key off the external-participant cookie).
-   */
-  detectInternal: async (req: Request, res: Response): Promise<void> => {
-    res.setHeader('Cache-Control', 'no-store');
-    try {
-      const { externalId } = req.params;
-      const result = await callInviteRoutingService.detect(req, res, externalId);
-      res.json(result);
-    } catch (err) {
-      logger.error(`[call-lobby] detectInternal failed | error=${err}`);
-      res.status(500).json({ result: 'external' });
     }
   },
 };

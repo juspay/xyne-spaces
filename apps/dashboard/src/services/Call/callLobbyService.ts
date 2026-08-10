@@ -1,11 +1,14 @@
 import { CallType, InvitationResponse } from '@xyne/shared';
 import type { CallChatMessage } from '@xyne/shared';
-import { apiInstance } from '../clients/apiClient';
+import axios from 'axios';
+import { apiInstance, BASE_URL } from '../clients/apiClient';
 
 export interface CallInfo {
   title: string | null;
   callType: string;
   status: string;
+  /** Authenticated dashboard route for this call. */
+  internalCallUrl: string;
   /** Present when the user has a valid session cookie — skip the lobby form */
   hasSession?: boolean;
 }
@@ -72,6 +75,25 @@ export const callLobbyService = {
       const e = err as { status?: number; response?: { status?: number } };
       if (e?.status === 404 || e?.response?.status === 404) return 'not_found';
       throw err;
+    }
+  },
+
+  /**
+   * Reuse the authenticated internal join flow to decide whether this browser
+   * should enter through the dashboard. Authentication, refresh, workspace, and
+   * call-access checks stay owned by the existing /calls/join route.
+   */
+  async joinAsInternal(externalId: string): Promise<void> {
+    // Use a standalone client so a 401 stays local to the public lobby instead
+    // of triggering the dashboard API client's global /auth redirect.
+    const response = await axios.post<{ success?: boolean }>(
+      `${BASE_URL}/calls/join`,
+      { callId: externalId },
+      { withCredentials: true },
+    );
+
+    if (!response.data.success) {
+      throw new Error('Internal call join failed');
     }
   },
 
@@ -164,37 +186,9 @@ export const callLobbyService = {
     return response.data;
   },
 
-  /**
-   * Get the public call invite URL and the backend's authoritative rollout
-   * state for the single-link share UI.
-   */
-  async getInviteUrl(externalId: string): Promise<{
-    url: string;
-    unifiedCallInviteLinkEnabled: boolean;
-  }> {
-    const response = await apiInstance.get<{
-      url: string;
-      unifiedCallInviteLinkEnabled: boolean;
-    }>(`${BASE}/${externalId}/invite-url`);
-    return response.data;
-  },
-
-  /**
-   * Unified Smart Call Invite Link probe. Asks the backend whether this browser
-   * already has a live internal session in the call's workspace. If so, the
-   * external lobby page should redirect to `redirectUrl` instead of rendering.
-   * Always resolves (fail-open to the external lobby); never reveals call state.
-   */
-  async detectInternal(externalId: string): Promise<{ internal: boolean; redirectUrl?: string }> {
-    try {
-      const response = await apiInstance.post<
-        { result: 'internal'; redirectUrl: string; workspaceId: string } | { result: 'external' }
-      >(`${BASE}/${externalId}/detect-internal`);
-      return response.data.result === 'internal'
-        ? { internal: true, redirectUrl: response.data.redirectUrl }
-        : { internal: false };
-    } catch {
-      return { internal: false };
-    }
+  /** Get the unified call invite URL from the backend. */
+  async getInviteUrl(externalId: string): Promise<string> {
+    const response = await apiInstance.get<{ url: string }>(`${BASE}/${externalId}/invite-url`);
+    return response.data.url;
   },
 };

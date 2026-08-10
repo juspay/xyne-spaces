@@ -149,9 +149,6 @@ const envSchema = Joi.object({
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
-  // Unified Smart Call Invite Link — server-side routes signed-in users of the
-  // call's workspace into the internal app; everyone else sees the external lobby.
-  ENABLE_UNIFIED_CALL_INVITE_LINK: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
   SCREEN_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(30),
   FCM_PROJECT_ID: Joi.string().allow('').default(''),
@@ -610,7 +607,6 @@ export const config = {
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
-  enableUnifiedCallInviteLink: envVars.ENABLE_UNIFIED_CALL_INVITE_LINK,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')

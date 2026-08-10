@@ -263,5 +263,5 @@ export function isValidUrl(url: string): boolean {
  * /external/ prefix) is driven entirely by the environment, not hardcoded.
  */
 export function buildCallInviteUrl(externalId: string): string {
-  return `${config.externalCallInviteBaseUrl}/call/${encodeURIComponent(externalId)}`;
+  return `${config.externalCallInviteBaseUrl}/call/${externalId}`;
 }

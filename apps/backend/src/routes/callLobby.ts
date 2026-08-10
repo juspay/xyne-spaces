@@ -152,9 +152,4 @@ router.get(
 );
 router.get('/:externalId/invite-url', resolveCallSession, callLobbyController.getInviteUrl);
 
-// Unified Smart Call Invite Link routing probe. NO resolveCallSession: this
-// endpoint must stay opaque and must not depend on the external participant
-// cookie or 404/ended semantics.
-router.post('/:externalId/detect-internal', callLobbyController.detectInternal);
-
 export default router;
