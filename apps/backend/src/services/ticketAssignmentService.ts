@@ -7,6 +7,8 @@ import { repositories } from '@/database/repositories';
 import { userResponsibilityFromRoleId, roleIdFromEnum } from '@/utils/roleFrameworkUtils';
 
 const prisma = DatabaseClient.getInstance();
+const TICKET_FETCH_MAX_RETRIES = 3;
+const TICKET_FETCH_RETRY_DELAY_MS = 500;
 
 interface AssignmentResult {
   assignedUserId: string;
@@ -454,10 +456,15 @@ export class TicketAssignmentService {
   }): Promise<string | null> {
     const { ticketId, groupId, actorId } = params;
 
-    const ticket = await prisma.ticket.findUnique({
+    const fetchTicket = () => prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { boardId: true, projectId: true, channelId: true },
     });
+    let ticket = await fetchTicket();
+    for (let retry = 0; !ticket && retry < TICKET_FETCH_MAX_RETRIES; retry++) {
+      await new Promise(resolve => setTimeout(resolve, TICKET_FETCH_RETRY_DELAY_MS));
+      ticket = await fetchTicket();
+    }
     if (!ticket) {
       logger.warn(`[AUTO-ASSIGN] Ticket ${ticketId} not found; cannot assign to group ${groupId}`);
       return null;
