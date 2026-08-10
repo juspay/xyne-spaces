@@ -151,6 +151,7 @@ export function useCanvasCommentEditorBridge({
     containerRef,
     enabled: ready && Boolean(canvasId),
     refreshKey: commentHighlightVersion,
+    activeThreadId: activeCommentThreadId,
     onAnchorClick: handleCommentAnchorClick,
     onOpenCountChange: onOpenCommentCountChange,
     onThreadsChange: setCommentThreads,
@@ -379,6 +380,7 @@ export function useCanvasCommentEditorBridge({
 
   const closeInlineCommentThread = useCallback((): void => {
     setInlineCommentThread(null);
+    setActiveCommentThreadId(null);
   }, []);
 
   return {

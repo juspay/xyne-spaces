@@ -1385,7 +1385,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             </div>
 
             {baseRoute === '/chat/activity' && (
-              <div className='hidden h-[27px] shrink-0 border-b border-border bg-background md:block' />
+              <div className='hidden h-[27px] shrink-0 bg-background md:block' />
             )}
 
             {previewVersion && (
