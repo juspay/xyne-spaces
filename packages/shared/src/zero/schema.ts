@@ -283,7 +283,7 @@ export const ticketExportTable = table('ticket_exports') // TicketExport
     workspaceId: string(),
     requestedBy: string(),
     status: string(),
-    filters: json(),
+    filters: string(),
     createdAt: number(),
     updatedAt: number(),
   })

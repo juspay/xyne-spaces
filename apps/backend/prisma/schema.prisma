@@ -358,7 +358,7 @@ model TicketExport {
   workspaceId     String
   requestedBy     String
   status          String
-  filters         Json
+  filters         String
   createdAt       DateTime
   updatedAt       DateTime
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

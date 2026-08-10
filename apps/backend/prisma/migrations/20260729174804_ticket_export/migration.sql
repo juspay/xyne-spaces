@@ -4,7 +4,7 @@ CREATE TABLE "public"."ticket_exports" (
     "workspaceId" TEXT NOT NULL,
     "requestedBy" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "filters" JSONB NOT NULL,
+    "filters" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

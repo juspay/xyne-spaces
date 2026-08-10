@@ -34,7 +34,7 @@ function formatFileStamp(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-const MAX_EXPORT_ROWS = 50_000;
+const MAX_EXPORT_ROWS = 1_000;
 const MAX_ACTIVITY_ROWS = 100_000;
 const TICKET_REPORT_RESOURCE_NAME = 'TICKET-REPORTS';
 const ESTIMATED_CORE_COLUMNS = 19;
@@ -111,7 +111,7 @@ interface ExportContext {
     id: string;
     workspaceId: string;
     requestedBy: string;
-    filters: Prisma.JsonValue;
+    filters: string;
     status: TicketExportStatus;
   };
   user: AuthenticatedUser;
@@ -130,7 +130,7 @@ export class TicketReportService {
         workspaceId,
         requestedBy: user.id,
         status: 'PENDING',
-        filters: filters as Prisma.InputJsonValue,
+        filters: JSON.stringify(filters),
         createdAt: now,
         updatedAt: now,
       },
@@ -582,7 +582,15 @@ export class TicketReportService {
   }
 
   private normalizeFilters(raw: unknown): TicketExportFilters {
-    const parsed = ticketExportFiltersSchema.safeParse(raw);
+    let value = raw;
+    if (typeof raw === 'string') {
+      try {
+        value = JSON.parse(raw) as unknown;
+      } catch {
+        value = {};
+      }
+    }
+    const parsed = ticketExportFiltersSchema.safeParse(value);
     return parsed.success ? parsed.data : ticketExportFiltersSchema.parse({});
   }
 
@@ -1181,7 +1189,7 @@ export class TicketReportService {
       workspaceId: record.workspaceId,
       requestedBy: record.requestedBy,
       status: record.status,
-      filters: record.filters,
+      filters: this.normalizeFilters(record.filters),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
