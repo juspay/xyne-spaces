@@ -1,7 +1,7 @@
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { BaseTransformer } from '@/integrations/core/baseTransformer';
 import type { NormalizedData, ParseResult } from '@/integrations/core/types';
-import { EmailType, type ExternalSource, TicketPriority } from '@prisma/client';
+import { EmailType, type ExternalSource } from '@prisma/client';
 import { FormFieldType } from '@xyne/shared';
 import type { NormalizedGooglePlayReview } from './client';
 import {
@@ -11,13 +11,6 @@ import {
   GOOGLE_PLAY_THUMBS_UP_FIELD,
 } from './constants';
 export const GOOGLE_PLAY_DEVELOPER_REPLY_SUFFIX = ':developer-reply';
-
-function priorityForRating(rating?: number): TicketPriority {
-  if (rating == null || rating >= 4) return TicketPriority.LOW;
-  if (rating === 3) return TicketPriority.MEDIUM;
-  if (rating === 2) return TicketPriority.HIGH;
-  return TicketPriority.CRITICAL;
-}
 
 export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, NormalizedData[]> {
   async transform(
@@ -51,7 +44,6 @@ export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, Norma
           rating: review.rating,
           clientVersionName: review.clientVersionName,
           clientVersionCode: review.clientVersionCode,
-          ticketPriority: priorityForRating(review.rating),
           updateExisting: true,
           syncTicketOnUpdate: true,
           skipBlockingCheck: true,

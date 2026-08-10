@@ -1,9 +1,9 @@
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
-import { FormFieldType, ActivityType } from '@xyne/shared';
+import { FormFieldType, FormContextType, FormEntityType, ActivityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { ensureBoardTicketFormFields } from '@/services/ticketFormFieldService';
 
 /**
  * Custom-field plumbing shared by the SEND_CSAT_REQUEST automation step

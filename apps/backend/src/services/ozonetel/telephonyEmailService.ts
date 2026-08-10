@@ -16,7 +16,6 @@ import { ozonetelConfigService, type OzonetelTicketRules } from './ozonetelConfi
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { resolveTelephonyAgentUserId } from './telephonyAgentUserService';
-import { ensureBoardTicketFormFields } from '@/services/ticketFormFieldService';
 import type {
   TelephonyDirection,
   TelephonyEvent,
@@ -315,11 +314,65 @@ function buildEmailBody(meta: TelephonyStoredMetadata): string {
 }
 
 async function ensureTelephonyFormFields(boardId: string, workspaceId: string, createdBy: string): Promise<void> {
-  await ensureBoardTicketFormFields({
-    boardId,
-    workspaceId,
-    createdBy,
-    fields: TELEPHONY_FORM_FIELDS,
+  const mapping = await db.formContextMapping.findFirst({
+    where: {
+      contextId: boardId,
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    },
+  });
+
+  const provisionNewForm = async (): Promise<void> => {
+    const form = await repositories.forms.createWithFields({
+      formName: 'Ticket Details',
+      entityType: FormEntityType.TICKET,
+      contextType: FormContextType.BOARD,
+      workspaceId,
+      createdBy,
+      fields: TELEPHONY_FORM_FIELDS,
+    });
+    await db.formContextMapping.create({
+      data: {
+        id: randomUUID(),
+        contextId: boardId,
+        contextType: FormContextType.BOARD,
+        entityType: FormEntityType.TICKET,
+        formId: form.id,
+        workspaceId,
+      },
+    });
+  };
+
+  if (!mapping) {
+    await provisionNewForm();
+    return;
+  }
+
+  const form = await db.form.findUnique({ where: { id: mapping.formId } });
+  if (!form) {
+    await db.formContextMapping.delete({ where: { id: mapping.id } });
+    await provisionNewForm();
+    return;
+  }
+
+  const existingFields = await repositories.forms.findFormFields(mapping.formId);
+  const existingNames = new Set(existingFields.map(f => f.fieldName));
+  const missing = TELEPHONY_FORM_FIELDS.filter(def => !existingNames.has(def.fieldName));
+  if (missing.length === 0) return;
+
+  await repositories.forms.updateWithFields(mapping.formId, {
+    formName: form.formName,
+    formDescription: form.formDescription ?? undefined,
+    fields: [
+      ...existingFields.map(f => ({
+        fieldId: f.id,
+        fieldName: f.fieldName,
+        fieldType: f.fieldType as unknown as FormFieldType,
+        fieldEnum: f.fieldEnum ?? undefined,
+        isOptional: f.isOptional,
+      })),
+      ...missing,
+    ],
   });
 }
 

@@ -10,8 +10,13 @@ export interface InteractionReplyContext {
   authorName: string;
 }
 
-export abstract class BaseInteractionReplySender {
-  readonly maxReplyLength?: number;
+export class InteractionReplyValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InteractionReplyValidationError';
+  }
+}
 
+export abstract class BaseInteractionReplySender {
   abstract sendReply(context: InteractionReplyContext): Promise<NormalizedData>;
 }

@@ -35,18 +35,12 @@ export function hasExternalInteractionTicketChanged(
   current: {
     title: string;
     description: string;
-    priority: string;
   } | null,
   next: {
     title: string;
     description: string;
-    priority?: string;
   },
 ): boolean {
   if (!current) return false;
-  return (
-    current.title !== next.title ||
-    current.description !== next.description ||
-    (next.priority != null && current.priority !== next.priority)
-  );
+  return current.title !== next.title || current.description !== next.description;
 }

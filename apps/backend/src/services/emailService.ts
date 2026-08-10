@@ -125,7 +125,6 @@ export interface CreateConversationWithEmailParams {
   rating?: number;
   clientVersionName?: string;
   clientVersionCode?: string;
-  ticketPriority?: TicketPriority;
 }
 
 export interface AddEmailToConversationParams {
@@ -162,7 +161,6 @@ export interface UpdateExternalInteractionParams {
   clientVersionName?: string | null;
   clientVersionCode?: string | null;
   occurredAt: Date;
-  ticketPriority?: TicketPriority;
   syncTicket?: boolean;
   updatedBy?: string | null;
 }
@@ -460,11 +458,9 @@ export class EmailService {
       clientVersionCode: params.clientVersionCode ?? null,
       createdAt: params.occurredAt,
     });
-    const desiredPriority = params.ticketPriority ?? currentTicket?.priority;
     const ticketChanged = hasExternalInteractionTicketChanged(currentTicket, {
       title: params.subject,
       description: params.body,
-      priority: desiredPriority,
     });
 
     if (!emailChanged && !ticketChanged) return currentEmail;
@@ -496,7 +492,6 @@ export class EmailService {
         data: {
           title: params.subject,
           description: params.body,
-          ...(desiredPriority && { priority: desiredPriority }),
           ...(params.updatedBy && { updatedBy: params.updatedBy }),
         },
       });
@@ -549,12 +544,6 @@ export class EmailService {
             description: {
               previousValue: currentTicket.description,
               newValue: result.ticket.description,
-            },
-          }),
-          ...(currentTicket.priority !== result.ticket.priority && {
-            priority: {
-              previousValue: currentTicket.priority,
-              newValue: result.ticket.priority,
             },
           }),
         },
@@ -1084,7 +1073,6 @@ export class EmailService {
       rating,
       clientVersionName,
       clientVersionCode,
-      ticketPriority,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1207,7 +1195,7 @@ export class EmailService {
     }
 
     // Derive ticket priority outside the transaction so we can look up the SLA policy.
-    const ticketPriorityForSla = ticketPriority ?? derivePriorityFromSubject(emailSubject ?? '');
+    const ticketPriorityForSla = derivePriorityFromSubject(emailSubject ?? '');
     const slaResolutionDue = await this.getSlaResolutionDue(
       boardId,
       ticketPriorityForSla,
@@ -1260,7 +1248,7 @@ export class EmailService {
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
       const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
-      const resolvedTicketPriority = ticketPriority ?? derivePriorityFromSubject(emailSubject);
+      const ticketPriority = derivePriorityFromSubject(emailSubject);
       const createdTicket = await tx.ticket.create({
         data: {
           title: ticketTitle,
@@ -1276,7 +1264,7 @@ export class EmailService {
           emailCount: 1,
           lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
-          priority: resolvedTicketPriority,
+          priority: ticketPriority,
           ticketType: BaseTicketType.DESK,
           ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroup && { userGroupId: groupId }),

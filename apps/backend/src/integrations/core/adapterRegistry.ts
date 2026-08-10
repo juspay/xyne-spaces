@@ -104,7 +104,6 @@ class AdapterRegistry {
     google: ExternalSourcePlatform.GOOGLE,
     'app-desk': ExternalSourcePlatform.APP_DESK,
     ozonetel: ExternalSourcePlatform.OZONETEL,
-    'google-play-reviews': ExternalSourcePlatform.GOOGLE_PLAY,
   };
 
   private tryMapStringToPlatform(platformStr: string): ExternalSourcePlatform | undefined {

@@ -3,11 +3,7 @@
  * Platform-agnostic interfaces
  */
 
-import {
-  EmailType,
-  ExternalSource,
-  TicketPriority,
-} from '@prisma/client';
+import { EmailType, ExternalSource } from '@prisma/client';
 import type { FormFieldType } from '@xyne/shared';
 import { RefetchOptions, RefetchResult } from './baseRefetch';
 import type { DownloadedAttachment } from '@/services/externalAttachmentService';
@@ -95,7 +91,6 @@ export interface NormalizedData {
     rating?: number;
     clientVersionName?: string;
     clientVersionCode?: string;
-    ticketPriority?: TicketPriority;
     updateExisting?: boolean;
     syncTicketOnUpdate?: boolean;
     skipBlockingCheck?: boolean;
@@ -248,9 +243,6 @@ export interface ExternalSourceAdapter {
 
   /** Optional: provider reply sender for non-email Desk interactions. */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
-
-  /** Optional provider reply-size limit. */
-  maxReplyLength?: number;
 }
 
 import type { MailReplyContext, MailReplyResult, NewMailContext } from './baseMailReplySender';

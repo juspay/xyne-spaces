@@ -9,6 +9,7 @@ import {
 import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { externalSourceCore } from '@/integrations/core/core';
+import { InteractionReplyValidationError } from '@/integrations/core/baseInteractionReplySender';
 import { logger } from '@/utils/logger';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
@@ -80,7 +81,7 @@ class SocialMediaService {
     body: string;
   }): Promise<Email> {
     const body = plainText(params.body);
-    if (!body) throw new Error('Reply body is required');
+    if (!body) throw new InteractionReplyValidationError('Reply body is required');
 
     const review = await db.email.findFirst({
       where: {
@@ -105,10 +106,6 @@ class SocialMediaService {
     if (!adapter.sendInteractionReply) {
       throw new Error(`Replies are not supported for source ${source.sourceType}`);
     }
-    if (adapter.maxReplyLength && body.length > adapter.maxReplyLength) {
-      throw new Error(`Reply cannot exceed ${adapter.maxReplyLength} characters`);
-    }
-
     const user = await db.user.findUnique({
       where: { id: params.userId },
       select: { name: true },

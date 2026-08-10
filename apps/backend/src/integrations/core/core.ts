@@ -283,7 +283,6 @@ export class ExternalSourceCore {
             clientVersionCode:
               normalizedData.emailData.clientVersionCode ?? existingEmail.clientVersionCode,
             occurredAt: normalizedData.metadata.timestamp,
-            ticketPriority: normalizedData.emailData.ticketPriority,
             syncTicket: normalizedData.emailData.syncTicketOnUpdate,
             updatedBy: source.ownerUserId,
           });
@@ -796,7 +795,6 @@ export class ExternalSourceCore {
           : source.name,
         receivedAt: normalizedData.metadata.timestamp,
         ...this.getEmailIntegrationFields(normalizedData),
-        ticketPriority: normalizedData.emailData.ticketPriority,
       });
       if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
         return { conversation: undefined, message: undefined, email: undefined, isNew: false, blocked: true };

@@ -2401,7 +2401,6 @@ model ExternalSource {
   updatedAt       DateTime @updatedAt
 
   @@index([workspaceId, sourceType])
-  @@index([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
   @@index([displayName])

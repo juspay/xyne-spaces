@@ -41,7 +41,6 @@ export class AdapterFactory {
       sendMailNew: mailReplySender?.sendNew.bind(mailReplySender),
       sendInteractionReply:
         interactionReplySender?.sendReply.bind(interactionReplySender),
-      maxReplyLength: interactionReplySender?.maxReplyLength,
     };
 
     adapterRegistry.register(platform, adapter);

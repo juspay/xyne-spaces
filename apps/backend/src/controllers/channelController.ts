@@ -1437,6 +1437,21 @@ export class ChannelController {
         return;
       }
 
+      const userId = req.user!.id;
+      const workspaceId = req.user!.workspaceId!;
+      const accessibleChannel = await db.channel.findFirst({
+        where: {
+          id: channelId,
+          workspaceId,
+          participants: { some: { userId } },
+        },
+        select: { id: true },
+      });
+      if (!accessibleChannel) {
+        res.status(404).json({ error: 'Channel not found' });
+        return;
+      }
+
       // This endpoint returns the channel's connected desk mailbox / owner account
       // email. Gate it with the same rule the socket layer uses (canAccessChannel):
       // workspace boundary + participant-only for PRIVATE channels.
@@ -1462,7 +1477,7 @@ export class ChannelController {
       res.setHeader('Cache-Control', 'private, no-cache');
 
       const source = await db.externalSource.findFirst({
-        where: { channelId },
+        where: { channelId, workspaceId },
         select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
@@ -1492,7 +1507,7 @@ export class ChannelController {
         connectedLabel = extractSlackChannelId(source.name);
       } else if (source?.sourceType === 'google-play-reviews') {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, sourceType: 'google-play-reviews' },
+          where: { channelId, workspaceId, sourceType: 'google-play-reviews' },
           select: {
             id: true,
             displayName: true,
