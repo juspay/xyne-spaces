@@ -102,6 +102,14 @@ import type { CallParticipantMetadata } from '../types/call.js';
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
 
+async function getCanvasThreadCommentCount(
+  tx: Transaction<Schema>,
+  threadId: string,
+): Promise<number> {
+  const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
+  return comments.filter(comment => comment.deletedAt == null).length;
+}
+
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
 function buildInitialMessageMd(msg: {
   messageId: string;
@@ -6200,6 +6208,7 @@ export const mutators = defineMutators({
           blockId,
           anchorText: anchorText || null,
           initialCommentId: commentId,
+          commentCount: 1,
           status: CanvasCommentThreadStatus.OPEN,
           statusUpdatedBy: null,
           statusUpdatedAt: null,
@@ -6251,12 +6260,20 @@ export const mutators = defineMutators({
           createdAt: timestamp,
         });
 
+        const commentCount = await getCanvasThreadCommentCount(tx, threadId);
+
         if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
           await tx.mutate.canvas_comment_threads.update({
             id: threadId,
+            commentCount,
             status: CanvasCommentThreadStatus.OPEN,
             statusUpdatedBy: ctx.userID,
             statusUpdatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.canvas_comment_threads.update({
+            id: threadId,
+            commentCount,
           });
         }
       },
@@ -6311,6 +6328,15 @@ export const mutators = defineMutators({
           mentionedUserIds: '[]',
           deletedAt: timestamp,
         });
+
+        const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+        if (thread) {
+          const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
+          await tx.mutate.canvas_comment_threads.update({
+            id: comment.threadId,
+            commentCount,
+          });
+        }
       },
     ),
     setThreadStatus: defineMutator(
@@ -7188,6 +7214,7 @@ export const mutators = defineMutators({
     upsert: defineMutator(
       z.object({
         displayName: z.string().nullable().optional(),
+        role: z.string().nullable().optional(),
         pronunciation: z.string().nullable().optional(),
         team: z.string().nullable().optional(),
         phoneNumber: z.string().nullable().optional(),
@@ -7201,6 +7228,7 @@ export const mutators = defineMutators({
         ctx,
         args: {
           displayName,
+          role,
           pronunciation,
           team,
           phoneNumber,
@@ -7222,6 +7250,7 @@ export const mutators = defineMutators({
           id: string;
           userId: string;
           displayName?: string | null;
+          role?: string | null;
           pronunciation?: string | null;
           team?: string | null;
           phoneNumber?: string | null;
@@ -7233,6 +7262,7 @@ export const mutators = defineMutators({
           id: profileId,
           userId: ctx.userID,
           ...(displayName !== undefined && { displayName }),
+          ...(role !== undefined && { role }),
           ...(pronunciation !== undefined && { pronunciation }),
           ...(team !== undefined && { team }),
           ...(phoneNumber !== undefined && { phoneNumber }),

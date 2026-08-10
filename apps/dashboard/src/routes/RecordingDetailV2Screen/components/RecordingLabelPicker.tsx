@@ -28,7 +28,7 @@ const CHIP_CLASS_NAME =
   'inline-flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground whitespace-nowrap scrollbar-none data-[theme=midnight]:bg-muted/50';
 
 const SUGGESTION_CHIP_CLASS_NAME =
-  'inline-flex shrink-0 items-center gap-1.5 rounded-md border border-dashed border-muted-foreground/40 px-1.5 py-0.5 text-xs font-medium text-foreground whitespace-nowrap scrollbar-none';
+  'inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/40 px-1.5 h-7 text-xs font-medium text-foreground whitespace-nowrap scrollbar-none';
 
 const READ_ONLY_TRIGGER_CLASS_NAME =
   'inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
@@ -152,7 +152,7 @@ export function RecordingLabelPicker({
   };
 
   const appliedLabels = (
-    <span className='flex max-w-76 w-full items-center gap-1.5 overflow-x-scroll scrollbar-none'>
+    <span className='flex max-w-72 w-full items-center gap-1.5 overflow-x-scroll scrollbar-none'>
       {visibleLabels.map(label => (
         <LabelChip key={label} label={resolveLabel(label)} />
       ))}
