@@ -12,7 +12,13 @@ import {
 } from 'lucide-react';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import { useActiveUserSearch, useSelf, useUser, useUsers } from '../../../../hooks/useUsers';
+import {
+  useActiveUsers,
+  useActiveUserSearch,
+  useSelf,
+  useUser,
+  useUsers,
+} from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { useAllChannels, useChannel } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
@@ -548,18 +554,47 @@ interface MultiFieldProps {
   placeholder: string;
 }
 
+// Search text can filter an already-selected entity out of `base` — without re-adding it,
+// would vanish the moment the search text stops matching him.
+function withSelectedOptions(
+  base: SelectorOption[],
+  value: string[],
+  resolveSelected: (id: string) => SelectorOption,
+): SelectorOption[] {
+  const present = new Set(base.map(o => o.value));
+  const selectedExtra = value.filter(v => !present.has(v)).map(resolveSelected);
+  return [...selectedExtra, ...base];
+}
+
 function MultiUsers({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const users = useActiveUserSearch(search, 30);
+  const users = useActiveUsers();
   const options: SelectorOption[] = useMemo(() => {
-    if (!users) return [];
-    return users.map(u => ({
-      value: u.id,
-      label: getUserDisplayName(u),
-      subtitle: u.email,
-      icon: <UserAvatar userId={u.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
-    }));
-  }, [users]);
+    const byId = new Map(users.map(u => [u.id, u]));
+    const lower = search.trim().toLowerCase();
+    const base = users
+      .filter(
+        u =>
+          !lower ||
+          getUserDisplayName(u).toLowerCase().includes(lower) ||
+          u.email?.toLowerCase().includes(lower),
+      )
+      .map(u => ({
+        value: u.id,
+        label: getUserDisplayName(u),
+        subtitle: u.email,
+        icon: <UserAvatar userId={u.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
+      }));
+    return withSelectedOptions(base, value, v => {
+      const u = byId.get(v);
+      return {
+        value: v,
+        label: u ? getUserDisplayName(u) : v,
+        subtitle: u?.email ?? null,
+        icon: <UserAvatar userId={v} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
+      };
+    });
+  }, [users, search, value]);
   return (
     <EntityMultiSelector
       options={options}
@@ -577,9 +612,9 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
   const [search, setSearch] = useState('');
   const groups = useUserGroups();
   const options: SelectorOption[] = useMemo(() => {
-    if (!groups) return [];
+    const byId = new Map((groups ?? []).map(g => [g.id, g]));
     const lower = search.trim().toLowerCase();
-    return groups
+    const base = (groups ?? [])
       .filter(g => g.isActive !== false)
       .filter(g => (lower ? g.name.toLowerCase().includes(lower) : true))
       .map(g => ({
@@ -587,7 +622,15 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
         label: g.name,
         icon: <Users className='size-4 text-muted-foreground' />,
       }));
-  }, [groups, search]);
+    return withSelectedOptions(base, value, v => {
+      const g = byId.get(v);
+      return {
+        value: v,
+        label: g?.name || v,
+        icon: <Users className='size-4 text-muted-foreground' />,
+      };
+    });
+  }, [groups, search, value]);
   return (
     <EntityMultiSelector
       options={options}
@@ -618,18 +661,14 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
         label: c.name || '(unnamed channel)',
         icon: channelIcon(c.type),
       }));
-    const present = new Set(base.map(o => o.value));
-    const selectedExtra: SelectorOption[] = value
-      .filter(v => !present.has(v))
-      .map(v => {
-        const c = byId.get(v);
-        return {
-          value: v,
-          label: c?.name || v,
-          icon: channelIcon(c?.type),
-        };
-      });
-    return [...selectedExtra, ...base];
+    return withSelectedOptions(base, value, v => {
+      const c = byId.get(v);
+      return {
+        value: v,
+        label: c?.name || v,
+        icon: channelIcon(c?.type),
+      };
+    });
   }, [channels, search, value]);
   return (
     <EntityMultiSelector
@@ -648,16 +687,24 @@ function MultiBoards({ value, onChange, placeholder }: MultiFieldProps): React.R
   const [search, setSearch] = useState('');
   const [boards] = useCachedQuery(queries.getAllBoardsList());
   const options: SelectorOption[] = useMemo(() => {
-    if (!boards) return [];
+    const byId = new Map((boards ?? []).map(b => [b.id, b]));
     const lower = search.trim().toLowerCase();
-    return boards
+    const base = (boards ?? [])
       .filter(b => (lower ? b.name.toLowerCase().includes(lower) : true))
       .map(b => ({
         value: b.id,
         label: b.name,
         icon: <Layers className='size-4 text-muted-foreground' />,
       }));
-  }, [boards, search]);
+    return withSelectedOptions(base, value, v => {
+      const b = byId.get(v);
+      return {
+        value: v,
+        label: b?.name || v,
+        icon: <Layers className='size-4 text-muted-foreground' />,
+      };
+    });
+  }, [boards, search, value]);
   return (
     <EntityMultiSelector
       options={options}
@@ -675,16 +722,24 @@ function MultiProjects({ value, onChange, placeholder }: MultiFieldProps): React
   const [search, setSearch] = useState('');
   const [projects] = useCachedQuery(queries.getAllProjects());
   const options: SelectorOption[] = useMemo(() => {
-    if (!projects) return [];
+    const byId = new Map((projects ?? []).map(p => [p.id, p]));
     const lower = search.trim().toLowerCase();
-    return projects
+    const base = (projects ?? [])
       .filter(p => (lower ? p.name.toLowerCase().includes(lower) : true))
       .map(p => ({
         value: p.id,
         label: p.name,
         icon: <Folder className='size-4 text-muted-foreground' />,
       }));
-  }, [projects, search]);
+    return withSelectedOptions(base, value, v => {
+      const p = byId.get(v);
+      return {
+        value: v,
+        label: p?.name || v,
+        icon: <Folder className='size-4 text-muted-foreground' />,
+      };
+    });
+  }, [projects, search, value]);
   return (
     <EntityMultiSelector
       options={options}
