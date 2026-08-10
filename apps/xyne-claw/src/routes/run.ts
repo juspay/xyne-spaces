@@ -96,9 +96,10 @@ import {
   buildSandboxStoreKey,
   clearPlan,
   isPlanToolSlug,
-  // Aliased: run.ts declares a local `isReadOnlyJob` const later in the same
-  // scope; this shared util is the single-source scheduled/automation check.
-  isReadOnlyJob as isScheduledOrAutomationRun,
+  // Non-interactive batch-run detector (scheduled OR automation): drives the
+  // plan-tools gate below. NOT the sandbox read-only pin — that is automation-only
+  // (local isReadOnlyJob const below + isReadOnlySandboxJob in the sandbox tools).
+  isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
@@ -2830,13 +2831,20 @@ async function processTask(
       }
     }
 
-    // Read-only routing (sbx-git): scheduled / automation runs are diverted to
-    // the SHARED read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit),
-    // so they must not carry mutating sandbox tools. Strip them here as the
-    // tool-level half of read-only enforcement (the sbx-git pod also mounts
-    // repos read-only). A rare automation that genuinely needs to write/run can
-    // opt out with agentConfig.allowWriteInReadOnlyJob.
-    const isReadOnlyJob = eventType === "automation" || eventType === "scheduled" || isScheduledRun;
+    // Read-only routing (sbx-git): AUTOMATION runs are diverted to the SHARED
+    // read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit), so they
+    // must not carry mutating sandbox tools. Strip them here as the tool-level
+    // half of read-only enforcement (the sbx-git pod also mounts repos
+    // read-only). Kept in sync with isReadOnlySandboxJob() in
+    // xyne-claw-shared/.../repo-configs.ts. Scheduled jobs are intentionally NOT
+    // pinned — they get a normal writable sandbox so they can build/refresh
+    // artifacts (e.g. live dashboards) unattended. A rare automation that needs
+    // to write/run can opt out with agentConfig.allowWriteInReadOnlyJob.
+    const isReadOnlyJob = eventType === "automation";
+    // Low-priority batch predicate (scheduled AND automation): drives the
+    // automationRun model/queue selection below. Separate from the sandbox pin.
+    const isLowPriorityBatchRun =
+      eventType === "automation" || eventType === "scheduled" || isScheduledRun;
     const allowWriteInReadOnlyJob = agentConfig?.["allowWriteInReadOnlyJob"] === true;
     // forceReadOnlySandbox: per-agent opt-in to the read-only sbx-git path for ALL
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
@@ -3508,9 +3516,10 @@ async function processTask(
         task,
         context: fullContext,
         // Automation/scheduled runs draw from the low-priority LiteLLM key so
-        // batch fleets can't queue interactive mentions (same predicate as the
-        // read-only sandbox routing above).
-        automationRun: isReadOnlyJob,
+        // batch fleets can't queue interactive mentions. NOTE: scheduled-OR-
+        // automation predicate; the sandbox read-only pin above is automation-only
+        // (scheduled jobs now get a writable sandbox).
+        automationRun: isLowPriorityBatchRun,
         userName,
         userEmail,
         customTools: tools,
