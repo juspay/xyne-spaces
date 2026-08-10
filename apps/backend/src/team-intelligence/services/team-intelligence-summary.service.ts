@@ -205,7 +205,7 @@ async function llmGenerate(
       { scope: 'user', purpose: options.purpose, promptChars: prompt.length },
       async () => {
     const response = await llmClient.generateStream({
-      model: appConfig.teamIntelligence.model,
+      model: appConfig.workflow.defaultModelName,
       messages: [createUserMessage(prompt)],
     });
     const finalMessagePromise = response.finalMessage.catch((error) => {
@@ -2429,7 +2429,7 @@ class TeamIntelligenceSummaryService {
     const summaryMetadata: Prisma.InputJsonValue = {
       generator: 'team-intelligence-user-evidence-llm-v1',
       generatedAt: new Date().toISOString(),
-      model: appConfig.teamIntelligence.model,
+      model: appConfig.workflow.defaultModelName,
       sourceCounts: {
         pullRequests: codeEvidence.pullRequests.length,
         soloCommits: codeEvidence.soloCommits.length,
