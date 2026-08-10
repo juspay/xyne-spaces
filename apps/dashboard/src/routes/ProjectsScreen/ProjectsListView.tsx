@@ -26,7 +26,7 @@ const ProjectsListView = (): ReactElement => {
   const canExportTickets = permissions.some(
     permission =>
       permission.resourceName === 'TICKET-REPORTS' &&
-      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
+      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
   );
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Fetch all projects using zero

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { WorkspaceRole } from '@prisma/client';
+import { WorkspaceRole } from '@xyne/shared';
 import { z } from 'zod';
 import {
   createTicketExportRequestSchema,
