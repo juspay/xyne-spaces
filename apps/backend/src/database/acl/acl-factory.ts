@@ -496,6 +496,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entity':
       return new BaseQueryACL(ctx, prisma)
+    case 'ticketExport':
+      return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
     }
