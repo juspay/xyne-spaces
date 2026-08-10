@@ -808,7 +808,7 @@ export class App {
       await emailClassificationQueue.initialize();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
-      // separate process) drains them nightly.
+      // separate process) drains each thread once its debounce window elapses.
       logger.info('Initializing entity extraction queue...');
       await entityExtractionQueue.initialize();
 
