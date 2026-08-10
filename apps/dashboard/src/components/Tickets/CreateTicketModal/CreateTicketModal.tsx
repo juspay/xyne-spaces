@@ -588,6 +588,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     debounceMs: 2000,
   });
 
+  // Retrieval always returns its top-ranked tickets, so a non-empty candidate list means
+  // "closest matches", not "duplicate". Only surface the panel once the analysis has actually
+  // confirmed a duplicate and named a ticket — otherwise unrelated tickets get shown as similar.
+  const showDuplicatePanel = Boolean(
+    duplicateCheck?.analysis?.isDuplicate &&
+    duplicateCheck?.analysis?.duplicateTicketId &&
+    duplicateCheck?.candidates?.length,
+  );
+
   // Once the user acts on the board (manual select, accept, or reject), suppress all further AI suggestions
   const [boardAISuggestionSuppressed, setBoardAISuggestionSuppressed] = useState(false);
   const [boardSelectorOpen, setBoardSelectorOpen] = useState(false);
@@ -2360,16 +2369,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               <span>Checking for duplicates...</span>
             </div>
           )}
-          {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
+          {showDuplicatePanel && (
             <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
               <div className='space-y-2'>
                 <div className='flex items-center justify-between pb-0.5'>
                   <span className='flex items-center gap-2'>
                     <Copy className='size-3' strokeWidth={2.5} />
                     <p className='text-sm font-medium text-foreground leading-5'>
-                      {duplicateCheck?.analysis?.isDuplicate
-                        ? 'Duplicate ticket found'
-                        : 'Similar tickets found'}
+                      Duplicate ticket found
                     </p>
                   </span>
                   <Button
@@ -2381,10 +2388,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     <X strokeWidth={2.33} className='size-3.5' />
                   </Button>
                 </div>
-                {(duplicateCheck?.analysis?.isDuplicate
-                  ? duplicateCheck?.candidates?.slice(0, 1)
-                  : duplicateCheck?.candidates?.slice(0, 5)
-                )?.map(candidate => {
+                {duplicateCheck?.candidates?.slice(0, 1)?.map(candidate => {
                   const candidateLink = candidateLinks.get(candidate.id);
 
                   return (

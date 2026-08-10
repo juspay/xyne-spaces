@@ -22,6 +22,7 @@ import { isOrganizationPolicyError, organizationDomainService } from '@/services
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
+import { redisService } from '@/services/redisService';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -905,6 +906,23 @@ export class UserService {
   }
 
   /**
+   * Check Redis for a verified email-password registration's passwordHash.
+   * Returns { passwordHash } if found, so it can be set on the OrgMember
+   * during org creation. Cleans up the Redis key after reading.
+   */
+  private async getVerifiedPasswordHash(email: string): Promise<{ passwordHash?: string }> {
+    try {
+      const raw = await redisService.get(`emailreg:verified:${email.toLowerCase().trim()}`);
+      if (!raw) return {};
+      const data = JSON.parse(raw) as { passwordHash?: string };
+      await redisService.del(`emailreg:verified:${email.toLowerCase().trim()}`);
+      return data.passwordHash ? { passwordHash: data.passwordHash } : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
    * Create organization with default workspace and user
    * Called after temp token is verified
    */
@@ -979,6 +997,7 @@ export class UserService {
               orgId: organization.orgId,
               role: OrgRole.OWNER,
               leftAt: null,
+              ...(existingOrgMember.passwordHash ? {} : await this.getVerifiedPasswordHash(userData.email)),
             },
           })
         : await this.prisma.orgMember.create({
@@ -986,6 +1005,7 @@ export class UserService {
               orgId: organization.orgId,
               email: userData.email,
               role: OrgRole.OWNER,
+              ...(await this.getVerifiedPasswordHash(userData.email)),
             }
           });
 

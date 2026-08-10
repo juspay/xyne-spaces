@@ -17,6 +17,7 @@ export default function AutomationBuilderScreen(): ReactElement {
   const proposalId = searchParams.get('proposal');
   const fromApprovals = searchParams.get('from') === 'approvals' || !!proposalId;
   const forkFromId = searchParams.get('fork');
+  const isClone = searchParams.get('clone') === '1';
 
   const isNew = !params.id || params.id === 'new';
   const { workspaceId } = useAuthContextValues();
@@ -76,10 +77,15 @@ export default function AutomationBuilderScreen(): ReactElement {
         {...(forkSource && isNew
           ? {
               initialConfig: forkSource.config,
-              initialName: forkSource.name,
+              initialName: isClone ? `${forkSource.name.slice(0, 72)} - Clone` : forkSource.name,
               ...(forkSource.description ? { initialDescription: forkSource.description } : {}),
-              forkFromSeriesId: forkSource.automationSeriesId ?? forkSource.id,
-              ...(forkFromId ? { forkSourceAutomationId: forkFromId } : {}),
+              // Clones start an independent lineage — forks stay pinned to the source.
+              ...(forkFromId && !isClone
+                ? {
+                    forkFromSeriesId: forkSource.automationSeriesId ?? forkSource.id,
+                    forkSourceAutomationId: forkFromId,
+                  }
+                : {}),
             }
           : {})}
         approvalReviewMode={fromApprovals}
