@@ -47,6 +47,7 @@ import { twitterAdapter } from "./adapters/twitter.js";
 import { redditAdapter } from "./adapters/reddit.js";
 import { xNewsAdapter } from "./adapters/x-news.js";
 import { jusbizMcpAdapter } from "./adapters/jusbiz-mcp.js";
+import { heisenbergAdapter } from "./adapters/heisenberg.js";
 
 export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   grafana: grafanaAdapter,
@@ -113,4 +114,5 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   reddit: redditAdapter,
   "x-news": xNewsAdapter,
   "jusbiz-mcp": jusbizMcpAdapter,
+  heisenberg: heisenbergAdapter,
 };

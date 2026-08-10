@@ -1,5 +1,5 @@
 FROM node:22.22.3-slim AS base
-WORKDIR /repo
+WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     openssl \
@@ -9,48 +9,38 @@ RUN apt-get update && apt-get install -y \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && rm -rf /var/lib/apt/lists/*
 
-# pnpm workspace build (same pattern as apps/xyne-claw/Dockerfile): the build
-# context is the repo root; workspace deps (@xyne/kata-sdk, @xyne/storage,
-# xyne-claw-shared) resolve via pnpm instead of per-package npm ci.
 FROM base AS builder
-WORKDIR /repo
+WORKDIR /app/apps/xyne-claw-auth/backend
 
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+# Copy and install shared package dependencies
+COPY packages/kata-sdk/package*.json /app/packages/kata-sdk/
+RUN cd /app/packages/kata-sdk && npm ci --ignore-scripts
+COPY packages/kata-sdk/ /app/packages/kata-sdk/
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY packages/kata-sdk/package.json           packages/kata-sdk/
-COPY packages/storage/package.json            packages/storage/
-COPY packages/xyne-claw-shared/package.json   packages/xyne-claw-shared/
-COPY apps/xyne-claw-auth/backend/package.json apps/xyne-claw-auth/backend/
+COPY packages/xyne-claw-shared/package*.json /app/packages/xyne-claw-shared/
+RUN cd /app/packages/xyne-claw-shared && npm ci --ignore-scripts
+COPY packages/xyne-claw-shared/ /app/packages/xyne-claw-shared/
 
-# `...` pulls the workspace deps in automatically. --ignore-scripts: only the
-# manifests exist at this layer, so prepare/postinstall hooks that need sources
-# would fail; the explicit steps after the source COPY do that work instead.
-RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-claw-auth...
-
-COPY packages/kata-sdk         packages/kata-sdk
-COPY packages/storage          packages/storage
-COPY packages/xyne-claw-shared packages/xyne-claw-shared
-COPY apps/xyne-claw-auth/backend/prisma        apps/xyne-claw-auth/backend/prisma
-COPY apps/xyne-claw-auth/backend/tsconfig.json apps/xyne-claw-auth/backend/
-COPY apps/xyne-claw-auth/backend/src           apps/xyne-claw-auth/backend/src
-COPY apps/xyne-claw-auth/backend/scripts       apps/xyne-claw-auth/backend/scripts
-
-WORKDIR /repo/apps/xyne-claw-auth/backend
+# Copy service files and install
+COPY apps/xyne-claw-auth/backend/package*.json ./
+RUN npm ci --ignore-scripts
+COPY apps/xyne-claw-auth/backend/prisma ./prisma
 RUN npx prisma generate
-# @xyne/storage ships built output (main: dist/index.js); --ignore-scripts
-# skipped its prepare hook, so build it explicitly before the typecheck.
-RUN pnpm --filter @xyne/storage run build
+COPY apps/xyne-claw-auth/backend/tsconfig.json ./
+COPY apps/xyne-claw-auth/backend/src ./src
+COPY apps/xyne-claw-auth/backend/scripts ./scripts
 RUN npx tsc --noEmit
 
 # Production image
 FROM base AS runner
-WORKDIR /repo/apps/xyne-claw-auth/backend
+WORKDIR /app/apps/xyne-claw-auth/backend
 
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs --create-home clawauth
 
-COPY --from=builder --chown=clawauth:nodejs /repo /repo
+COPY --from=builder --chown=clawauth:nodejs /app/apps/xyne-claw-auth/backend ./
+COPY --from=builder --chown=clawauth:nodejs /app/packages/xyne-claw-shared /app/packages/xyne-claw-shared
+COPY --from=builder --chown=clawauth:nodejs /app/packages/kata-sdk /app/packages/kata-sdk
 
 USER clawauth
 

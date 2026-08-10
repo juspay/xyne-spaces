@@ -3,11 +3,17 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
+import { createLogger } from "../../logger.js";
+import { readFile } from "node:fs/promises";
+import { resolve, join, sep } from "node:path";
 import {
   cleanupSdlcGitCredentialMaterial,
   installSdlcGitCredentialBootstrap,
   type SdlcRuntimeCredentialBinding,
 } from "./sdlc-credential-bootstrap.js";
+
+const sandboxLog = createLogger("sandbox-tools");
 
 // Build a redacted `Error: ...` string from a caught error. Several tool
 // catch blocks interpolate err.message straight into tool output, which can
@@ -105,38 +111,6 @@ function readOnlyGuard(session: Session, opts: { command?: string; write?: boole
   return null;
 }
 
-// Narrow set of destructive command patterns blocked on the sandbox shell path.
-// Enforced at the execute() chokepoint below, so it fires on every sandbox-run
-// path regardless of which agent framework dispatched the call.
-const DESTRUCTIVE_SANDBOX_PATTERNS: { pattern: RegExp; label: string }[] = [
-  { pattern: /\brm\s+-\w*r\w*(?:\s+-\S+)*\s+(?:\/|~|\$HOME|\.\.)(?:\s|\/|\*|$)/, label: "recursive rm of /, ~, $HOME or .." },
-  { pattern: /\bgit\s+push\b[^\n]*--force(?!-with-lease)\b/, label: "git push --force" },
-  { pattern: /\bgit\s+push\b[^\n]*\s-f(?=\s|$)/, label: "git push -f" },
-  { pattern: /\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b/, label: "curl | sh" },
-  { pattern: /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/, label: "wget | sh" },
-  { pattern: /\bnpm\s+publish\b/, label: "npm publish" },
-  { pattern: /\bmkfs\b/, label: "mkfs" },
-  { pattern: /\bdd\b[^\n]*\bof=\/dev\//, label: "dd to device" },
-  { pattern: /:\s*\(\s*\)\s*\{\s*:/, label: "fork bomb" },
-  { pattern: />\s*\/dev\/(?:sd|nvme|disk)/, label: "write to disk device" },
-];
-
-/** Reject an obviously-destructive sandbox command. Returns an error string, or null if allowed. */
-function destructiveCommandGuard(cmd: string | undefined): string | null {
-  if (!cmd) return null;
-  for (const { pattern, label } of DESTRUCTIVE_SANDBOX_PATTERNS) {
-    if (pattern.test(cmd)) {
-      return (
-        `Error: command blocked by the sandbox safety guard ("${label}"). ` +
-        "This pattern is not allowed. Narrow it (target a specific subdirectory, " +
-        "use `git push --force-with-lease` instead of `--force`, avoid piping remote " +
-        "scripts into a shell) and retry."
-      );
-    }
-  }
-  return null;
-}
-
 const STALE_PATTERNS = [
   /could not connect to the backend sandbox/i,
   /HTTP request failed/i,
@@ -210,6 +184,111 @@ function storeKeyFromContext(context: { meta?: Record<string, string> } | undefi
     context?.meta?.["conversationId"],
     context?.meta?.["agentSlug"],
   );
+}
+
+const EXPERIMENT_IDLE_SLACK_MS = 20 * 60_000;
+const EXPERIMENT_IDLE_FLOOR_MS = 30 * 60_000;
+const EXPERIMENT_IDLE_CAP_MS = 3 * 60 * 60_000;
+
+export function experimentIdleTimeoutMs(ctx: ToolExecutionContext): number | undefined {
+  const raw = ctx.meta?.["experimentDeadlineAt"];
+  if (!raw) return undefined;
+  const deadlineMs = Date.parse(raw);
+  if (!Number.isFinite(deadlineMs)) return undefined;
+  const wantedMs = deadlineMs - Date.now() + EXPERIMENT_IDLE_SLACK_MS;
+  return Math.min(EXPERIMENT_IDLE_CAP_MS, Math.max(EXPERIMENT_IDLE_FLOOR_MS, wantedMs));
+}
+
+function idleTimeoutForSessionCreation(
+  context: ToolExecutionContext,
+  explicitIdleTimeoutMs: number | undefined,
+  fallbackIdleTimeoutMs: number,
+): number {
+  if (explicitIdleTimeoutMs !== undefined) return explicitIdleTimeoutMs;
+  const experimentIdleMs = experimentIdleTimeoutMs(context);
+  if (experimentIdleMs !== undefined) {
+    sandboxLog.info(
+      `[sandbox] applying experiment idle timeout default: ${Math.ceil(experimentIdleMs / 60_000)} min`,
+      { experimentIdleTimeoutMs: experimentIdleMs },
+    );
+    return experimentIdleMs;
+  }
+  return fallbackIdleTimeoutMs;
+}
+
+const AUTH_URL_DEFAULT = "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003";
+
+/** POST to the experiment control plane. Best-effort by design: a control-plane
+ * outage must never fail the sandbox tool whose real work already succeeded.
+ * No-ops when the run isn't an experiment. */
+async function postToExperiment(
+  context: ToolExecutionContext,
+  suffix: string,
+  payload: Record<string, unknown>,
+  logContext: Record<string, unknown>,
+): Promise<void> {
+  const experimentId = context.meta?.["experimentId"]?.trim();
+  if (!experimentId) return;
+
+  const authUrl = (
+    context.config["XYNE_CLAW_AUTH_URL"] ??
+    process.env["XYNE_CLAW_AUTH_URL"] ??
+    AUTH_URL_DEFAULT
+  ).replace(/\/+$/, "");
+  const s2sKey =
+    context.s2sKey ??
+    context.config["XYNE_CLAW_S2S_KEY"] ??
+    process.env["XYNE_CLAW_S2S_KEY"] ??
+    "";
+
+  const warn = (error: string) =>
+    sandboxLog.warn(`[sandbox] experiment ${suffix} report failed; continuing`, { experimentId, ...logContext, error });
+
+  if (!s2sKey) {
+    warn("XYNE_CLAW_S2S_KEY is unavailable");
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${authUrl}/claw/api/v1/internal/experiments/${encodeURIComponent(experimentId)}${suffix}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-s2s-key": s2sKey },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) warn(`HTTP ${response.status}`);
+  } catch (err) {
+    warn(redactSecrets(err instanceof Error ? err.message : String(err)));
+  }
+}
+
+/** Persist an experiment's newly-created sandbox id outside the ephemeral claw
+ * process, so a later epoch can reuse the sandbox instead of spawning another. */
+async function reportExperimentSandboxCreated(
+  context: ToolExecutionContext,
+  session: Session,
+  template: string,
+): Promise<void> {
+  const epoch = context.meta?.["experimentEpoch"]?.trim() || "unknown";
+  await postToExperiment(
+    context,
+    "/sandbox-note",
+    { note: `sandboxId=${session.id} template=${template} createdAtEpoch=${epoch}` },
+    { sandboxId: session.id },
+  );
+}
+
+/** Register files that actually reached the thread. The control plane gates
+ * `proved` on this list — proof left inside a sandbox dies with the sandbox. */
+async function reportExperimentDelivery(
+  context: ToolExecutionContext,
+  filenames: string[],
+): Promise<void> {
+  if (filenames.length === 0) return;
+  await postToExperiment(context, "/delivered", { filenames }, { filenames: filenames.length });
 }
 
 function rememberSession(storeKey: string | undefined, session: Session, template?: string, owner?: SessionOwner): void {
@@ -488,7 +567,11 @@ export const sandboxCreate: ToolDefinition = {
     const storeKey = storeKeyFromContext(context);
     if (!storeKey) return "Error: No userId/conversationId in context.";
     const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60 * 60 * 1000;
-    const idleTimeoutMs = (params["idleTimeoutMs"] as number | undefined) ?? 10 * 60 * 1000;
+    const idleTimeoutMs = idleTimeoutForSessionCreation(
+      context,
+      params["idleTimeoutMs"] as number | undefined,
+      10 * 60 * 1000,
+    );
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
@@ -510,6 +593,11 @@ export const sandboxCreate: ToolDefinition = {
       const client = makeClient(context.config, template);
       const session = await client.createSession({ timeoutMs, idleTimeoutMs, ...(template ? { template } : {}) });
       rememberSession(storeKey, session, template, ownerFromContext(context));
+      await reportExperimentSandboxCreated(
+        context,
+        session,
+        template ?? context.config["KATA_TEMPLATE"] ?? "kata-workspace-template",
+      );
       return JSON.stringify({ sessionId: session.id, status: "ready" });
     } catch (err) {
       return sandboxErr(err);
@@ -554,8 +642,6 @@ export const sandboxRun: ToolDefinition = {
     const cmd = (params["cmd"] ?? params["command"]) as string;
     const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60_000;
     if (!cmd?.trim()) return "Error: cmd or command is required.";
-    const destructive = destructiveCommandGuard(cmd);
-    if (destructive) return destructive;
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
@@ -656,8 +742,6 @@ export const sandboxRunDetached: ToolDefinition = {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
     const cmd = (params["cmd"] ?? params["command"]) as string;
-    const destructive = destructiveCommandGuard(cmd);
-    if (destructive) return destructive;
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Create one with sandbox-create first.`;
@@ -786,6 +870,189 @@ export const sandboxWriteFile: ToolDefinition = {
       if (isStaleSessionError(err)) {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
+/**
+ * Surgical string-replace edit — the revision fast path. Without it every
+ * design/code revision re-emits the ENTIRE file through sandbox-write-file
+ * (tens of thousands of tokens for one changed line, minutes of decode).
+ * Same contract as claw's own Edit tool: oldString must match exactly once
+ * unless replaceAll, so a bad match can never silently corrupt the file.
+ */
+export const sandboxEditFile: ToolDefinition = {
+  slug: "sandbox-edit-file",
+  name: "Sandbox Edit File",
+  description:
+    "Edit an existing text file in the sandbox by exact string replacement — MUCH faster than rewriting the whole file with sandbox-write-file. " +
+    "oldString must appear exactly once in the file (or pass replaceAll: true). Include enough surrounding context to make it unique.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Session ID returned by sandbox-create",
+      },
+      path: {
+        type: "string",
+        description: "Absolute path inside the sandbox (e.g. /workspace/design.html)",
+      },
+      oldString: {
+        type: "string",
+        description: "Exact text to replace, including whitespace/indentation. Must match exactly once unless replaceAll.",
+      },
+      newString: {
+        type: "string",
+        description: "Replacement text.",
+      },
+      replaceAll: {
+        type: "boolean",
+        description: "Replace every occurrence instead of requiring a unique match. Default false.",
+      },
+    },
+    required: ["sessionId", "path", "oldString", "newString"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const path = params["path"] as string;
+    const oldString = params["oldString"] as string;
+    const newString = params["newString"] as string;
+    const replaceAll = params["replaceAll"] === true;
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
+    if (!oldString) return "Error: oldString must be non-empty.";
+    if (oldString === newString) return "Error: oldString and newString are identical.";
+
+    try {
+      const current = (await session.files.read(path)).toString("utf8");
+      const count = current.split(oldString).length - 1;
+      if (count === 0) {
+        return `Error: oldString not found in ${path}. Read the file and copy the exact text (including whitespace).`;
+      }
+      if (count > 1 && !replaceAll) {
+        return `Error: oldString matches ${count} times in ${path}. Add surrounding context to make it unique, or pass replaceAll: true.`;
+      }
+      const next = replaceAll ? current.split(oldString).join(newString) : current.replace(oldString, newString);
+      await session.files.write(path, Buffer.from(next, "utf8"));
+      return JSON.stringify({ path, replaced: replaceAll ? count : 1 });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
+/**
+ * Copy a companion file from THIS run's materialized skill directory directly
+ * into the sandbox — server-side, so the bytes never round-trip through the
+ * model's context (no token cost, no base64 corruption of binaries, no
+ * truncation of large scripts). This is the ergonomic path for "a skill ships
+ * a script, run it in the sandbox": instead of reading the file into context
+ * and re-emitting it through sandbox-write-file, point at the skill file and
+ * the runtime streams the bytes across.
+ *
+ * Confinement: the source is resolved ONLY under this run's session-skills
+ * root (`context.meta.skillsRoot`, injected by the claw runtime as
+ * `<dataDir>/session-skills/<sessionId>` — the SAME directory the agent's
+ * read tools are granted). Absolute inputs and `..` traversal that escape that
+ * root are rejected, so this can't read another user's session or arbitrary
+ * pod files.
+ */
+export const sandboxCopyIn: ToolDefinition = {
+  slug: "sandbox-copy-in",
+  name: "Sandbox Copy Skill File",
+  description:
+    "Copy a companion file bundled with a loaded skill (a script or asset in the skill's folder) directly into a sandbox session, WITHOUT pasting its content. " +
+    "Prefer this over sandbox-write-file when a skill ships a script/binary you need to run in the sandbox: the file is streamed server-side, so large or binary files stay intact and don't bloat context. " +
+    "`skillPath` is relative to the skill directory shown in the skill's <location> (e.g. 'sandbox-record-video/scripts/recorder.mjs').",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Sandbox session ID returned by sandbox-create / sandbox-repo-setup",
+      },
+      skillPath: {
+        type: "string",
+        description:
+          "Path of the skill companion file RELATIVE to this run's session-skills root, e.g. '<skill-slug>/scripts/run.sh'. Leading '/' and '..' are rejected.",
+      },
+      destPath: {
+        type: "string",
+        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of skillPath>).",
+      },
+    },
+    required: ["sessionId", "skillPath"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const skillPathRaw = params["skillPath"] as string;
+    const destPathRaw = params["destPath"] as string | undefined;
+
+    const skillsRoot = context.meta?.["skillsRoot"];
+    if (!skillsRoot) {
+      return "Error: No skills are materialized for this run (context.meta.skillsRoot is unset), so there is nothing to copy in. Use sandbox-write-file for ad-hoc content.";
+    }
+    if (typeof skillPathRaw !== "string" || skillPathRaw.trim().length === 0) {
+      return "Error: skillPath must be a non-empty path relative to the skill directory.";
+    }
+
+    // Confine the source to THIS run's session-skills root. Reject absolute
+    // inputs and any '..' traversal that escapes the root — otherwise this
+    // becomes an arbitrary pod-file / cross-session read primitive.
+    const rootAbs = resolve(skillsRoot);
+    const sourceAbs = resolve(join(rootAbs, skillPathRaw));
+    if (sourceAbs !== rootAbs && !sourceAbs.startsWith(rootAbs + sep)) {
+      return "Error: skillPath escapes the skill directory. Pass a path relative to the skill folder (no leading '/' and no '..').";
+    }
+    if (isCredentialPath(sourceAbs)) {
+      return JSON.stringify({ error: "Refused: path looks like a credential file" });
+    }
+
+    const destPath =
+      typeof destPathRaw === "string" && destPathRaw.trim().length > 0
+        ? destPathRaw.trim()
+        : `/workspace/${sourceAbs.split("/").pop()}`;
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
+
+    try {
+      const buf = await readFile(sourceAbs);
+      await session.files.write(destPath, buf);
+      return JSON.stringify({ skillPath: skillPathRaw, destPath, bytes: buf.length, copied: true });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return `Error: Skill file not found at '${skillPathRaw}'. Check the path relative to the skill's <location> directory.`;
       }
       return sandboxErr(err);
     }
@@ -926,10 +1193,12 @@ export const sandboxDeliverFiles: ToolDefinition = {
 
     const blocks: string[] = [];
     const errors: string[] = [];
+    const deliveredNames: string[] = [];
     for (const p of paths) {
       try {
         const buf = await session.files.read(p);
         const fileName = p.split("/").pop() ?? "file";
+        deliveredNames.push(fileName);
         const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
         const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
         blocks.push(`[ATTACHMENT:${fileName}:${mimeType}]\n${buf.toString("base64")}`);
@@ -945,6 +1214,10 @@ export const sandboxDeliverFiles: ToolDefinition = {
     if (blocks.length === 0) {
       return `Error: failed to read any of ${paths.length} file(s):\n${errors.join("\n")}`;
     }
+
+    // Only files that actually produced an attachment block are reported —
+    // this list is what lets a finding be marked `proved`.
+    await reportExperimentDelivery(context, deliveredNames);
 
     // Concatenate ATTACHMENT blocks. xyne-claw's custom-tools.ts scans for all
     // matches and emits one attachment per block. Trailing error notes are
@@ -1149,10 +1422,11 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         const client = makeClient(context.config, config.template);
         const session = await client.createSession({
           timeoutMs: noRepoDuration,
-          idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+          idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
           template: config.template,
         });
         rememberSession(storeKey, session, config.template, ownerFromContext(context));
+        await reportExperimentSandboxCreated(context, session, config.template);
         return JSON.stringify({ sessionId: session.id, status: "ready", template: config.template, ports: config.ports || {} });
       }
 
@@ -1302,11 +1576,12 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       const client = makeClient(context.config, claimTemplate);
       const session = await client.createSession({
         timeoutMs: sessionDurationMs,
-        idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+        idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
         template: claimTemplate,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
       rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
+      await reportExperimentSandboxCreated(context, session, claimTemplate);
       log.push(`Session created: ${session.id}`);
       if (config.runtimeCredentialBinding) {
         try {
@@ -1774,12 +2049,17 @@ async function resolveSbxGit(requestedRepo: string, context: ToolExecutionContex
   // Boot the one shared read-only sandbox (repos are cloned in its prebake).
   try {
     const client = makeClient(context.config, SBX_GIT.template);
-    const session = await client.createSession({ timeoutMs: SBX_GIT.sessionTimeoutMs, template: SBX_GIT.template });
+    const session = await client.createSession({
+      timeoutMs: SBX_GIT.sessionTimeoutMs,
+      idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, 10 * 60 * 1000),
+      template: SBX_GIT.template,
+    });
     // No owner → shared across conversations; mark it so ownership checks pass.
     rememberSession(key, session, SBX_GIT.template);
     bindCaller(session);
     SHARED_SESSIONS.add(session.id);
     READONLY_SESSIONS.add(session.id);
+    await reportExperimentSandboxCreated(context, session, SBX_GIT.template);
     return sbxGitResultMessage(requestedRepo, session.id, focusRepos, reason);
   } catch (err) {
     return sandboxErr(err);
@@ -1917,6 +2197,30 @@ export const sandboxRepoSetup: ToolDefinition = {
       const executionId = context.meta?.["sdlcExecutionId"]?.trim();
       const sessionId = context.meta?.["sdlcSessionId"]?.trim();
       const agentSlug = context.meta?.["agentSlug"]?.trim();
+      // Chat-surface SDLC runs carry repository context but no dispatched
+      // execution, so no runtime credential grant exists and a private-repo
+      // clone cannot be authenticated. When the same repo exists in the local
+      // REPO_CONFIGS mirror, serve the fast read-only sbx-git sandbox instead
+      // (seconds, no credentials). Otherwise point the agent at its canvases.
+      if (!operation && !executionId && !sessionId) {
+        // The SDLC repo row's display name ("Xyne Spaces") rarely matches a
+        // REPO_CONFIGS key ("xyne-spaces") — try the caller's requested name
+        // and a slugified display name before giving up on the local mirror.
+        const mirrorCandidates = [
+          repoName,
+          typeof params["repoName"] === "string" ? (params["repoName"] as string) : "",
+          repoName.trim().toLowerCase().replace(/\s+/g, "-"),
+        ].filter(Boolean);
+        const mirrorName = mirrorCandidates.find((name) => REPO_CONFIGS[name]);
+        if (!wantWrite && mirrorName) {
+          return resolveSbxGit(mirrorName, context);
+        }
+        return (
+          "Error: Repository cloning is only available inside dispatched SDLC executions (setup/artifact/work). " +
+          "This chat run has no repository credential grant. Use the Repo Knowledge baseline canvases " +
+          "(spaces-search / spaces-read-canvas in the repository channel) as the source instead."
+        );
+      }
       if (operation || executionId || sessionId) {
         if (agentSlug !== "sdlc-agent") {
           return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
@@ -1992,6 +2296,18 @@ export const sandboxRepoSetup: ToolDefinition = {
     // — bad-branch / repo-not-found errors pass through unchanged.
     if (isSandboxProvisioningFailure(result)) {
       const firstLine = result.split("\n")[0]?.replace(/^Error:\s*/i, "").slice(0, 160) ?? "provisioning failed";
+      // Flag-gated (SANDBOX_UNAVAILABLE_DEFER, default ON; =false restores the
+      // old behaviour): instead of silently
+      // substituting a read-only session — which lets a write-needing agent
+      // "succeed" with an unusable sandbox, conclude it cannot work, and end the
+      // run with NO retry signal (forcing a human to re-tag) — emit a stable
+      // `sandbox_unavailable` sentinel. custom-tools.ts turns this into a typed
+      // SandboxUnavailableError, run.ts ends the run with error:"sandbox_unavailable",
+      // and claw-auth run-recovery defers + auto-resumes once a SandboxClaim binds.
+      // See apps/xyne-claw/docs/sbx-availability-signal.md.
+      if (isSandboxUnavailableDeferEnabled()) {
+        return formatSandboxUnavailable(firstLine);
+      }
       const reason =
         `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
       const ro = await resolveSbxGit(repoName, context, reason);

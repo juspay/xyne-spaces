@@ -285,6 +285,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
   const [showBackfill, setShowBackfill] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showSessionUpload, setShowSessionUpload] = useState(false);
+  const [sessionUploadSource, setSessionUploadSource] = useState<"claude" | "opencode" | "codex">("claude");
   const [status, setStatus] = useState<MemoryStatusFlags | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
@@ -421,13 +422,29 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
               </button>
             )}
             {canDelete && (
-              <button
-                onClick={() => setShowSessionUpload(true)}
-                title="Upload Claude session exports (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
-                className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
-              >
-                <Inbox size={12} /> Upload sessions
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => { setSessionUploadSource("claude"); setShowSessionUpload(true); }}
+                  title="Upload Claude session exports (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+                >
+                  <Inbox size={12} /> Claude
+                </button>
+                <button
+                  onClick={() => { setSessionUploadSource("opencode"); setShowSessionUpload(true); }}
+                  title="Upload OpenCode session bundles (.json, or a .zip of them) — parsed and retained as agent memory"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+                >
+                  <Inbox size={12} /> OpenCode
+                </button>
+                <button
+                  onClick={() => { setSessionUploadSource("codex"); setShowSessionUpload(true); }}
+                  title="Upload Codex rollout logs (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+                >
+                  <Inbox size={12} /> Codex
+                </button>
+              </div>
             )}
             <button
               onClick={loadStats}
@@ -605,6 +622,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
       {showSessionUpload && (
         <UploadSessionModal
           agentSlug={agentSlug}
+          source={sessionUploadSource}
           onClose={() => setShowSessionUpload(false)}
           onDone={() => {
             setShowSessionUpload(false);
@@ -1032,7 +1050,7 @@ function AllMemories({
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [typeFilter, setTypeFilter] = useState<"all" | "world" | "experience" | "observation">("all");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "session-ingest" | "claude-upload" | "other">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "session-ingest" | "claude-upload" | "opencode-upload" | "codex-upload" | "other">("all");
   const [groupBy, setGroupBy] = useState<"none" | "type" | "session" | "subsystem">("none");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -1061,7 +1079,8 @@ function AllMemories({
 
     if (sourceFilter !== "all") {
       const source = memory.tags?.find((tag) => tag.startsWith("source:"))?.slice("source:".length);
-      if (sourceFilter === "other" ? source === "session-ingest" || source === "claude-upload" : source !== sourceFilter) {
+      const knownSources = new Set(["session-ingest", "claude-upload", "opencode-upload", "codex-upload"]);
+      if (sourceFilter === "other" ? knownSources.has(source ?? "") : source !== sourceFilter) {
         return false;
       }
     }
@@ -2592,13 +2611,21 @@ function RecallTester({ agentSlug, userTag }: { agentSlug: string; userTag?: str
  */
 function UploadSessionModal({
   agentSlug,
+  source,
   onClose,
   onDone,
 }: {
   agentSlug: string;
+  source: "claude" | "opencode" | "codex";
   onClose: () => void;
   onDone: () => void;
 }) {
+  const sourceLabel = source === "opencode" ? "OpenCode" : source === "codex" ? "Codex" : "Claude";
+  const acceptedExts = source === "opencode" ? /\.(json|zip)$/i : /\.(jsonl|json|zip)$/i;
+  // Zip MEMBERS must be session files, never nested archives: a zip-inside-zip
+  // would be decoded as garbled binary-as-UTF-8 and uploaded as a "session".
+  const acceptedMemberExts = source === "opencode" ? /\.(json)$/i : /\.(jsonl|json)$/i;
+  const acceptAttr = source === "opencode" ? ".json,.zip" : ".jsonl,.json,.zip";
   const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
   const [sessions, setSessions] = useState<Array<{ name: string; content: string }>>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -2625,13 +2652,13 @@ function UploadSessionModal({
             if (entry.dir) continue;
             const base = entry.name.split("/").pop() ?? entry.name;
             if (entry.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
-            if (!/\.(jsonl|json)$/i.test(base)) continue;
+            if (!acceptedMemberExts.test(base)) continue;
             const content = await entry.async("string");
             if (content.length > MAX_SESSION_BYTES) { skip.push(`${base} (over 20MB)`); continue; }
             if (!content.trim()) { skip.push(`${base} (empty)`); continue; }
             picked.push({ name: base, content });
           }
-        } else if (/\.(jsonl|json)$/i.test(file.name)) {
+        } else if (acceptedExts.test(file.name)) {
           if (file.size > MAX_SESSION_BYTES) { skip.push(`${file.name} (over 20MB)`); continue; }
           picked.push({ name: file.name, content: await file.text() });
         } else {
@@ -2665,7 +2692,7 @@ function UploadSessionModal({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ filename: s.name, content: s.content }),
+          body: JSON.stringify({ filename: s.name, content: s.content, source }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 202 && data.success) ok++;
@@ -2687,7 +2714,7 @@ function UploadSessionModal({
       >
         <div className="mb-3 flex items-center gap-2">
           <Inbox size={16} className="text-xyne-fg-secondary" />
-          <h3 className="text-[14px] font-semibold text-xyne-fg-primary">Upload Claude sessions</h3>
+          <h3 className="text-[14px] font-semibold text-xyne-fg-primary">Upload {sourceLabel} sessions</h3>
           <button
             onClick={onClose}
             disabled={uploading}
@@ -2704,7 +2731,7 @@ function UploadSessionModal({
               <Check size={14} /> Uploaded <b>{doneCount}</b> session{doneCount === 1 ? "" : "s"} — parsing and extracting memories in the background.
             </p>
             <p className="text-xyne-fg-tertiary">
-              New facts appear in this agent's bank within a few minutes (source: claude-upload).
+              New facts appear in this agent's bank within a few minutes (source: {source}-upload).
             </p>
             {failures.length > 0 && (
               <div className="rounded-lg border border-xyne-error-fg/30 bg-xyne-error-bg/40 p-2 text-[12px] text-xyne-error-fg">
@@ -2722,13 +2749,15 @@ function UploadSessionModal({
         ) : (
           <div className="space-y-3">
             <p className="text-[12px] text-xyne-fg-tertiary">
-              Pick Claude Code session files (<span className="font-mono">.jsonl</span>), claude.ai exports (<span className="font-mono">.json</span>),
-              or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as
-              this agent's memory — uploading is the approval.
+              {source === "opencode"
+                ? <>Pick OpenCode session bundles (<span className="font-mono">.json</span>) or a <span className="font-mono">.zip</span> containing them. Each bundle is parsed and retained as this agent's memory — uploading is the approval.</>
+                : source === "codex"
+                  ? <>Pick Codex rollout logs (<span className="font-mono">.jsonl</span> / <span className="font-mono">.json</span>) or a <span className="font-mono">.zip</span> containing them. Each rollout is parsed and retained as this agent's memory — uploading is the approval.</>
+                  : <>Pick Claude Code session files (<span className="font-mono">.jsonl</span>), claude.ai exports (<span className="font-mono">.json</span>), or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as this agent's memory — uploading is the approval.</>}
             </p>
             <input
               type="file"
-              accept=".jsonl,.json,.zip"
+              accept={acceptAttr}
               multiple
               disabled={reading || uploading}
               onChange={(e) => void onPickFiles(e)}

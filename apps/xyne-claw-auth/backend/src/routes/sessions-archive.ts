@@ -14,7 +14,7 @@
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { gcsService } from "../services/storageService.js";
+import { gcsService } from "../services/gcsService.js";
 import { redisService } from "../redis.js";
 
 import { createLogger } from "../logger.js";

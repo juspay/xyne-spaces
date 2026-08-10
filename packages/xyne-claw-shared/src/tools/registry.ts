@@ -16,6 +16,7 @@ import * as sandboxPw from "./sandbox-pw/index.js";
 import * as createPpt from "./create-ppt/index.js";
 import * as createReport from "./create-report/index.js";
 import * as genius from "./genius/index.js";
+import * as visualize from "./visualize/index.js";
 import * as webSearch from "./web-search/index.js";
 import * as deepResearch from "./deep-research/index.js";
 import * as generateImage from "./generate-image/index.js";
@@ -29,6 +30,7 @@ import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
+import * as recordSkill from "./record-skill/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -140,6 +142,10 @@ register(createReport.createHtmlReportTool);
 register(genius.geniusAnalyticsTool);
 register(genius.geniusInvestigationTool);
 
+// Register visualize tool — renders a chart from data the agent already has,
+// reusing the Analytics module's chart contracts + renderer registry.
+register(visualize.visualizeTool);
+
 // Register web-search and deep-research tools
 register(webSearch.webSearchTool);
 register(deepResearch.deepResearchTool);
@@ -202,12 +208,15 @@ register(sandbox.sandboxRun);
 register(sandbox.sandboxRunDetached);
 register(sandbox.sandboxPollJob);
 register(sandbox.sandboxWriteFile);
+register(sandbox.sandboxEditFile);
+register(sandbox.sandboxCopyIn);
 register(sandbox.sandboxReadFile);
 register(sandbox.sandboxDeliverFiles);
 register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
 register(sandbox.gitRead);
 register(videoExplainer.createVideoExplainer);
+register(recordSkill.analyzeSkillRecording);
 
 // Register sandbox-pw tools (browser via @playwright/mcp through sandbox-router-test)
 for (const t of sandboxPw.SANDBOX_PW_TOOLS) register(t);

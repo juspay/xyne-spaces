@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
 import { publishHandoffSignal } from "../handoff-redis.js";
 import {
@@ -32,6 +33,7 @@ import {
   cleanupSdlcSandboxCredentialsForContext,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
@@ -39,6 +41,7 @@ import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { buildExperimentTools, type ExperimentContext } from "../experiment.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -122,16 +125,21 @@ import {
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
 import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
-import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
+import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../gcs.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { parseTaskCommand } from "../task-commands.js";
+import {
+  buildDesignSystemPromptInjection,
+  parseTaskCommand,
+  resolveTaskCommandMode,
+} from "../task-commands.js";
 import { createLogger } from "../logger.js";
 
 const clog = createLogger("run");
+const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
 
 const router = Router();
 
@@ -155,6 +163,12 @@ interface ActiveRunControl {
   handoffCapFired?: boolean;
   handoffLastTurn?: number;
   handoffCapTimer?: ReturnType<typeof setTimeout>;
+  /** True when the abort came from the SIGTERM drain deadline (pod shutdown),
+   *  not from anything the run did. The failure callback prefixes its error
+   *  with SHUTDOWN_DRAIN so claw-auth suppresses the user-facing "internal
+   *  error" notice — recovery/handoff refires these, and announcing an infra
+   *  restart as an agent failure was a recurring deploy-day false alarm. */
+  drainCancelled?: boolean;
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
@@ -176,6 +190,44 @@ function configFastModeEnabled(agentConfig: Record<string, unknown> | undefined)
 
 function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<string, unknown> | undefined): boolean {
   return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
+}
+
+function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const id = typeof obj["id"] === "string" ? obj["id"].trim() : "";
+  const deadlineAt = typeof obj["deadlineAt"] === "string" ? obj["deadlineAt"].trim() : "";
+  if (!id || !deadlineAt) return undefined;
+  const epochValue = obj["epoch"];
+  const epoch = typeof epochValue === "number" && Number.isFinite(epochValue)
+    ? epochValue
+    : typeof epochValue === "string" && epochValue.trim()
+      ? Number(epochValue)
+      : 0;
+  const focus = typeof obj["focus"] === "string" && obj["focus"].trim()
+    ? obj["focus"].trim()
+    : undefined;
+  return {
+    id,
+    epoch: Number.isFinite(epoch) ? epoch : 0,
+    deadlineAt,
+    ...(focus ? { focus } : {}),
+    ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
+  };
+}
+
+function experimentRemaining(deadlineAt: string): string {
+  const deadlineMs = Date.parse(deadlineAt);
+  if (!Number.isFinite(deadlineMs)) return "unknown";
+  const totalMinutes = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 60_000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(" ");
 }
 
 function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
@@ -211,6 +263,7 @@ export function cancelActiveRunsForDrain(reason = "server draining"): number {
     const ageS = active.startedAtMs ? Math.round((Date.now() - active.startedAtMs) / 1000) : -1;
     clog.warn(`[run] drain deadline reached — cancelling active run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"} user=${active.userId} ageS=${ageS} reason=${reason}`);
     clog.warn(`[metric] name=inflight_killed kind=count value=1 cause=drain_deadline agent=${active.agentSlug ?? "unknown"} session=${sessionId}`);
+    active.drainCancelled = true;
     active.abortController.abort();
     cancelled++;
   }
@@ -366,6 +419,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     providerConfigs,
     progressUrl,
     attachments,
+    recordingRefs,
     contextFiles,
     additionalInstructions,
     researchContext,
@@ -388,6 +442,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     senderName,
     channelName,
     mode,
+    experiment: rawExperiment,
     planContinuation,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as {
@@ -448,6 +503,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     >;
     progressUrl?: string;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+    recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
     contextFiles?: Array<{ path: string; content: string }>;
     additionalInstructions?: string;
     researchContext?: {
@@ -502,12 +558,20 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  and STOPS. 'auto' (or absent) ⇒ today's behavior, unchanged. Set by
      *  claw-auth, trust-gated on the matching agent config flag. */
     mode?: "plan" | "auto" | "daily_brief";
+    /** /experiment autonomous exploration mode context, forwarded by claw-auth. */
+    experiment?: {
+      id?: string;
+      epoch?: number;
+      deadlineAt?: string;
+      focus?: string;
+    };
     /** True when this run is Turn 2 (auto) dispatched right after a plan was
      *  approved (or a trivial plan auto-continued). Used only to emit a
      *  mode_switch debug event; behavior is identical to any other auto run. */
     planContinuation?: boolean;
     generateFollowUpSuggestions?: boolean;
   };
+  const experiment = normalizeExperimentContext(rawExperiment);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -528,6 +592,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       });
     return;
   }
+
+  // A task command is already an explicit execution contract. Do not route it
+  // through the generic plan-mode approval turn, which would replace the
+  // original `/command ...` task with an "Execute this approved plan" prompt.
+  const effectiveMode = resolveTaskCommandMode(task, mode);
 
   if (
     !providedSessionId ||
@@ -730,6 +799,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       providerConfigs,
       progressUrl,
       attachments,
+      recordingRefs,
       contextFiles,
       additionalInstructions,
       researchContext,
@@ -750,7 +820,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       twinDestinations,
       senderName,
       channelName,
-      mode,
+      effectiveMode,
+      experiment,
       planContinuation,
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
@@ -850,6 +921,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         providerConfigs,
         emitter,
         attachments,
+        recordingRefs,
         contextFiles,
         additionalInstructions,
         researchContext,
@@ -873,7 +945,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         twinDestinations,
         senderName,
         channelName,
-        mode,
+        effectiveMode,
+        experiment,
         planContinuation,
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
@@ -953,6 +1026,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     providerConfigs,
     progressUrl,
     attachments,
+    recordingRefs,
     contextFiles,
     additionalInstructions,
     researchContext,
@@ -973,7 +1047,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     twinDestinations,
     senderName,
     channelName,
-    mode,
+    effectiveMode,
+    experiment,
     planContinuation,
     shouldGenerateFollowUpSuggestions,
     typeof callbackUrl === "string" ? callbackUrl : undefined,
@@ -1292,6 +1367,9 @@ async function processTask(
   attachments:
     | Array<{ fileName: string; mimeType: string; data: string }>
     | undefined,
+  recordingRefs:
+    | Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>
+    | undefined,
   contextFiles: Array<{ path: string; content: string }> | undefined,
   additionalInstructions: string | undefined,
   researchContext:
@@ -1323,11 +1401,17 @@ async function processTask(
   senderName?: string,
   channelName?: string,
   mode?: "plan" | "auto" | "daily_brief",
+  experiment?: ExperimentContext,
   planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
 ): Promise<void> {
   let mcpCleanup: (() => Promise<void>) | undefined;
+  // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
+  // workspaces are deleted whole in the finally, but a persistent cwd survives
+  // the run — without explicit cleanup, up-to-1GB screen captures accumulate
+  // under <cwd>/.context/recordings/ forever.
+  const stagedRecordingAbsPaths: string[] = [];
   let sdlcSandboxCleanupContext: ToolExecutionContext | undefined;
   const tid = traceId ?? sessionId.slice(0, 8);
   const log = (msg: string) => clog.info(`[run] [${tid}] ${msg}`);
@@ -1546,19 +1630,38 @@ async function processTask(
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
     // in attachment-ingest.ts. derivedContextFiles ordering is significant —
     // see that module's header.
+    // Parse command contracts before attachment ingestion. /record-skill keeps
+    // the raw recording for a fixed-command sandbox analyzer rather than
+    // spending ffmpeg CPU in the long-lived claw pod.
+    const taskCommand = parseTaskCommand(task);
+    const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
       pdfBuffers: pdfBuffersByName,
       videoKeyframes,
+      videoBuffers: videoBuffersByName,
       imageAttachments,
       textAttachments,
       xlsxAttachments,
       pdfAttachments,
-    } = await ingestAttachments(attachments, log);
+      docxAttachments,
+      pptxAttachments,
+      htmlAttachments,
+      videoAttachments,
+    } = await ingestAttachments(attachments, log, { deferVideoProcessing: recordSkillCommand });
 
     const mergedContextFiles = [
       ...(contextFiles ?? []),
       ...derivedContextFiles,
+      ...(recordSkillCommand
+        ? (recordingRefs ?? []).map((recording) => ({
+            path: `${recording.fileName}.video.md`,
+            content:
+              `# Recording: ${recording.fileName}\n\n` +
+              `This ${recording.fileSize}-byte recording is registered for the sandbox-backed ` +
+              `\`analyze-skill-recording\` tool.\n`,
+          }))
+        : []),
     ];
 
     // Use provided cwd, repo workspace, or create an ephemeral workspace
@@ -1579,6 +1682,29 @@ async function processTask(
         pdfBuffersByName.map((p) => ({ path: p.fileName, data: p.buf })),
       );
       log(`Raw PDF originals kept: ${writtenBin.length}`);
+    }
+    // /record-skill only: retain the raw recording in the ephemeral run
+    // workspace until analyze-skill-recording copies it into this
+    // conversation's sandbox. The workspace is deleted by normal run cleanup.
+    const recordingFiles: Array<{
+      fileName: string;
+      mimeType: string;
+      fileSize?: number;
+      relPath?: string;
+      attachmentId?: string;
+    }> = (recordingRefs ?? []).map((recording) => ({ ...recording }));
+    if (videoBuffersByName.length > 0) {
+      for (const video of videoBuffersByName) {
+        const requestedPath = `recordings/${video.fileName}`;
+        const [writtenPath] = await writeWorkspaceBinaryFiles(workspaceDir, [
+          { path: requestedPath, data: video.buf },
+        ]);
+        if (writtenPath) {
+          recordingFiles.push({ fileName: video.fileName, mimeType: video.mimeType, relPath: writtenPath });
+          if (requestCwd) stagedRecordingAbsPaths.push(join(workspaceDir, writtenPath));
+        }
+      }
+      log(`Record-skill originals staged: ${recordingFiles.length}`);
     }
 
     const toolPermissions =
@@ -1611,12 +1737,28 @@ async function processTask(
     mcpGetPendingActions = getPendingActions;
     mcpCleanup = cleanup;
 
+    // Task commands are parsed before custom-tool loading so command-owned
+    // tools can be force-mounted for this run without mutating Agent.config.
+    const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
+
     const meta: Record<string, string> = { userId };
     if (userName) meta["userName"] = userName;
     if (userEmail) meta["userEmail"] = userEmail;
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    if (taskCommand) meta["taskCommand"] = taskCommand.command;
+    if (recordingFiles.length > 0) {
+      // Server-authored metadata consumed only by analyze-skill-recording. The
+      // tool validates containment under workspaceDir before reading anything.
+      meta["recordingWorkspaceDir"] = workspaceDir;
+      meta["recordingFiles"] = JSON.stringify(recordingFiles);
+    }
+    if (experiment) {
+      meta["experimentId"] = experiment.id;
+      meta["experimentEpoch"] = String(experiment.epoch);
+      meta["experimentDeadlineAt"] = experiment.deadlineAt;
+    }
     // Surface the run's trigger type so the sandbox tools can route scheduled /
     // automation runs to the shared read-only sbx-git sandbox instead of cloning
     // a per-project golden snapshot (see sandboxRepoSetup → resolveSbxGit).
@@ -1630,6 +1772,10 @@ async function processTask(
     // `sandbox-repo-setup`. Without this the pin was invisible to those tools, so a
     // pinned agent's bare create silently fell back to the Kata default template.
     if (agentConfig?.["sandboxRepo"]) meta["sandboxRepo"] = String(agentConfig["sandboxRepo"]);
+    // Task-command sandbox profile (e.g. /design → "browser"): a DEFAULT, so an
+    // agent's explicit pin above always wins. Routes bare sandbox-create onto a
+    // warm-pooled template instead of the cold kata default.
+    else if (taskCommand?.sandboxProfile) meta["sandboxRepo"] = taskCommand.sandboxProfile;
     // Per-agent opt-in (e.g. reviewer agents): ALWAYS use the shared read-only
     // sbx-git sandbox, even for interactive runs. The sandbox tool ORs this with
     // isReadOnlyJob (see sandboxRepoSetup → resolveSbxGit). Reviewers only
@@ -1685,7 +1831,16 @@ async function processTask(
       if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
         meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
       }
-      if (typeof trustedSdlcGates?.["accessCredentialRevision"] === "number") {
+      // Runtime credentials are granted per dispatched EXECUTION (setup/
+      // artifact/work). Chat-surface runs carry repository context but no
+      // execution, so setting the operation flag without the ids would only
+      // trip the incomplete-grant guard in sandbox-repo-setup. Gate on the
+      // full triple so chat runs degrade to baseline-canvas access instead.
+      if (
+        typeof trustedSdlcGates?.["accessCredentialRevision"] === "number" &&
+        typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
+        typeof trustedSdlcExecution?.["sessionId"] === "string"
+      ) {
         meta["sdlcRuntimeCredentialOperation"] =
           trustedSdlcPermissions?.["writeRequested"] === true ? "PUSH" : "CLONE";
       }
@@ -1768,6 +1923,7 @@ async function processTask(
       undefined,
       runtimeProviderConfig,
       emitPlanForCustom,
+      taskCommand?.autoTools ?? [],
     );
     const {
       tools: customToolDefs,
@@ -2457,6 +2613,9 @@ async function processTask(
           return isDirectPick || isGatewayPick || isCustomPick;
         }
         if (customToolDefs.some((c) => c.name === t.name)) {
+          // Slash-command contracts own their minimum palette. Keep these
+          // per-run tools even when the stored Agent.config did not select them.
+          if (forcedTaskCommandTools.has(t.name)) return true;
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
           const isAllowedCustom = allowedCustom.has(t.name) || (toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false);
           if (isAllowedCustom) return true;
@@ -2546,6 +2705,14 @@ async function processTask(
     if (isDailyBrief) {
       allTools.push(buildEmitBriefTool(emitBriefRef, abortRun));
       log("Daily brief mode — injected terminal emit_brief tool");
+    }
+    if (experiment) {
+      allTools.push(...buildExperimentTools(experiment, abortRun));
+      log(
+        experiment.mode === "review"
+          ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
+          : `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
+      );
     }
 
     // Inject copilot respond-to-user tool if provider is copilot.
@@ -2835,17 +3002,36 @@ async function processTask(
 
     // Task commands (/explainer …): a leading command binds the run to a
     // required tool — instruction injected here, exit gated in runTask.
-    const taskCommand = parseTaskCommand(task);
     const taskCommandToolAvailable =
       taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
     if (taskCommand) {
+      // The fenced-```html contract exists for Design Studio's live preview,
+      // where the chat UI hides the block. Webhook-originated runs (Spaces
+      // threads) have no such surface — a 30k-token source dump would land
+      // verbatim in the thread above the delivered file. Same command, per-
+      // surface artifact contract.
+      // Studio dispatches (agent-chat) send NO eventType; every webhook/
+      // automation surface sends one and posts results into a thread.
+      const isStudioSurface = !eventType;
+      const surfaceSuffix = taskCommand.command === "/design" && !isStudioSurface
+        ? "\n\nSURFACE OVERRIDE: this run was invoked from a Spaces thread, not Design Studio. Do NOT include the fenced ```html block in your response — the delivered .html file attachment is the artifact. Keep the final message to a 1-2 sentence summary of the design."
+        : "";
       activeInjections.push({
         id: `__task-command-${taskCommand.command.slice(1)}`,
         label: `Command: ${taskCommand.command}`,
-        content: taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction,
+        content: (taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction) + surfaceSuffix,
       });
       log(
         `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,
+      );
+    }
+    const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
+    if (designSystemInjection.status === "injected") {
+      activeInjections.push(designSystemInjection.injection);
+      log(`[task-command] ${taskCommand?.command ?? "artifact"} designSystem prompt injection applied`);
+    } else if (designSystemInjection.status === "oversized") {
+      log(
+        `[task-command] ${taskCommand?.command ?? "artifact"} designSystem ignored: ${designSystemInjection.length} chars exceeds 32000 char cap`,
       );
     }
 
@@ -3102,10 +3288,13 @@ async function processTask(
     }
 
     // Surface every derived context file to the agent — without this, files
-    // written under .context/ (xlsx → <name>.md, pdf → <name>.md) are
-    // invisible: the LLM sees only the user's free-text turn and replies
+    // written under .context/ (xlsx/pdf/docx/pptx → <name>.md, html in place)
+    // are invisible: the LLM sees only the user's free-text turn and replies
     // "I don't see any attachment". Each entry shows the ORIGINAL filename
-    // plus the path the agent's read tool should use.
+    // plus the path the agent's read tool should use. EVERY type that
+    // ingestAttachments converts must be listed below — docx/pptx/html were
+    // converted and written but never advertised here, which is how a working
+    // .docx conversion still produced "I don't see any attachment".
     // Advertise the SAME sanitized path that writeWorkspaceTextFiles actually
     // wrote. sanitizeRelativePath replaces every char outside [a-zA-Z0-9._-]
     // with "_", so "Juspay ecomm Issues Log.xlsx" lands at
@@ -3128,6 +3317,30 @@ async function processTask(
         label: `${a.fileName} (pdf, text-extracted to markdown)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
+      ...docxAttachments.map((a) => ({
+        label: `${a.fileName} (docx, extracted to markdown)`,
+        path: toWorkspaceContextPath(`${a.fileName}.md`),
+      })),
+      ...pptxAttachments.map((a) => ({
+        label: `${a.fileName} (pptx, extracted to markdown)`,
+        path: toWorkspaceContextPath(`${a.fileName}.md`),
+      })),
+      // html converts in place — its MD_CONVERTERS suffix is "", so the derived
+      // file keeps the original filename rather than gaining a ".md".
+      ...htmlAttachments.map((a) => ({
+        label: `${a.fileName} (html, converted to markdown)`,
+        path: toWorkspaceContextPath(a.fileName),
+      })),
+      ...videoAttachments.map((a) => ({
+        label: recordSkillCommand
+          ? `${a.fileName} (screen recording; analyze with analyze-skill-recording)`
+          : `${a.fileName} (video, sampled to a visual narrative)`,
+        path: toWorkspaceContextPath(`${a.fileName}.video.md`),
+      })),
+      ...(recordSkillCommand ? (recordingRefs ?? []).map((recording) => ({
+        label: `${recording.fileName} (screen recording, ${Math.ceil(recording.fileSize / 1024 / 1024)} MB; analyze with analyze-skill-recording)`,
+        path: toWorkspaceContextPath(`${recording.fileName}.video.md`),
+      })) : []),
     ];
     if (attachmentEntries.length > 0) {
       const attachmentContext = [
@@ -3242,12 +3455,20 @@ async function processTask(
           ...(channelName ? { channelName } : {}),
         })
       : "";
+    // Accounts the agent is configured to use but the user hasn't connected or
+    // configured. Told to the model so it surfaces the gap instead of
+    // fabricating results from a tool it never received.
+    const experimentGuide = experiment?.mode === "review"
+      ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
+      : experiment
+      ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
+      : "";
     const authoritativeSdlcContext = trustedSdlcContext
       ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify(trustedSdlcContext, null, 2)}\n\`\`\``
       : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate;
+      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs
@@ -3354,6 +3575,10 @@ async function processTask(
         userId,
         task,
         context: fullContext,
+        // Automation/scheduled runs draw from the low-priority LiteLLM key so
+        // batch fleets can't queue interactive mentions (same predicate as the
+        // read-only sandbox routing above).
+        automationRun: isReadOnlyJob,
         userName,
         userEmail,
         customTools: tools,
@@ -3368,6 +3593,9 @@ async function processTask(
         fileAttachments:
           fileAttachments.length > 0 ? fileAttachments : undefined,
         skills: effectiveSkills,
+        ...(taskCommand?.skillPaths?.length
+          ? { extraSkillPaths: taskCommand.skillPaths.map((skillPath) => resolve(XYNE_CLAW_PACKAGE_DIR, skillPath)) }
+          : {}),
         skillTriggers:
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:
@@ -3731,7 +3959,14 @@ async function processTask(
     // claw-auth posts only the reaction / stays silent. The full structured
     // delivery (action, emoji, destination) rides on the `twinDelivery` field.
     const twinDelivery = isTwinMentionFlow ? result.twinDelivery : undefined;
-    const callbackResultText = isTwinMentionFlow ? (twinDelivery?.message ?? "") : rawCallbackText;
+    const defaultCallbackResultText = isTwinMentionFlow ? (twinDelivery?.message ?? "") : rawCallbackText;
+    // `/explainer` is an artifact-only command: once the MP4 exists, send the
+    // attachment without the model's storyboard/process narration or a generic
+    // "rendered" caption. If rendering failed, retain the text error/fallback.
+    const explainerVideoAttached =
+      taskCommand?.command === "/explainer" &&
+      resultAttachments.some((attachment) => attachment.mimeType === "video/mp4");
+    const callbackResultText = explainerVideoAttached ? "" : defaultCallbackResultText;
 
     // Honor an explicit user stop even when generation FINISHED before the abort
     // could interrupt it. Non-copilot agents (codex/spaces) deliver their final
@@ -3933,6 +4168,26 @@ async function processTask(
         fastMode: fastModeForCallback,
         status: "failed",
         error: "session_locked",
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+      return;
+    }
+    // Write sandbox could not be provisioned (no warm capacity + node pool full).
+    // End the run with a terminal signal claw-auth run-recovery recognizes, so it
+    // defers and re-dispatches this same run until a SandboxClaim binds — the user
+    // does NOT need to re-tag. Gated upstream by SANDBOX_UNAVAILABLE_DEFER
+    // (default ON; set =false to restore the old read-only fallback).
+    if (err instanceof SandboxUnavailableError) {
+      log(`Sandbox unavailable — queuing run for auto-resume (sessionId=${sessionId})`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "failed",
+        error: "sandbox_unavailable",
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4146,6 +4401,11 @@ async function processTask(
         `Session failed: ${err instanceof Error ? err.message : String(err)}`,
       );
 
+      // Drain kills are infra events, not agent failures — mark them so
+      // claw-auth's result handler skips the user-facing error notice (the
+      // recovery worker refires the run; see ActiveRunControl.drainCancelled).
+      const drainKilled = activeRuns.get(sessionId)?.drainCancelled === true;
+      const rawError = err instanceof Error ? err.message : "Internal error";
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
@@ -4153,7 +4413,7 @@ async function processTask(
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
         status: "failed",
-        error: err instanceof Error ? err.message : "Internal error",
+        error: drainKilled ? `SHUTDOWN_DRAIN: ${rawError}` : rawError,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4169,6 +4429,13 @@ async function processTask(
       // Clean up ephemeral workspace. (Host-side git worktrees no longer
       // exist — repo work happens in the sandbox.)
       await deleteWorkspace(sessionId).catch(() => {});
+    } else if (stagedRecordingAbsPaths.length > 0) {
+      // Persistent cwd survives the run — remove the raw recordings we staged
+      // into it (the sandbox has its own copy once analysis ran).
+      const { unlink } = await import("node:fs/promises");
+      for (const p of stagedRecordingAbsPaths) {
+        await unlink(p).catch(() => {});
+      }
     }
     // Free the per-run plan/todo state (todo-write store) so it doesn't
     // accumulate across runs. No-op when the run never used todo-write.

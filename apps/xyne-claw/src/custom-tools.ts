@@ -9,9 +9,11 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { getAllCustomTools, parseToolsConfig, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
-import { SERVER } from "./config.js";
+import { SERVER, PATHS } from "./config.js";
+import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
+import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -42,7 +44,7 @@ const ATTACHMENT_GLOBAL_RE = /\[ATTACHMENT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]
 // the model can see the image) — they are NOT pushed into allAttachments and
 // will NOT be delivered to the user. Use when the agent needs to look at a
 // file for self-verification without leaking it to the chat thread.
-const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)$/;
+const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)(?:\n([\s\S]*))?$/;
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
@@ -139,6 +141,7 @@ export function loadCustomTools(
   parentToolCallId?: string,
   providerConfig?: ToolExecutionContext["providerConfig"],
   emitPlan?: ToolExecutionContext["emitPlan"],
+  forcedCustomSlugs: readonly string[] = [],
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
@@ -151,7 +154,11 @@ export function loadCustomTools(
   // tool sets that aren't tied to a specific agent slug — primarily Google
   // and Microsoft, which only need their OAuth token to be available.
   const toolsConfig = parseToolsConfig(agentConfig ?? undefined);
-  const selectedCustom = new Set(toolsConfig?.custom ?? []);
+  const selectedCustom = new Set([
+    ...(toolsConfig?.custom ?? []),
+    ...forcedCustomSlugs,
+  ]);
+  const forcedCustom = new Set(forcedCustomSlugs);
   // Google + Microsoft are no longer loaded as in-process custom tools — they
   // run as claw-auth-hosted stdio MCP connectors (type "google"/"microsoft"),
   // resolved through the normal MCP credential path. See mcp/servers/google-server.ts
@@ -182,7 +189,7 @@ export function loadCustomTools(
     else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
-    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
+    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
     else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
 
     return allowed;
@@ -207,8 +214,16 @@ export function loadCustomTools(
   const pinnedSandboxRepo = typeof agentConfig?.["sandboxRepo"] === "string"
     ? (agentConfig["sandboxRepo"] as string).trim()
     : "";
-  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo)
-    ? { ...(meta ?? {}), ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}) }
+  // Absolute root of THIS run's materialized skills (`<dataDir>/session-skills/<sessionId>`).
+  // Injected so `sandbox-copy-in` can stream a skill's companion file into the
+  // sandbox server-side, confined to this root (mirrors the agent's skill read root).
+  const skillsRoot = sessionId ? join(PATHS.dataDir, "session-skills", sessionId) : "";
+  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo || skillsRoot)
+    ? {
+        ...(meta ?? {}),
+        ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
+        ...(skillsRoot ? { skillsRoot } : {}),
+      }
     : undefined;
 
   const tools = customTools.map((ct) => {
@@ -279,6 +294,22 @@ export function loadCustomTools(
         }
         log.info(`[custom-tool] ${ct.slug} result: ${result.slice(0, 300)}`);
 
+        // Sandbox-capacity deferral (flag-gated, default off): the inner catch
+        // above stringifies every tool throw and hands it to the LLM, which for a
+        // failed WRITE-sandbox provision would just give up and end the run with no
+        // retry signal. When sandbox-repo-setup emits the `sandbox_unavailable`
+        // sentinel, rethrow a typed error so it propagates to run.ts's terminal
+        // catch → run ends with error:"sandbox_unavailable" → run-recovery defers
+        // and auto-resumes. See apps/xyne-claw/docs/sbx-availability-signal.md.
+        if (
+          isSandboxUnavailableDeferEnabled() &&
+          ct.slug === "sandbox-repo-setup" &&
+          isSandboxUnavailable(result)
+        ) {
+          log.info(`[custom-tool] ${ct.slug} sandbox_unavailable — deferring run for auto-resume`);
+          throw new SandboxUnavailableError(result.slice("Error: ".length));
+        }
+
         // INSPECT marker — image goes into agent's content for self-verification
         // but is NOT pushed to allAttachments (user does not receive the file).
         // Use case: sandbox-read-file on a screenshot the agent wants to look at
@@ -288,12 +319,17 @@ export function loadCustomTools(
           const fileName = inspectMatch[1]!;
           const mimeType = inspectMatch[2]!;
           const data = inspectMatch[3]!;
+          const inspectionSummary = inspectMatch[4]?.trim();
           const isImage = mimeType.startsWith("image/");
           log.info(`[inspect] ${ct.slug} fileName=${fileName} mime=${mimeType} bytes=${data.length} (NOT delivered to user)`);
           if (isImage) {
             return {
               content: [
-                { type: "text" as const, text: `Inspected ${fileName} (visible to you only — call sandbox-deliver-files to send it to the user).` },
+                {
+                  type: "text" as const,
+                  text: inspectionSummary ||
+                    `Inspected ${fileName} (visible to you only — call sandbox-deliver-files to send it to the user).`,
+                },
                 { type: "image" as const, data, mimeType },
               ],
               details: {},

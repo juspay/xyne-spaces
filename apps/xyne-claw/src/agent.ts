@@ -40,7 +40,7 @@ import {
   markSessionIdle,
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, SessionLockedError } from "./session-lock.js";
-import { gcsUploadDebugRun } from "./storage.js";
+import { gcsUploadDebugRun } from "./gcs.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
@@ -739,7 +739,9 @@ export function resolveModel(
   // Per-agent overrides (agentConfig.modelSettings). `model` only applies to
   // the default LiteLLM branch — provider branches already receive an
   // overridden providerConfig.model from runTask. `maxTokens` applies to all.
-  overrides?: { model?: string | undefined; maxTokens?: number | undefined },
+  // `litellmApiKey` swaps the platform key on the default LiteLLM branch only
+  // (automation/scheduled runs use the low-priority automation key).
+  overrides?: { model?: string | undefined; maxTokens?: number | undefined; litellmApiKey?: string | undefined },
 ) {
   const maxTokens = overrides?.maxTokens ?? 16384;
   if (provider === "copilot" && providerConfig?.apiKey) {
@@ -926,7 +928,7 @@ export function resolveModel(
   const litellmModel = overrides?.model ?? LITELLM.model;
   modelRegistry.registerProvider("litellm", {
     baseUrl: LITELLM.url,
-    apiKey: LITELLM.apiKey,
+    apiKey: overrides?.litellmApiKey || LITELLM.apiKey,
     api: "openai-completions",
     authHeader: true,
     models: [
@@ -1271,6 +1273,9 @@ export interface PromptInjection {
 export interface RunTaskOptions {
   userId: string;
   task: string;
+  /** Automation/scheduled run — the default LiteLLM branch uses the
+   *  low-priority automation key so batch load never queues human mentions. */
+  automationRun?: boolean | undefined;
   // Optional fields use `| undefined` (not bare `?`) so call sites can pass
   // through possibly-undefined values under exactOptionalPropertyTypes.
   context?: string | undefined;
@@ -1291,6 +1296,9 @@ export interface RunTaskOptions {
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
   skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
+  /** Trusted, package-owned skill roots for a built-in run mode. Unlike
+   * session skills these are not user supplied and are not deleted at exit. */
+  extraSkillPaths?: string[] | undefined;
   skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
   promptInjections?: PromptInjection[] | undefined;
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
@@ -1416,6 +1424,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     images,
     fileAttachments,
     skills,
+    extraSkillPaths,
     skillTriggers,
     promptInjections,
     requiredTool,
@@ -1500,8 +1509,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const model = resolveModel(modelRegistry, provider, effectiveProviderConfig, {
     // Spaces default-model override — only the LiteLLM branch reads it;
     // provider-credential runs keep the model configured on the credential.
-    model: effectiveProviderConfig ? undefined : modelSettings?.model,
+    // Precedence on the platform branch: per-agent modelSettings.model, then
+    // the automation default model (batch runs), then LITELLM.model.
+    model: effectiveProviderConfig
+      ? undefined
+      : modelSettings?.model ?? (opts.automationRun ? LITELLM.automationModel : undefined),
     maxTokens: modelSettings?.maxTokens,
+    litellmApiKey: opts.automationRun ? LITELLM.automationApiKey : undefined,
   });
 
   // Use persistent session if conversationId provided, otherwise in-memory
@@ -1542,7 +1556,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   // If skills provided, materialize them to disk and add their directory as
   // an additional skill path so pi's DefaultResourceLoader picks them up.
-  const additionalSkillPaths: string[] = [];
+  const additionalSkillPaths: string[] = [...(extraSkillPaths ?? [])];
   if (skills && skills.length > 0 && sessionId) {
     const skillsDir = await writeSessionSkills(sessionId, skills);
     if (skillsDir) {
@@ -1972,8 +1986,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   let streamRateTimer: ReturnType<typeof setInterval> | null = null;
   let turnStreamRateSamples: StreamRateSample[] = [];
   const MAX_RESULT_LEN = 50_000;
-  const MAX_INVOCATIONS_BYTES = 1_000_000;
-  let invocationsSizeEstimate = 0;
 
   const coerceResult = (result: unknown): string => {
     if (typeof result === "string") return result;
@@ -2261,10 +2273,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       const started = inflightCalls.get(event.toolCallId);
       if (!started) {
         log.warn(`[agent] tool_execution_end without matching start: ${event.toolCallId} (${event.toolName}) isError=${event.isError} — push skipped`);
-      } else if (invocationsSizeEstimate >= MAX_INVOCATIONS_BYTES) {
-        log.warn(`[agent] tool_execution_end size-cap reached: ${event.toolCallId} (${event.toolName}) — push skipped (size=${invocationsSizeEstimate})`);
       }
-      if (started && invocationsSizeEstimate < MAX_INVOCATIONS_BYTES) {
+      if (started) {
         // Persist EXACTLY what the model saw — no second, persist-only cut.
         // The model-visible result is already bounded in-execute: custom / MCP /
         // subagent tools go through promoteIfOversized (tool-output.ts — 32KB
@@ -2276,6 +2286,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         // and (b) cut the MCP `{"content":[…]}` JSON envelope mid-string, so the
         // frontend's JSON.parse failed and citation-chunk parsing broke. Storing
         // the coerced result verbatim keeps DB == model and the JSON valid.
+        //
+        // There is deliberately NO cumulative byte cap on this persist path: a
+        // run-wide cap silently dropped the DB + debug copies of every tool
+        // AFTER the threshold while the model still had them, breaking the
+        // DB == debug == model parity above and surfacing as the finalize sweep
+        // label "(no result — tool end event was not received)". Each result is
+        // already bounded by the in-execute spill (32KB bulk / 128KB retrieval),
+        // and MAX_TOOL_INVOCATIONS in agentRunRepository bounds the row count, so
+        // the full invocation set is persisted verbatim.
         const fullResult = coerceResult(event.result);
         const citations = takeCitations(event.toolCallId);
         const debug = takeDebug(event.toolCallId);
@@ -2298,7 +2317,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(bgTask ? { background: true, backgroundState: "running" as const, backgroundTaskId: bgTask.taskId } : {}),
         };
         toolInvocations.push(inv);
-        invocationsSizeEstimate += fullResult.length + 200; // rough overhead per invocation
         // Stream the invocation to xyne-claw-auth so Control Center watchers see tools populate live
         pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
         pushDebugEvent("tool_execution_end", {

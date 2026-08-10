@@ -7,22 +7,8 @@ import { listToolsForUser, callTool } from "../mcp/runner.js";
 import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
-import {
-  BITBUCKET_CUSTOM_TOOLS,
-  handleUploadPrScreenshot,
-  handleGetPrComments,
-  handleGetPrTemplate,
-  buildUpstreamBitbucketCitation,
-} from "../mcp/adapters/bitbucket.js";
-import {
-  GRAFANA_CUSTOM_TOOLS,
-  handleGrafanaQueryLogs,
-  handleGrafanaListMetrics,
-  handleGrafanaQueryMetrics,
-  handleGrafanaQueryDatabase,
-  buildUpstreamGrafanaCitation,
-  prefixChunk,
-} from "../mcp/adapters/grafana.js";
+import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
+import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import type { Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
@@ -407,7 +393,11 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
 }
 
 export function signAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.encryptionKey).update(JSON.stringify(action)).digest("hex");
+  return crypto.createHmac("sha256", CONFIG.actionSigningKey).update(JSON.stringify(action)).digest("hex");
+}
+
+function signLegacyAction(action: Record<string, unknown>): string {
+  return crypto.createHmac("sha256", CONFIG.legacyActionSigningKey).update(JSON.stringify(action)).digest("hex");
 }
 
 /**
@@ -671,12 +661,68 @@ async function getAppTokenCredentials(userId: string): Promise<Record<string, un
  * Wrapper around loadEffectiveCredentials that adds the xyne-spaces app-token
  * fallback. Keeps the same return shape so callers can swap it in seamlessly.
  */
+async function loadSlackSurfaceCredentials(
+  sessionId: string | undefined,
+): Promise<EffectiveCredentials | null> {
+  if (!sessionId) return null;
+
+  const { getSession } = await import("./webhook.js");
+  const runCtx = await getSession(sessionId).catch(() => null);
+  const delivery = runCtx?.slackDelivery;
+  if (!delivery?.surfaceAgentId || !delivery.teamId) return null;
+
+  const { agentBotToken, connectedSurfaceBotToken } = await import("../surfaces/slack/delivery.js");
+  const botToken = delivery.connectedSurfaceId
+    ? await connectedSurfaceBotToken(delivery.connectedSurfaceId).catch(() => null)
+    : await agentBotToken(delivery.surfaceAgentId, delivery.teamId).catch(() => null);
+  if (!botToken) return null;
+
+  return {
+    credentials: { botToken, teamId: delivery.teamId },
+    source: "agent",
+    connectionId: `slack-surface:${delivery.connectedSurfaceId ?? delivery.surfaceAgentId}:${delivery.teamId}`,
+    isUserOwned: false,
+  };
+}
+
+/**
+ * Mirror the per-run Slack subagent injection at the claw-auth enforcement
+ * boundary. MCP listing/call routes load the agent's stored config, not the
+ * agentConfig override forwarded to claw, so without this the virtual Slack
+ * group is created and then immediately filtered back out.
+ */
+async function withSlackSurfaceToolsConfig(
+  config: AgentToolsConfig | undefined,
+  sessionId: string,
+): Promise<AgentToolsConfig | undefined> {
+  if (!config) return undefined;
+
+  const { getSession } = await import("./webhook.js");
+  const runCtx = await getSession(sessionId).catch(() => null);
+  if (!runCtx?.slackDelivery?.surfaceAgentId || !runCtx.slackDelivery.teamId) return config;
+
+  const subagents = Array.isArray(config.subagents)
+    ? config.subagents.filter((value): value is string => typeof value === "string")
+    : [];
+  if (subagents.includes("slack")) return config;
+  return { ...config, subagents: [...subagents, "slack"] };
+}
+
 async function loadEffectiveCredentialsWithSpacesFallback(
   userId: string,
   serverType: string,
   agentSlug?: string,
   agentOrgId?: string,
+  sessionId?: string,
 ): Promise<EffectiveCredentials | null> {
+  // A Slack-surface run must use the bot installed in the workspace that
+  // dispatched it. Do this before user/agent/global credential resolution so
+  // an unrelated personal Slack connection cannot cross workspace boundaries.
+  if (serverType === "slack") {
+    const surface = await loadSlackSurfaceCredentials(sessionId);
+    if (surface) return surface;
+  }
+
   const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId);
   if (effective) return effective;
 
@@ -707,6 +753,23 @@ export function verifyActionSignature(action: Record<string, unknown>, signature
   }
 }
 
+export function verifyActionSignatureAny(
+  actions: readonly Record<string, unknown>[],
+  signature: string,
+): boolean {
+  try {
+    const given = Buffer.from(signature, "hex");
+    return actions.some((action) => {
+      const current = Buffer.from(signAction(action), "hex");
+      if (current.length === given.length && crypto.timingSafeEqual(current, given)) return true;
+      const legacy = Buffer.from(signLegacyAction(action), "hex");
+      return legacy.length === given.length && crypto.timingSafeEqual(legacy, given);
+    });
+  } catch {
+    return false;
+  }
+}
+
 const router = Router();
 
 // Scope the Bearer gate to the subpaths this router actually serves
@@ -726,7 +789,9 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const spacesAppId = req.session?.spacesAppId;
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
-    const strictAgentToolsConfig = isStrictAgentToolsEnabled() ? sessionAgentTools?.toolsConfig : undefined;
+    const strictAgentToolsConfig = isStrictAgentToolsEnabled()
+      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      : undefined;
     const tenantUniqueId = resolveGatewayTenantForRequest();
 
     // User connections + global-fallback servers (servers with allowGlobalFallback
@@ -836,6 +901,33 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
         log.info(`[mcp/tools] added virtual research-agent-mcp entry for userId=${userId}`);
       }
     }
+    // Virtual Heisenberg entry: the internal pipeline service has no user
+    // credentials. Its reviewed static adapter uses the deployment-wide
+    // HEISENBERG_BASE_URL (with a code default), so every agent can select it
+    // without creating a user_mcp_connections row.
+    const hasHeisenbergEntry = entries.some((e) => e.serverType === "heisenberg");
+    if (!hasHeisenbergEntry) {
+      const heisenbergServer = await prisma.mcpServer.findUnique({ where: { type: "heisenberg" } });
+      if (heisenbergServer?.enabled) {
+        entries.push({ type: "global", serverType: "heisenberg", serverName: heisenbergServer.name, enforcementType: "virtual" });
+        log.info(`[mcp/tools] added virtual heisenberg entry for userId=${userId}`);
+      }
+    }
+
+    // Slack-surface runs do not require a separately configured MCP
+    // connection. The verified workspace install supplies credentials.
+    const hasSlackEntry = entries.some((entry) => entry.serverType === "slack");
+    if (!hasSlackEntry) {
+      const { getSession } = await import("./webhook.js");
+      const runCtx = await getSession(req.params.sessionId).catch(() => null);
+      if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
+        const slackServer = await prisma.mcpServer.findUnique({ where: { type: "slack" } });
+        if (slackServer) {
+          entries.push({ type: "user", serverType: "slack", serverName: slackServer.name, enforcementType: "virtual" });
+          log.info(`[mcp/tools] added virtual slack entry (surface bot token) for userId=${userId}`);
+        }
+      }
+    }
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
@@ -856,13 +948,15 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const results = await Promise.allSettled(
       entries.map(async (entry) => {
         if (!(await hasConnectorDefinition(entry.serverType))) return null;
-        const effective = await loadEffectiveCredentials(
-          userId,
-          entry.serverType,
-          agentSlug,
-          undefined,
-          sessionAgentOrgId,
-        );
+        const effective = entry.serverType === "slack"
+          ? await loadEffectiveCredentialsWithSpacesFallback(
+              userId,
+              entry.serverType,
+              agentSlug,
+              sessionAgentOrgId,
+              req.params.sessionId,
+            )
+          : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
         if (!effective) return null;
         const serverTools = await listToolsForUser(
           userId,
@@ -1081,7 +1175,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const spacesAppId = req.session?.spacesAppId;
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
-    const strictAgentToolsConfig = isStrictAgentToolsEnabled() ? sessionAgentTools?.toolsConfig : undefined;
+    const strictAgentToolsConfig = isStrictAgentToolsEnabled()
+      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      : undefined;
     const { serverType, tool, params, permission, backendId } = req.body as {
       serverType?: string;
       tool?: string;
@@ -1106,7 +1202,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // connector + credentials checks so they don't reject a valid call.
     //
     // SECURITY:
-    // - ALL four kb-* tools are read-only by design (see KB_TOOLS, writeTools
+    // - ALL kb-* tools are read-only by design (see KB_TOOL_NAMES, writeTools
     //   set to []). They intentionally bypass the write-action approval flow
     //   below — if a future change adds a mutating KB tool, it MUST be routed
     //   through validateWriteAction (above) instead of this branch.
@@ -1152,6 +1248,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
               userId,
               agentSlug,
               collectionId: String(p["collectionId"] ?? ""),
+              ...(typeof p["depth"] === "number" ? { depth: p["depth"] as number } : {}),
             });
             break;
           case "kb-read-file":
@@ -1375,6 +1472,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       serverType,
       agentSlug,
       sessionAgentOrgId,
+      req.params.sessionId,
     );
     if (!effective) {
       res
@@ -1489,6 +1587,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     }
     if (serverType === "bitbucket" && tool === "get-pr-comments") {
       const result = await handleGetPrComments(credentials, params ?? {});
+      res.json({ success: true, data: result });
+      return;
+    }
+    if (serverType === "bitbucket" && tool === "list-pull-requests") {
+      const result = await handleListPullRequests(credentials, params ?? {});
       res.json({ success: true, data: result });
       return;
     }
@@ -1929,19 +2032,18 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
           return;
         }
 
-        const effective = await loadEffectiveCredentialsWithSpacesFallback(
-          userId,
-          serverType,
-          agentSlug,
-          sessionAgentOrgId,
-        );
-        const credentials = effective?.credentials;
-        if (!credentials) {
-          res
-            .status(404)
-            .json({ success: false, error: `No connection found for user and server type: ${serverType}` });
-          return;
-        }
+      const effective = await loadEffectiveCredentialsWithSpacesFallback(
+        userId,
+        serverType,
+        agentSlug,
+        sessionAgentOrgId,
+        req.params.sessionId,
+      );
+      const credentials = effective?.credentials;
+      if (!credentials) {
+        res.status(404).json({ success: false, error: `No connection found for user and server type: ${serverType}` });
+        return;
+      }
 
         const validationError = await validateWriteAction(serverType, tool, actionParams, {
           ...credentials,

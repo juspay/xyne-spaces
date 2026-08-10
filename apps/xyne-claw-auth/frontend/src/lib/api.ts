@@ -12,6 +12,78 @@ export class ApiError extends Error {
   }
 }
 
+export interface DesignArtifactShare {
+  id: string;
+  title: string;
+  attachmentId: string;
+  conversationId: string;
+  sharePath: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  viewCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicDesignArtifact {
+  title: string;
+  updatedAt: string;
+  expiresAt: string | null;
+}
+
+export async function publishDesignArtifact(input: {
+  attachmentId: string;
+  conversationId: string;
+  title: string;
+  expiresInDays?: 1 | 7 | 30 | 90 | null;
+}): Promise<DesignArtifactShare> {
+  const result = await request<{ success: true; data: DesignArtifactShare }>(
+    `${AUTH_API_URL}/api/v1/design-shares`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return result.data;
+}
+
+export async function getDesignArtifactShare(conversationId: string): Promise<DesignArtifactShare | null> {
+  const result = await request<{ success: true; data: DesignArtifactShare | null }>(
+    `${AUTH_API_URL}/api/v1/design-shares/conversation/${encodeURIComponent(conversationId)}`,
+  );
+  return result.data;
+}
+
+export async function revokeDesignArtifactShare(shareId: string): Promise<void> {
+  await request<{ success: true }>(
+    `${AUTH_API_URL}/api/v1/design-shares/${encodeURIComponent(shareId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function getPublicDesignArtifact(token: string): Promise<PublicDesignArtifact> {
+  const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/metadata`, {
+    headers: { "x-design-share-token": token },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(response.status, body.error ?? "Shared design is unavailable");
+  }
+  const result = await response.json() as { success: true; data: PublicDesignArtifact };
+  return result.data;
+}
+
+export async function getPublicDesignArtifactHtml(token: string): Promise<Blob> {
+  const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/content`, {
+    headers: { "x-design-share-token": token },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(response.status, body.error ?? "Shared design is unavailable");
+  }
+  return response.blob();
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     credentials: "include",
@@ -618,6 +690,17 @@ export async function updateAgent(
   const data = await request<{ success: boolean; data: Agent }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}`,
     { method: "PUT", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
+export async function updateAgentDesignSystem(
+  slug: string,
+  designSystem: string | null,
+): Promise<Agent> {
+  const data = await request<{ success: boolean; data: Agent }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/design-system`,
+    { method: "PATCH", body: JSON.stringify({ designSystem }) },
   );
   return data.data;
 }
@@ -1862,7 +1945,7 @@ export async function listOrgServiceTokens(
 export async function mintOrgServiceToken(
   userId: string,
   orgId: string,
-  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[] },
+  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[]; allowChannelPost?: boolean },
 ): Promise<MintedServiceAccessToken> {
   const data = await request<{ success: boolean; data: MintedServiceAccessToken }>(
     `${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens`,
@@ -2722,6 +2805,20 @@ export async function sendChatMessage(
   requestOptions?: {
     disableTools?: boolean;
     additionalInstructions?: string;
+    studioMode?: "design";
+    designArtifactAttachmentId?: string;
+    designSelection?: {
+      scope: "element" | "component" | "design-system";
+      selector: string;
+      tagName: string;
+      label: string;
+      id?: string;
+      classes: string[];
+      text: string;
+      ancestors: string[];
+      styles: Record<string, string>;
+      rect: { x: number; y: number; width: number; height: number };
+    };
     /** Per-request model/provider override. Used by the in-chat model switcher
      *  to pin a LiteLLM model off the agent's shared key for this turn. */
     providerOverride?: { provider: string; model?: string };
@@ -2767,6 +2864,11 @@ export async function sendChatMessage(
       ...(requestOptions?.additionalInstructions?.trim()
         ? { additionalInstructions: requestOptions.additionalInstructions.trim() }
         : {}),
+      ...(requestOptions?.studioMode ? { studioMode: requestOptions.studioMode } : {}),
+      ...(requestOptions?.designArtifactAttachmentId
+        ? { designArtifactAttachmentId: requestOptions.designArtifactAttachmentId }
+        : {}),
+      ...(requestOptions?.designSelection ? { designSelection: requestOptions.designSelection } : {}),
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
       ...(requestOptions?.researchContext ? { researchContext: requestOptions.researchContext } : {}),
     }),
@@ -5948,6 +6050,18 @@ export async function startSearchEvalRun(
     `${AUTH_API_URL}/api/v1/search-evals/sheets/${sheetId}/runs`,
     { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
   );
+}
+
+/** Live rank-profile names for a UI entity type ("messages"/"tickets"/
+ *  "files"/"emails"/"channels"), or the common-to-every-schema set when
+ *  `queryType` is "" ("All types") — read straight off Vespa's deployed .sd
+ *  schema (see rank-profiles.ts), not a hardcoded list. */
+export async function getSearchEvalRankProfiles(queryType: string, userId: string): Promise<string[]> {
+  const data = await request<{ success: boolean; profiles: string[] }>(
+    `${AUTH_API_URL}/api/v1/search-evals/rank-profiles?type=${encodeURIComponent(queryType)}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.profiles ?? [];
 }
 
 interface SearchEvalTopKStat {

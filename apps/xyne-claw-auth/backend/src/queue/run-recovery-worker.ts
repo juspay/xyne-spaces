@@ -34,6 +34,32 @@ interface RecoveryDispatchPayload {
   channelId: string;
   context?: string;
   detached?: boolean;
+  /** Experiment context (/experiment). MUST be carried: xyne-claw injects the
+   *  experiment-ledger / experiment-review / end-experiment tools ONLY when this
+   *  is present on the /run body (routes/run.ts normalizeExperimentContext →
+   *  buildExperimentTools). It used to be dropped here — TypeScript silently
+   *  strips the excess property when the dispatch payload is stored, so every
+   *  recovery re-dispatch (watchdog timeout, drain handoff, lock defer) landed
+   *  WITHOUT the tools and the agent could no longer write to its own ledger
+   *  ("Tool experiment-review not found"). Long epochs are exactly the runs that
+   *  get recovered, so the first restart silently disarmed the experiment. */
+  experiment?: {
+    id: string;
+    epoch: number;
+    deadlineAt: string;
+    focus?: string;
+    mode?: "review";
+  };
+  /** /record-skill recording refs. Same excess-property-strip hazard as
+   *  `experiment` above: the /run handler re-binds these in Redis under the NEW
+   *  sessionId on every dispatch, so losing them on a recovery hop leaves
+   *  analyze-skill-recording 404ing against the dead session's binding. */
+  recordingRefs?: Array<{
+    attachmentId: string;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+  }>;
   agentConfig?: Record<string, unknown>;
   fastMode?: boolean;
   resumedFromHandoff?: boolean;
@@ -92,6 +118,8 @@ interface RunRecoveryState {
   lastError: string | null;
   /** Count of session_locked deferrals (see deferLockContentionRetry). */
   lockDeferrals?: number;
+  /** Count of sandbox_unavailable deferrals (see deferSandboxRetry). */
+  sandboxDeferrals?: number;
   /** Count of explicit drain handoffs for this root run. Caps deploy crash-loop ping-pong. */
   handoffsUsed?: number;
   dispatchPayload: RecoveryDispatchPayload;
@@ -117,7 +145,7 @@ let worker: Worker<RunRecoveryJobData> | undefined;
  */
 async function runAlreadyCompleted(idempotencyKey: string): Promise<boolean> {
   try {
-    const { gcsService } = await import("../services/storageService.js");
+    const { gcsService } = await import("../services/gcsService.js");
     const buf = await gcsService.getFileBuffer(`claw-results/${idempotencyKey}.json`);
     const marker = JSON.parse(buf.toString("utf8")) as { status?: string };
     return marker.status === "completed";
@@ -148,6 +176,16 @@ function recoveryIdempotencyKey(state: RunRecoveryState): string {
 
 function isSessionLockedFailure(error?: string | null): boolean {
   return error === "session_locked" || error?.includes("session_locked") === true;
+}
+
+/** A writable dev sandbox could not be provisioned: the agent-sandbox operator
+ *  had no warm capacity to bind AND the kata node pool was at max nodes. Emitted
+ *  by sandbox-repo-setup → run.ts as error:"sandbox_unavailable". Unlike
+ *  session_locked (a peer run holds this conversation's lock), capacity here is
+ *  owned by the operator + node autoscaler, so we defer and re-dispatch the same
+ *  run until a SandboxClaim binds. */
+function isSandboxUnavailableFailure(error?: string | null): boolean {
+  return error === "sandbox_unavailable" || error?.includes("sandbox_unavailable") === true;
 }
 
 /** Scheduled fires use a one-shot `scheduled_<jobId>_<ts>` conversationId. The
@@ -190,6 +228,52 @@ async function deferLockContentionRetry(
   return true;
 }
 
+/** Re-schedule a run that could not get a write sandbox, WITHOUT consuming a
+ *  retry attempt — same idempotency guarantee as deferLockContentionRetry
+ *  (dispatchRetry's runAlreadyCompleted marker prevents a double run if the
+ *  original later completes). Returns false when the deferral cap is hit so the
+ *  caller can exhaust with a clear message. */
+/** Tell the thread ONCE that the run is parked waiting for sandbox capacity.
+ *  A defer can last minutes (maxSandboxDeferrals x sandboxRetryDelayMs) and the
+ *  run terminates before the model replies, so without this the user sees a
+ *  mention that produced nothing and re-tags — the exact behaviour this whole
+ *  feature exists to remove. Posted on the FIRST deferral only (no spam), and
+ *  only for conversation-mode runs that have somewhere to post. Best-effort:
+ *  a failed notice must never block the deferral itself. */
+async function notifySandboxDeferred(state: RunRecoveryState): Promise<void> {
+  const ctx = state.sessionContext;
+  if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.channelId) return;
+  const waitMinutes = Math.round((CONFIG.maxSandboxDeferrals * CONFIG.sandboxRetryDelayMs) / 60_000);
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+    markdownText:
+      "⏳ Waiting for a dev sandbox — all of them are busy right now. " +
+      `I'll pick this up automatically as soon as one frees (up to ~${waitMinutes} min); no need to re-tag me.`,
+    userId: ctx.spacesAppUserId,
+    metadata: { contentFormat: "markdown" },
+  }, ctx.appToken);
+}
+
+async function deferSandboxRetry(
+  state: RunRecoveryState,
+  delayMs: number = CONFIG.sandboxRetryDelayMs,
+): Promise<boolean> {
+  state.sandboxDeferrals = (state.sandboxDeferrals ?? 0) + 1;
+  if (state.sandboxDeferrals > CONFIG.maxSandboxDeferrals) return false;
+  state.retryScheduled = true;
+  state.lastHeartbeatAt = Date.now();
+  await saveState(state);
+  await scheduleDispatch(state.rootSessionId, "sandbox_unavailable — waiting for write capacity", delayMs);
+  if (state.sandboxDeferrals === 1) {
+    await notifySandboxDeferred(state).catch((err) => {
+      log.warn(`[run-recovery] sandbox-deferred notice failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+  log.info(`[run-recovery] sandbox unavailable deferred root=${state.rootSessionId} deferral=${state.sandboxDeferrals}/${CONFIG.maxSandboxDeferrals} retryInMs=${delayMs}`);
+  return true;
+}
+
 async function enqueueLockContentionRun(state: RunRecoveryState): Promise<boolean> {
   const { dispatchPayload, sessionContext } = state;
   if (sessionContext.responseMode !== "conversation") return false;
@@ -210,6 +294,12 @@ async function enqueueLockContentionRun(state: RunRecoveryState): Promise<boolea
     ...(dispatchPayload.context ? { context: dispatchPayload.context } : {}),
     ...(sessionContext.resultForwardUrl ? { resultForwardUrl: sessionContext.resultForwardUrl } : {}),
     ...(sessionContext.resolveMentions ? { resolveMentions: sessionContext.resolveMentions } : {}),
+    // Keep the experiment context across the queue hop, or the drained run comes
+    // back without its ledger tools (see RecoveryDispatchPayload.experiment).
+    ...(dispatchPayload.experiment ? { experiment: dispatchPayload.experiment } : {}),
+    // Keep recording refs across the hop, or the drained /record-skill run
+    // re-dispatches with no Redis binding and analyze-skill-recording 404s.
+    ...(dispatchPayload.recordingRefs?.length ? { recordingRefs: dispatchPayload.recordingRefs } : {}),
     // This run already dispatched once (and persisted its user ChatMessage) before
     // hitting session_locked — the drain re-dispatch must NOT re-persist it, or the
     // retried turn shows up as a duplicate root user row (a branch).
@@ -359,10 +449,18 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
   const tail = isSessionLockedFailure(state.lastError)
     ? "Another task was already running in this thread, so this request could not start. Please re-send your message after the current task finishes."
     : "Some application issue is happening while running this query. Admins will get back to you.";
+  // "I retried **0/2** times … but it still failed" reads absurd and alarms
+  // users — at zero retries the run was interrupted and could not even be
+  // redispatched (handoff/dispatch failure), which is a different story than
+  // burning through real retries.
+  const headline =
+    state.retriesUsed > 0
+      ? `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`
+      : "This request was interrupted and could not be resumed automatically.";
   const message = [
     "⚠️ **Run recovery exhausted**",
     "",
-    `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`,
+    headline,
     `Session ID: \`${state.activeSessionId}\``,
     `Root Session ID: \`${state.rootSessionId}\``,
     "",
@@ -920,6 +1018,16 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
 
   if (state.status !== "running") {
     return { retried: false, exhausted: state.status === "exhausted", rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+  }
+
+  if (status === "failed" && isSandboxUnavailableFailure(error)) {
+    state.lastError = error ?? null;
+    await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+    if (await deferSandboxRetry(state)) {
+      return { retried: true, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+    }
+    await markExhausted(state, "sandbox_unavailable (no write capacity after max deferrals)");
+    return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries, terminalDrop: true };
   }
 
   if (status === "failed" && isSessionLockedFailure(error)) {

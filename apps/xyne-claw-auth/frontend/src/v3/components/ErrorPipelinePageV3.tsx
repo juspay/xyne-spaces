@@ -458,7 +458,7 @@ export function ErrorPipelinePageV3({ userId }: { userId: string }) {
   const removeFile = useCallback((idx: number) => {
     setPendingFiles((prev) => {
       const removed = prev[idx];
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       return prev.filter((_, i) => i !== idx);
     });
   }, []);
@@ -496,7 +496,7 @@ export function ErrorPipelinePageV3({ userId }: { userId: string }) {
       if (pendingFiles.length) {
         const metas = await uploadChatAttachments("doctor-agent", userId, pendingFiles.map((p) => p.file));
         attachmentIds = metas.map((m) => m.id);
-        pendingFiles.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+        pendingFiles.forEach((p) => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
         setPendingFiles([]);
       }
       const attachedContext: AttachedContextRef[] = selectedContext

@@ -1,18 +1,15 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
-import {
-  chatMessageRepository,
-  agentRunRepository,
-  chatAttachmentRepository,
-  userProviderCredentialsRepository,
-  userAgentInstructionRepository,
-} from "../repositories/index.js";
+import { spacesAppFetch } from "../lib/spaces-api.js";
+import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
-import { gcsService } from "../services/storageService.js";
+import { gcsService } from "../services/gcsService.js";
 import {
   normalizeAttachedContext,
   buildAttachedContextPayload,
@@ -29,7 +26,7 @@ import {
   resolveOrchestratorCallableAgentsForRun,
 } from "../lib/callable-agent-resolver.js";
 import { ClawSseParser, parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
-import { mintSessionToken } from "../lib/session-tokens.js";
+import { mintSessionToken, verifySessionToken } from "../lib/session-tokens.js";
 import { consumeAlreadyOpenStream } from "../lib/consume-claw-stream.js";
 import {
   resolveAgentProviderConfigs,
@@ -46,15 +43,12 @@ import {
   s2sKeyMatches,
 } from "../middleware/require-auth.js";
 import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
-import { getDmChannelForUserAndApp, getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import {
-  isAllowedExternalCallbackUrl,
-  isInternalCallbackOrigin,
-  type ExternalResultCallbackConfig,
-} from "../surfaces/external-api/delivery.js";
+import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
-import { agentScopeAllows, sanitizeExternalRunBody } from "../lib/service-tokens.js";
+import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
+import { decryptStoredField } from "../surfaces/spaces/client.js";
 
 import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
@@ -64,6 +58,55 @@ const log = createLogger("run");
 const router = Router();
 
 const RUN_RETRY_DELAY_MS = 250;
+const RECORDING_MAX_BYTES = 1024 * 1024 * 1024;
+const RECORDING_REF_TTL_SECONDS = 6 * 60 * 60;
+const RECORDING_REF_PREFIX = "run-recordings:";
+
+interface RunRecordingRef {
+  attachmentId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+}
+
+/**
+ * Per-ref validation, NOT atomic: one malformed ref (bad mimeType, oversized,
+ * odd fileName) is SKIPPED with a log, never a 400 for the whole run — a user's
+ * text task must not die because one of their clips had octet-stream metadata.
+ * Returns null only when the field itself is structurally wrong (non-array),
+ * which indicates a caller bug rather than bad attachment metadata.
+ */
+function normalizeRecordingRefs(value: unknown): RunRecordingRef[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const refs: RunRecordingRef[] = [];
+  for (const item of value) {
+    if (refs.length >= 4) {
+      log.warn(`[recordings] ref cap reached — dropping ${value.length - 4} extra ref(s)`);
+      break;
+    }
+    const row = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const attachmentId = typeof row["attachmentId"] === "string" ? row["attachmentId"].trim() : "";
+    const fileName = typeof row["fileName"] === "string" ? row["fileName"].trim() : "";
+    const mimeType = typeof row["mimeType"] === "string" ? row["mimeType"].trim().toLowerCase() : "";
+    const fileSize = Number(row["fileSize"]);
+    const reject = (why: string) => log.warn(`[recordings] skipping ref ${attachmentId || "<no-id>"} (${fileName || "<no-name>"}): ${why}`);
+    if (!attachmentId || !/^[A-Za-z0-9_-]{8,160}$/.test(attachmentId)) { reject("bad attachmentId"); continue; }
+    if (!fileName || fileName.length > 255 || /[/\\]/.test(fileName)) { reject("bad fileName"); continue; }
+    if (!mimeType.startsWith("video/")) { reject(`non-video mimeType "${mimeType}"`); continue; }
+    if (!Number.isSafeInteger(fileSize) || fileSize <= 0 || fileSize > RECORDING_MAX_BYTES) { reject(`bad fileSize ${row["fileSize"]}`); continue; }
+    refs.push({ attachmentId, fileName, mimeType, fileSize });
+  }
+  return refs;
+}
+
+/** Loose shape check for the /experiment epoch context forwarded to the runtime. */
+function isExperimentContext(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return typeof obj["id"] === "string" && obj["id"].trim() !== "" &&
+    typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -548,6 +591,149 @@ router.get("/callable-agent-spec", requireStrictS2S, async (req: Request, res: R
   }
 });
 
+/**
+ * Stream one recording that was explicitly attached to this run. Sandboxes
+ * have no egress; xyne-claw presents its S2S key + per-run token and relays
+ * this response through the Kata file API in bounded chunks.
+ */
+router.get(
+  "/run/:sessionId/recordings/:attachmentId",
+  requireStrictS2S,
+  requireResultToken((req) => req.params["sessionId"]),
+  async (req: Request<{ sessionId: string; attachmentId: string }>, res: Response): Promise<void> => {
+    const sessionId = req.params.sessionId;
+    const attachmentId = req.params.attachmentId;
+    const token = verifySessionToken(req.headers["x-session-token"] as string | undefined);
+    if (typeof token === "string") {
+      res.status(401).json({ success: false, error: `session token ${token}` });
+      return;
+    }
+
+    const redis = redisService.getConnection();
+    const storedRaw = await redis.get(`${RECORDING_REF_PREFIX}${sessionId}`).catch(() => null);
+    if (!storedRaw) {
+      res.status(404).json({ success: false, error: "No recordings are registered for this run" });
+      return;
+    }
+    let stored: { userId?: string; refs?: RunRecordingRef[] };
+    try {
+      stored = JSON.parse(storedRaw) as { userId?: string; refs?: RunRecordingRef[] };
+    } catch {
+      res.status(500).json({ success: false, error: "Recording reference state is invalid" });
+      return;
+    }
+    if (stored.userId !== token.uid) {
+      res.status(403).json({ success: false, error: "Recording owner does not match this run" });
+      return;
+    }
+    const ref = stored.refs?.find((candidate) => candidate.attachmentId === attachmentId);
+    if (!ref) {
+      res.status(404).json({ success: false, error: "Recording was not attached to this run" });
+      return;
+    }
+
+    const sources: Array<{ label: string; url: string; headers: Record<string, string> }> = [];
+    const live = await getSpacesAuthForUser(token.uid, "webhook").catch(() => null);
+    if (live) {
+      const cookie = [
+        `google_access_token=${live.token}`,
+        `user_session_id=${live.sessionId}`,
+        `xyne_session=${live.sessionId}`,
+        `xyne_last_workspace=${live.workspaceId}`,
+      ].join("; ");
+      sources.push({
+        label: "user-token",
+        url: `${CONFIG.spacesInternalUrl}/api/attachments/${encodeURIComponent(attachmentId)}/download`,
+        headers: {
+          Authorization: `Bearer ${live.token}`,
+          "x-session-id": live.sessionId,
+          "x-workspace-id": live.workspaceId,
+          Cookie: cookie,
+        },
+      });
+    }
+    if (token.appid) {
+      const agent = await agentRepository.findBySpacesAppId(token.appid).catch(() => null);
+      if (agent?.spacesAppToken) {
+        try {
+          const appToken = decryptStoredField(agent.spacesAppToken);
+          sources.push({
+            label: "apps-route",
+            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${encodeURIComponent(attachmentId)}/download`,
+            headers: { Authorization: `Bearer ${appToken}` },
+          });
+        } catch (error) {
+          log.warn(`[recording-stream] could not decrypt app token for appid=${token.appid}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    if (sources.length === 0) {
+      res.status(401).json({ success: false, error: "No Spaces credential is available for this recording" });
+      return;
+    }
+
+    let upstream: globalThis.Response | null = null;
+    const failures: string[] = [];
+    for (const source of sources) {
+      try {
+        const candidate = await fetch(source.url, {
+          headers: source.headers,
+          signal: AbortSignal.timeout(30 * 60 * 1000),
+        });
+        if (candidate.ok && candidate.body) {
+          upstream = candidate;
+          break;
+        }
+        failures.push(`${source.label}: HTTP ${candidate.status}`);
+        await candidate.body?.cancel().catch(() => undefined);
+      } catch (error) {
+        failures.push(`${source.label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!upstream?.body) {
+      log.warn(`[recording-stream] session=${sessionId} attachment=${attachmentId} failed: ${failures.join(" | ")}`);
+      res.status(502).json({ success: false, error: "Failed to download recording from Spaces" });
+      return;
+    }
+
+    const declaredLength = Number(upstream.headers.get("content-length") ?? ref.fileSize);
+    if (Number.isFinite(declaredLength) && declaredLength > RECORDING_MAX_BYTES) {
+      await upstream.body.cancel().catch(() => undefined);
+      res.status(413).json({ success: false, error: "Recording exceeds the 1 GB limit" });
+      return;
+    }
+    res.status(200);
+    res.setHeader("Content-Type", ref.mimeType);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(ref.fileName)}`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Recording-Expected-Bytes", String(ref.fileSize));
+
+    let streamedBytes = 0;
+    const limiter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        streamedBytes += chunk.length;
+        if (streamedBytes > RECORDING_MAX_BYTES) {
+          callback(new Error("recording stream exceeded 1 GB"));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+    try {
+      await pipeline(
+        Readable.fromWeb(upstream.body as ReadableStream<Uint8Array>),
+        limiter,
+        res,
+      );
+      log.info(`[recording-stream] session=${sessionId} attachment=${attachmentId} bytes=${streamedBytes}`);
+    } catch (error) {
+      log.warn(`[recording-stream] session=${sessionId} attachment=${attachmentId} interrupted: ${error instanceof Error ? error.message : String(error)}`);
+      if (!res.headersSent) res.status(502).json({ success: false, error: "Recording stream failed" });
+      else res.destroy(error instanceof Error ? error : undefined);
+    }
+  },
+);
+
 // ── POST /run — accept task, resolve identity + agent, forward to xyne-claw ──
 
 router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
@@ -559,49 +745,17 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const serviceToken = (res.locals ?? {})["accessToken"] as VerifiedCliToken | undefined;
     const isServiceTokenCaller = serviceToken?.client === "service";
     if (isServiceTokenCaller) {
-      const { sanitized, dropped } = sanitizeExternalRunBody(req.body as Record<string, unknown>);
+      // Channel-delivery fields (channelId/deliverTo) survive the strip ONLY
+      // when the token carries CHANNELS_POST_SCOPE; otherwise external callers
+      // still cannot address a Spaces channel.
+      const allowChannelDelivery = canPostToChannels(serviceToken?.scopes ?? []);
+      const { sanitized, dropped } = sanitizeExternalRunBody(req.body as Record<string, unknown>, { allowChannelDelivery });
       if (dropped.length > 0) {
         log.warn(`[run] service token dropped non-contract fields: ${dropped.join(", ")}`);
       }
       req.body = sanitized;
     }
-    const {
-      task,
-      context,
-      conversationId,
-      piSessionConversationId,
-      agentSlug,
-      callbackUrl,
-      callbackSecret,
-      channelId,
-      deliverTo,
-      projectId,
-      projectName,
-      cwd,
-      eventType,
-      triggerSource,
-      slackDelivery,
-      traceId,
-      provider,
-      providerOrder,
-      providerOverride,
-      subagentProviders,
-      subagentProviderMode,
-      providerConfigs,
-      progressUrl,
-      attachments,
-      contextFiles,
-      attachedContext,
-      ticketIds,
-      canvasIds,
-      callIds,
-      idempotencyKey: requestedIdempotencyKey,
-      isRegenerate,
-      detached,
-      fastMode,
-      resumedFromHandoff,
-      generateFollowUpSuggestions,
-    } = req.body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = req.body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -633,6 +787,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       providerConfigs?: Record<string, ProviderConfig>;
       progressUrl?: string;
       attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+      recordingRefs?: RunRecordingRef[];
       contextFiles?: Array<{ path: string; content: string }>;
       attachedContext?: Array<{
         type: "channel" | "ticket" | "canvas" | "call";
@@ -694,6 +849,15 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       }
     }
     const isInternalS2SCaller = s2sKeyMatches(req.headers["x-s2s-key"]);
+    const normalizedRecordingRefs = normalizeRecordingRefs(recordingRefs);
+    if (normalizedRecordingRefs === null) {
+      res.status(400).json({ success: false, error: "recordingRefs must contain at most four valid video references, each no larger than 1 GB" });
+      return;
+    }
+    if (normalizedRecordingRefs.length > 0 && !isInternalS2SCaller) {
+      res.status(403).json({ success: false, error: "recordingRefs require internal service authentication" });
+      return;
+    }
     if ((triggerSource === "slack" || slackDelivery !== undefined) && !isInternalS2SCaller) {
       res
         .status(400)
@@ -791,6 +955,40 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         log.warn(
           `[run] dm-delivery unresolved user=${authenticatedUserId} agent=${agentSlug || "assistant"}`,
         );
+      }
+    }
+
+    // Fail-closed channel authorization for external (service-token) callers.
+    // A CHANNELS_POST_SCOPE token may request channel delivery, but only into
+    // channels the agent's Spaces app can actually reach. The agent posts
+    // results and write-approval cards with THIS app token, so we validate the
+    // same principal here and reject up-front — otherwise an inaccessible
+    // channelId would silently drop both later (the original channelId-drop
+    // pain: HITL approval cards vanishing on API-triggered runs).
+    if (isServiceTokenCaller && effectiveChannelId) {
+      try {
+        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
+        const appToken = ciphertext && iv && authTag
+          ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey)
+          : "";
+        if (!appToken) {
+          res.status(403).json({ success: false, error: "This agent has no Spaces app credential; it cannot post to a channel" });
+          return;
+        }
+        await spacesAppFetch("/channel/info", { channelId: effectiveChannelId }, appToken);
+      } catch (channelErr) {
+        const msg = channelErr instanceof Error ? channelErr.message : String(channelErr);
+        if (/Spaces app API 404/i.test(msg) || /CHANNEL_NOT_FOUND/i.test(msg)) {
+          res.status(400).json({ success: false, error: `channel ${effectiveChannelId} not found` });
+          return;
+        }
+        if (/Spaces app API 403/i.test(msg) || /forbidden/i.test(msg)) {
+          res.status(403).json({ success: false, error: `agent's app is not a member of channel ${effectiveChannelId} — add the app to the channel first` });
+          return;
+        }
+        // Unknown/transient lookup failure: fail OPEN so a Spaces hiccup doesn't
+        // block runs (mirrors pendingActionTargetValidation in webhook.ts).
+        log.warn(`[run] channel access precheck failed open channelId=${effectiveChannelId} err=${msg.slice(0, 200)}`);
       }
     }
 
@@ -994,6 +1192,19 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...(agent.spacesAppId ? { spacesAppId: agent.spacesAppId } : {}),
       ttlSeconds: 6 * 60 * 60,
     });
+    if (normalizedRecordingRefs.length > 0) {
+      try {
+        await redisService.getConnection().setex(
+          `${RECORDING_REF_PREFIX}${sessionId}`,
+          RECORDING_REF_TTL_SECONDS,
+          JSON.stringify({ userId: resolved.userId, refs: normalizedRecordingRefs }),
+        );
+      } catch (error) {
+        log.error(`[run] Failed to bind recording references to session ${sessionId}:`, error);
+        res.status(503).json({ success: false, error: "Could not initialize recording transfer" });
+        return;
+      }
+    }
     const standardCallableAgents = callableAgents as Array<{ slug: string; spacesAppId?: string | null }>;
     const callableAgentsWithSession =
       agent.delegationTier === "orchestrator"
@@ -1226,6 +1437,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...(agent.skills ? { skills: agent.skills } : {}),
       ...(progressUrl ? { progressUrl } : {}),
       ...(attachments?.length ? { attachments } : {}),
+      ...(normalizedRecordingRefs.length ? { recordingRefs: normalizedRecordingRefs } : {}),
       ...(mergedContextFiles.length > 0 ? { contextFiles: mergedContextFiles } : {}),
       ...(attachedContext?.length ? { attachedContext } : {}),
       ...(ticketIds?.length ? { ticketIds } : {}),
@@ -1255,6 +1467,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         ? { planContinuation: true }
         : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      // /experiment epoch context (id/epoch/deadlineAt/focus) — set only by
+      // dispatchExperimentEpoch (lib/experiment.ts) via this same S2S proxy.
+      // Must be threaded through the allowlist or the runtime never injects the
+      // experiment tools and the mode is silently inert.
+      ...(isExperimentContext((req.body as { experiment?: unknown }).experiment)
+        ? { experiment: (req.body as { experiment?: unknown }).experiment }
+        : {}),
     };
 
     if (detached === true) {
