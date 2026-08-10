@@ -114,10 +114,20 @@ export class DraftAttachmentController {
       if (attachmentIdsArray.length > 0) {
         const existingAttachments = await this.db.messageAttachment.findMany({
           where: { id: { in: attachmentIdsArray } },
-          select: { id: true, uploadedByUserId: true, entityType: true },
+          select: { id: true, uploadedByUserId: true, entityType: true, url: true },
         });
+        // Reject an id only when it is genuinely not the caller's to fill:
+        //  - it belongs to a different user (cross-user overwrite), or
+        //  - it already has a stored file (`url` set) — i.e. an already-committed
+        //    attachment on ANY surface (CHAT/TICKET/EMAIL/CANVAS/...), which this
+        //    draft-upload endpoint must not repoint.
+        // A freshly-created draft row always has `url === ''`, so it is safe to
+        // fill even if a concurrent send/schedule has already flipped its
+        // entityType DRAFT -> CHAT/DELAYED_MESSAGE. Keying on `url` (not
+        // entityType) removes that false 403 while preserving both the cross-user
+        // and cross-surface protections.
         const foreign = existingAttachments.find(
-          a => a.uploadedByUserId !== userId || a.entityType !== AttachmentEntityType.DRAFT,
+          a => a.uploadedByUserId !== userId || a.url !== '',
         );
         if (foreign) {
           logger.warn(
