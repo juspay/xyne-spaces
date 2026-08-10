@@ -27,16 +27,26 @@ export class WorkspacesACL extends BaseQueryACL<
       return { id: this.ctx.workspaceId }
     }
     return {
-      status: 'ACTIVE',
-      organization: {
-        members: {
-          some: {
-            memberId: this.ctx.memberId,
-            // Only active memberships (leftAt null) grant access to the org's workspaces.
-            leftAt: null,
+      // The caller's session workspace is always readable. Org membership records one org
+      // per email (org_members.email is unique), while users can belong to workspaces in
+      // other orgs — for those sessions the membership clause below can never match, and
+      // hiding the caller's own workspace breaks every lookup that resolves it (e.g. app
+      // creation resolving the owning org).
+      OR: [
+        { id: this.ctx.workspaceId },
+        {
+          status: 'ACTIVE',
+          organization: {
+            members: {
+              some: {
+                memberId: this.ctx.memberId,
+                // Only active memberships (leftAt null) grant access to the org's workspaces.
+                leftAt: null,
+              },
+            },
           },
         },
-      },
+      ],
     }
   }
 
