@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ConnectionQuality, Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { Hand, MicOff, Monitor, ImagePlus } from 'lucide-react';
+import { Hand, MicOff, Monitor, ImagePlus, UserMinus } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
@@ -11,6 +11,7 @@ import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
 import { cn } from '../../../utils/classNames';
 import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
+import CompactActionsMenu from '../../ui/CompactActionsMenu';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
@@ -79,6 +80,21 @@ export function ParticipantTile({
   // Check if this is the AI agent participant
   const isAIAgent = participant.identity.startsWith('agent-');
   const isControlled = isAIAgent && aiController;
+
+  // Host detection for the agent-tile menu: the backend stamps the host's LiveKit
+  // identity as `createdBy` in room metadata (same source the toggle uses).
+  const room = useSelector(roomActor, state => state.context.room);
+  const isHost = useMemo(() => {
+    const metadata = room?.metadata;
+    const localIdentity = room?.localParticipant.identity;
+    if (!metadata || !localIdentity) return false;
+    try {
+      const createdBy = (JSON.parse(metadata) as { createdBy?: string }).createdBy;
+      return !!createdBy && createdBy === localIdentity;
+    } catch {
+      return false;
+    }
+  }, [room?.metadata, room?.localParticipant.identity]);
 
   // Use LiveKit's built-in hook for speaking detection - uses observables internally
   const isSpeaking = useIsSpeaking(participant.participant);
@@ -184,6 +200,25 @@ export function ParticipantTile({
         participantName: participant.name,
       })}
     >
+      {/* Host-only agent controls: the agent tile only renders while transcription is
+          ON, so "Remove from call" fires the same soft kill-switch (silence + hide),
+          reversible from the transcribing toggle — not a hard, unrecoverable removal. */}
+      {isAIAgent && isHost && !compact && (
+        <div className='absolute top-2 right-2 z-20 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
+          <CompactActionsMenu
+            triggerClassName='p-1.5 h-7 w-7 rounded-md border-0 bg-black/50 text-white hover:bg-black/70'
+            items={[
+              {
+                icon: <UserMinus size={16} />,
+                label: 'Remove from call',
+                onSelect: () => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' }),
+                testId: 'remove-agent-menu-item',
+              },
+            ]}
+          />
+        </div>
+      )}
+
       {/* Video Track - Using LiveKit's VideoTrack component */}
       {(hasVideo || isScreenShare) && videoTrackRef ? (
         <VideoTrack
