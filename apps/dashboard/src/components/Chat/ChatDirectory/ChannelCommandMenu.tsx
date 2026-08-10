@@ -70,6 +70,8 @@ import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
+import type { CommandTarget } from './SlashCommands/QuickDmComposer';
+import { ResultActionsMenu } from './ResultActionsMenu';
 import { SlashCommandPalette } from './SlashCommands/SlashCommandPalette';
 import { useSlashCommands, type SlashCommandClickInfo } from './SlashCommands/useSlashCommands';
 import { getCommand, COMMAND_KINDS } from './SlashCommands/commands';
@@ -144,6 +146,8 @@ export const ChannelCommandItem = ({
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
       data-item-label={displayName}
+      data-result-id={channel.id}
+      data-result-type='channel'
       onSelect={() => onSelect(displayName)}
       onMouseDownCapture={onItemMouseDown}
       className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer mt-1.5 aria-selected:bg-accent ${!isMobile && 'hover:bg-accent'}`}
@@ -273,7 +277,11 @@ const ChannelCommandMenu = ({
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
-  const commandRef = useRef<HTMLDivElement>(null);
+  const commandRef = useRef<HTMLDivElement | null>(null);
+  // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
+  const rowListObserverRef = useRef<MutationObserver | null>(null);
+  // The highlighted result row the ⌥↵ Actions menu opens above.
+  const actionsAnchorRef = useRef<HTMLElement | null>(null);
   // Tracks whether the most recent activation gesture (mouse or keyboard)
   // carried a Cmd/Ctrl modifier. cmdk's onSelect strips the event and a
   // synthetic .click() strips modifier flags, so we prime this ref from
@@ -594,6 +602,9 @@ const ChannelCommandMenu = ({
   // enterWillOpen = Enter opens the row vs. runs a search; activeItemLabel = its name.
   const [enterWillOpen, setEnterWillOpen] = useState(false);
   const [activeItemLabel, setActiveItemLabel] = useState<string | null>(null);
+  // Whether the highlighted row is a user/channel — the only rows ⌥↵ can act on. Gates the footer
+  // Actions hint so it isn't shown (misleadingly) on messages/tickets/etc. where ⌥↵ does nothing.
+  const [activeItemActionable, setActiveItemActionable] = useState(false);
 
   // Slash-command mode (`/call`, `/chat`, `/askai`). All command state + logic lives in the hook;
   // the parent feeds it the shared cmdk selection (activeItemLabel/hasNavigated) and wires its
@@ -608,6 +619,17 @@ const ChannelCommandMenu = ({
     (info: SlashCommandClickInfo): void => {
       const selectionType = lastSlashSelectionRef.current;
       lastSlashSelectionRef.current = 'unknown';
+      // The ⌥↵ Actions menu dispatches a command WITHOUT first typing `/`, so the commandActive
+      // effect hasn't opened a slash session yet (⌥↵ Call never enters command mode at all) and
+      // onClick would be dropped for want of a session id. Demand-start one here (mirroring the
+      // effect's start branch) so the click — and its `source` — is logged; the effect won't
+      // double-start because slashSessionActiveRef is now set.
+      if (!slashSessionActiveRef.current) {
+        slashSessionActiveRef.current = true;
+        slashInvokedRef.current = false;
+        lastSlashImpressionKeyRef.current = '';
+        slashMetrics.onSessionStart();
+      }
       if (info.terminal) slashInvokedRef.current = true;
       slashMetrics.onClick({
         stage: info.stage,
@@ -616,6 +638,7 @@ const ChannelCommandMenu = ({
         terminal: info.terminal,
         ...(info.targetType && { targetType: info.targetType }),
         ...(info.destination && { destination: info.destination }),
+        ...(info.source && { source: info.source }),
       });
     },
     [slashMetrics],
@@ -653,6 +676,9 @@ const ChannelCommandMenu = ({
     handleEditorText,
   } = slash;
 
+  // ⌥↵ Actions menu: the highlighted user/channel result to act on (Message / Call). Null = closed.
+  const [actionsMenuTarget, setActionsMenuTarget] = useState<CommandTarget | null>(null);
+
   // ── Slash-command funnel: session start / end ────────────────────────────
   // A session spans one entry into command mode (`/`) until a command executes
   // or the box leaves command mode. `commandActive` covers discovery, picker,
@@ -679,7 +705,12 @@ const ChannelCommandMenu = ({
   // command's picker — deduped by a stage+command key so keystrokes within the
   // same view don't re-log.
   useEffect(() => {
-    if (!(commandActive && open && commandText.startsWith('/'))) {
+    // `isComposing` means a target is picked and the composer is on screen — there's no options
+    // view to impress, so bail. This drops the phantom picker impression on the ⌥↵ Message path
+    // (which seeds `/chat ` then jumps straight to compose) and, in the normal `/chat` flow, stops
+    // re-logging the picker once a recipient is chosen. Clearing the key lets the picker re-log if
+    // the user goes back to it.
+    if (!(commandActive && open && commandText.startsWith('/')) || isComposing) {
       lastSlashImpressionKeyRef.current = '';
       return;
     }
@@ -744,6 +775,7 @@ const ChannelCommandMenu = ({
     slash.commandChannelResults,
     slash.commandGroupDmResults,
     slashMetrics,
+    isComposing,
   ]);
 
   // Once the seeded `/` actually lands (command mode is genuinely active), drop the seed flag so
@@ -755,11 +787,40 @@ const ChannelCommandMenu = ({
   }, [seedCommandMode, commandText]);
 
   const syncEnterIntent = useCallback((): void => {
-    const active = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
+    const container = commandRef.current;
+    // The auto-select timer below can fire after the Command unmounts (Escape mid-timer), leaving a
+    // null container — bail before the querySelector.
+    if (!container) return;
+    const active = container.querySelector('[cmdk-item][aria-selected="true"]');
     const willOpen = !!active && active.getAttribute('data-show-results-item') !== 'true';
     setEnterWillOpen(willOpen);
     setActiveItemLabel(willOpen ? (active?.getAttribute('data-item-label') ?? null) : null);
+    // At rest (nothing selected yet) fall back to the first enabled row — the row ⌥↵ acts on
+    // (matching resolveActionTarget) — so the hint is right before any arrow/hover.
+    const actionRow = active ?? container.querySelector('[cmdk-item]:not([aria-disabled="true"])');
+    const resultType = actionRow?.getAttribute('data-result-type');
+    setActiveItemActionable(resultType === 'user' || resultType === 'channel');
   }, []);
+
+  // Callback ref for the <Command> root. Recompute the ⌥↵ hint when rows actually land instead of
+  // guessing with a setTimeout: sync once on mount (browse rows are already children), then observe
+  // the results list for late/streamed rows. Null on unmount/branch swap → disconnect.
+  const attachCommandRef = useCallback(
+    (node: HTMLDivElement | null): void => {
+      commandRef.current = node;
+      rowListObserverRef.current?.disconnect();
+      rowListObserverRef.current = null;
+      if (!node) return;
+      syncEnterIntent();
+      // Observe the results list, not the <Command> root: the footer hint syncEnterIntent toggles
+      // sits outside [cmdk-list], so scoping here avoids re-firing on our own hint writes.
+      const listEl = node.querySelector('[cmdk-list]') ?? node;
+      const observer = new MutationObserver((): void => syncEnterIntent());
+      observer.observe(listEl, { childList: true, subtree: true });
+      rowListObserverRef.current = observer;
+    },
+    [syncEnterIntent],
+  );
 
   // Ghost suffix telling the user what Enter does - shown when there's typed text or a filter
   // chip and no mention typeahead is open. getScreenSearchSuffix() picks the text.
@@ -1573,6 +1634,16 @@ const ChannelCommandMenu = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // A tab-switch swaps the result set, so reset the navigation flag (new tab re-auto-selects row 0)
+  // and the ghost. activeItemActionable is deliberately NOT reset — syncEnterIntent owns it and the
+  // row-swap MutationObserver recomputes it; forcing false here races that sync and clobbers it.
+  useEffect(() => {
+    hasNavigatedRef.current = false;
+    setHasNavigated(false);
+    setActiveItemLabel(null);
+    setEnterWillOpen(false);
+  }, [activeTab]);
+
   // Reset active tab if the current tab is no longer in the enabled set.
   // In inline mode, fall back to the first enabled tab (never ALL).
   useEffect(() => {
@@ -1618,6 +1689,11 @@ const ChannelCommandMenu = ({
       hasNavigatedRef.current = false;
       setEnterWillOpen(false);
       setActiveItemLabel(null);
+      // Close the ⌥↵ Actions menu on palette close too. It renders as a sibling (survives the
+      // dialog), so a leftover target keeps the popup open over a stale, detached anchor row and
+      // re-surfaces it on the next Cmd+K open.
+      setActionsMenuTarget(null);
+      actionsAnchorRef.current = null;
       setActiveTab(TabType.ALL);
       onTabChange?.(TabType.ALL);
       resetSearchState();
@@ -1762,6 +1838,8 @@ const ChannelCommandMenu = ({
       items.forEach(item => {
         item.setAttribute('aria-selected', item === hovered ? 'true' : 'false');
       });
+      // Hover moves aria-selected (an attribute) — the row-list MutationObserver only watches
+      // childList, so it's blind to this. Recompute the hint here or it freezes while hovering.
       syncEnterIntent();
       markNavigated();
     });
@@ -2063,7 +2141,9 @@ const ChannelCommandMenu = ({
           item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
         });
       }
-      syncEnterIntent();
+      // No sync here: the results-list observer recomputes actionability whenever rows change
+      // (incl. a re-rank, which reorders keyed rows = a childList mutation), and enterWillOpen/label
+      // stay hidden until the user navigates (arrow/hover re-sync them then).
     }, 50);
     return () => clearTimeout(timer);
   }, [
@@ -2074,12 +2154,14 @@ const ChannelCommandMenu = ({
     filteredLocalUsers.length,
     backendResultOrder,
     mentionSearchType,
-    syncEnterIntent,
     commandActive,
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
     commandText,
   ]);
+
+  // Browse-mode hint sync lives in attachCommandRef's MutationObserver (the auto-select effect above
+  // only runs during an active search).
 
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
@@ -2638,19 +2720,94 @@ const ChannelCommandMenu = ({
     />
   );
 
+  // ⌥↵ Actions menu, rendered on top of the still-open palette (unlike the confirm dialogs, which
+  // close it first). Running an action dispatches through the slash-command hook; Esc/backdrop just
+  // closes the menu and hands focus back to the search editor.
+  const resultActionsMenu = (
+    <ResultActionsMenu
+      open={actionsMenuTarget !== null}
+      target={actionsMenuTarget}
+      anchorRef={actionsAnchorRef}
+      onRun={kind => {
+        if (actionsMenuTarget) slash.invokeActionOnTarget(kind, actionsMenuTarget);
+        setActionsMenuTarget(null);
+      }}
+      onClose={() => {
+        setActionsMenuTarget(null);
+        // Return focus to the search editor on the NEXT frame — after the DropdownMenu unmounts and
+        // Radix's modal focus-scope finishes its cleanup. Focusing synchronously loses that race
+        // (focus lands on <body>), which leaves cmd+K arrow navigation dead until the user clicks.
+        requestAnimationFrame(() => {
+          (
+            commandRef.current?.querySelector('[contenteditable="true"]') as HTMLElement | null
+          )?.focus();
+        });
+      }}
+    />
+  );
+
   const commandConfirmations = (
     <>
       {channelCallConfirm}
       {recordingActiveDialog}
+      {resultActionsMenu}
     </>
   );
 
   if (inline && !open) return commandConfirmations;
 
+  // Resolve the highlighted Cmd+K row into a chat/call target for the ⌥↵ Actions menu, then map it
+  // to the full user/channel object. Only user & channel results are actionable — chat/call need a
+  // target. Two rows can carry aria-selected at once (cmdk's own value + our manual arrow/hover
+  // setAttribute), so a plain first-match can grab a row the user isn't looking at; prefer the one
+  // whose label matches the visible "– Open" hint (activeItemLabel), then the first selected, then
+  // the first enabled row (mirrors the Enter target fallback).
+  const resolveActionTarget = (): { element: HTMLElement; target: CommandTarget } | null => {
+    const container = commandRef.current;
+    if (!container) return null;
+    const selected = Array.from(
+      container.querySelectorAll<HTMLElement>('[cmdk-item][aria-selected="true"]'),
+    );
+    const byLabel =
+      activeItemLabel !== null
+        ? selected.find(el => el.getAttribute('data-item-label') === activeItemLabel)
+        : undefined;
+    const element =
+      byLabel ??
+      selected[0] ??
+      container.querySelector<HTMLElement>('[cmdk-item]:not([aria-disabled="true"])');
+    if (!element) return null;
+    const resultId = element.getAttribute('data-result-id');
+    const resultType = element.getAttribute('data-result-type');
+    if (!resultId || !resultType) return null;
+    if (resultType === 'user') {
+      const user = usersById.get(resultId);
+      return user ? { element, target: { type: 'user', user } } : null;
+    }
+    if (resultType === 'channel') {
+      const entry = allChannels.find(item => item.channel.id === resultId);
+      if (!entry) return null;
+      return {
+        element,
+        target: {
+          type: 'channel',
+          channel: entry.channel,
+          displayName: getDMDisplayNameWithSelf(entry.channel, entry.searchableNames),
+          isDm: isDMChannel(entry.channel.scopeType),
+        },
+      };
+    }
+    return null;
+  };
+
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
     // A picked target renders its own UI (composer or confirm modal) — let it own all
     // keys (typing, Enter to send/confirm, its own @/# mention pickers).
     if (commandTarget) return;
+
+    // While the ⌥↵ Actions menu is open it owns the keyboard (via its own document-level capture
+    // handler); the palette must stay inert underneath.
+    if (actionsMenuTarget) return;
 
     // ── Slash-command mode: picker / `/` discovery ───────────────────────
     // Escape is intentionally NOT handled here — it falls through so the menu
@@ -2903,6 +3060,19 @@ const ChannelCommandMenu = ({
 
     // Shift+Enter → allow newline in Lexical
     if (e.shiftKey) return;
+
+    // ⌥↵ → open the Actions menu (Message / Call) for the highlighted user/channel result. If the
+    // row isn't actionable (message/ticket/etc.), fall through to normal Enter navigation.
+    if (e.altKey && mentionSearchType === null) {
+      const resolved = resolveActionTarget();
+      if (resolved) {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsAnchorRef.current = resolved.element;
+        setActionsMenuTarget(resolved.target);
+        return;
+      }
+    }
 
     // If mention search is active, let the mention selection handle Enter
     if (mentionSearchType !== null) {
@@ -4203,8 +4373,10 @@ const ChannelCommandMenu = ({
       </div>
       {/* end body flex row */}
 
-      {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
-      {!inline && !isMobile && (
+      {/* Footer - outside body flex so TicketPreviewPanel only spans results area. Hidden while the
+          `/chat` composer is open (isComposing): its hints (Open/Navigate/Actions/Ask AI) are about
+          the results list, which the composer replaces — you're typing a message, not navigating. */}
+      {!inline && !isMobile && !isComposing && (
         <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 rounded-b-2xl'>
           {/* Fade the scrolling results into the footer (replaces the hard top border) */}
           <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
@@ -4235,18 +4407,34 @@ const ChannelCommandMenu = ({
                 <ArrowTurnDownLeft size={10} />
               </span>
             </span>
-            {/* <span className='text-gray-300'>|</span> */}
-            <span className='flex gap-2.5 items-center'>
-              <span>Navigate </span>
-              <span className='flex gap-1'>
-                <span className='p-1 bg-muted rounded-lg'>
-                  <ArrowUp size={12} />
-                </span>
-                <span className='p-1 bg-muted rounded-lg'>
-                  <ArrowDown size={12} />
+            {/* Navigate hint (↑↓). Shown when the selected row isn't ⌥↵-actionable — a message/
+                ticket/file/desk row, or nothing selected — so the footer always offers a next step.
+                Mutually exclusive with the Actions hint below (which covers user/channel rows). */}
+            {!activeItemActionable && (
+              <span className='flex gap-2.5 items-center'>
+                <span>Navigate</span>
+                <span className='flex items-center gap-1'>
+                  <span className='p-1 bg-muted rounded-lg'>
+                    <ArrowUp size={10} />
+                  </span>
+                  <span className='p-1 bg-muted rounded-lg'>
+                    <ArrowDown size={10} />
+                  </span>
                 </span>
               </span>
-            </span>
+            )}
+            {/* Actions menu hint (⌥↵). Shown whenever the selected row is a user/channel — whether
+                auto-selected on search or arrowed/hovered — since ⌥↵ acts on it. Non-actionable rows
+                (messages/tickets/files/desk) fall to the Navigate hint above. */}
+            {activeItemActionable && (
+              <span className='flex gap-2.5 items-center'>
+                <span>Actions</span>
+                <span className='flex items-center gap-1 px-1.5 py-1 bg-muted rounded-lg leading-none'>
+                  <span>⌥</span>
+                  <ArrowTurnDownLeft size={10} />
+                </span>
+              </span>
+            )}
             {previewTicket ? (
               <span className='flex gap-2.5 items-center'>
                 <span className='flex gap-1'>
@@ -4331,7 +4519,7 @@ const ChannelCommandMenu = ({
   if (inline) {
     return (
       <Command
-        ref={commandRef}
+        ref={attachCommandRef}
         // Selection is managed imperatively (aria-selected via setAttribute) because cmdk's
         // arrow-nav needs a Command.Input we don't use. Pin cmdk's value to a sentinel that
         // matches no item so it never marks one selected too — otherwise it latches a result row
@@ -4390,6 +4578,12 @@ const ChannelCommandMenu = ({
               }
             }}
             onEscapeKeyDown={event => {
+              // While the ⌥↵ Actions menu is open, Escape closes only it — never the palette.
+              if (actionsMenuTarget !== null) {
+                event.preventDefault();
+                setActionsMenuTarget(null);
+                return;
+              }
               // While focus is inside such an overlay, Escape should close only
               // the overlay (it owns that via OverlayPortal), not the palette.
               // Scoped to the focused target — not a global query — so the
@@ -4405,7 +4599,7 @@ const ChannelCommandMenu = ({
             }}
           >
             <Command
-              ref={commandRef}
+              ref={attachCommandRef}
               // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
               // item so it never adds a second highlighted row next to the imperatively-managed one.
               value='__none__'
