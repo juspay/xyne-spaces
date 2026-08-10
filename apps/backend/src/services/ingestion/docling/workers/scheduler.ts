@@ -278,6 +278,24 @@ const timed = async <T>(fn: () => Promise<T>) => {
   return { value, elapsedMs: Date.now() - start };
 };
 
+// ── Graceful shutdown signal (shared by all roles in this process) ───────────
+// Flipped on SIGTERM/SIGINT by startDoclingSchedulerRole. The role loops below
+// poll this so an in-flight OCR split/write/reap iteration finishes and releases
+// its permits, instead of being hard-killed mid-iteration by process.exit().
+let doclingSchedulerStopRequested = false;
+let doclingSignalsRegistered = false;
+const registerDoclingShutdownSignals = (): void => {
+  if (doclingSignalsRegistered) return;
+  doclingSignalsRegistered = true;
+  const requestStop = (): void => {
+    if (doclingSchedulerStopRequested) return;
+    doclingSchedulerStopRequested = true;
+    logger.info('[DOCLING_SCHEDULER] stop requested (SIGTERM/SIGINT) — draining role loops');
+  };
+  process.once('SIGTERM', requestStop);
+  process.once('SIGINT', requestStop);
+};
+
 // ── Dynamic worker pool (resizes to desired concurrency) ─────────────────────
 
 interface WorkerControl {
@@ -314,7 +332,7 @@ const startDynamicRolePool = async (input: {
   };
 
   for (;;) {
-    if (input.shouldStop?.()) {
+    if (input.shouldStop?.() || doclingSchedulerStopRequested) {
       for (const w of workers.values()) w.stopRequested = true;
       await Promise.allSettled(Array.from(workers.values()).map((w) => w.promise));
       return;
@@ -1134,7 +1152,7 @@ const reconcileWrapperGlobalActiveKeys = async (): Promise<number> => {
 // ── Reaper ───────────────────────────────────────────────────────────────────
 
 export const startReaper = async () => {
-  for (;;) {
+  while (!doclingSchedulerStopRequested) {
     try {
       const deletedFileIds = await listDeletedActiveDoclingFileIds(50);
       for (const fileId of deletedFileIds) {
@@ -1180,6 +1198,7 @@ export const startReaper = async () => {
     }
     await sleep(sched().pollMs);
   }
+  logger.info('[DOCLING_SCHEDULER][reaper] stop requested — loop exited');
 };
 
 // ── Role dispatcher ──────────────────────────────────────────────────────────
@@ -1188,6 +1207,9 @@ export const startDoclingSchedulerRole = async (role: string): Promise<void> => 
   if (!sched().enabled) {
     throw new Error('DOCLING_ASYNC_SCHEDULER_ENABLED must be true to start scheduler roles');
   }
+  // Splitter/writer/reaper poll doclingSchedulerStopRequested; submitter installs
+  // its own SIGTERM drain. Registering here covers every role incl. the 'all' pod.
+  registerDoclingShutdownSignals();
   switch (role) {
     case 'splitter':
       return startSplitter();

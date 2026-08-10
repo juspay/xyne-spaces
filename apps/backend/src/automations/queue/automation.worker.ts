@@ -42,6 +42,19 @@ class AutomationWorker {
     logger.info('[AUTOMATION-WORKER] Started');
   }
 
+  /**
+   * Graceful stop for shutdown. Closes the automations queue, which stops the
+   * processor from accepting new jobs and awaits in-flight jobs. The caller
+   * (worker.ts shutdown) wraps this in a bounded drain. Idempotent.
+   */
+  async stop(): Promise<void> {
+    if (!this.isInitialized) return;
+    this.isInitialized = false;
+    await automationQueue.close();
+    this.executor = null;
+    logger.info('[AUTOMATION-WORKER] Stopped');
+  }
+
   private async processJob(job: Bull.Job<AutomationJobData>): Promise<void> {
     if (!this.executor) {
       throw new Error('[AUTOMATION-WORKER] Executor not initialized');

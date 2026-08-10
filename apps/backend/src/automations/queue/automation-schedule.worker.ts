@@ -34,6 +34,15 @@ class AutomationScheduleWorker {
     logger.info('[AUTOMATION-SCHEDULE-WORKER] Started');
   }
 
+  /** Graceful stop for shutdown. Closes the schedule queue (drains in-flight). Idempotent. */
+  async stop(): Promise<void> {
+    if (!this.isInitialized) return;
+    this.isInitialized = false;
+    await automationScheduleQueue.close();
+    this.executor = null;
+    logger.info('[AUTOMATION-SCHEDULE-WORKER] Stopped');
+  }
+
   private async processJob(job: Bull.Job<AutomationScheduleJobData>): Promise<void> {
     if (!this.executor) {
       throw new Error('[AUTOMATION-SCHEDULE-WORKER] Executor not initialized');

@@ -34,6 +34,10 @@ const envSchema = Joi.object({
   COMMON_DATABASE_POOL_TIMEOUT_SECONDS: Joi.number().default(10),
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
+  // Graceful worker shutdown (XYNE-55093). Per-role bounded drain budget and the
+  // overall hard-exit backstop; both well under the pod terminationGracePeriod.
+  WORKER_DRAIN_TIMEOUT_MS: Joi.number().default(25000),
+  WORKER_SHUTDOWN_DEADLINE_MS: Joi.number().default(90000),
   API_KEYS_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
@@ -781,6 +785,12 @@ export const config = {
   },
   questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
+  workerShutdown: {
+    // Per-role bounded drain budget for in-flight jobs (see workers/drain.ts).
+    drainTimeoutMs: envVars.WORKER_DRAIN_TIMEOUT_MS as number,
+    // Overall deadline; if total drain overruns, worker.ts force-exits.
+    deadlineMs: envVars.WORKER_SHUTDOWN_DEADLINE_MS as number,
+  },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,

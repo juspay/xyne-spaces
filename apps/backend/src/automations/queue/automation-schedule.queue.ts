@@ -72,6 +72,15 @@ class AutomationScheduleQueue {
     return this.queue;
   }
 
+  /** Graceful stop — see AutomationQueue.close(). Idempotent. */
+  async close(): Promise<void> {
+    if (!this.queue) return;
+    await this.queue.close();
+    this.queue = null;
+    this.isInitialized = false;
+    logger.info('[AUTOMATION-SCHEDULE-QUEUE] Closed');
+  }
+
   get isReady(): boolean {
     return this.isInitialized && this.queue !== null;
   }
