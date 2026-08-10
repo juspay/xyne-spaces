@@ -2917,6 +2917,7 @@ model CanvasCommentThread {
   blockId         String
   anchorText      String?
   initialCommentId String?
+  commentCount    Int                       @default(1)
   status          String                    @default("OPEN")
   statusUpdatedBy String?
   statusUpdatedAt DateTime?

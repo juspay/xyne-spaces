@@ -9,6 +9,7 @@ export interface CanvasEditorRef {
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
+  toggleComments: () => void;
   selectedTheme: string;
 }
 
@@ -32,6 +33,8 @@ export interface CanvasEditorProps {
   initialBlockIdToFocus?: string | undefined;
   /** When set with initialBlockIdToFocus, open the matching comment thread on load. */
   initialCommentThreadId?: string | undefined;
+  /** Emits the number of open comment threads already loaded by the editor highlight query. */
+  onOpenCommentCountChange?: (count: number) => void;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */
@@ -49,6 +52,7 @@ export interface CollaborativeCanvasEditorRef {
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
+  toggleComments: () => void;
   selectedTheme: string;
 }
 
