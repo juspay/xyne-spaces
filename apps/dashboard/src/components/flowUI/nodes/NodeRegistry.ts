@@ -16,6 +16,7 @@ import { LinkNode } from './LinkNode';
 import { PlanNode } from './PlanNode';
 import { PrNode } from './PrNode';
 import { CallScheduleNode } from './CallScheduleNode';
+import { UserQuestionNode } from './UserQuestionNode';
 import { AgentNode } from './AgentNode';
 import { McpConfigureNode } from './McpConfigureNode';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
@@ -66,6 +67,7 @@ NodeRegistry.register('plan', PlanNode);
 NodeRegistry.register('pr', PrNode);
 // NodeRegistry.register('pr_approval', PrApprovalNode); // unlinked for now
 NodeRegistry.register('call_schedule', CallScheduleNode);
+NodeRegistry.register('user_question', UserQuestionNode);
 NodeRegistry.register('agent', AgentNode);
 NodeRegistry.register('mcpConfigure', McpConfigureNode);
 
