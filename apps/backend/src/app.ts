@@ -154,6 +154,7 @@ import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
@@ -745,6 +746,10 @@ export class App {
           await assignmentReactivationQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing ticket reassignment queue...');
+          await ticketReassignmentQueue.initialize();
+        })(),
+        (async () => {
           logger.info('Initializing on-call rotation queue...');
           await onCallRotationQueue.initialize();
         })(),
@@ -786,6 +791,9 @@ export class App {
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
+
+      logger.info('Initializing ticket reassignment queue...');
+      await ticketReassignmentQueue.initialize();
 
       logger.info('Initializing on-call rotation queue...');
       await onCallRotationQueue.initialize();
@@ -836,9 +844,17 @@ export class App {
     await configSyncService.syncConfigWithDatabase();
 
     // Initialize and start model sync queue (Bull-based scheduling)
-    logger.info('Initializing model sync queue...');
-    await modelSyncQueue.initialize();
-    await modelSyncQueue.runInitialSync();
+    // Only run when LiteLLM is configured; otherwise there is nothing to sync
+    // and we must not fire requests to LiteLLM (e.g. local `pnpm run dev`).
+    if (config.litellm.apiKey && config.litellm.baseUrl) {
+      logger.info('Initializing model sync queue...');
+      await modelSyncQueue.initialize();
+      await modelSyncQueue.runInitialSync();
+    } else {
+      logger.info(
+        'Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
+      );
+    }
 
     // Initialize calendar sync queues
     logger.info('Initializing Microsoft Calendar sync queue...');
@@ -975,6 +991,9 @@ export class App {
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();
+
+      // Close ticket reassignment queue
+      await ticketReassignmentQueue.close();
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();

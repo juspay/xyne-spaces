@@ -1053,10 +1053,9 @@ export class JiraMigrationController {
         const chunks = chunkArray(messageIds, phase1MessageChunkSize);
         for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          const [, , , attachmentResult, messageResult] = await db.$transaction([
+          const [, , attachmentResult, messageResult] = await db.$transaction([
             db.reactionCount.deleteMany({ where: { messageId: { in: chunk } } }),
             db.reaction.deleteMany({ where: { messageId: { in: chunk } } }),
-            db.messageSearch.deleteMany({ where: { messageId: { in: chunk } } }),
             db.messageAttachment.deleteMany({ where: { entityId: { in: chunk } } }),
             db.message.deleteMany({ where: { messageId: { in: chunk } } }),
           ]);

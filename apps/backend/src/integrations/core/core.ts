@@ -252,7 +252,7 @@ export class ExternalSourceCore {
               source.channelId,
             );
       if (existingEmail) {
-        if (adapter.postprocess && source.sourceType === 'ozonetel') {
+        if (adapter.postprocess) {
           await adapter.postprocess({
             conversationId: existingEmail.conversationId,
             entityId: existingEmail.id,

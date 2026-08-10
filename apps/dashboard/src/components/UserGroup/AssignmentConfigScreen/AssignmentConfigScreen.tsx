@@ -69,6 +69,7 @@ export const AssignmentConfigScreen = ({
 
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
+  const [localReassignOnUnavailable, setLocalReassignOnUnavailable] = useState<boolean>(false);
   const [localRotationInterval, setLocalRotationInterval] = useState<RotationInterval>(
     RotationInterval.WEEKLY,
   );
@@ -264,8 +265,13 @@ export const AssignmentConfigScreen = ({
     if (userGroup) {
       setLocalAutoRotationEnabled(userGroup.autoRotationEnabled ?? false);
       setLocalRotationInterval(userGroup.rotationInterval ?? RotationInterval.WEEKLY);
+      setLocalReassignOnUnavailable(userGroup.reassignOnUnavailable ?? false);
     }
-  }, [userGroup?.autoRotationEnabled, userGroup?.rotationInterval]);
+  }, [
+    userGroup?.autoRotationEnabled,
+    userGroup?.rotationInterval,
+    userGroup?.reassignOnUnavailable,
+  ]);
 
   const boards = allBoards || [];
 
@@ -469,10 +475,10 @@ export const AssignmentConfigScreen = ({
       return;
     }
 
-    performSave();
+    void performSave();
   };
 
-  const performSave = (): void => {
+  const performSave = async (): Promise<void> => {
     // Validate percentage sum equals 100 when usePercentage is enabled
     if (localUsePercentage) {
       if (localAutoRotationEnabled) {
@@ -555,19 +561,21 @@ export const AssignmentConfigScreen = ({
         {} as Record<string, string>,
       );
 
-      void zero.mutate(
-        mutators.assignmentConfig.batchUpdate({
-          userGroupId,
-          userStates,
-          boardWeight: boardWeightData,
-          expertiseMappings: expertiseMappingsData,
-          userMappings,
-          stateIds,
-          complexityScoreId: uuidv4(),
-          mappingIds,
-          timestamp: Date.now(),
-        }),
-      );
+      const pendingServerResults = [
+        zero.mutate(
+          mutators.assignmentConfig.batchUpdate({
+            userGroupId,
+            userStates,
+            boardWeight: boardWeightData,
+            expertiseMappings: expertiseMappingsData,
+            userMappings,
+            stateIds,
+            complexityScoreId: uuidv4(),
+            mappingIds,
+            timestamp: Date.now(),
+          }),
+        ).server,
+      ];
 
       // Also update rotation settings (enable/disable, interval)
       const rotationChanged =
@@ -576,23 +584,48 @@ export const AssignmentConfigScreen = ({
           localRotationInterval !== (userGroup?.rotationInterval ?? 'WEEKLY'));
 
       if (rotationChanged) {
-        void zero.mutate(
-          mutators.assignmentConfig.toggleGroupAutoRotation({
-            userGroupId,
-            autoRotationEnabled: localAutoRotationEnabled,
-            rotationInterval: localAutoRotationEnabled ? localRotationInterval : undefined,
-            rotationStartDate: localAutoRotationEnabled ? Date.now() : undefined,
-            timestamp: Date.now(),
-          }),
+        pendingServerResults.push(
+          zero.mutate(
+            mutators.assignmentConfig.toggleGroupAutoRotation({
+              userGroupId,
+              autoRotationEnabled: localAutoRotationEnabled,
+              rotationInterval: localAutoRotationEnabled ? localRotationInterval : undefined,
+              rotationStartDate: localAutoRotationEnabled ? Date.now() : undefined,
+              timestamp: Date.now(),
+            }),
+          ).server,
         );
+      }
+
+      // Also update reassign-on-unavailable setting
+      const reassignOnUnavailableChanged =
+        localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
+
+      if (reassignOnUnavailableChanged) {
+        pendingServerResults.push(
+          zero.mutate(
+            mutators.userGroup.update({
+              userGroupId,
+              reassignOnUnavailable: localReassignOnUnavailable,
+              timestamp: Date.now(),
+            }),
+          ).server,
+        );
+      }
+
+      const serverResults = await Promise.all(pendingServerResults);
+      const failedResult = serverResults.find(result => result.type === 'error');
+      if (failedResult?.type === 'error') {
+        throw new Error(failedResult.error.message || 'Failed to save assignment configuration');
       }
 
       setHasChanges(false);
       setPendingSetMappings(null);
       setJustSaved(true);
-    } catch {
+    } catch (error) {
       toast.error('Changes not saved', {
-        description: 'Something went wrong on save. Try again.',
+        description:
+          error instanceof Error ? error.message : 'Something went wrong on save. Try again.',
         duration: 5000,
       });
     } finally {
@@ -883,6 +916,38 @@ export const AssignmentConfigScreen = ({
             )}
           </div>
 
+          {/* Allow reassignment on unavailability */}
+          <div className='rounded-2xl border border-border bg-card p-4'>
+            <div className='mb-4'>
+              <h2 className='text-sm font-semibold text-foreground'>
+                Allow reassignment on unavailability
+              </h2>
+              <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                Let members of this group choose whether to hand off their existing open tickets
+                when they pause ticket assignment.
+              </p>
+            </div>
+
+            <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
+              <div className='min-w-0'>
+                <span className='block text-[13px] font-medium text-foreground'>
+                  Allow existing-ticket reassignment
+                </span>
+                <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                  Members can opt in from the pause dialog. If no eligible replacement exists, their
+                  tickets stay assigned to them.
+                </p>
+              </div>
+              <Switch
+                checked={localReassignOnUnavailable}
+                onCheckedChange={checked => {
+                  setLocalReassignOnUnavailable(checked);
+                  setHasChanges(true);
+                }}
+              />
+            </div>
+          </div>
+
           {/* Board Filter */}
           <div className='rounded-2xl border border-border bg-card p-4'>
             <div className='flex flex-col gap-2'>
@@ -1124,7 +1189,7 @@ export const AssignmentConfigScreen = ({
               variant='destructive'
               onClick={() => {
                 setShowDisableRotationWarning(false);
-                performSave();
+                void performSave();
               }}
               data-track-category='UserGroups'
               data-track-name='ConfirmDisableRotation'

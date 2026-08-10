@@ -1,6 +1,8 @@
 import { TicketStatusV2, TicketPriority } from '@xyne/shared';
 
 export interface CreateTicketRequest {
+  /** Internal idempotency hook (used by FLOW materialization). */
+  id?: string;
   // Required fields
   title: string;
   description: string;
@@ -22,6 +24,7 @@ export interface CreateTicketRequest {
   eta?: Date;
   createdAt?: string; // Optional createdAt for backdated tickets
   metadata?: Record<string, unknown>; // Additional metadata - external source tracking, domain-specific context
+  rootId?: string; // FLOW root ticket id for this materialized step ticket.
   closedAt?: Date;
   closedBy?: string;
   sourceConversationId?: string;

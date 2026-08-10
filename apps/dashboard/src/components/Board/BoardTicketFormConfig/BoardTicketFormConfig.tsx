@@ -149,39 +149,6 @@ export const BoardTicketFormConfig = ({
           )}
         </div>
 
-        {/* Workflows */}
-        <div className='py-2 border-t border-border'>
-          <div className='flex items-center justify-between mb-2'>
-            <div className='flex-1'>
-              <label htmlFor='workflows' className='text-sm font-medium text-foreground'>
-                Workflows Field
-              </label>
-              <p className='text-xs text-muted-foreground mt-0.5'>
-                Show/hide workflows field in ticket form
-              </p>
-            </div>
-            <Switch
-              id='workflows'
-              checked={config.workflows.enabled}
-              onCheckedChange={() => handleToggle('workflows', 'enabled')}
-              disabled={disabled}
-            />
-          </div>
-          {config.workflows.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
-              <label htmlFor='workflows-mandatory' className='text-xs text-muted-foreground'>
-                Make mandatory
-              </label>
-              <Switch
-                id='workflows-mandatory'
-                checked={config.workflows.mandatory ?? false}
-                onCheckedChange={() => handleToggle('workflows', 'mandatory')}
-                disabled={disabled}
-              />
-            </div>
-          )}
-        </div>
-
         {/* Labels */}
         <div className='py-2 border-t border-border'>
           <div className='flex items-center justify-between mb-2'>
