@@ -163,7 +163,7 @@ export function McpDetailPanel({
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
             enabled
               ? 'border-border bg-card text-foreground hover:bg-muted'
-              : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',
+              : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
           )}
         >
           {enabled ? 'Disable' : 'Enable'}

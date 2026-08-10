@@ -86,7 +86,7 @@ const BuiltinCard = ({
       title={enabled ? `Remove ${entry.label}` : `Add all ${entry.label} tools`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle built-in group'
-      className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {enabled ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />
