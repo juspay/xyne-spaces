@@ -17,11 +17,12 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { executeTwinApprovalDelivery } from "../lib/twin-delivery.js";
+import { fetchTicketForCard, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -493,8 +494,19 @@ async function finishWriteSuccess(opts: {
   channelId?: string | undefined;
   resultText: string;
 }): Promise<void> {
-  const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
-  const flow = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
+  let flow: FlowDefinition | null = null;
+  if (opts.tool === "spaces-create-ticket") {
+    const xyneId = parseXyneIdFromToolResult(opts.resultText);
+    const agent = xyneId ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId) : null;
+    if (xyneId && agent) {
+      const ticket = await fetchTicketForCard(xyneId, agent.token);
+      if (ticket) flow = buildTicketFlow(ticket);
+    }
+  }
+  if (!flow) {
+    const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
+    flow = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
+  }
   await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, flow, opts.conversationId, opts.channelId, opts.spacesAppId);
   if (opts.actionId === "approve-continue" || opts.actionId === "retry-continue") {
     await dispatchContinuationRun({
