@@ -48,6 +48,21 @@ const ENTITY_TIMEOUT_MS = Number(
  */
 const ENTITY_MAX_RETRIES = Number(process.env["ENTITY_LLM_MAX_RETRIES"] ?? 1);
 
+/**
+ * Hard ceiling on generated tokens.
+ *
+ * Extraction time is dominated by OUTPUT, not input: a 60k-char batch of
+ * varied threads asks for a label per entity mention, and with no bound the
+ * model can emit tens of thousands of tokens — or loop on a long JSON array —
+ * and spend the entire request budget doing it. Input size was never the cost;
+ * a 60k-char prompt with a trivial instruction returns in ~14s.
+ *
+ * A bound turns "runs forever, times out, batch lost" into "returns truncated,
+ * fails schema validation, gets repaired or reported". Both lose the batch, but
+ * only one of them does so in seconds and frees the slot.
+ */
+const ENTITY_MAX_TOKENS = Number(process.env["ENTITY_LLM_MAX_TOKENS"] ?? 12_000);
+
 /** Worst case: every attempt burns its full timeout, plus the 5s first backoff. */
 const ENTITY_TOTAL_BUDGET_MS =
   ENTITY_TIMEOUT_MS * (ENTITY_MAX_RETRIES + 1) + 5_000 * ENTITY_MAX_RETRIES;
@@ -91,7 +106,8 @@ const ENTITY_SLOT_WAIT_MS = Number(process.env["ENTITY_LLM_SLOT_WAIT_MS"] ?? 45_
 log.info(
   `[entity-llm] model=${ENTITY_MODEL} attemptTimeout=${ENTITY_TIMEOUT_MS}ms ` +
     `retries=${ENTITY_MAX_RETRIES} worstCase=${Math.round(ENTITY_TOTAL_BUDGET_MS / 1000)}s ` +
-    `slotWait=${Math.round(ENTITY_SLOT_WAIT_MS / 1000)}s concurrency=${ENTITY_MAX_CONCURRENT}`,
+    `slotWait=${Math.round(ENTITY_SLOT_WAIT_MS / 1000)}s concurrency=${ENTITY_MAX_CONCURRENT} ` +
+    `maxTokens=${ENTITY_MAX_TOKENS}`,
 );
 
 let entityActive = 0;
@@ -181,6 +197,7 @@ export async function completeEntityPrompt(
             model: ENTITY_MODEL,
             messages,
             temperature: 0,
+            max_tokens: ENTITY_MAX_TOKENS,
             // glm-latest is a reasoning model; disabling the trace took a batch of
             // 8 documents from 45s to 7.7s with no quality loss.
             chat_template_kwargs: { enable_thinking: false },

@@ -50,15 +50,31 @@ const logger = createLogger("entity-extraction", createTraceId());
 /** The pipeline's Logger port. The shared logger already satisfies it. */
 const pipelineLogger: PipelineLogger = logger;
 
+/**
+ * Batch sizing, env-tunable because the right value is a property of the MODEL,
+ * not of the pipeline — and the model is now a deployment-time choice.
+ *
+ * These were hardcoded at 60,000 to keep whole threads intact, which is the
+ * right instinct: a thread's full context is what makes it useful for type
+ * discovery. But cost here is dominated by OUTPUT, not input. A 60k batch of
+ * varied threads asks for a label per entity mention across eight documents,
+ * which can run to tens of thousands of generated tokens and blow any per-call
+ * timeout — while a 60k prompt with a trivial instruction returns in ~14s.
+ *
+ * Smaller batches cut generated tokens roughly proportionally. Threads are
+ * still never truncated; a long one splits across documents at message
+ * boundaries, as before.
+ */
+const MAX_THREAD_CHARS = Number(process.env["ENTITY_MAX_THREAD_CHARS"] ?? 24_000);
+const MAX_DOC_CHARS = Number(process.env["ENTITY_MAX_DOC_CHARS"] ?? 24_000);
+const MAX_BATCH_CHARS = Number(process.env["ENTITY_MAX_BATCH_CHARS"] ?? 24_000);
+
 function settings(): BootstrapConfig {
   return mergeConfig({
-    // Keep whole threads intact: a thread's full context is what makes it
-    // useful for discovering types. Only genuinely huge threads (beyond the
-    // model's context) split, and never truncate.
-    fetchMessages: { maxThreadChars: 60_000 },
+    fetchMessages: { maxThreadChars: MAX_THREAD_CHARS },
     extract: {
-      maxDocChars: 60_000,
-      maxBatchChars: 60_000,
+      maxDocChars: MAX_DOC_CHARS,
+      maxBatchChars: MAX_BATCH_CHARS,
       concurrency: CONFIG.entityExtraction.concurrency,
     },
   });
@@ -84,6 +100,10 @@ export async function discoverTypes(runId: string): Promise<void> {
     runId,
     ...stats,
     documents: docs.length,
+    // Batch sizing is now the main lever on per-call latency, so record what
+    // this run actually used rather than inferring it from the deployment.
+    maxBatchChars: MAX_BATCH_CHARS,
+    concurrency: CONFIG.entityExtraction.concurrency,
   });
 
   await prisma.entityExtractionRun.update({
