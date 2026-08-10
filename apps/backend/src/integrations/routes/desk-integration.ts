@@ -271,6 +271,7 @@ router.post(
           expectedEmail,
           workspaceId,
           platform,
+          userId,
           timestamp: Date.now(),
         });
 

@@ -13,6 +13,7 @@ import { BaseWatchProvider, WatchResult, SubscriptionRecord } from '../pubsubTyp
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
 export class GmailWatchProvider extends BaseWatchProvider {
   readonly name = 'gmail';
@@ -31,7 +32,12 @@ export class GmailWatchProvider extends BaseWatchProvider {
       throw new Error(`Source ${source.name} is not a Gmail source`);
     }
 
-    return this.renewSource(source);
+    const result = await this.renewSource(source);
+    if (!source.lastSyncCursor && result.historyId) {
+      await seedSyncCursor({ source, seedHistoryId: result.historyId, reason: 'no-cursor' });
+    }
+
+    return result;
   }
 
   private async renewSource(source: {
