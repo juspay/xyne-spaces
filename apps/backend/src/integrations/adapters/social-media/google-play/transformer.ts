@@ -45,7 +45,6 @@ export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, Norma
           clientVersionName: review.clientVersionName,
           clientVersionCode: review.clientVersionCode,
           updateExisting: true,
-          syncTicketOnUpdate: true,
           skipBlockingCheck: true,
         },
         metadata: {

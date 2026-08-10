@@ -112,6 +112,14 @@ interface GooglePlayApplicationInput {
   packageName: string;
 }
 
+interface GooglePlayApplicationRow extends GooglePlayApplicationInput {
+  id: string;
+}
+
+function createGooglePlayApplication(): GooglePlayApplicationRow {
+  return { id: crypto.randomUUID(), displayName: '', packageName: '' };
+}
+
 function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput[]): boolean {
   if (applications.length === 0) return false;
   const packageNames = applications.map(application => application.packageName);
@@ -162,9 +170,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
-  const [googlePlayApplications, setGooglePlayApplications] = useState<
-    GooglePlayApplicationInput[]
-  >([{ displayName: '', packageName: '' }]);
+  const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
+    createGooglePlayApplication(),
+  ]);
   const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
@@ -785,7 +793,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 onClick={() =>
                   setGooglePlayApplications(applications => [
                     ...applications,
-                    { displayName: '', packageName: '' },
+                    createGooglePlayApplication(),
                   ])
                 }
                 disabled={googlePlayApplications.length >= 20}
@@ -809,7 +817,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName);
               return (
                 <div
-                  key={index}
+                  key={application.id}
                   className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'
                 >
                   <div className='flex items-center justify-between'>

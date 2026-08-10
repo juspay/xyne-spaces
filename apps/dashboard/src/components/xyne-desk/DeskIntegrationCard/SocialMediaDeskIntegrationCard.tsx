@@ -19,14 +19,14 @@ import Input from '../../ui/Input';
 import { DeskConnectionCard } from './DeskConnectionCard';
 
 interface GooglePlayApplicationInput {
+  id: string;
   displayName: string;
   packageName: string;
 }
 
-const EMPTY_APPLICATION: GooglePlayApplicationInput = {
-  displayName: '',
-  packageName: '',
-};
+function createGooglePlayApplication(): GooglePlayApplicationInput {
+  return { id: crypto.randomUUID(), displayName: '', packageName: '' };
+}
 
 interface SocialMediaDeskIntegrationCardProps {
   channelId: string;
@@ -39,7 +39,7 @@ export const SocialMediaDeskIntegrationCard = ({
 }: SocialMediaDeskIntegrationCardProps): ReactElement | null => {
   const [showAddApps, setShowAddApps] = useState(false);
   const [applications, setApplications] = useState<GooglePlayApplicationInput[]>([
-    { ...EMPTY_APPLICATION },
+    createGooglePlayApplication(),
   ]);
   const [isAdding, setIsAdding] = useState(false);
   const [isReauthorizing, setIsReauthorizing] = useState(false);
@@ -144,7 +144,7 @@ export const SocialMediaDeskIntegrationCard = ({
         applications: normalizedApplications,
       });
       setShowAddApps(false);
-      setApplications([{ ...EMPTY_APPLICATION }]);
+      setApplications([createGooglePlayApplication()]);
       clearChannelConnectedEmailCache(channelId);
       toast.success(
         `${result.added} Google Play app${result.added === 1 ? '' : 's'} added successfully.`,
@@ -217,7 +217,7 @@ export const SocialMediaDeskIntegrationCard = ({
             variant='outline'
             size='sm'
             onClick={() => {
-              setApplications([{ ...EMPTY_APPLICATION }]);
+              setApplications([createGooglePlayApplication()]);
               setShowAddApps(true);
             }}
             data-track-category='social-media-desk-integration'
@@ -258,7 +258,7 @@ export const SocialMediaDeskIntegrationCard = ({
           <div className='flex max-h-80 flex-col gap-3 overflow-y-auto'>
             {applications.map((application, index) => (
               <div
-                key={index}
+                key={application.id}
                 className='grid grid-cols-[1fr_1fr_auto] items-end gap-2 rounded-md border border-border p-3'
               >
                 <label
@@ -318,7 +318,9 @@ export const SocialMediaDeskIntegrationCard = ({
               variant='ghost'
               size='sm'
               disabled={applications.length >= 20}
-              onClick={() => setApplications(current => [...current, { ...EMPTY_APPLICATION }])}
+              onClick={() =>
+                setApplications(current => [...current, createGooglePlayApplication()])
+              }
             >
               <Plus size={14} />
               Add another

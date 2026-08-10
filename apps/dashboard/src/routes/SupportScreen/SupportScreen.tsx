@@ -284,6 +284,7 @@ const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new
   ChannelType.CALL,
   ChannelType.SLACK,
   ChannelType.APP,
+  ChannelType.SOCIAL_MEDIA,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';

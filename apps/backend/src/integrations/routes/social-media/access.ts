@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { ChannelType } from '@xyne/shared';
+import { ChannelType, ChannelVisibility } from '@xyne/shared';
 import { db } from '@/database/client';
 
 export async function canAccessSocialMediaChannel(
@@ -12,7 +12,7 @@ export async function canAccessSocialMediaChannel(
       id: channelId,
       workspaceId,
       type: ChannelType.SOCIAL_MEDIA,
-      participants: { some: { userId } },
+      OR: [{ visibility: ChannelVisibility.PUBLIC }, { participants: { some: { userId } } }],
     },
     select: { id: true },
   });

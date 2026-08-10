@@ -5,6 +5,8 @@ import { db } from '@/database/client';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { GOOGLE_PLAY_SCOPE } from './constants';
 
+const GOOGLE_PLAY_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
+
 export interface GooglePlayCredentials {
   accessToken: string;
   refreshToken: string;
@@ -32,13 +34,8 @@ export interface NormalizedGooglePlayReview {
   };
 }
 
-export function getGooglePlayReviewLastModifiedAt(
-  review: NormalizedGooglePlayReview,
-): number {
-  return Math.max(
-    review.occurredAt.getTime(),
-    review.developerReply?.occurredAt.getTime() ?? 0,
-  );
+export function getGooglePlayReviewLastModifiedAt(review: NormalizedGooglePlayReview): number {
+  return Math.max(review.occurredAt.getTime(), review.developerReply?.occurredAt.getTime() ?? 0);
 }
 
 function timestampToDate(value?: androidpublisher_v3.Schema$Timestamp): Date {
@@ -108,12 +105,15 @@ export class GooglePlayClient {
       version: 'v3',
       auth: this.createOAuthClient(credentials),
     });
-    await publisher.reviews.list({ packageName, maxResults: 1 });
+    await publisher.reviews.list(
+      { packageName, maxResults: 1 },
+      { timeout: GOOGLE_PLAY_REQUEST_TIMEOUT_MS }
+    );
   }
 
   async listReviews(
     source: ExternalSource,
-    modifiedAfter?: Date,
+    modifiedAfter?: Date
   ): Promise<NormalizedGooglePlayReview[]> {
     const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
     const auth = this.createOAuthClient(credentials);
@@ -140,11 +140,14 @@ export class GooglePlayClient {
     const modifiedAfterTimestamp = modifiedAfter?.getTime();
     let token: string | undefined;
     do {
-      const response = await publisher.reviews.list({
-        packageName: source.externalIdentifier!,
-        maxResults: 100,
-        ...(token && { token }),
-      });
+      const response = await publisher.reviews.list(
+        {
+          packageName: source.externalIdentifier!,
+          maxResults: 100,
+          ...(token && { token }),
+        },
+        { timeout: GOOGLE_PLAY_REQUEST_TIMEOUT_MS }
+      );
       const pageReviews: NormalizedGooglePlayReview[] = [];
       for (const review of response.data.reviews ?? []) {
         if (!review.reviewId) continue;
@@ -179,8 +182,8 @@ export class GooglePlayClient {
         ...pageReviews.filter(
           (review) =>
             modifiedAfterTimestamp === undefined ||
-            getGooglePlayReviewLastModifiedAt(review) >= modifiedAfterTimestamp,
-        ),
+            getGooglePlayReviewLastModifiedAt(review) >= modifiedAfterTimestamp
+        )
       );
 
       // Google returns the most recently created or modified reviews first. Once a
@@ -189,7 +192,7 @@ export class GooglePlayClient {
         modifiedAfterTimestamp !== undefined &&
         pageReviews.length > 0 &&
         pageReviews.every(
-          (review) => getGooglePlayReviewLastModifiedAt(review) < modifiedAfterTimestamp,
+          (review) => getGooglePlayReviewLastModifiedAt(review) < modifiedAfterTimestamp
         )
       ) {
         break;
@@ -206,11 +209,14 @@ export class GooglePlayClient {
       version: 'v3',
       auth: this.createOAuthClient(credentials),
     });
-    const response = await publisher.reviews.reply({
-      packageName: source.externalIdentifier!,
-      reviewId,
-      requestBody: { replyText: body },
-    });
+    const response = await publisher.reviews.reply(
+      {
+        packageName: source.externalIdentifier!,
+        reviewId,
+        requestBody: { replyText: body },
+      },
+      { timeout: GOOGLE_PLAY_REQUEST_TIMEOUT_MS }
+    );
     return timestampToDate(response.data.result?.lastEdited);
   }
 }

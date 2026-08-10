@@ -9,6 +9,7 @@ const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.CALL,
+  ChannelType.SOCIAL_MEDIA,
 ]);
 
 export interface TicketUrlParams {

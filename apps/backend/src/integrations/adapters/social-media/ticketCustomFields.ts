@@ -17,6 +17,7 @@ export async function syncSocialMediaTicketCustomFields(
     select: {
       id: true,
       boardId: true,
+      projectId: true,
       workspaceId: true,
       createdBy: true,
     },
@@ -30,6 +31,7 @@ export async function syncSocialMediaTicketCustomFields(
 
   await ensureBoardTicketFormFields({
     boardId: ticket.boardId,
+    projectId: ticket.projectId,
     workspaceId: ticket.workspaceId,
     createdBy: ticket.createdBy,
     fields: fields.map(({ fieldName, fieldType }) => ({

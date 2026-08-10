@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import {
   FormContextType,
   FormEntityType,
+  parseFieldOptions,
   type FormFieldType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -19,7 +20,7 @@ export interface TicketFormFieldDefinition {
 
 async function hasAllBoardTicketFormFields(
   boardId: string,
-  fields: TicketFormFieldDefinition[],
+  fields: TicketFormFieldDefinition[]
 ): Promise<boolean> {
   const mapping = await db.formContextMapping.findFirst({
     where: {
@@ -44,6 +45,7 @@ async function hasAllBoardTicketFormFields(
 
 export async function ensureBoardTicketFormFields(params: {
   boardId: string;
+  projectId: string;
   workspaceId: string;
   createdBy: string;
   fields: TicketFormFieldDefinition[];
@@ -71,12 +73,11 @@ export async function ensureBoardTicketFormFields(params: {
     if (mapping) {
       const mappedForm = await db.form.findUnique({ where: { id: mapping.formId } });
       if (!mappedForm) {
-        logger.warn('[TicketFormFieldService] Removing dangling ticket form mapping', {
+        logger.error('[TicketFormFieldService] Ticket form mapping points to a missing form', {
           boardId: params.boardId,
           formId: mapping.formId,
         });
-        await db.formContextMapping.delete({ where: { id: mapping.id } });
-        mapping = null;
+        throw new Error(`Mapped ticket form ${mapping.formId} not found`);
       }
     }
 
@@ -87,6 +88,7 @@ export async function ensureBoardTicketFormFields(params: {
         contextType: FormContextType.BOARD,
         workspaceId: params.workspaceId,
         createdBy: params.createdBy,
+        projectId: params.projectId,
         fields: params.fields,
       });
 
@@ -127,21 +129,22 @@ export async function ensureBoardTicketFormFields(params: {
 
     const existingFields = await repositories.forms.findFormFields(mapping.formId);
     const existingNames = new Set(existingFields.map((field) => field.fieldName));
-    const missingFields = params.fields.filter(
-      (field) => !existingNames.has(field.fieldName),
-    );
+    const missingFields = params.fields.filter((field) => !existingNames.has(field.fieldName));
     if (missingFields.length === 0) return;
 
     await repositories.forms.updateWithFields(mapping.formId, {
       formName: form.formName,
       formDescription: form.formDescription ?? undefined,
+      projectId: params.projectId,
       fields: [
         ...existingFields.map((field) => ({
           fieldId: field.id,
           fieldName: field.fieldName,
           fieldType: field.fieldType as unknown as FormFieldType,
           fieldEnum: field.fieldEnum ?? undefined,
+          fieldOptions: parseFieldOptions(field.fieldOptions ?? field.fieldEnum),
           isOptional: field.isOptional,
+          parentOptionId: field.parentOptionId,
         })),
         ...missingFields,
       ],
