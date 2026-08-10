@@ -60,6 +60,9 @@ const AuthScreen = (): ReactElement | null => {
     signInWithMicrosoft,
     logout,
     signInWithEmail,
+    registerWithEmail,
+    verifyEmailCode,
+    resendVerificationCode,
     communityJoinRequest,
     enterpriseJoinTarget,
   } = useAuth();
@@ -103,6 +106,19 @@ const AuthScreen = (): ReactElement | null => {
   const [fpMessage, setFpMessage] = useState('');
   const [fpLoading, setFpLoading] = useState(false);
   const fpSubmitLockRef = useRef(false);
+
+  // Registration flow
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regStep, setRegStep] = useState<'register' | 'verify'>('register');
+  const [regError, setRegError] = useState('');
+  const [regMessage, setRegMessage] = useState('');
+  const [regLoading, setRegLoading] = useState(false);
+  const [regCode, setRegCode] = useState('');
+  const regSubmitLockRef = useRef(false);
 
   useEffect(() => {
     const param = searchParams.get('enrollment_success');
@@ -385,6 +401,110 @@ const AuthScreen = (): ReactElement | null => {
       fpSubmitLockRef.current = false;
       setFpLoading(false);
     }
+  };
+
+  const handleRegisterSubmit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (regSubmitLockRef.current) return;
+
+    setRegError('');
+    setRegMessage('');
+
+    if (!regName.trim()) {
+      setRegError('Name is required');
+      return;
+    }
+    if (!regEmail.trim()) {
+      setRegError('Email is required');
+      return;
+    }
+    if (regPassword.length < 8) {
+      setRegError('Password must be at least 8 characters');
+      return;
+    }
+    if (!/[A-Z]/.test(regPassword) || !/\d/.test(regPassword) || !/[^A-Za-z0-9]/.test(regPassword)) {
+      setRegError('Password must include at least one uppercase letter, one number, and one special character');
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      setRegError('Passwords do not match');
+      return;
+    }
+
+    const pendingWorkspaceId =
+      searchParams.get('workspaceId')?.trim() ||
+      localStorage.getItem(PENDING_WORKSPACE_ID_KEY)?.trim() ||
+      undefined;
+
+    regSubmitLockRef.current = true;
+    setRegLoading(true);
+    try {
+      const result = await registerWithEmail(regEmail.trim(), regPassword, regName.trim(), pendingWorkspaceId);
+      if (result.success) {
+        setRegMessage(result.message || 'Verification code sent to your email.');
+        setRegStep('verify');
+      } else {
+        setRegError(result.error || 'Registration failed');
+      }
+    } finally {
+      regSubmitLockRef.current = false;
+      setRegLoading(false);
+    }
+  };
+
+  const handleRegVerify = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (regSubmitLockRef.current) return;
+
+    setRegError('');
+    const normalizedCode = regCode.replace(/\D/g, '');
+    if (!/^\d{6}$/.test(normalizedCode)) {
+      setRegError('Enter a valid 6-digit code');
+      return;
+    }
+
+    regSubmitLockRef.current = true;
+    setRegLoading(true);
+    try {
+      const result = await verifyEmailCode(regEmail.trim(), normalizedCode);
+      // On success, OAUTH_CALLBACK_COMPLETE is dispatched to the auth machine,
+      // which takes over navigation — joining the workspace (community OPEN,
+      // community REQUEST_TO_JOIN, or enterprise) just like Google/Microsoft SSO.
+      // No local step change needed; the auth machine will redirect.
+      if (!result.success) {
+        setRegError(result.error || 'Verification failed');
+      }
+    } finally {
+      regSubmitLockRef.current = false;
+      setRegLoading(false);
+    }
+  };
+
+  const handleRegResendCode = async (): Promise<void> => {
+    setRegError('');
+    setRegMessage('');
+    try {
+      const result = await resendVerificationCode(regEmail.trim());
+      if (result.success) {
+        setRegMessage(result.message || 'A new verification code has been sent.');
+      } else {
+        setRegError(result.error || 'Failed to resend code');
+      }
+    } catch {
+      setRegError('Failed to resend code. Please try again.');
+    }
+  };
+
+  const resetRegistrationState = (): void => {
+    setShowRegisterForm(false);
+    setRegName('');
+    setRegEmail('');
+    setRegPassword('');
+    setRegConfirmPassword('');
+    setRegCode('');
+    setRegStep('register');
+    setRegError('');
+    setRegMessage('');
   };
 
   if (isAuthenticated) {
@@ -836,9 +956,9 @@ const AuthScreen = (): ReactElement | null => {
                         <div className='flex-1 h-px bg-border' />
                       </div>
 
-                      {/* Email Sign In Toggle */}
-                      {!showEmailForm ? (
-                        <div className='w-full max-w-[280px] md:max-w-[320px]'>
+                      {/* Email Sign In / Sign Up Toggle */}
+                      {!showEmailForm && !showRegisterForm ? (
+                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
                           <button
                             onClick={() => {
                               clearError();
@@ -852,9 +972,160 @@ const AuthScreen = (): ReactElement | null => {
                               Sign in with Email
                             </span>
                           </button>
+                          <button
+                            onClick={() => {
+                              clearError();
+                              setShowEmailForm(true);
+                              setShowRegisterForm(true);
+                            }}
+                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-transparent text-foreground border border-border rounded-[10px] overflow-hidden h-12 hover:bg-accent'
+                            data-track-category='Auth'
+                            data-track-name='EmailRegisterToggle'
+                          >
+                            <span className='text-sm font-semibold text-center'>
+                              Sign up with Email
+                            </span>
+                          </button>
+                        </div>
+                      ) : showRegisterForm ? (
+                        /* Registration Flow */
+                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
+                          {regStep === 'register' && (
+                            <form
+                              onSubmit={e => {
+                                void handleRegisterSubmit(e);
+                              }}
+                              className='flex flex-col gap-3'
+                            >
+                              <p className='text-sm font-medium text-foreground'>
+                                {pendingCommunityWorkspaceName
+                                  ? `Join ${pendingCommunityWorkspaceName}`
+                                  : 'Create Account'}
+                              </p>
+                              <p className='text-xs text-muted-foreground'>
+                                Register with your email to join the community.
+                              </p>
+                              <input
+                                type='text'
+                                value={regName}
+                                onChange={e => setRegName(e.target.value)}
+                                placeholder='Full name'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='RegisterNameInput'
+                              />
+                              <input
+                                type='email'
+                                value={regEmail}
+                                onChange={e => setRegEmail(e.target.value)}
+                                placeholder='Email address'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='RegisterEmailInput'
+                              />
+                              <input
+                                type='password'
+                                value={regPassword}
+                                onChange={e => setRegPassword(e.target.value)}
+                                placeholder='Password (min 8 chars, 1 uppercase, 1 number, 1 special)'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='RegisterPasswordInput'
+                              />
+                              <input
+                                type='password'
+                                value={regConfirmPassword}
+                                onChange={e => setRegConfirmPassword(e.target.value)}
+                                placeholder='Confirm password'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='RegisterConfirmPasswordInput'
+                              />
+                              {regError && <p className='text-xs text-red-600'>{regError}</p>}
+                              <button
+                                type='submit'
+                                disabled={regLoading}
+                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                                data-track-category='Auth'
+                                data-track-name='RegisterSubmit'
+                              >
+                                {regLoading ? 'Sending...' : 'Send Verification Code'}
+                              </button>
+                            </form>
+                          )}
+
+                          {regStep === 'verify' && (
+                            <form
+                              onSubmit={e => {
+                                void handleRegVerify(e);
+                              }}
+                              className='flex flex-col gap-3'
+                            >
+                              <p className='text-sm font-medium text-foreground'>
+                                Verify Your Email
+                              </p>
+                              <p className='text-xs text-muted-foreground'>
+                                We sent a 6-digit code to {regEmail}
+                              </p>
+                              <input
+                                type='text'
+                                value={regCode}
+                                onChange={e =>
+                                  setRegCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                }
+                                placeholder='6-digit code'
+                                maxLength={6}
+                                pattern='[0-9]{6}'
+                                inputMode='numeric'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
+                                data-track-category='Auth'
+                                data-track-name='RegisterVerifyCodeInput'
+                              />
+                              {regError && <p className='text-xs text-red-600'>{regError}</p>}
+                              {regMessage && <p className='text-xs text-green-600'>{regMessage}</p>}
+                              <button
+                                type='submit'
+                                disabled={regLoading}
+                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                                data-track-category='Auth'
+                                data-track-name='RegisterVerifySubmit'
+                              >
+                                {regLoading ? 'Verifying...' : 'Verify & Continue'}
+                              </button>
+                              <button
+                                type='button'
+                                onClick={() => {
+                                  void handleRegResendCode();
+                                }}
+                                disabled={regLoading}
+                                className='text-xs text-muted-foreground hover:text-foreground text-center'
+                                data-track-category='Auth'
+                                data-track-name='RegisterResendCode'
+                              >
+                                Resend code
+                              </button>
+                            </form>
+                          )}
+
+                          <button
+                            type='button'
+                            onClick={() => {
+                              clearError();
+                              resetRegistrationState();
+                            }}
+                            className='text-xs text-muted-foreground hover:text-foreground text-center'
+                            data-track-category='Auth'
+                            data-track-name='BackToSignIn'
+                          >
+                            Back to sign in
+                          </button>
                         </div>
                       ) : showForgotPassword ? (
-                        /* Forgot Password Flow */
                         <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
                           {fpStep === 'email' && (
                             <form
@@ -1032,7 +1303,21 @@ const AuthScreen = (): ReactElement | null => {
                             type='button'
                             onClick={() => {
                               clearError();
+                              setShowRegisterForm(true);
+                              setShowForgotPassword(false);
+                            }}
+                            className='text-xs text-muted-foreground hover:text-foreground text-center'
+                            data-track-category='Auth'
+                            data-track-name='SwitchToRegister'
+                          >
+                            Don&apos;t have an account? Sign up
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              clearError();
                               setShowEmailForm(false);
+                              setShowRegisterForm(false);
                               setEmail('');
                               setPassword('');
                             }}
