@@ -2,11 +2,12 @@ import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
+import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
 
 interface SocialMediaReplyComposerProps {
   conversationId: string;
   channelId?: string | null;
+  drafts?: readonly EmailDraftRecord[];
   replyBasePath: string;
   placeholder: string;
   maxLength?: number;
@@ -28,6 +29,7 @@ function toPlainText(value: string): string {
 export const SocialMediaReplyComposer = ({
   conversationId,
   channelId,
+  drafts,
   replyBasePath,
   placeholder,
   maxLength,
@@ -36,8 +38,11 @@ export const SocialMediaReplyComposer = ({
   const [content, setContent] = useState('');
   const [sending, setSending] = useState(false);
   const loadedDraftRef = useRef('');
-  const draft = useEmailDraft(conversationId);
-  const { deleteDraft } = useEmailDraftOperations(conversationId, channelId);
+  const { deleteDraft, latestDraft: draft } = useEmailDraftOperations(
+    conversationId,
+    channelId,
+    drafts,
+  );
 
   useEffect(() => {
     const nextDraft = draft?.draftContent ?? '';

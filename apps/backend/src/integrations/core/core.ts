@@ -3,7 +3,12 @@
  * Main orchestrator: runs adapter flow + syncs to database
  */
 
-import { ExternalSourceAdapter, NormalizedData, IngestionResult } from './types';
+import {
+  ExternalSourceAdapter,
+  NormalizedData,
+  IngestionResult,
+  type IngestionOptions,
+} from './types';
 import { SourceNotFoundError } from './errors';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
@@ -84,12 +89,15 @@ export class ExternalSourceCore {
     adapter: ExternalSourceAdapter,
     sourceName: string,
     rawPayload: any,
-    source?: ExternalSource
+    source?: ExternalSource,
+    options?: IngestionOptions,
   ): Promise<IngestionResult[]> {
     logger.info(`Ingesting data from ${sourceName} using ${adapter.name} adapter`);
 
     // 1. Preprocess (optional - fetch extra data if needed)
-    const enrichedPayload = adapter.preprocess ? await adapter.preprocess(rawPayload, source) : rawPayload;
+    const enrichedPayload = adapter.preprocess
+      ? await adapter.preprocess(rawPayload, source, options)
+      : rawPayload;
 
     // preprocess may split one webhook into several messages (e.g. Gmail history batch); each runs through transform -> sync on its own.
     const payloads = Array.isArray(enrichedPayload) ? enrichedPayload : [enrichedPayload];

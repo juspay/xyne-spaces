@@ -94,7 +94,9 @@ router.post(
 
       let synced = 0;
       for (const source of sources) {
-        const result = await socialMediaService.syncSource(source.id);
+        const result = await socialMediaService.syncSource(source.id, {
+          ignoreSyncCursor: true,
+        });
         synced += result.synced;
       }
       res.json({ synced, sourceCount: sources.length });

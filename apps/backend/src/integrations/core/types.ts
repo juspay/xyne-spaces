@@ -24,6 +24,11 @@ export enum ExternalSourcePlatform {
   GOOGLE_PLAY = 'google-play-reviews',
 }
 
+export interface IngestionOptions {
+  /** Bypass the source's persisted cursor for an explicit full/manual fetch. */
+  ignoreSyncCursor?: boolean;
+}
+
 /**
  * Generic parser interface
  * All platform adapters must implement this
@@ -200,7 +205,11 @@ export interface ExternalSourceAdapter {
   ): Promise<AuthResult>;
 
   /** Optional: Preprocess payload (fetch additional data via API) */
-  preprocess?(rawPayload: unknown, source?: ExternalSource): Promise<unknown>;
+  preprocess?(
+    rawPayload: unknown,
+    source?: ExternalSource,
+    options?: IngestionOptions,
+  ): Promise<unknown>;
 
   /** Optional: Dynamically determine source name for database lookup based on payload */
   getSourceNameFromDB?(payload: unknown): string | undefined;

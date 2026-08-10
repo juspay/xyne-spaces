@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiInstance } from '../services/clients/apiClient';
+import { fetchGooglePlayReviews } from '../services/clients/socialMediaDeskApi';
 
 export interface RefetchResponseInline {
   success: boolean;
@@ -16,7 +17,14 @@ export interface RefetchResponseQueued {
   queued: true;
   jobId: string;
 }
-export type RefetchResponse = RefetchResponseInline | RefetchResponseQueued;
+export interface SocialMediaRefetchResponse {
+  synced: number;
+  sourceCount: number;
+}
+export type RefetchResponse =
+  | RefetchResponseInline
+  | RefetchResponseQueued
+  | SocialMediaRefetchResponse;
 
 export interface RefetchRange {
   startDate?: string;
@@ -25,6 +33,7 @@ export interface RefetchRange {
 
 export const useRefetchExternalSource = (
   channelId: string | undefined,
+  isSocialMedia = false,
 ): { refetch: (range?: RefetchRange) => void; isPending: boolean } => {
   const queryClient = useQueryClient();
 
@@ -35,6 +44,7 @@ export const useRefetchExternalSource = (
   >({
     mutationFn: async range => {
       if (!channelId) throw new Error('channelId required');
+      if (isSocialMedia) return fetchGooglePlayReviews(channelId);
       const body = range?.startDate && range?.endDate ? range : undefined;
       const response = await apiInstance.post<RefetchResponse>(
         `/external-source-sync/${channelId}/refetch`,
@@ -55,6 +65,14 @@ export const useRefetchExternalSource = (
       if (!channelId || mutation.isPending) return;
       mutation.mutate(range, {
         onSuccess: result => {
+          if ('synced' in result) {
+            toast.success(
+              result.synced > 0
+                ? `Processed ${result.synced} review interaction${result.synced === 1 ? '' : 's'}`
+                : 'Google Play reviews are up to date',
+            );
+            return;
+          }
           if (result.queued) {
             toast.success('Fetching emails in background', {
               description: 'We’ll notify you when this finishes.',

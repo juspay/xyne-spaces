@@ -284,19 +284,6 @@ router.post(
         )
       );
 
-      void (async () => {
-        for (const source of sources) {
-          try {
-            await socialMediaService.syncSource(source.id);
-          } catch (error) {
-            logger.error(`${TAG} Initial Google Play sync failed`, {
-              sourceId: source.id,
-              error,
-            });
-          }
-        }
-      })();
-
       res.status(201).json({
         added: sources.length,
       });
@@ -569,7 +556,7 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
         encryptedCredentials,
         applications: state.applications,
       });
-      const sources = await Promise.all(
+      await Promise.all(
         sourceRecords.map((data) =>
           tx.externalSource.create({
             data,
@@ -577,18 +564,9 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
           })
         )
       );
-      return { channelId: channel.id, sourceIds: sources.map((source) => source.id) };
+      return { channelId: channel.id };
     });
 
-    void (async () => {
-      for (const sourceId of result.sourceIds) {
-        try {
-          await socialMediaService.syncSource(sourceId);
-        } catch (error) {
-          logger.error(`${TAG} Initial Google Play sync failed`, { sourceId, error });
-        }
-      }
-    })();
     redirectToDesk(req, res, {
       workspaceId: state.workspaceId,
       channelId: result.channelId,

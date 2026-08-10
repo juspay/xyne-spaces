@@ -12,6 +12,7 @@ export function buildGooglePlaySourceRecords(params: {
     displayName: string;
   }>;
 }) {
+  const connectedAt = new Date().toISOString();
   return params.applications.map((application) => ({
     name: [
       SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
@@ -29,5 +30,6 @@ export function buildGooglePlaySourceRecords(params: {
     boardId: params.boardId,
     ownerUserId: params.ownerUserId,
     credentials: params.encryptedCredentials,
+    lastSyncCursor: connectedAt,
   }));
 }

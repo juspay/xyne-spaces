@@ -31,6 +31,15 @@ export interface NormalizedGooglePlayReview {
   };
 }
 
+export function getGooglePlayReviewLastModifiedAt(
+  review: NormalizedGooglePlayReview,
+): number {
+  return Math.max(
+    review.occurredAt.getTime(),
+    review.developerReply?.occurredAt.getTime() ?? 0,
+  );
+}
+
 function timestampToDate(value?: androidpublisher_v3.Schema$Timestamp): Date {
   const seconds = Number(value?.seconds ?? 0);
   const nanos = Number(value?.nanos ?? 0);
@@ -101,7 +110,10 @@ export class GooglePlayClient {
     await publisher.reviews.list({ packageName, maxResults: 1 });
   }
 
-  async listReviews(sourceId: string): Promise<NormalizedGooglePlayReview[]> {
+  async listReviews(
+    sourceId: string,
+    modifiedAfter?: Date,
+  ): Promise<NormalizedGooglePlayReview[]> {
     const source = await db.externalSource.findUniqueOrThrow({ where: { id: sourceId } });
     const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
     const auth = this.createOAuthClient(credentials);
@@ -125,6 +137,7 @@ export class GooglePlayClient {
 
     const publisher = google.androidpublisher({ version: 'v3', auth });
     const reviews: NormalizedGooglePlayReview[] = [];
+    const modifiedAfterTimestamp = modifiedAfter?.getTime();
     let token: string | undefined;
     do {
       const response = await publisher.reviews.list({
@@ -132,6 +145,7 @@ export class GooglePlayClient {
         maxResults: 100,
         ...(token && { token }),
       });
+      const pageReviews: NormalizedGooglePlayReview[] = [];
       for (const review of response.data.reviews ?? []) {
         if (!review.reviewId) continue;
         const userComment = review.comments?.find((comment) => comment.userComment)?.userComment;
@@ -141,7 +155,7 @@ export class GooglePlayClient {
         )?.developerComment;
         const authorName = review.authorName ?? undefined;
         const rating = userComment.starRating ?? undefined;
-        reviews.push({
+        pageReviews.push({
           reviewId: review.reviewId,
           authorName,
           subject: `${rating ? `${'★'.repeat(rating)}${'☆'.repeat(5 - rating)} ` : ''}${source.displayName} review${authorName ? ` from ${authorName}` : ''}`,
@@ -160,6 +174,25 @@ export class GooglePlayClient {
             },
           }),
         });
+      }
+      reviews.push(
+        ...pageReviews.filter(
+          (review) =>
+            modifiedAfterTimestamp === undefined ||
+            getGooglePlayReviewLastModifiedAt(review) >= modifiedAfterTimestamp,
+        ),
+      );
+
+      // Google returns the most recently created or modified reviews first. Once a
+      // complete page is older than the cutoff, subsequent pages are outside this sync.
+      if (
+        modifiedAfterTimestamp !== undefined &&
+        pageReviews.length > 0 &&
+        pageReviews.every(
+          (review) => getGooglePlayReviewLastModifiedAt(review) < modifiedAfterTimestamp,
+        )
+      ) {
+        break;
       }
       token = response.data.tokenPagination?.nextPageToken ?? undefined;
     } while (token);

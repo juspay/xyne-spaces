@@ -1376,16 +1376,21 @@ const SupportScreen = (): ReactElement => {
     markViewed();
     return markViewed;
   }, [selectedChannelId, isSelectedChannelJoined]);
-  const selectedChannelName =
-    sortedEmailChannels.find(c => c.id === selectedChannelId)?.name?.trim() || 'Xyne Desk';
+  const selectedChannelFull = useMemo(
+    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
+    [sortedEmailChannels, selectedChannelId],
+  );
+  const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
+  const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
 
-  // Manual fetch — shown when a specific email channel is selected.
-  // SupportScreen already filters to EMAIL channels; the hook owns its own
-  // toasts and the 400 / 403 / generic-error branches.
+  // Manual fetch for the selected desk. Social-media desks fetch every review
+  // currently available from Google; email desks open the range picker.
   const refetchChannelId =
     selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : undefined;
-  const { refetch: handleRefetch, isPending: isRefetching } =
-    useRefetchExternalSource(refetchChannelId);
+  const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
+    refetchChannelId,
+    isSocialMediaDesk,
+  );
   const canRefetch = !!refetchChannelId;
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
@@ -1591,11 +1596,6 @@ const SupportScreen = (): ReactElement => {
       }
     },
     [selectedTickets, clearTicketSelection, navigate, supportBase],
-  );
-
-  const selectedChannelFull = useMemo(
-    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
-    [sortedEmailChannels, selectedChannelId],
   );
 
   const [showMergeDialog, setShowMergeDialog] = useState(false);
@@ -2427,11 +2427,19 @@ const SupportScreen = (): ReactElement => {
                           </DropdownMenu>
                         ) : (
                           <Tooltip
-                            content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
+                            content={
+                              isRefetching
+                                ? 'Fetching latest…'
+                                : isSocialMediaDesk
+                                  ? 'Fetch all available Google Play reviews'
+                                  : 'Fetch latest emails'
+                            }
                             side='bottom'
                           >
                             <button
-                              onClick={() => setShowRefetchDialog(true)}
+                              onClick={() =>
+                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
+                              }
                               disabled={isRefetching}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -3308,7 +3316,7 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && (
+      {canRefetch && !isSocialMediaDesk && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
@@ -4655,6 +4663,7 @@ export const SupportTicketDetail = ({
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
                     placeholder='Reply to this review…'
                     maxLength={350}

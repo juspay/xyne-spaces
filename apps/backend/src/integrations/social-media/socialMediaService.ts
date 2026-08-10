@@ -8,6 +8,8 @@ import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { externalSourceCore } from '@/integrations/core/core';
 import { InteractionReplyValidationError } from '@/integrations/core/baseInteractionReplySender';
+import type { IngestionOptions } from '@/integrations/core/types';
+import { SOCIAL_MEDIA_SOURCE_TYPES } from './constants';
 import { logger } from '@/utils/logger';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
@@ -46,7 +48,10 @@ class SocialMediaService {
     return source as SocialMediaSource;
   }
 
-  async syncSource(sourceId: string): Promise<{ synced: number }> {
+  async syncSource(
+    sourceId: string,
+    options?: IngestionOptions,
+  ): Promise<{ synced: number }> {
     const lock = await acquireLock(`lock:social-media-sync:${sourceId}`, {
       ttlSeconds: 10 * 60,
     });
@@ -58,9 +63,22 @@ class SocialMediaService {
     }
 
     try {
+      const syncStartedAt = new Date();
       const source = await this.getSourceContext(sourceId);
       const adapter = adapterRegistry.getAdapter(source.sourceType);
-      const results = await externalSourceCore.ingest(adapter, source.name, undefined, source);
+      const results = await externalSourceCore.ingest(
+        adapter,
+        source.name,
+        undefined,
+        source,
+        options,
+      );
+      if (source.sourceType === SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY) {
+        await db.externalSource.update({
+          where: { id: source.id },
+          data: { lastSyncCursor: syncStartedAt.toISOString() },
+        });
+      }
       logger.info(`${TAG} Source synchronized`, {
         sourceId,
         sourceType: source.sourceType,

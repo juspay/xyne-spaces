@@ -39,6 +39,15 @@ export async function disconnectSocialMediaDesk(channelId: string): Promise<void
   await apiInstance.post(`/integrations/social-media/${channelId}/disconnect`);
 }
 
+export async function fetchGooglePlayReviews(
+  channelId: string,
+): Promise<{ synced: number; sourceCount: number }> {
+  const response = await apiInstance.post<{ synced: number; sourceCount: number }>(
+    `/integrations/social-media/${channelId}/sync`,
+  );
+  return response.data;
+}
+
 export async function disconnectGooglePlayApp(channelId: string, sourceId: string): Promise<void> {
   await apiInstance.post(
     `/integrations/social-media/${channelId}/google-play/apps/${sourceId}/disconnect`,
