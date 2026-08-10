@@ -141,8 +141,8 @@ function getFlowJsonRawTextForMentions(content: string): string | null {
  * Friendly notification label for a flow CARD (plan, etc.) whose todos/title
  * don't live in text `content` props — so extractTextFromFlowJson returns ''
  * and the preview would otherwise fall back to the meaningless "Flow JSON" text
- * node. Currently handles the `plan` component; returns null for other flows so
- * the caller keeps its existing extraction.
+ * node. Handles plan and user-question artifacts; returns null for other flows
+ * so the caller keeps its existing extraction.
  */
 function getFlowCardNotificationLabel(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
@@ -159,11 +159,22 @@ function getFlowCardNotificationLabel(content: string): string | null {
     const plan = Array.isArray(flow.components)
       ? flow.components.find((c) => c?.type === 'plan')
       : undefined;
-    if (!plan) return null;
-    const rawTitle = plan.props?.['title'];
-    const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-    const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
-    return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+    if (plan) {
+      const rawTitle = plan.props?.['title'];
+      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+      const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
+      return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+    }
+    const questionSet = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'user_question')
+      : undefined;
+    if (!questionSet) return null;
+    const questions = questionSet.props?.['questions'];
+    const count = Array.isArray(questions) ? questions.length : 0;
+    const phase = questionSet.props?.['phase'];
+    if (phase === 'answered') return `✅ Answered ${count || 'agent'} question${count === 1 ? '' : 's'}`;
+    if (phase === 'declined') return 'Question request declined';
+    return count > 1 ? `💬 Agent wants to ask you ${count} questions` : '💬 Agent wants to ask you a question';
   } catch {
     return null;
   }

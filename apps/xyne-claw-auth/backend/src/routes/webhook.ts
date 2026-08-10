@@ -5894,11 +5894,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
 
     // ── Post question buttons in thread ──
-    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
+    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; questions?: import("xyne-claw-shared").UserQuestion[]; question?: string; options?: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
       const { signAction: signUserAnswer } = await import("./mcp.js");
+      let postedQuestionSets = 0;
       for (const q of pendingQuestions) {
-        const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
+        const questions = q.questions?.length ? q.questions : q.question && q.options?.length ? [{ id: "q1", question: q.question, type: "single_choice" as const, options: q.options }] : undefined;
+        if (!questions) continue;
+        const questionFlow = withSpacesAppId(buildUserQuestionFlow(questions, {
           questionId: q.questionId,
           agentSlug: ctx.agentSlug ?? "",
           channelId: ctx.channelId,
@@ -5928,8 +5931,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           flow: questionFlow,
           userId: ctx.spacesAppUserId,
         }, token);
+        postedQuestionSets += 1;
       }
-      log.info(`Posted ${pendingQuestions.length} question(s) in thread ${ctx.conversationId}`);
+      log.info(`Posted ${postedQuestionSets} question set(s) in thread ${ctx.conversationId}`);
     }
 
     // ── Post /goal suggestion FlowUI card in thread ──

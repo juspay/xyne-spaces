@@ -16,6 +16,7 @@ import { LinkNode } from './LinkNode';
 import { PlanNode } from './PlanNode';
 import { PrNode } from './PrNode';
 import { CallScheduleNode } from './CallScheduleNode';
+import { UserQuestionNode } from './UserQuestionNode';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
 // is kept in ./PrApprovalNode.tsx but unlinked so 'pr_approval' isn't a live artifact.
 
@@ -64,6 +65,7 @@ NodeRegistry.register('plan', PlanNode);
 NodeRegistry.register('pr', PrNode);
 // NodeRegistry.register('pr_approval', PrApprovalNode); // unlinked for now
 NodeRegistry.register('call_schedule', CallScheduleNode);
+NodeRegistry.register('user_question', UserQuestionNode);
 
 /**
  * Kept for backward compatibility with existing callers/imports.
