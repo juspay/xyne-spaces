@@ -12,7 +12,7 @@
  * keep in sync.
  */
 
-import { mustGetQuery } from '@rocicorp/zero';
+import { mustGetQuery, type AnyCustomQuery } from '@rocicorp/zero';
 import { schema } from '@xyne/shared';
 import type { Context } from '@xyne/shared';
 import { queries } from '@/zero/queries';
@@ -60,9 +60,9 @@ export async function callQuery<T = unknown>(
 ): Promise<T> {
   const provider = readProvider(options.usePrimary === true);
 
-  let queryDef: { fn: (input: { args: unknown; ctx: Context }) => unknown };
+  let queryDef: AnyCustomQuery;
   try {
-    queryDef = mustGetQuery(queries, name) as typeof queryDef;
+    queryDef = mustGetQuery(queries as never, name) as AnyCustomQuery;
   } catch (err) {
     // A manifest entry naming a query that no longer exists is a deployment
     // bug, not a client error.

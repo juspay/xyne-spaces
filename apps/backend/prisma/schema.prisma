@@ -976,6 +976,7 @@ model SdkIdempotencyKey {
   id             String    @id @default(cuid())
   key            String
   userId         String
+  workspaceId    String
   endpoint       String
   requestHash    String    @map("request_hash")
   responseStatus Int?      @map("response_status")
@@ -983,7 +984,8 @@ model SdkIdempotencyKey {
   createdAt      DateTime  @default(now()) @map("created_at")
   expiresAt      DateTime  @map("expires_at")
 
-  @@unique([userId, endpoint, key], map: "sdk_idempotency_keys_user_endpoint_key")
+  @@unique([workspaceId, userId, endpoint, key], map: "sdk_idempotency_keys_workspace_user_endpoint_key")
+  @@index([workspaceId])
   @@index([expiresAt])
   @@map("sdk_idempotency_keys")
   @@schema("non_zero")

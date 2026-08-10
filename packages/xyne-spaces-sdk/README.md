@@ -39,8 +39,224 @@ Node 18+ or any modern browser. No runtime dependencies.
 
 ## Authentication
 
-Pass an OAuth access token. `sdk.users.me()` reads your identity from the token's
-own claims, so it costs no round trip:
+The SDK authenticates every API request with an OAuth bearer access token:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+It does **not** redirect users, exchange authorization codes, persist refresh
+tokens, or refresh a session automatically. Your application owns that OAuth
+lifecycle and gives the current access token to the SDK:
+
+```typescript
+const sdk = createClient({
+  // Use the Spaces origin. The SDK adds /api/v1 to its requests.
+  baseUrl: process.env.XYNE_SPACES_BASE_URL,
+  token: accessToken,
+});
+```
+
+Spaces implements the OAuth 2.0 authorization-code flow for public clients,
+with mandatory PKCE using `S256`. There is no client secret. A token represents
+the user who approved access, their workspace, the OAuth client, and the scopes
+they granted.
+
+### Configure an OAuth client
+
+Choose these values in the application that uses the SDK. These variable names
+are examples; the SDK does not read environment variables itself.
+
+```dotenv
+XYNE_SPACES_BASE_URL=http://localhost:3001
+XYNE_SPACES_OAUTH_BASE_URL=http://localhost:3001/api/v1/oauth
+XYNE_SPACES_CLIENT_ID=my-chat-app
+XYNE_SPACES_REDIRECT_URI=http://localhost:4173/auth/callback
+XYNE_SPACES_SCOPES=spaces.channels:read spaces.conversations:read spaces.messages:read spaces.messages:write spaces.users:read
+```
+
+The Spaces deployment administrator must register the public client id and each
+exact callback URI. On a self-hosted backend that is the
+`SDK_OAUTH_CLIENTS` setting:
+
+```dotenv
+SDK_OAUTH_CLIENTS={"my-chat-app":["http://localhost:4173/auth/callback","https://chat.example.com/auth/callback"]}
+```
+
+The backend must also have the public SDK API and OAuth server enabled with an
+RSA signing key. The private key belongs only on the Spaces backend; SDK
+applications must never receive it.
+
+```dotenv
+SDK_API_ENABLED=true
+SDK_OAUTH_ENABLED=true
+SDK_JWT_PRIVATE_KEY_FILE=./sdk-jwt.pem
+SDK_JWT_KEY_ID=sdk-key-1
+```
+
+Generate a development key with `openssl genrsa -out sdk-jwt.pem 2048`. In
+production, keep the key in a secret manager and use HTTPS callback URIs. A
+self-hosted deployment must also apply the backend Prisma migrations that create
+the SDK authorization-code and refresh-token tables.
+
+### Sign in with authorization code + PKCE
+
+OAuth endpoints are advertised at:
+
+```text
+{XYNE_SPACES_OAUTH_BASE_URL}/.well-known/oauth-authorization-server
+```
+
+The flow is:
+
+1. Generate a random PKCE `code_verifier`, its SHA-256 `code_challenge`, and a
+   random `state` value. Store the verifier and state in the user's server-side
+   session, or in `sessionStorage` for a browser-only client.
+2. Navigate the browser to the authorization endpoint. Use a top-level browser
+   navigation, not `fetch()` or an iframe. The user signs into Spaces if needed,
+   reviews the requested scopes, and approves or denies them.
+3. Spaces redirects to the registered callback with `code` and `state`. Reject
+   the callback unless `state` exactly matches the stored value.
+4. Exchange the one-time code and original verifier for tokens.
+
+```typescript
+// Supply these from your framework's public runtime/build configuration.
+// The client id is public; there is deliberately no client secret.
+const oauthBaseUrl = 'http://localhost:3001/api/v1/oauth';
+const clientId = 'my-chat-app';
+const redirectUri = 'http://localhost:4173/auth/callback';
+const requestedScopes = [
+  'spaces.channels:read',
+  'spaces.conversations:read',
+  'spaces.messages:read',
+  'spaces.messages:write',
+  'spaces.users:read',
+];
+
+function base64url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+const digest = await crypto.subtle.digest(
+  'SHA-256',
+  new TextEncoder().encode(verifier),
+);
+const challenge = base64url(new Uint8Array(digest));
+const state = base64url(crypto.getRandomValues(new Uint8Array(32)));
+
+// Save { verifier, state } before redirecting.
+const authorizeUrl = new URL(`${oauthBaseUrl}/authorize`);
+authorizeUrl.searchParams.set('response_type', 'code');
+authorizeUrl.searchParams.set('client_id', clientId);
+authorizeUrl.searchParams.set('redirect_uri', redirectUri);
+authorizeUrl.searchParams.set('scope', requestedScopes.join(' '));
+authorizeUrl.searchParams.set('state', state);
+authorizeUrl.searchParams.set('code_challenge', challenge);
+authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+
+window.location.assign(authorizeUrl);
+```
+
+At the callback, after validating `state`, exchange the returned code:
+
+```typescript
+const callbackUrl = new URL(window.location.href);
+const code = callbackUrl.searchParams.get('code');
+const returnedState = callbackUrl.searchParams.get('state');
+const pending = loadPendingLogin(); // The previously saved { verifier, state }.
+
+if (!code || !pending || returnedState !== pending.state) {
+  throw new Error('Invalid OAuth callback');
+}
+
+const response = await fetch(`${oauthBaseUrl}/token`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    grant_type: 'authorization_code',
+    client_id: clientId,
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: pending.verifier,
+  }),
+});
+
+if (!response.ok) throw new Error('Spaces authorization failed');
+
+const tokens = await response.json() as {
+  access_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  refresh_token: string;
+  scope: string;
+};
+
+sdk.setToken(tokens.access_token);
+```
+
+Authorization codes expire after 10 minutes by default and can be used only
+once. Access tokens expire after 15 minutes by default.
+
+### Refresh and sign out
+
+Exchange the current refresh token before the access token expires, then put the
+new access token into the existing SDK client:
+
+```typescript
+const response = await fetch(`${oauthBaseUrl}/token`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    grant_type: 'refresh_token',
+    client_id: clientId,
+    refresh_token: currentRefreshToken,
+  }),
+});
+
+if (!response.ok) throw new Error('Spaces token refresh failed');
+
+const next = await response.json() as {
+  access_token: string;
+  expires_in: number;
+  refresh_token: string;
+  scope: string;
+};
+sdk.setToken(next.access_token);
+
+// Refresh tokens rotate. Replace both stored tokens together; never reuse the
+// old refresh token.
+saveTokens(next.access_token, next.refresh_token, next.expires_in);
+```
+
+Refresh tokens last 30 days by default and are single-use. Every successful
+refresh returns a replacement. Reusing an already-rotated refresh token revokes
+its entire token family and requires a fresh sign-in.
+
+For logout, revoke the refresh token and clear the SDK token:
+
+```typescript
+await fetch(`${oauthBaseUrl}/revoke`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ token: currentRefreshToken, client_id: clientId }),
+});
+
+sdk.clearToken();
+```
+
+For production browser applications, prefer a small backend-for-frontend that
+keeps refresh tokens in an encrypted server-side session and identifies that
+session with a `Secure`, `HttpOnly`, `SameSite` cookie. Keep the short-lived
+access token in memory; do not put refresh tokens in `localStorage`.
+
+### Read the current token identity
+
+`sdk.users.me()` reads the caller identity from the access token's own claims,
+so it costs no round trip:
 
 ```typescript
 const me = await sdk.users.me();
@@ -51,6 +267,10 @@ if (await sdk.users.isSessionExpired()) {
 }
 ```
 
+This local decoding is for application convenience, not authorization. The SDK
+does not verify the token signature; the Spaces API performs the authoritative
+signature, expiry, account, workspace, role, scope, and row-access checks.
+
 A few operations take the acting user's id as an argument rather than reading it
 server-side — `sdk.dashboards.upsert`, `sdk.tickets.upsertStageRequest`. Pass
 `me.id`:
@@ -58,6 +278,74 @@ server-side — `sdk.dashboards.upsert`, `sdk.tickets.upsertStageRequest`. Pass
 ```typescript
 await sdk.dashboards.upsert({ name: 'Ops', createdBy: me.id });
 ```
+
+## Scopes
+
+Scopes limit which parts of the public API a token may call. Request only the
+scopes the application needs and pass them as a space-separated `scope`
+parameter during authorization. Explicitly send this parameter: omitting it
+currently asks for every supported scope.
+
+Read and write grants are independent. For example,
+`spaces.messages:write` permits message mutations but does not imply
+`spaces.messages:read`. Most resource families have both forms:
+
+| Resource family | Read scope | Write scope |
+|---|---|---|
+| Channels | `spaces.channels:read` | `spaces.channels:write` |
+| Conversations | `spaces.conversations:read` | `spaces.conversations:write` |
+| Messages | `spaces.messages:read` | `spaces.messages:write` |
+| Calls | `spaces.calls:read` | `spaces.calls:write` |
+| Tickets and support tickets | `spaces.tickets:read` | `spaces.tickets:write` |
+| Boards and stages | `spaces.boards:read` | `spaces.boards:write` |
+| Projects | `spaces.projects:read` | `spaces.projects:write` |
+| Canvases | `spaces.canvases:read` | `spaces.canvases:write` |
+| Collections | `spaces.collections:read` | `spaces.collections:write` |
+| Forms | `spaces.forms:read` | `spaces.forms:write` |
+| Releases, RCAs, CoEs, and impacts | `spaces.releases:read` | `spaces.releases:write` |
+| Automations | `spaces.automations:read` | `spaces.automations:write` |
+| Email | `spaces.email:read` | `spaces.email:write` |
+| Users and user groups | `spaces.users:read` | `spaces.users:write` |
+| Activities | `spaces.activities:read` | `spaces.activities:write` |
+| Dashboards | `spaces.dashboards:read` | `spaces.dashboards:write` |
+| Recaps | `spaces.recaps:read` | `spaces.recaps:write` |
+| Shared links | `spaces.links:read` | `spaces.links:write` |
+| Repositories | `spaces.repos:read` | `spaces.repos:write` |
+| Attachments | `spaces.attachments:read` | `spaces.attachments:write` |
+| Search | `spaces.search:read` | — |
+
+`spaces.admin` is the API-surface super-scope used for workspace and
+organization administration. Grant it only to applications that genuinely
+administer Spaces. It satisfies endpoint scope checks, but it does not turn a
+normal Spaces user into an administrator or bypass workspace and row-level
+access controls.
+
+Some SDK methods cross resource families. For example, a view that lists
+channels, loads their threads, reads messages, and resolves authors needs four
+read scopes:
+
+```text
+spaces.channels:read
+spaces.conversations:read
+spaces.messages:read
+spaces.users:read
+```
+
+A chat application that also starts threads, sends messages, and uploads files
+would normally add:
+
+```text
+spaces.conversations:write
+spaces.messages:write
+spaces.attachments:write
+```
+
+The authorization-server discovery response contains the deployment's current
+`scopes_supported` list. The token response returns the scopes actually granted,
+and `sdk.users.me().scopes` exposes the same list from the access-token claims.
+Calling a method without a required scope returns HTTP 403 as an `SdkError` with
+code `forbidden`; it is not an authentication failure. A valid scope still only
+allows data that the approving user can access normally.
 
 ## Resources
 

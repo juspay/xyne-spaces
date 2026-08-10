@@ -65,6 +65,7 @@ export async function callMutator(input: CallMutatorInput): Promise<CallMutatorR
   const { name, args, authData, ctx, endpoint, idempotencyKey } = input;
 
   const asyncTasks: Array<() => Promise<void>> = [];
+  const awaitedPostCommitTasks: Array<() => Promise<void>> = [];
   const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
   const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
   const requestHash = hashRequest(name, args);
@@ -79,6 +80,7 @@ export async function callMutator(input: CallMutatorInput): Promise<CallMutatorR
           tx.dbTransaction as unknown as PgQueryable,
           idempotencyKey,
           authData.sub,
+          authData.workspaceId,
           endpoint,
           requestHash,
         );
@@ -89,7 +91,7 @@ export async function callMutator(input: CallMutatorInput): Promise<CallMutatorR
         }
       }
 
-      const mutators = createMutators(authData, asyncTasks);
+      const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
       const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs);
       const mutator = mustGetMutator(mutators, name);
       // Args are validated by the mutator's own zod schema on the next line;
@@ -108,6 +110,7 @@ export async function callMutator(input: CallMutatorInput): Promise<CallMutatorR
     return { replayed: true, ...(storedResponse ? { storedResponse } : {}) };
   }
 
+  await Promise.allSettled(awaitedPostCommitTasks.map((task) => task()));
   drainSideEffects(authData, ctx, asyncTasks, vespaJobs, sideEffectJobs);
   return { replayed: false };
 }
@@ -120,6 +123,7 @@ export async function callMutator(input: CallMutatorInput): Promise<CallMutatorR
 export async function recordIdempotentResponse(
   key: string,
   userId: string,
+  workspaceId: string,
   endpoint: string,
   status: number,
   body: unknown,
@@ -130,8 +134,8 @@ export async function recordIdempotentResponse(
         await tx.dbTransaction.query(
           `UPDATE ${IDEMPOTENCY_TABLE}
              SET response_status = $1, response_body = $2
-           WHERE key = $3 AND user_id = $4 AND endpoint = $5`,
-          [status, JSON.stringify(body ?? null), key, userId, endpoint],
+           WHERE key = $3 AND "userId" = $4 AND "workspaceId" = $5 AND endpoint = $6`,
+          [status, JSON.stringify(body ?? null), key, userId, workspaceId, endpoint],
         );
       },
     );
@@ -153,17 +157,18 @@ async function claimIdempotencyKey(
   pg: PgQueryable,
   key: string,
   userId: string,
+  workspaceId: string,
   endpoint: string,
   requestHash: string,
 ): Promise<ClaimResult> {
   const expiresAt = new Date(Date.now() + v1Config.idempotency.ttlHours * 3600_000);
 
   const inserted = await pg.query(
-    `INSERT INTO ${IDEMPOTENCY_TABLE} (id, key, user_id, endpoint, request_hash, created_at, expires_at)
-     VALUES (gen_random_uuid()::text, $1, $2, $3, $4, NOW(), $5)
-     ON CONFLICT (user_id, endpoint, key) DO NOTHING
+    `INSERT INTO ${IDEMPOTENCY_TABLE} (id, key, "userId", "workspaceId", endpoint, request_hash, created_at, expires_at)
+     VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, NOW(), $6)
+     ON CONFLICT ("workspaceId", "userId", endpoint, key) DO NOTHING
      RETURNING id`,
-    [key, userId, endpoint, requestHash, expiresAt],
+    [key, userId, workspaceId, endpoint, requestHash, expiresAt],
   );
 
   if (inserted.rows.length > 0) return { kind: 'claimed' };
@@ -171,8 +176,8 @@ async function claimIdempotencyKey(
   const existing = await pg.query(
     `SELECT request_hash, response_status, response_body
        FROM ${IDEMPOTENCY_TABLE}
-      WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-    [userId, endpoint, key],
+      WHERE "userId" = $1 AND "workspaceId" = $2 AND endpoint = $3 AND key = $4`,
+    [userId, workspaceId, endpoint, key],
   );
   const row = existing.rows[0];
   if (!row) {
