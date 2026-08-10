@@ -9,7 +9,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
-import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
 
@@ -1276,33 +1276,115 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
   return json.data.filter((a) => a.enabled);
 }
 
+/**
+ * Resolve the installed-app webhook URL + app signing secret for a Claw agent
+ * in a workspace. Single source of truth for BOTH server-initiated dispatch
+ * paths (app-mention `runClawAgent` and S2S `runS2SClawAgent`) so their app-id
+ * route resolution and signing-secret lookup cannot drift apart.
+ *
+ * `webhookUrl` is the app-id route (`/claw/api/v1/webhook/app/<spacesAppId>`)
+ * that claw-auth writes at install time; `signingSecretEnc` is the ENCRYPTED
+ * app-level signing secret (caller decrypts). Both are null when unresolved.
+ */
+async function resolveClawAppInstall(
+  agentSlug: string,
+  workspaceId: string,
+): Promise<{ webhookUrl: string | null; signingSecretEnc: string | null; spacesAppUserId: string | null }> {
+  const agents = await listS2SClawAgents();
+  const agent = agents.find(candidate => candidate.slug === agentSlug);
+  const spacesAppUserId = agent?.spacesAppUserId ?? null;
+
+  let installedApp = spacesAppUserId
+    ? await db.installedApps.findFirst({
+        where: {
+          userId: spacesAppUserId,
+          user: { workspaceId },
+          webhookUrl: { contains: '/claw/api/v1/webhook/' },
+        },
+        // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
+        select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+      })
+    : null;
+
+  // Keep legacy installations working while they are being migrated.
+  if (!installedApp) {
+    installedApp = await db.installedApps.findFirst({
+      where: {
+        user: { workspaceId },
+        webhookUrl: { endsWith: `/webhook/${agentSlug}` },
+      },
+      select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+    });
+  }
+
+  return {
+    webhookUrl: installedApp?.webhookUrl ?? null,
+    signingSecretEnc: installedApp?.app?.signingSecret ?? null,
+    spacesAppUserId,
+  };
+}
+
 /** Run a claw agent via S2S (non-streaming, callback-based). Mirrors legacy clawClient.runAgent(). */
 export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAgentResponse> {
-  const url = config.xyneClaw.webhookUrl;
   const sessionId = randomUUID();
+
+  // Claw's webhook endpoints require BOTH credentials on every S2S dispatch:
+  //   1. x-s2s-key         — proves the call came from a trusted service.
+  //   2. X-Xyne-Signature  — per-app HMAC over the raw body that authorizes
+  //                          THIS specific agent (the shared s2s key cannot).
+  // Resolve the agent's install to get the app-id webhook route and the
+  // app-level signing secret. Without them we cannot sign, so fail fast rather
+  // than send an unsigned request that claw-auth rejects (401) once its
+  // temporary bypass is removed.
+  const { webhookUrl, signingSecretEnc } = await resolveClawAppInstall(
+    req.agentSlug,
+    req.spacesWorkspaceId,
+  );
+  if (!webhookUrl) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: no installed-app webhook for agent "${req.agentSlug}" in workspace ${req.spacesWorkspaceId}`
+    );
+  }
+  if (!signingSecretEnc) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: app for agent "${req.agentSlug}" has no signing secret`
+    );
+  }
+
+  // Serialize the body ONCE and sign those exact bytes, then send the SAME
+  // string as the request body. The verifier HMACs the raw received bytes, so
+  // re-serializing after signing (or letting the HTTP client re-encode) breaks
+  // verification.
+  const payload = JSON.stringify({
+    s2sKey: config.xyneClaw.s2sKey,
+    sessionId,
+    agentSlug: req.agentSlug,
+    task: req.task,
+    userId: req.userId,
+    spacesWorkspaceId: req.spacesWorkspaceId,
+    spacesOrgId: req.spacesOrgId,
+    spacesOrgMemberId: req.spacesOrgMemberId,
+    callbackUrl: req.callbackUrl,
+    ...(req.conversationId ? { conversationId: req.conversationId } : {}),
+    ...(req.channelId ? { channelId: req.channelId } : {}),
+  });
+  const signature = signWebhookPayload(payload, decrypt(signingSecretEnc));
+
   let res: globalThis.Response;
   try {
-    res = await fetch(url, {
+    res = await fetch(webhookUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
-      body: JSON.stringify({
-        s2sKey: config.xyneClaw.s2sKey,
-        sessionId,
-        agentSlug: req.agentSlug,
-        task: req.task,
-        userId: req.userId,
-        spacesWorkspaceId: req.spacesWorkspaceId,
-        spacesOrgId: req.spacesOrgId,
-        spacesOrgMemberId: req.spacesOrgMemberId,
-        callbackUrl: req.callbackUrl,
-        ...(req.conversationId ? { conversationId: req.conversationId } : {}),
-        ...(req.channelId ? { channelId: req.channelId } : {}),
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        ...getS2SHeaders(),
+        'X-Xyne-Signature': signature,
+      },
+      body: payload,
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] runS2SClawAgent: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`
+      `[ClawAgentService] runS2SClawAgent: failed to reach claw-auth webhook at ${webhookUrl}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
@@ -1335,44 +1417,22 @@ export async function runClawAgent(
 ): Promise<{ dispatched: boolean }> {
   // Current Claw installations use /webhook/app/<spacesAppId>. The old
   // /webhook/<agentSlug> URL was removed from the installation flow, so the
-  // webhook cannot be resolved from its URL suffix anymore. Resolve the agent
-  // first and use its Spaces app user id to find the corresponding install.
-  const agents = await listS2SClawAgents();
-  const agent = agents.find(candidate => candidate.slug === req.agentSlug);
+  // webhook cannot be resolved from its URL suffix anymore. Resolve the agent's
+  // install (shared with the S2S path) to get the app-id webhook + secret.
+  const { webhookUrl, signingSecretEnc, spacesAppUserId } = await resolveClawAppInstall(
+    req.agentSlug,
+    req.workspaceId,
+  );
 
-  let installedApp = agent?.spacesAppUserId
-    ? await db.installedApps.findFirst({
-        where: {
-          userId: agent.spacesAppUserId,
-          user: { workspaceId: req.workspaceId },
-          webhookUrl: { contains: '/claw/api/v1/webhook/' },
-        },
-        // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
-        select: { webhookUrl: true, app: { select: { signingSecret: true } } },
-      })
-    : null;
-
-  // Keep legacy installations working while they are being migrated.
-  if (!installedApp) {
-    installedApp = await db.installedApps.findFirst({
-      where: {
-        user: { workspaceId: req.workspaceId },
-        webhookUrl: { endsWith: `/webhook/${req.agentSlug}` },
-      },
-      select: { webhookUrl: true, app: { select: { signingSecret: true } } },
-    });
-  }
-
-  if (!installedApp?.webhookUrl) {
+  if (!webhookUrl) {
     logger.warn('[ClawAgentService] runClawAgent: no installed-app webhook for agent', {
       agentSlug: req.agentSlug,
       channelId: req.channelId,
       workspaceId: req.workspaceId,
-      spacesAppUserId: agent?.spacesAppUserId ?? null,
+      spacesAppUserId,
     });
     return { dispatched: false };
   }
-  const signingSecretEnc = installedApp.app?.signingSecret;
   if (!signingSecretEnc) {
     logger.warn('[ClawAgentService] runClawAgent: app has no signing secret', {
       agentSlug: req.agentSlug,
@@ -1400,7 +1460,7 @@ export async function runClawAgent(
     },
     timestamp: new Date().toISOString(),
   };
-  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc));
+  await sendWebhookNotification(webhookUrl, event, decrypt(signingSecretEnc));
   return { dispatched: true };
 }
 
