@@ -862,6 +862,11 @@ model UserPreference {
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
   channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
+  channelFilterMode        String?          // Channels group filter (null = app default)
+  starredFilterMode        String?          // Starred group filter (null = app default)
+  starredSortOrder         String?          // Starred group sort (null = app default)
+  dmFilterMode             String?          // DM group filter (null = app default)
+  dmSortOrder              String?          // DM group sort (null = app default)
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
   showThreadTags           Boolean  @default(false) // Render thread classification chips in chat; opt-in
@@ -1864,6 +1869,7 @@ model ChannelSection {
   isCollapsed Boolean           @default(false) // Per-user collapse state, synced across devices
   isDeleted   Boolean           @default(false) // Soft delete flag
   sortOrder   String?           // Optional per-section channel sort order
+  filterMode  String?           // Per-section channel filter (null = app default)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
 

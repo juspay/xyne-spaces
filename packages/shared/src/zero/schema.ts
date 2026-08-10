@@ -37,6 +37,7 @@ import {
   CanvasRole,
   CanvasVisibility,
   ChannelAddUserPolicy,
+  ChannelFilterMode,
   ChannelRole,
   ChannelScopeType,
   ChannelSortOrder,
@@ -599,6 +600,11 @@ export const userPreferenceTable = table('user_preferences')
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
+    channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
+    starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter
+    starredSortOrder: enumeration<ChannelSortOrder>().optional(),   // Starred group sort
+    dmFilterMode: enumeration<ChannelFilterMode>().optional(),      // DM group filter
+    dmSortOrder: enumeration<ChannelSortOrder>().optional(),        // DM group sort
     enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     allowThreadBroadcastMentions: boolean(), // Allow @channel/@here in thread replies
     // Global notification settings
@@ -835,6 +841,7 @@ export const channelSectionTable = table('channel_sections') // Prisma model: Ch
     createdAt: number(),
     updatedAt: number().optional(),
     sortOrder: enumeration<ChannelSortOrder>().optional(),
+    filterMode: enumeration<ChannelFilterMode>().optional(),
   })
   .primaryKey('id');
 

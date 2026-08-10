@@ -175,6 +175,14 @@ export enum ChannelSortOrder {
 }
 
 // @ts-ignore TS1294
+export enum ChannelFilterMode {
+  ACTIVE = 'ACTIVE',
+  UNREADS = 'UNREADS',
+  MENTIONS = 'MENTIONS',
+  ALL = 'ALL',
+}
+
+// @ts-ignore TS1294
 export enum MessageType {
   USER = 'USER',
   BOT = 'BOT',
