@@ -310,10 +310,7 @@ export class ExternalSourceCore {
             updatedBy: source.ownerUserId,
           });
         }
-        if (
-          adapter.postprocess &&
-          (source.sourceType === 'ozonetel' || normalizedData.emailData?.updateExisting)
-        ) {
+        if (adapter.postprocess) {
           await adapter.postprocess({
             conversationId: existingEmail.conversationId,
             entityId: existingEmail.id,
