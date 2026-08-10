@@ -15,6 +15,23 @@ export class MessagesACL extends BaseACL<'messages'> {
     }
   }
 
+  private async assertChannelMembership(conversationId: string, tx: Transaction<Schema>): Promise<void> {
+    const conversation = await tx.run(zql.conversations.where('conversationId', '=', conversationId).related('channel').one());
+    if (!conversation || !conversation.channel) {
+      throw new MutationACLError('Message not found: conversation or channel does not exist', 'messages');
+    }
+    if (conversation.channel.visibility === ChannelVisibility.PUBLIC) {
+      return;
+    }
+    const participant = await tx.run(zql.channel_participants
+      .where('channelId', '=', conversation.channel.id)
+      .where('userId', '=', this.ctx.userID)
+      .one());
+    if (!participant) {
+      throw new MutationACLError('Message mutation failed: only channel participants can modify messages in private channels', 'messages');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'messages'>>, tx: Transaction<Schema>): Promise<void> {
     const conversation = await tx.run(zql.conversations.where('conversationId', '=', args.conversationId).related('channel').one());
     if (!conversation || !conversation.channel) {
@@ -70,9 +87,21 @@ export class MessagesACL extends BaseACL<'messages'> {
       throw new MutationACLError('Message delete failed: message does not exist', 'messages');
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
-    if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
-      return;
+
+    // The non-participant banner is addressed to one person and dismissed by them, so its
+    // recipient is the one caller who may remove a system message. Every other system
+    // message — call summaries, whiteboards, channel notices — stays put.
+    if (message.msgType === MessageType.SYSTEM) {
+      const subtype = (message.metadata as { messageSubtype?: string } | null)?.messageSubtype;
+      if (message.visibleTo === this.ctx.userID && subtype === 'user_not_in_channel') {
+        return;
+      }
+      throw new MutationACLError('Message delete failed: system messages cannot be deleted', 'messages');
     }
-    throw new MutationACLError('Message delete failed: only the original sender can delete this message', 'messages');
+
+    if (message.senderId !== this.ctx.userID) {
+      throw new MutationACLError('Message delete failed: only the original sender can delete this message', 'messages');
+    }
+    await this.assertChannelMembership(message.conversationId, tx);
   }
 }
