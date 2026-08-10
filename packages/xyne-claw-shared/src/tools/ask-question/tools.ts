@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import type { ToolDefinition } from "../types.js";
 
 export const ASK_QUESTION_CONFIG_SCHEMA = {
-  CLAW_AUTH_URL: {
-    label: "Claw Auth Service URL",
+  XYNE_CLAW_AUTH_URL: {
+    label: "Xyne Claw Auth Service URL",
     default: "http://localhost:3003",
     required: true as const,
     placeholder: "http://localhost:3003",
@@ -44,7 +44,7 @@ export const askUserQuestion: ToolDefinition = {
     }
 
     const meta = context.meta ?? {};
-    const authUrl = context.config["CLAW_AUTH_URL"] ?? "http://localhost:3003";
+    const authUrl = context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
     const questionId = crypto.randomUUID();
 
     // Store question in xyne-claw-auth Redis

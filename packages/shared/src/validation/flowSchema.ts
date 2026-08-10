@@ -328,6 +328,37 @@ export const planComponentSchema = baseComponentSchema.extend({
   props: planPropsSchema,
 });
 
+// ── Ask-question artifact ────────────────────────────────────────────────
+// A single-question, single-answer HITL card. The lifecycle is the discriminant:
+//   pending  → user picks one option and submits.
+//   answered → read-only outcome showing the selected answer.
+export const askQuestionPropsSchema = z.discriminatedUnion('phase', [
+  z
+    .object({
+      phase: z.literal('pending'),
+      question: z.string().min(1),
+      options: z.array(z.string().min(1)).min(2).max(4),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('answered'),
+      question: z.string().min(1),
+      answer: z.string().min(1),
+      answeredBy: z.string().optional(),
+      answeredAt: z.string().optional(),
+    })
+    .strict(),
+]);
+
+export const askQuestionComponentSchema = baseComponentSchema.extend({
+  type: z.literal('ask_question'),
+  props: askQuestionPropsSchema,
+});
+
+export type AskQuestionProps = z.infer<typeof askQuestionPropsSchema>;
+export type AskQuestionPhase = AskQuestionProps['phase'];
+
 // TS mirrors inferred from the schema so the two can't drift.
 export type ProposedTodo = z.infer<typeof proposedTodoSchema>;
 export type ExecTodo = z.infer<typeof execTodoSchema>;
@@ -517,6 +548,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     linkComponentSchema,
     tableComponentSchema,
     planComponentSchema,
+    askQuestionComponentSchema,
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,

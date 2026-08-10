@@ -14,6 +14,7 @@ import { ImageNode } from './ImageNode';
 import { TableNode } from './TableNode';
 import { LinkNode } from './LinkNode';
 import { PlanNode } from './PlanNode';
+import { AskQuestionNode } from './AskQuestionNode';
 import { PrNode } from './PrNode';
 import { CallScheduleNode } from './CallScheduleNode';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
@@ -61,6 +62,7 @@ NodeRegistry.register('image', ImageNode);
 NodeRegistry.register('table', TableNode);
 NodeRegistry.register('link', LinkNode);
 NodeRegistry.register('plan', PlanNode);
+NodeRegistry.register('ask_question', AskQuestionNode);
 NodeRegistry.register('pr', PrNode);
 // NodeRegistry.register('pr_approval', PrApprovalNode); // unlinked for now
 NodeRegistry.register('call_schedule', CallScheduleNode);
