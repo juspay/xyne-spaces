@@ -1831,7 +1831,16 @@ async function processTask(
       if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
         meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
       }
-      if (typeof trustedSdlcGates?.["accessCredentialRevision"] === "number") {
+      // Runtime credentials are granted per dispatched EXECUTION (setup/
+      // artifact/work). Chat-surface runs carry repository context but no
+      // execution, so setting the operation flag without the ids would only
+      // trip the incomplete-grant guard in sandbox-repo-setup. Gate on the
+      // full triple so chat runs degrade to baseline-canvas access instead.
+      if (
+        typeof trustedSdlcGates?.["accessCredentialRevision"] === "number" &&
+        typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
+        typeof trustedSdlcExecution?.["sessionId"] === "string"
+      ) {
         meta["sdlcRuntimeCredentialOperation"] =
           trustedSdlcPermissions?.["writeRequested"] === true ? "PUSH" : "CLONE";
       }

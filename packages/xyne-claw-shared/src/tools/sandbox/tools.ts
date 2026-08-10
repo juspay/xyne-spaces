@@ -2197,6 +2197,21 @@ export const sandboxRepoSetup: ToolDefinition = {
       const executionId = context.meta?.["sdlcExecutionId"]?.trim();
       const sessionId = context.meta?.["sdlcSessionId"]?.trim();
       const agentSlug = context.meta?.["agentSlug"]?.trim();
+      // Chat-surface SDLC runs carry repository context but no dispatched
+      // execution, so no runtime credential grant exists and a private-repo
+      // clone cannot be authenticated. When the same repo exists in the local
+      // REPO_CONFIGS mirror, serve the fast read-only sbx-git sandbox instead
+      // (seconds, no credentials). Otherwise point the agent at its canvases.
+      if (!operation && !executionId && !sessionId) {
+        if (!wantWrite && REPO_CONFIGS[repoName]) {
+          return resolveSbxGit(repoName, context);
+        }
+        return (
+          "Error: Repository cloning is only available inside dispatched SDLC executions (setup/artifact/work). " +
+          "This chat run has no repository credential grant. Use the Repo Knowledge baseline canvases " +
+          "(spaces-search / spaces-read-canvas in the repository channel) as the source instead."
+        );
+      }
       if (operation || executionId || sessionId) {
         if (agentSlug !== "sdlc-agent") {
           return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
