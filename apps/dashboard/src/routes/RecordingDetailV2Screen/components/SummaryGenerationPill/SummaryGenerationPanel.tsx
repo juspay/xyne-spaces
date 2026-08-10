@@ -38,7 +38,7 @@ interface PlaceholderGroup {
 
 const GENERATION_STAGES: ReadonlyArray<GenerationStage> = [
   { label: 'Reading through the transcript…', atMs: 0 },
-  { label: 'Matching speakers…', atMs: 9_000 },
+  { label: 'Generating summary…', atMs: 9_000 },
   { label: 'Pulling out decisions & action items…', atMs: 24_000 },
 ];
 
