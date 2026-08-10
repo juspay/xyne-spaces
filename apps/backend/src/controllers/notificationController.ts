@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
+import { notificationLogCompletenessService } from '@/notification-service/notificationLogCompletenessService';
+import { repositories } from '@/database/repositories';
+import { currentWorkspaceId } from '@/database/tenant/context';
+import { config } from '@/config/env';
 import { unreadService } from '@/services/unreadService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
@@ -423,6 +427,97 @@ export class NotificationController {
       res.status(500).json({ error: 'Internal server error' });
     }
   }
+
+  // ---- SDLCT-0002: Notification log pipeline completeness (workspace-scoped) --
+
+  /**
+   * GET /api/notifications/:id/logs
+   * Lifecycle events for one notification, scoped to the caller's workspace.
+   */
+  getNotificationLogs = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!config.notificationLog?.enabled) {
+        res.status(404).json({ error: 'Notification log pipeline is disabled' });
+        return;
+      }
+      const workspaceId = currentWorkspaceId();
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Workspace context required' });
+        return;
+      }
+      const notificationId = req.params.id;
+      const events = await repositories.notificationLogs.findByNotificationId(
+        workspaceId,
+        notificationId,
+      );
+      res.json({ notificationId, count: events.length, events });
+    } catch (error) {
+      logger.error('Failed to get notification logs:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /api/notifications/:id/completeness
+   * Completeness classification (COMPLETE/INCOMPLETE/FAILED/UNKNOWN) for one
+   * notification, scoped to the caller's workspace.
+   */
+  getNotificationCompleteness = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!config.notificationLog?.enabled) {
+        res.status(404).json({ error: 'Notification log pipeline is disabled' });
+        return;
+      }
+      const workspaceId = currentWorkspaceId();
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Workspace context required' });
+        return;
+      }
+      const result = await notificationLogCompletenessService.getCompletenessForNotificationId(
+        workspaceId,
+        req.params.id,
+      );
+      res.json(result);
+    } catch (error) {
+      logger.error('Failed to get notification completeness:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /api/notifications/logs?correlationId=...
+   * Events + completeness for a single correlation id, scoped to the caller's
+   * workspace. Used for support/debugging a specific push.
+   */
+  getLogsByCorrelationId = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!config.notificationLog?.enabled) {
+        res.status(404).json({ error: 'Notification log pipeline is disabled' });
+        return;
+      }
+      const workspaceId = currentWorkspaceId();
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Workspace context required' });
+        return;
+      }
+      const correlationId = (req.query.correlationId as string | undefined)?.trim();
+      if (!correlationId) {
+        res.status(400).json({ error: 'correlationId query parameter is required' });
+        return;
+      }
+      const events = await repositories.notificationLogs.findByCorrelationId(
+        workspaceId,
+        correlationId,
+      );
+      const completeness = notificationLogCompletenessService.classify(events, {
+        emitMetrics: false,
+      });
+      res.json({ correlationId, count: events.length, events, completeness });
+    } catch (error) {
+      logger.error('Failed to get notification logs by correlationId:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 }
 
 export const notificationController = new NotificationController();

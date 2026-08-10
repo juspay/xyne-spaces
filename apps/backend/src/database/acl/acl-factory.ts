@@ -236,6 +236,11 @@ export class ACLFactory {
       return new NotificationsACL(ctx, prisma)
     case 'notificationPreference':
       return new NotificationPreferencesACL(ctx, prisma)
+    // SDLCT-0002: append-only notification lifecycle audit log. Workspace-scoped
+    // and never exposed via Zero; reads go through NotificationLogRepository with an
+    // explicit workspaceId, but a case is required to keep this switch exhaustive.
+    case 'notificationLogEvent':
+      return new BaseQueryACL(ctx, prisma)
     case 'organization':
       return new OrganizationsACL(ctx, prisma)
     case 'orgMember':

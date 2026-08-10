@@ -44,6 +44,10 @@ export interface MobilePushPayload {
   relatedEntityType?: string;
   relatedEntityId?: string;
   metadata?: Record<string, any>;
+  // SDLCT-0002: end-to-end correlation id + tenant key threaded through the
+  // whole mobile-push pipeline so producer/worker/provider events join up.
+  correlationId?: string;
+  workspaceId?: string;
   // When true, the client uses this push to warm caches only; it must NOT
   // surface a banner. Sent to the sender's own mobile devices so cross-platform
   // sends show up instantly on the mobile app.

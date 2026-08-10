@@ -12,6 +12,8 @@ import {
 } from '@/bots/json-ui';
 import type { FlowJson } from '@/bots/json-ui/types';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
+import { notificationLogService } from '@/notification-service/notificationLogService';
+import { v4 as uuidv4 } from 'uuid';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
@@ -902,6 +904,9 @@ class NotificationService {
                   sessionData,
                   deliveryMethod
                 );
+                // SDLCT-0002: one correlation id per (notification, session) push, so the
+                // persisted Notification row and every downstream delivery event join up.
+                const correlationId = uuidv4();
                 const mobilePayload = {
                   type: data.type,
                   title: data.title,
@@ -911,7 +916,16 @@ class NotificationService {
                   relatedEntityType: data.relatedEntityType,
                   relatedEntityId: data.relatedEntityId,
                   metadata: data.metadata,
+                  correlationId,
+                  workspaceId: sessionData.workspaceId,
                 };
+                void notificationLogService.recordNotificationCreated({
+                  workspaceId: sessionData.workspaceId,
+                  correlationId,
+                  notificationId: sessionNotification.id,
+                  channel: 'MOBILE_PUSH',
+                  metadata: { notificationType: data.type, platform: session.platform },
+                });
                 await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
               } else {
                 await realTimeNotificationService.queueMobilePush(userId, session, {
@@ -920,6 +934,7 @@ class NotificationService {
                   message: data.message,
                   relatedEntityId: data.relatedEntityId,
                   metadata: data.metadata,
+                  workspaceId: sessionData.workspaceId,
                 });
               }
             }
@@ -1771,6 +1786,8 @@ class NotificationService {
             deliveryMethod
           );
 
+          // SDLCT-0002: correlation id per (notification, session) push.
+          const correlationId = uuidv4();
           const mobilePayload = {
             type: data.type,
             title: data.title,
@@ -1779,8 +1796,17 @@ class NotificationService {
             actionUrl: data.actionUrl,
             relatedEntityType: data.relatedEntityType,
             relatedEntityId: data.relatedEntityId,
-            metadata: data.metadata
+            metadata: data.metadata,
+            correlationId,
+            workspaceId: sessionData.workspaceId,
           };
+          void notificationLogService.recordNotificationCreated({
+            workspaceId: sessionData.workspaceId,
+            correlationId,
+            notificationId: sessionNotification.id,
+            channel: 'MOBILE_PUSH',
+            metadata: { notificationType: data.type, platform: session.platform },
+          });
 
           try {
             await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
@@ -3016,6 +3042,8 @@ class NotificationService {
         return;
       }
 
+      const prefetchWorkspaceId =
+        data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: senderId }));
       await Promise.allSettled(
         mobileSessions.map(session =>
           realTimeNotificationService.queueMobilePush(senderId, session, {
@@ -3027,6 +3055,7 @@ class NotificationService {
             relatedEntityId: data.relatedEntityId,
             metadata: data.metadata,
             prefetchOnly: true,
+            workspaceId: prefetchWorkspaceId,
           }),
         ),
       );

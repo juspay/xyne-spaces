@@ -35,6 +35,8 @@ const envSchema = Joi.object({
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
+  // SDLCT-0002: append-only notification lifecycle audit trail. Default OFF; writes are gated on this flag.
+  NOTIFICATION_LOG_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
   // workspace). USER_MENTIONED is delivered to THIS app at workspace scope (in
@@ -783,6 +785,10 @@ export const config = {
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
+  notificationLog: {
+    // Gates ALL notification-log writes. When false, the pipeline is a no-op (fail-open behavior preserved).
+    enabled: envVars.NOTIFICATION_LOG_ENABLED as boolean,
+  },
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {

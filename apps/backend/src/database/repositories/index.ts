@@ -30,6 +30,7 @@ export {
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
+export { NotificationLogRepository } from './notificationLogRepository';
 export { MessageRepository } from './messageRepository';
 export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
@@ -93,6 +94,7 @@ import {
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
+import { NotificationLogRepository } from './notificationLogRepository';
 import { CallRepository } from './callRepository';
 import { CallRecordingRepository } from './callRecordingRepository';
 import { CallWhiteboardRepository } from './callWhiteboardRepository';
@@ -155,6 +157,7 @@ export class RepositoryContainer {
   public aclAuditLogs: ACLAuditLogRepository;
   public notifications: NotificationRepository;
   public notificationPreferences: NotificationPreferenceRepository;
+  public notificationLogs: NotificationLogRepository;
   public browserNotificationSubscriptions: BrowserNotificationSubscriptionRepository;
   public calls: CallRepository;
   public callRecordings: CallRecordingRepository;
@@ -214,6 +217,7 @@ export class RepositoryContainer {
     this.aclAuditLogs = new ACLAuditLogRepository();
     this.notifications = new NotificationRepository();
     this.notificationPreferences = new NotificationPreferenceRepository();
+    this.notificationLogs = new NotificationLogRepository();
     this.browserNotificationSubscriptions = new BrowserNotificationSubscriptionRepository();
     this.calls = new CallRepository();
     this.callRecordings = new CallRecordingRepository();

@@ -5,6 +5,7 @@ import {
   MobilePushJobData
 } from '../types';
 import { MobilePushChannel } from '../channels/mobilePush';
+import { notificationLogService } from '../notificationLogService';
 
 import { logger } from '@/utils/logger';
 import {
@@ -110,6 +111,20 @@ export class NotificationWorker {
       const data = job.data as MobilePushJobData;
       const notificationId = data.payload?.notificationId;
 
+      // SDLCT-0002: worker-stage instrumentation (join key comes off the payload).
+      const attempt = job.attemptsMade;
+      const maxAttempts = job.opts?.attempts ?? 1;
+      const logCtx = {
+        workspaceId: data.payload?.workspaceId,
+        correlationId: data.payload?.correlationId,
+        notificationId,
+        channel: 'MOBILE_PUSH' as const,
+        provider: (data.platform === 'ios' ? 'APNS' : 'FCM') as 'APNS' | 'FCM',
+        attempt,
+        metadata: { notificationType: data.payload?.type, platform: data.platform, jobId: String(job.id ?? '') },
+      };
+      void notificationLogService.recordQueueProcessingStarted(logCtx);
+
       this.logger.info(`Processing ${job.queue.name} job`, { 
         jobId: job.id, 
         userId: data.userId,
@@ -135,6 +150,14 @@ export class NotificationWorker {
           notificationId,
           appVersion: data.appVersion,
         });
+
+        // SDLCT-0002: record whether this failure will be retried or is terminal.
+        const willRetry = result.isRetryable === true && attempt + 1 < maxAttempts;
+        if (willRetry) {
+          void notificationLogService.recordDeliveryRetryScheduled({ ...logCtx, reasonCode: result.errorCode ?? 'RETRYABLE' });
+        } else {
+          void notificationLogService.recordDeliveryFailedFinal({ ...logCtx, reasonCode: result.errorCode ?? 'FAILED' });
+        }
 
         // Throw error to trigger Bull retry if it's a retryable error
         if (result.isRetryable) {
