@@ -122,6 +122,10 @@ interface ThreadMessagesProps {
   /** Custom click handler for the channel name badge. Defaults to opening the thread in-channel. */
   onChannelLinkClick?: () => void;
   skipInputAutoFocus?: boolean;
+  /** Overrides what the header's Ask AI button does. Defaults to opening the
+   *  panel on this thread; hosts with their own agent session (e.g. Desk's
+   *  draft agent) pass their own opener. */
+  onAskAI?: () => void;
 }
 
 export const ThreadMessages = ({
@@ -142,6 +146,7 @@ export const ThreadMessages = ({
   showChannelLink = false,
   onChannelLinkClick,
   skipInputAutoFocus: propSkipInputAutoFocus = false,
+  onAskAI,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -771,13 +776,17 @@ export const ThreadMessages = ({
   // Support URL-driven tab selection for the compact side panel mode as well.
   useEffect(() => {
     if (!underTicketView) return;
+    if (hideTabBar) {
+      setUnderTicketActiveTab('replies');
+      return;
+    }
 
     if (selectedTab === 'rca' && isFixTicket) {
       setUnderTicketActiveTab('rca');
       return;
     }
     setUnderTicketActiveTab('replies');
-  }, [underTicketView, selectedTab, isFixTicket]);
+  }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
   const tabs = useMemo(() => {
     const allTabs = [
@@ -1173,6 +1182,10 @@ export const ThreadMessages = ({
                     size='sm'
                     variant='ghost'
                     onClick={() => {
+                      if (onAskAI) {
+                        onAskAI();
+                        return;
+                      }
                       xyneAIActor.send({
                         type: 'OPEN',
                         channelId: derivedChannelId,
