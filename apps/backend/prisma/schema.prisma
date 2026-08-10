@@ -1962,6 +1962,9 @@ model Email {
   externalMessageId String
   sentByUserId String?            // User who sent this outbound email (REPLY / REPLY_ALL / COMPOSE). Null for inbound and automation/system sends. Powers the per-desk "Sent" view.
   rfcMessageId String?
+  rating Int?
+  clientVersionName String?
+  clientVersionCode String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1973,6 +1976,8 @@ model Email {
   @@index([channelId, rfcMessageId])
   @@index([conversationId, id])
   @@index([sentByUserId, createdAt(sort: Desc)]) // "Sent by me" list, ordered newest-first
+  @@index([workspaceId, rating])
+  @@index([workspaceId, clientVersionName])
   @@map("emails")
   @@schema("public")
 }

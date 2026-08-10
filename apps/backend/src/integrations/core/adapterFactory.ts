@@ -5,6 +5,7 @@ import { BaseTransformer } from './baseTransformer';
 import { BasePostprocessor } from './basePostprocessor';
 import { BaseRefetch } from './baseRefetch';
 import { BaseMailReplySender } from './baseMailReplySender';
+import { BaseInteractionReplySender } from './baseInteractionReplySender';
 import { adapterRegistry } from './adapterRegistry';
 
 /**
@@ -14,16 +15,19 @@ import { adapterRegistry } from './adapterRegistry';
 export class AdapterFactory {
   static create(
     platform: ExternalSourcePlatform,
-    authenticator: BaseAuthenticator,
+    authenticator: BaseAuthenticator | undefined,
     transformer: BaseTransformer<any, any>,
     flow?: BaseFlow,
     postprocessor?: BasePostprocessor,
     refetcher?: BaseRefetch,
     mailReplySender?: BaseMailReplySender,
+    interactionReplySender?: BaseInteractionReplySender,
   ): ExternalSourceAdapter {
     const adapter: ExternalSourceAdapter = {
       name: platform,
-      authenticate: authenticator.authenticate.bind(authenticator),
+      authenticate:
+        authenticator?.authenticate.bind(authenticator) ??
+        (async () => ({ authenticated: false })),
       preprocess: flow?.preprocess?.bind(flow),
       getSourceNameFromDB: flow?.getSourceNameFromDB?.bind(flow),
       isTestPayload: flow?.isTestPayload?.bind(flow),
@@ -35,9 +39,33 @@ export class AdapterFactory {
       refetch: refetcher?.refetch.bind(refetcher),
       sendMailReply: mailReplySender?.sendReply.bind(mailReplySender),
       sendMailNew: mailReplySender?.sendNew.bind(mailReplySender),
+      sendInteractionReply:
+        interactionReplySender?.sendReply.bind(interactionReplySender),
+      maxReplyLength: interactionReplySender?.maxReplyLength,
     };
 
     adapterRegistry.register(platform, adapter);
+    return adapter;
+  }
+
+  static createPolling(
+    platform: ExternalSourcePlatform,
+    transformer: BaseTransformer<any, any>,
+    flow: BaseFlow,
+    postprocessor?: BasePostprocessor,
+    interactionReplySender?: BaseInteractionReplySender,
+  ): ExternalSourceAdapter {
+    const adapter = AdapterFactory.create(
+      platform,
+      undefined,
+      transformer,
+      flow,
+      postprocessor,
+      undefined,
+      undefined,
+      interactionReplySender,
+    );
+    adapter.supportsPolling = true;
     return adapter;
   }
 }

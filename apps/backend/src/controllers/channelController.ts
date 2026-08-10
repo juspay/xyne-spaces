@@ -16,7 +16,10 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { createForwardedMessageXml,
+import {
+  createForwardedMessageXml,
+  GOOGLE_PLAY_REVIEWS_SOURCE_TYPE,
+ 
   parseForwardedMessageXml,
   ChannelScopeType,
   ChannelVisibility,
@@ -27,7 +30,8 @@ import { createForwardedMessageXml,
   AppPermissionStatus,
   AppPermissionType,
   ActivityClassification,
-  ActivityClassificationJobType, ChannelType, ChannelRole } from '@xyne/shared';
+  ActivityClassificationJobType, ChannelType, ChannelRole,
+} from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
@@ -1463,7 +1467,7 @@ export class ChannelController {
         orderBy: { createdAt: 'desc' },
       });
       const hasSource = !!source;
-      const isConnected = source?.isActive === true;
+      let isConnected = source?.isActive === true;
       const sourceType = source?.sourceType ?? null;
 
       let connectedLabel: string | null = null;
@@ -1480,6 +1484,17 @@ export class ChannelController {
         );
       } else if (source?.sourceType === 'slack-desk') {
         connectedLabel = extractSlackChannelId(source.name);
+      } else if (source?.sourceType === GOOGLE_PLAY_REVIEWS_SOURCE_TYPE) {
+        const reviewSources = await db.externalSource.findMany({
+          where: { channelId, sourceType: GOOGLE_PLAY_REVIEWS_SOURCE_TYPE },
+          select: { displayName: true, isActive: true },
+          orderBy: { createdAt: 'asc' },
+        });
+        isConnected = reviewSources.some(reviewSource => reviewSource.isActive);
+        connectedLabel =
+          reviewSources.length === 1
+            ? reviewSources[0].displayName
+            : `${reviewSources.length} Google Play apps`;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];

@@ -1410,6 +1410,9 @@ export const emailTable = table('emails')
     externalMessageId: string(),
     sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
+    rating: number().optional(),
+    clientVersionName: string().optional(),
+    clientVersionCode: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

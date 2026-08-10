@@ -104,15 +104,21 @@ export class ExternalSourceCore {
       }
 
       // 2. Transform to normalized format
-      const parseResult = await adapter.transform(payload);
+      const parseResult = await adapter.transform(payload, source);
 
       if (!parseResult.success || !parseResult.data) {
         throw new Error(`Transform failed: ${parseResult.error}`);
       }
 
-      // 3. Sync to database (sourceName already resolved in authenticate.ts)
-      const results = await this.sync(adapter, sourceName, parseResult.data, source);
-      allResults.push(...results);
+      // 3. Sync to database (sourceName already resolved in authenticate.ts).
+      // A single provider payload may contain multiple interactions.
+      const normalizedItems = Array.isArray(parseResult.data)
+        ? parseResult.data
+        : [parseResult.data];
+      for (const normalizedData of normalizedItems) {
+        const results = await this.sync(adapter, sourceName, normalizedData, source);
+        allResults.push(...results);
+      }
     }
 
     return allResults;
@@ -184,7 +190,15 @@ export class ExternalSourceCore {
         isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
       );
 
-      if (!existingThread) {
+      const existingDeskEmail =
+        !existingThread && isDeskChannel && source.channelId
+          ? await this.emailRepo.findFirstByThreadAndChannel(
+              normalizedData.externalThreadId,
+              source.channelId,
+            )
+          : null;
+
+      if (!existingThread && !existingDeskEmail) {
         logger.warn(`Blocking orphan reply for thread ${normalizedData.externalThreadId} - no parent conversation found`, {
           externalId: normalizedData.externalId,
           externalThreadId: normalizedData.externalThreadId,
@@ -252,7 +266,32 @@ export class ExternalSourceCore {
               source.channelId,
             );
       if (existingEmail) {
-        if (adapter.postprocess) {
+        if (normalizedData.emailData?.updateExisting) {
+          await emailService.updateExternalInteraction({
+            emailId: existingEmail.id,
+            subject: normalizedData.emailData.subject ?? existingEmail.subject,
+            body: normalizedData.content,
+            from: normalizedData.emailData.from ?? existingEmail.from,
+            externalThreadId: normalizedData.externalThreadId,
+            externalMessageId: normalizedData.externalId,
+            sentByUserId:
+              normalizedData.emailData.sentByUserId ?? existingEmail.sentByUserId,
+            type: normalizedData.emailData.type ?? existingEmail.type,
+            rating: normalizedData.emailData.rating ?? existingEmail.rating,
+            clientVersionName:
+              normalizedData.emailData.clientVersionName ?? existingEmail.clientVersionName,
+            clientVersionCode:
+              normalizedData.emailData.clientVersionCode ?? existingEmail.clientVersionCode,
+            occurredAt: normalizedData.metadata.timestamp,
+            ticketPriority: normalizedData.emailData.ticketPriority,
+            syncTicket: normalizedData.emailData.syncTicketOnUpdate,
+            updatedBy: source.ownerUserId,
+          });
+        }
+        if (
+          adapter.postprocess &&
+          (source.sourceType === 'ozonetel' || normalizedData.emailData?.updateExisting)
+        ) {
           await adapter.postprocess({
             conversationId: existingEmail.conversationId,
             entityId: existingEmail.id,
@@ -498,6 +537,7 @@ export class ExternalSourceCore {
           rfcMessageId: normalizedData.rfcMessageId,
           uploadedFiles: uploadedFiles,
           receivedAt: normalizedData.metadata.timestamp,
+          ...this.getEmailIntegrationFields(normalizedData),
         });
         return { conversation, message: undefined, email, isNew: false };
       } else {
@@ -550,9 +590,9 @@ export class ExternalSourceCore {
             externalThreadId: normalizedData.externalThreadId,
             externalMessageId: normalizedData.externalId,
             rfcMessageId: normalizedData.rfcMessageId,
-            emailType: EmailType.DEFAULT,
             uploadedFiles: uploadedFilesForThread,
             receivedAt: normalizedData.metadata.timestamp,
+            ...this.getEmailIntegrationFields(normalizedData),
           });
 
           return { conversation, email, isNew: false };
@@ -606,9 +646,9 @@ export class ExternalSourceCore {
             externalThreadId: normalizedData.externalThreadId,
             externalMessageId: normalizedData.externalId,
             rfcMessageId: normalizedData.rfcMessageId,
-            emailType: EmailType.DEFAULT,
             uploadedFiles: uploadedFilesForRefs,
             receivedAt: normalizedData.metadata.timestamp,
+            ...this.getEmailIntegrationFields(normalizedData),
           });
 
           return { conversation, email, isNew: false };
@@ -677,9 +717,9 @@ export class ExternalSourceCore {
           externalThreadId: normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
           rfcMessageId: normalizedData.rfcMessageId,
-          emailType: EmailType.DEFAULT,
           uploadedFiles: uploadedFiles,
           receivedAt: normalizedData.metadata.timestamp,
+          ...this.getEmailIntegrationFields(normalizedData),
         });
 
         logger.info(`[EMAIL_DUPLICATE_SUCCESS] Successfully added email to existing conversation`, {
@@ -751,8 +791,12 @@ export class ExternalSourceCore {
         rfcMessageId: normalizedData.rfcMessageId,
         ticketMetadata: normalizedData.metadata,
         uploadedFiles: uploadedFiles,
-        sourceName: source.name, // Pass sourceName for Superposition context
+        sourceName: normalizedData.emailData.skipBlockingCheck
+          ? undefined
+          : source.name,
         receivedAt: normalizedData.metadata.timestamp,
+        ...this.getEmailIntegrationFields(normalizedData),
+        ticketPriority: normalizedData.emailData.ticketPriority,
       });
       if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
         return { conversation: undefined, message: undefined, email: undefined, isNew: false, blocked: true };
@@ -790,6 +834,17 @@ export class ExternalSourceCore {
       });
       return { conversation, message, isNew: true };
     }
+  }
+
+  private getEmailIntegrationFields(normalizedData: NormalizedData) {
+    const emailData = normalizedData.emailData;
+    return {
+      emailType: emailData?.type ?? EmailType.DEFAULT,
+      sentByUserId: emailData?.sentByUserId,
+      rating: emailData?.rating,
+      clientVersionName: emailData?.clientVersionName,
+      clientVersionCode: emailData?.clientVersionCode,
+    };
   }
 
   /**

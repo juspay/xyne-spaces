@@ -42,6 +42,7 @@ import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, e
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
+import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 config()
 
 class WorkerService {
@@ -78,6 +79,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
@@ -157,6 +159,11 @@ class WorkerService {
       if (callValidationEnabled) {
         logger.info('Starting call validation worker service...');
         await callValidationWorker.start();
+      }
+
+      if (socialMediaSyncEnabled) {
+        logger.info('Starting social media review sync worker...');
+        socialMediaSyncWorker.start();
       }
 
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
@@ -351,6 +358,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
@@ -397,6 +405,10 @@ class WorkerService {
 
       if (callValidationEnabled) {
         await callValidationWorker.stop();
+      }
+
+      if (socialMediaSyncEnabled) {
+        socialMediaSyncWorker.stop();
       }
 
       if (messageClassificationEnabled) {

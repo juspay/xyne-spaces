@@ -155,6 +155,8 @@ import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailCompo
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
+import { PlainTextDeskReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
+import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -1640,18 +1642,58 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      applications?: Array<{ displayName: string; packageName: string }>;
     },
   ) => {
-    const { connector, deskType, callSource, dlEmail, slackChannelId, installedAppId, ...rest } =
-      data;
+    const {
+      connector,
+      deskType,
+      callSource,
+      dlEmail,
+      slackChannelId,
+      installedAppId,
+      applications,
+      channelType: _submittedChannelType,
+      ...rest
+    } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
+
+    if (deskType === 'SOCIAL_MEDIA') {
+      if (!applications?.length || !rest.boardId) {
+        toast.error('At least one Google Play application and a board are required');
+        return;
+      }
+      void startGooglePlayOAuth({
+        channelName: rest.name,
+        applications,
+        projectId: rest.projectId,
+        boardId: rest.boardId,
+        ...(rest.assigneeUserGroupId && {
+          assigneeUserGroupId: rest.assigneeUserGroupId,
+        }),
+        visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        platform: isElectron ? 'electron' : 'web',
+      })
+        .then(authorizationUrl => {
+          setShowCreateChannelModal(false);
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(authorizationUrl);
+          } else {
+            window.location.href = authorizationUrl;
+          }
+        })
+        .catch(error => {
+          toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
+        });
+      return;
+    }
 
     if (deskType === 'SLACK') {
       if (!slackChannelId) {
@@ -1796,6 +1838,23 @@ const SupportScreen = (): ReactElement => {
     createChannelMutation.mutate(rest);
   };
 
+  useEffect(() => {
+    const connected = searchParams.get('socialMediaOAuth') === 'success';
+    const error = searchParams.get('socialMediaError');
+    if (!connected && !error) return;
+    if (connected) toast.success('Google Play reviews connected successfully');
+    if (error) toast.error(error.replaceAll('_', ' '));
+    setSearchParams(
+      previous => {
+        const next = new URLSearchParams(previous);
+        next.delete('socialMediaOAuth');
+        next.delete('socialMediaError');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
+
   const handleTicketClick = useCallback(
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
@@ -1918,15 +1977,20 @@ const SupportScreen = (): ReactElement => {
               className:
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
-          : c.type === ChannelType.CALL
+          : c.type === ChannelType.SOCIAL_MEDIA
             ? {
-                label: 'Call',
-                className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                label: 'Social',
+                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
               }
-            : {
-                label: 'Mailbox',
-                className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-              };
+            : c.type === ChannelType.CALL
+              ? {
+                  label: 'Call',
+                  className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                }
+              : {
+                  label: 'Mailbox',
+                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                };
     const isJoined = joinedChannelIds.has(c.id);
     const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
@@ -4554,7 +4618,9 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+                  {channel?.type === ChannelType.SLACK ||
+                  channel?.type === ChannelType.APP ||
+                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
@@ -4581,7 +4647,19 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                conversationId ? (
+                  <PlainTextDeskReplyComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    replyBasePath='/integrations/social-media'
+                    placeholder='Reply to this review…'
+                    maxLength={350}
+                    trackingCategory='social-media-composer'
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SLACK ||
+                channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}

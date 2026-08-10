@@ -78,6 +78,10 @@ import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
+import {
+  hasExternalInteractionEmailChanged,
+  hasExternalInteractionTicketChanged,
+} from '@/services/externalInteractionUpdate';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 export function stripCitationBlock(text: string): string {
@@ -118,6 +122,10 @@ export interface CreateConversationWithEmailParams {
   emailType?: EmailType;
   // User who sent this email, for outbound-new flows. Null/undefined for inbound.
   sentByUserId?: string;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
+  ticketPriority?: TicketPriority;
 }
 
 export interface AddEmailToConversationParams {
@@ -133,8 +141,30 @@ export interface AddEmailToConversationParams {
   externalMessageId: string;
   rfcMessageId?: string | null;
   emailType?: EmailType;
+  sentByUserId?: string;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
+}
+
+export interface UpdateExternalInteractionParams {
+  emailId: string;
+  subject: string;
+  body: string;
+  from: string;
+  externalThreadId: string;
+  externalMessageId: string;
+  type: EmailType;
+  sentByUserId?: string | null;
+  rating?: number | null;
+  clientVersionName?: string | null;
+  clientVersionCode?: string | null;
+  occurredAt: Date;
+  ticketPriority?: TicketPriority;
+  syncTicket?: boolean;
+  updatedBy?: string | null;
 }
 
 export interface CreateConversationFromEmailParams {
@@ -401,6 +431,138 @@ export class EmailService {
         logger.error('[EmailService] Failed to log Vespa insertion error to database:', dbError);
       }
     });
+  }
+
+  async updateExternalInteraction(
+    params: UpdateExternalInteractionParams,
+  ) {
+    const currentEmail = await this.prisma.email.findUnique({
+      where: { id: params.emailId },
+    });
+    if (!currentEmail) throw new Error(`Email ${params.emailId} not found`);
+
+    const currentTicket = params.syncTicket
+      ? await this.prisma.ticket.findFirst({
+          where: { conversationId: currentEmail.conversationId },
+        })
+      : null;
+
+    const emailChanged = hasExternalInteractionEmailChanged(currentEmail, {
+      subject: params.subject,
+      body: params.body,
+      from: params.from,
+      externalThreadId: params.externalThreadId,
+      externalMessageId: params.externalMessageId,
+      type: params.type,
+      sentByUserId: params.sentByUserId ?? null,
+      rating: params.rating ?? null,
+      clientVersionName: params.clientVersionName ?? null,
+      clientVersionCode: params.clientVersionCode ?? null,
+      createdAt: params.occurredAt,
+    });
+    const desiredPriority = params.ticketPriority ?? currentTicket?.priority;
+    const ticketChanged = hasExternalInteractionTicketChanged(currentTicket, {
+      title: params.subject,
+      description: params.body,
+      priority: desiredPriority,
+    });
+
+    if (!emailChanged && !ticketChanged) return currentEmail;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const email = emailChanged
+        ? await tx.email.update({
+            where: { id: params.emailId },
+            data: {
+              subject: params.subject,
+              body: params.body,
+              from: params.from,
+              externalThreadId: params.externalThreadId,
+              externalMessageId: params.externalMessageId,
+              type: params.type,
+              sentByUserId: params.sentByUserId,
+              rating: params.rating,
+              clientVersionName: params.clientVersionName,
+              clientVersionCode: params.clientVersionCode,
+              createdAt: params.occurredAt,
+            },
+          })
+        : currentEmail;
+
+      if (!currentTicket || !ticketChanged) return { email, ticket: null };
+
+      const ticket = await tx.ticket.update({
+        where: { id: currentTicket.id },
+        data: {
+          title: params.subject,
+          description: params.body,
+          ...(desiredPriority && { priority: desiredPriority }),
+          ...(params.updatedBy && { updatedBy: params.updatedBy }),
+        },
+      });
+      await syncConversationTicketMdFromPrismaTicket(tx, ticket);
+      return { email, ticket };
+    });
+
+    if (emailChanged) {
+      this.pushVespaJobForMail(
+        result.email.id,
+        params.updatedBy ?? currentTicket?.updatedBy ?? currentEmail.from,
+        currentEmail.workspaceId ?? undefined,
+      ).catch((error) => {
+        logger.error('[EmailService] Failed to reindex updated external interaction', {
+          emailId: result.email.id,
+          error,
+        });
+      });
+    }
+
+    if (result.ticket && currentTicket) {
+      this.pushVespaJobForTicket(
+        result.ticket.id,
+        params.updatedBy ?? currentTicket.updatedBy,
+        result.ticket.workspaceId,
+      ).catch((error) => {
+        logger.error('[EmailService] Failed to reindex updated external ticket', {
+          ticketId: result.ticket!.id,
+          error,
+        });
+      });
+      void messageMetadataService
+        .syncInitialMessageMd(result.ticket.conversationId)
+        .catch((error) => {
+          logger.warn('[EmailService] Failed to sync edited external ticket metadata', {
+            ticketId: result.ticket!.id,
+            error,
+          });
+        });
+      void emitTicketUpdated({
+        ticket: result.ticket,
+        changes: {
+          ...(currentTicket.title !== result.ticket.title && {
+            title: {
+              previousValue: currentTicket.title,
+              newValue: result.ticket.title,
+            },
+          }),
+          ...(currentTicket.description !== result.ticket.description && {
+            description: {
+              previousValue: currentTicket.description,
+              newValue: result.ticket.description,
+            },
+          }),
+          ...(currentTicket.priority !== result.ticket.priority && {
+            priority: {
+              previousValue: currentTicket.priority,
+              newValue: result.ticket.priority,
+            },
+          }),
+        },
+        performedById: params.updatedBy ?? null,
+      });
+    }
+
+    return result.email;
   }
 
   /**
@@ -919,6 +1081,10 @@ export class EmailService {
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
+      rating,
+      clientVersionName,
+      clientVersionCode,
+      ticketPriority,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1041,7 +1207,7 @@ export class EmailService {
     }
 
     // Derive ticket priority outside the transaction so we can look up the SLA policy.
-    const ticketPriorityForSla = derivePriorityFromSubject(emailSubject ?? '');
+    const ticketPriorityForSla = ticketPriority ?? derivePriorityFromSubject(emailSubject ?? '');
     const slaResolutionDue = await this.getSlaResolutionDue(
       boardId,
       ticketPriorityForSla,
@@ -1084,6 +1250,9 @@ export class EmailService {
           externalMessageId,
           ...(sentByUserId && { sentByUserId }),
           ...(normalizedRfcMessageId && { rfcMessageId: normalizedRfcMessageId }),
+          ...(rating != null && { rating }),
+          ...(clientVersionName && { clientVersionName }),
+          ...(clientVersionCode && { clientVersionCode }),
           ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,
       });
@@ -1091,7 +1260,7 @@ export class EmailService {
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
       const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
-      const ticketPriority = derivePriorityFromSubject(emailSubject);
+      const resolvedTicketPriority = ticketPriority ?? derivePriorityFromSubject(emailSubject);
       const createdTicket = await tx.ticket.create({
         data: {
           title: ticketTitle,
@@ -1107,7 +1276,7 @@ export class EmailService {
           emailCount: 1,
           lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
-          priority: ticketPriority,
+          priority: resolvedTicketPriority,
           ticketType: BaseTicketType.DESK,
           ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroup && { userGroupId: groupId }),
@@ -1313,6 +1482,10 @@ export class EmailService {
         externalMessageId,
         rfcMessageId,
         emailType = EmailType.DEFAULT,
+        sentByUserId,
+        rating,
+        clientVersionName,
+        clientVersionCode,
         uploadedFiles = [],
         receivedAt,
       } = params;
@@ -1346,6 +1519,10 @@ export class EmailService {
         externalThreadId: externalThreadId,
         externalMessageId: externalMessageId,
         rfcMessageId,
+        sentByUserId,
+        rating,
+        clientVersionName,
+        clientVersionCode,
         ...(receivedAt && { createdAt: receivedAt }),
       };
 

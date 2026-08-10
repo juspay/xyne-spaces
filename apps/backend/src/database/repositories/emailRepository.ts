@@ -23,6 +23,9 @@ export class EmailRepository {
     externalMessageId: string;
     sentByUserId?: string;
     rfcMessageId?: string | null;
+    rating?: number;
+    clientVersionName?: string;
+    clientVersionCode?: string;
     createdAt?: Date;
   }): Promise<Email> {
     const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
@@ -57,6 +60,9 @@ export class EmailRepository {
         externalMessageId: data.externalMessageId,
         ...(data.sentByUserId && { sentByUserId: data.sentByUserId }),
         ...(rfcMessageId && { rfcMessageId }),
+        ...(data.rating != null && { rating: data.rating }),
+        ...(data.clientVersionName && { clientVersionName: data.clientVersionName }),
+        ...(data.clientVersionCode && { clientVersionCode: data.clientVersionCode }),
         ...(data.createdAt && { createdAt: data.createdAt }),
       },
     });
