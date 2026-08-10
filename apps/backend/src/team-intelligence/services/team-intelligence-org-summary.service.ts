@@ -102,73 +102,73 @@ async function llmGenerate(
     return await withTeamIntelligenceLlmSlot(
       { scope: 'org', purpose: options.purpose, promptChars: prompt.length },
       async () => {
-    const response = await llmClient.generateStream({
-      model: appConfig.teamIntelligence.model,
-      messages: [createUserMessage(prompt)],
-    });
-    const finalMessagePromise = response.finalMessage.catch((error) => {
-      logger.warn('[TEAM-INTEL-ORG-SUMMARY] Streaming final message accumulation failed', {
-        purpose: options.purpose,
-        error,
-      });
-      return null;
-    });
-    let chunkCount = 0;
-    let contentChunkCount = 0;
-    let thinkingChunkCount = 0;
-    let streamedThinkingChars = 0;
-    let finalFinishReason: string | undefined;
-    let streamedContent = '';
-    let streamError: unknown = null;
-    try {
-      for await (const chunk of response.stream) {
-        chunkCount += 1;
-        if (chunk.type === 'content' && chunk.content) {
-          contentChunkCount += 1;
-          streamedContent += chunk.content;
+        const response = await llmClient.generateStream({
+          model: appConfig.teamIntelligence.model,
+          messages: [createUserMessage(prompt)],
+        });
+        const finalMessagePromise = response.finalMessage.catch((error) => {
+          logger.warn('[TEAM-INTEL-ORG-SUMMARY] Streaming final message accumulation failed', {
+            purpose: options.purpose,
+            error,
+          });
+          return null;
+        });
+        let chunkCount = 0;
+        let contentChunkCount = 0;
+        let thinkingChunkCount = 0;
+        let streamedThinkingChars = 0;
+        let finalFinishReason: string | undefined;
+        let streamedContent = '';
+        let streamError: unknown = null;
+        try {
+          for await (const chunk of response.stream) {
+            chunkCount += 1;
+            if (chunk.type === 'content' && chunk.content) {
+              contentChunkCount += 1;
+              streamedContent += chunk.content;
+            }
+            if (chunk.type === 'thinking' && chunk.thinking) {
+              thinkingChunkCount += 1;
+              streamedThinkingChars += chunk.thinking.length;
+            }
+            if (chunk.metadata?.finishReason) {
+              finalFinishReason = chunk.metadata.finishReason;
+            }
+            if (chunk.type === 'error' && chunk.error) {
+              throw new Error(chunk.error);
+            }
+          }
+        } catch (error) {
+          streamError = error;
         }
-        if (chunk.type === 'thinking' && chunk.thinking) {
-          thinkingChunkCount += 1;
-          streamedThinkingChars += chunk.thinking.length;
+        const finalMessage = await finalMessagePromise;
+        const content = (finalMessage?.content || streamedContent).trim();
+        if (streamError && content) {
+          logger.warn('[TEAM-INTEL-ORG-SUMMARY] Using streamed content after stream error', {
+            purpose: options.purpose,
+            durationMs: Date.now() - startedAt,
+            responseChars: content.length,
+            error: streamError,
+          });
         }
-        if (chunk.metadata?.finishReason) {
-          finalFinishReason = chunk.metadata.finishReason;
+        if (streamError && !content) {
+          throw streamError;
         }
-        if (chunk.type === 'error' && chunk.error) {
-          throw new Error(chunk.error);
+        if (!content) {
+          throw new Error(
+            `LLM returned an empty response (chunks=${chunkCount}, contentChunks=${contentChunkCount}, thinkingChunks=${thinkingChunkCount}, thinkingChars=${streamedThinkingChars}, finishReason=${finalFinishReason ?? 'unknown'})`
+          );
         }
-      }
-    } catch (error) {
-      streamError = error;
-    }
-    const finalMessage = await finalMessagePromise;
-    const content = (finalMessage?.content || streamedContent).trim();
-    if (streamError && content) {
-      logger.warn('[TEAM-INTEL-ORG-SUMMARY] Using streamed content after stream error', {
-        purpose: options.purpose,
-        durationMs: Date.now() - startedAt,
-        responseChars: content.length,
-        error: streamError,
-      });
-    }
-    if (streamError && !content) {
-      throw streamError;
-    }
-    if (!content) {
-      throw new Error(
-        `LLM returned an empty response (chunks=${chunkCount}, contentChunks=${contentChunkCount}, thinkingChunks=${thinkingChunkCount}, thinkingChars=${streamedThinkingChars}, finishReason=${finalFinishReason ?? 'unknown'})`
-      );
-    }
-    logger.info('[TEAM-INTEL-ORG-SUMMARY] LLM call completed', {
-      purpose: options.purpose,
-      durationMs: Date.now() - startedAt,
-      chunkCount,
-      contentChunkCount,
-      thinkingChunkCount,
-      finishReason: finalFinishReason,
-      responseChars: content.length,
-    });
-    return content;
+        logger.info('[TEAM-INTEL-ORG-SUMMARY] LLM call completed', {
+          purpose: options.purpose,
+          durationMs: Date.now() - startedAt,
+          chunkCount,
+          contentChunkCount,
+          thinkingChunkCount,
+          finishReason: finalFinishReason,
+          responseChars: content.length,
+        });
+        return content;
       }
     );
   } catch (error) {
@@ -235,9 +235,15 @@ function buildSectionPrompt(
     '- Write naturally, for example: "Mettle/Pragati team is blocked on leadership taxonomy confirmation" or "Ananya Rao in Xyne shipped approval-card rendering". Do not use bracketed labels as the only team context.',
     '- When a supplied team payload includes member names, include the relevant individual name for ownership, achievement, blocker, or decision context. If no individual is clear, name the team.',
     '- Omit routine completed work, low-impact activity, duplicated team-level detail, and medium/low items unless they are required to explain a blocker, critical movement, ownership gap, dependency, or founder action.',
-    '- Return every evidence-backed item that meets the founder-significance rules. Do not add filler, but do not omit valid critical/high/blocker/risk points just to keep the list short.',
+    '- Apply a mandatory importance gate: include an insight only when omitting it could cause founders or leadership to miss a material organization outcome, strategic movement, significant change, blocker, risk, unresolved decision, cross-team dependency, ownership/capability/load concern, or concrete leadership action.',
+    '- Optimize for decision value, not coverage. More teams or more source data must not produce more output by itself.',
+    '- Rank candidates by organization-wide impact, urgency, evidence strength, and actionability; merge overlapping team signals into one organization-level insight.',
+    '- Completed work is important only when it creates a material organization outcome, advances a strategic bet, changes risk, unlocks other teams, or warrants founder recognition; ordinary delivery activity is not automatically founder-significant.',
+    '- Treat missing data as one consolidated insight only when it materially changes confidence or requires corrective action. Never generate multiple bullets from the same visibility gap.',
+    '- Unless this section explicitly requires fewer, return at most 3 top-level insight items per array. This cap does not apply to teamSignalRefs, contributor IDs, affected-team IDs, or other reference arrays inside a selected insight.',
+    '- Empty or short output is correct when nothing crosses the importance threshold. Never fill space or represent every team for completeness.',
     '- Order every array by leadership urgency: CRITICAL/HIGH first, then BLOCKED/OPEN/STALLED/REGRESSING, then MEDIUM. LOW should usually be omitted.',
-    '- Keep executive narrative under 300 words and each bullet/detail sentence concise.',
+    '- Keep executive narrative under 150 words, lead with the most important organization conclusion, and keep each bullet/detail sentence concise.',
     '- Do not include immutable identity, processingCoverage, or unrelated sections in this fragment.',
     '',
     `SECTION: ${section.name}`,
@@ -749,7 +755,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
           teamSummaryId: team.teamSummaryId,
           signalId,
           reason: 'Source evidence from completed team summary',
-      }));
+        }));
     })
   );
   const sectionFallbackRefs = new Map<string, OrgTeamSignalRef[]>();
@@ -999,7 +1005,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       instructions: [
         '- Return one qualitative organization momentum assessment with simple initiative title arrays.',
         '- Distinguish meaningful progress from activity volume.',
-        '- Include every related initiative title that is materially supported by the evidence.',
+        '- Include only the most decision-relevant initiative titles, ranked by organization impact; omit routine or redundant titles.',
       ],
       outputShape: {
         momentum: 'FORWARD|FORWARD_WITH_BLOCKERS|MIXED|FLAT|REGRESSING|INSUFFICIENT_BASELINE',
@@ -1021,8 +1027,8 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       ),
       instructions: [
         '- Return qualitative alignment status plus simple decision facts; do not create final schema IDs.',
-        '- Include every material decision, prioritizing unresolved, irreversible, conflicting, or founder-input decisions.',
-        '- Include every material open question supported by the evidence.',
+        '- Include only the highest-impact decisions, prioritizing unresolved, irreversible, conflicting, or founder-input decisions.',
+        '- Include only open questions whose resolution can materially change direction, risk, ownership, or execution.',
       ],
       outputShape: {
         alignmentStatus: 'ALIGNED|PARTIALLY_ALIGNED|MISALIGNED|INSUFFICIENT_EVIDENCE',
@@ -1047,7 +1053,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       instructions: [
         '- Return qualitative arrays for overloadedTeams, teamsNeedingSupport, capabilityGaps, ownershipConcentrationRisks, and resourceImbalances.',
         '- Describe observable system conditions, not team/person judgment.',
-        '- Include every founder-actionable load, support, capability, ownership, or resource concern. Omit unsupported or routine observations.',
+        '- Include only the most consequential founder-actionable load, support, capability, ownership, or resource concerns. Omit unsupported, routine, or lower-impact observations.',
       ],
       outputShape: {
         overloadedTeams: [
@@ -1137,7 +1143,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       ),
       instructions: [
         '- Return qualitative capability mix arrays; these are capability coverage/gap observations, not team ratings.',
-        '- Include every material capability signal. Prioritize missing capabilities, concentration risks, and strengths relevant to critical bets.',
+        '- Include only the most material capability signals. Prioritize missing capabilities, concentration risks, and strengths relevant to critical bets.',
       ],
       outputShape: {
         strongCapabilities: [itemShape],
@@ -1159,7 +1165,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       ),
       instructions: [
         '- Return qualitative touch-level arrays for teams. Low-touch means less intervention required now, not unimportant.',
-        '- Include every team whose touch level is materially supported by the evidence. Prioritize high-touch, medium-touch, and insufficient-evidence teams before low-touch teams.',
+        '- Include only teams whose required leadership touch is consequential. Prioritize high-touch and medium-touch teams; include insufficient-evidence teams only when the visibility gap itself creates material risk. Omit routine low-touch teams.',
       ],
       outputShape: {
         highTouch: [
@@ -1231,7 +1237,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       ),
       instructions: [
         '- Return qualitative bottleneck arrays separated into peopleOrOwnership, process, platform, and crossTeamDependencies.',
-        '- Include every bottleneck that can change organization outcomes.',
+        '- Include only the highest-impact bottlenecks that can change organization outcomes.',
       ],
       outputShape: {
         peopleOrOwnership: [itemShape],
@@ -1260,7 +1266,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       ),
       instructions: [
         '- Return qualitative decision agenda arrays. Include only decisions supported by current signals.',
-        '- Include every decision agenda item supported by current signals. Prioritize irreversible, conflicting, ownerless, delayed, or budget-impacting decisions.',
+        '- Include only decision agenda items that can materially change outcomes. Prioritize irreversible, conflicting, ownerless, delayed, or budget-impacting decisions.',
       ],
       outputShape: {
         irreversibleDecisions: [decisionFactShape],
@@ -1280,7 +1286,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       ),
       instructions: [
         '- Return qualitative leadership leverage arrays tied to observed source signals.',
-        '- Include every concrete leverage point tied to observed source signals. Omit nice-to-know observations that do not change a founder or manager decision.',
+        '- Include only the highest-leverage points tied to observed source signals. Omit nice-to-know observations that do not change a founder or manager decision.',
       ],
       outputShape: {
         budgetsAndApprovals: [itemShape],
@@ -1303,7 +1309,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       instructions: [
         '- Return one qualitative organization next-leap assessment.',
         '- State what is wrong, what comes next, and the next meaningful leap without unsupported facts.',
-        '- Include every people/process/platform/connections/successSignals item that is materially supported by the evidence.',
+        '- Include only the most decision-relevant people/process/platform/connections/successSignals items supported by the evidence.',
       ],
       outputShape: {
         whatNext: 'string',
@@ -1349,7 +1355,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       source: buildOrgSectionSource(input, ['dataGaps']),
       instructions: [
         '- Return only an items array of evidence/data gaps that limit organization interpretation.',
-        '- Include every evidence/data gap that materially reduces founder confidence.',
+        '- Include only evidence/data gaps that materially change founder confidence or require corrective action.',
       ],
       outputShape: { items: [{ gap: 'string', impact: 'string' }] },
     },
@@ -1357,11 +1363,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
   const whoRaw = extractionRaw.who;
   const whoIsDoingWhat = simpleRecords(whoRaw)
     .map((fact, index): OrgWorkstream | null => {
-      const refs = refsFromFact(
-        fact,
-        'Evidence for organization initiative',
-        'who-is-doing-what'
-      );
+      const refs = refsFromFact(fact, 'Evidence for organization initiative', 'who-is-doing-what');
       const teamIds = [
         ...new Set([...teamIdsFromFact(fact, validTeamIds), ...teamIdsFromRefs(refs)]),
       ];
@@ -2062,7 +2064,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       '- executiveSummary must be concise, qualitative, and founder-ready. It must not be empty/default when priorSections contains critical work, blockers, risks, or actions.',
       '- Every executiveSummary list item and every managerSummaryBullets.text sentence must name the relevant team(s), and must name the relevant individual(s) when currentTeamSignals includes member/owner names.',
       '- Write team/person context inside the sentence itself, not only in contributorTeamIds or teamSignalRefs.',
-      '- managerSummaryBullets must contain ONLY the 7 to 8 most important, evidence-backed founder/leadership takeaways across the entire organization — the things a founder absolutely must see today. Select only critical blockers, major risks, shipped milestones, and high-leverage actions. Do NOT emit one bullet per team or per routine update; merge related points and drop low-signal filler entirely. Cap at 8 bullets total.',
+      '- managerSummaryBullets must contain only the 3 to 5 most important, evidence-backed founder/leadership takeaways across the organization — facts whose omission could change a founder decision or understanding. Select material blockers, risks, outcomes, strategic movement, unresolved decisions, and high-leverage actions. Do not emit one bullet per team or routine update; merge related points. Return fewer than 3 when evidence is weak and never exceed 5.',
     ],
     outputShape: {
       overallConfidence: 'HIGH|MEDIUM|LOW',
@@ -2084,7 +2086,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
           contributorTeamIds: ['exact team id'],
           teamSignalRefs: refShape,
         },
-      ], // max 8 bullets — only the most important founder-level takeaways
+      ], // max 5 bullets — only decision-relevant founder-level takeaways
     },
     priorSections: compactForPriorSections({
       whoIsDoingWhat: rankedWhoIsDoingWhat,

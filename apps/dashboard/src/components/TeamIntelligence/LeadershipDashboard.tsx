@@ -342,7 +342,16 @@ const itemBadges = (item: LeadershipItem): Array<{ label: string; tone: Tone }> 
     });
   }
   if (item.timeHorizon) badges.push({ label: formatLabel(item.timeHorizon), tone: 'info' });
-  return badges.slice(0, 3);
+  const availableTones: Tone[] = ['danger', 'warn', 'info', 'accent', 'good', 'neutral'];
+  const usedTones = new Set<Tone>();
+
+  return badges.slice(0, 3).map(badge => {
+    const tone = usedTones.has(badge.tone)
+      ? (availableTones.find(candidate => !usedTones.has(candidate)) ?? badge.tone)
+      : badge.tone;
+    usedTones.add(tone);
+    return { ...badge, tone };
+  });
 };
 
 const firstNonEmpty = (...values: Array<string | undefined | null>): string =>
@@ -384,7 +393,7 @@ const Pill = ({
 }): ReactElement => (
   <span
     className={cn(
-      'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium',
+      'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium',
       toneClassName[tone],
     )}
   >
@@ -660,12 +669,12 @@ const ExpandableList = ({
                 )}
               />
               <div className='min-w-0 flex-1'>
-                <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5'>
-                  <h4 className='text-[15px] font-medium leading-snug text-foreground/90 sm:text-base'>
+                <div className='flex items-start justify-between gap-3'>
+                  <h4 className='min-w-0 flex-1 text-[15px] font-medium leading-snug text-foreground/90 sm:text-base'>
                     {title}
                   </h4>
                   {badges.length > 0 ? (
-                    <div className='flex flex-wrap items-center gap-1'>
+                    <div className='ml-auto flex max-w-[55%] shrink-0 flex-nowrap items-center justify-end gap-1 overflow-x-auto'>
                       {badges.map(badge => (
                         <Pill key={`${title}-${badge.label}`} tone={badge.tone}>
                           {badge.label}
@@ -743,6 +752,19 @@ const CalloutQuote = ({
 };
 
 const ItemGrid = ExpandableList;
+
+const bulletCategoryTone = (category: string): Tone => {
+  const normalized = category.trim().toUpperCase();
+  if (normalized.includes('ACHIEVEMENT') || normalized.includes('SUCCESS')) return 'good';
+  if (normalized.includes('MILESTONE') || normalized.includes('PROGRESS')) return 'info';
+  if (normalized.includes('LEARNED') || normalized.includes('INSIGHT')) return 'accent';
+  if (normalized.includes('BLOCKER') || normalized.includes('WARNING')) return 'warn';
+  if (normalized.includes('RISK') || normalized.includes('FAILURE')) return 'danger';
+
+  const fallbackTones: Tone[] = ['accent', 'info', 'good', 'warn', 'danger'];
+  const hash = [...normalized].reduce((value, character) => value + character.charCodeAt(0), 0);
+  return fallbackTones[hash % fallbackTones.length]!;
+};
 
 const StringList = ({
   items,
@@ -1049,12 +1071,16 @@ const BulletBrief = ({ request }: { request: SectionRequest }): ReactElement | n
                   )}
                 />
                 <div className='min-w-0 flex-1'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <h4 className='text-sm font-medium leading-snug text-foreground/90 sm:text-[15px]'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <h4 className='min-w-0 flex-1 text-sm font-medium leading-snug text-foreground/90 sm:text-[15px]'>
                       {bullet.title}
                     </h4>
                     {bullet.category ? (
-                      <Pill tone='accent'>{formatLabel(bullet.category)}</Pill>
+                      <div className='ml-auto shrink-0'>
+                        <Pill tone={bulletCategoryTone(bullet.category)}>
+                          {formatLabel(bullet.category)}
+                        </Pill>
+                      </div>
                     ) : null}
                   </div>
                   {isExpanded ? (

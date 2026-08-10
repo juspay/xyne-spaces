@@ -8,7 +8,7 @@ import {
 import { teamIntelligenceGoalGroupingService } from '@/services/teamIntelligenceGoalGroupingService';
 
 export class TeamIntelligenceOrgController {
-  /** Groups teams by their highest active goal track and the previous month's evidence. */
+  /** Groups teams by their highest active goal track and all available evidence. */
   getTeamGoalGroups = async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user?.workspaceId;

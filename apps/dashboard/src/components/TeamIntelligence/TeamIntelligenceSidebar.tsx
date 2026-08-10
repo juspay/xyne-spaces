@@ -217,12 +217,6 @@ const TeamIntelligenceSidebar = ({
         <p className='px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
           Manager Briefs
         </p>
-        {data ? (
-          <p className='px-2 pb-1 text-[10px] text-muted-foreground'>
-            Goal alignment · {data.from} to {data.to}
-          </p>
-        ) : null}
-
         {isLoading ? (
           <p className='px-2 py-3 text-xs text-muted-foreground'>Grouping teams by goals…</p>
         ) : isError || !data ? (

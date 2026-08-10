@@ -13,8 +13,6 @@ export interface TeamGoalGroupTeam extends MettleTeam {
 }
 
 export interface TeamGoalGroupsResponse {
-  from: string;
-  to: string;
   totalTeams: number;
   groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
   warnings: TeamGoalGroupsWarning[];
@@ -43,14 +41,6 @@ const normalizeTrack = (track: unknown): '10X' | '5X' | '2X' | null => {
 const highestTrack = (goals: MettleTeamGoal[]): '10X' | '5X' | '2X' | null => {
   const tracks = new Set(goals.map((goal) => normalizeTrack(goal.track)).filter(Boolean));
   return GROUP_ORDER.find((track) => tracks.has(track)) ?? null;
-};
-
-export const previousMonthRange = (now: Date): { from: Date; to: Date } => {
-  const to = new Date(now);
-  const from = new Date(now);
-  from.setUTCMonth(from.getUTCMonth() - 1);
-  from.setUTCHours(0, 0, 0, 0);
-  return { from, to };
 };
 
 export const classifyTeamGoalGroup = (
@@ -103,8 +93,7 @@ const mapWithConcurrency = async <T, U>(
 };
 
 class TeamIntelligenceGoalGroupingService {
-  async getTeamGoalGroups(workspaceId: string, now = new Date()): Promise<TeamGoalGroupsResponse> {
-    const { from, to } = previousMonthRange(now);
+  async getTeamGoalGroups(workspaceId: string): Promise<TeamGoalGroupsResponse> {
     const { teams } = await mettleTeamSyncService.fetchTeamsFromMettle();
     const sortedTeams = [...(teams ?? [])].sort((a, b) => a.name.localeCompare(b.name));
     const teamIds = sortedTeams.map((team) => team.id);
@@ -139,7 +128,6 @@ class TeamIntelligenceGoalGroupingService {
             where: {
               workspaceId,
               teamId: { in: teamIds },
-              reportDate: { gte: from, lte: to },
               status: 'COMPLETED',
               contentUrl: { not: null },
             },
@@ -198,8 +186,6 @@ class TeamIntelligenceGoalGroupingService {
     }
 
     return {
-      from: from.toISOString().slice(0, 10),
-      to: to.toISOString().slice(0, 10),
       totalTeams: sortedTeams.length,
       groups,
       warnings,

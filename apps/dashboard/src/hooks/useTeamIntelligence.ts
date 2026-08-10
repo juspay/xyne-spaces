@@ -52,7 +52,7 @@ export function useTeams(): UseQueryResult<TeamsResponse> {
 
 export function useTeamGoalGroups(): UseQueryResult<TeamGoalGroupsResponse> {
   return useQuery<TeamGoalGroupsResponse>({
-    queryKey: ['team-intelligence', 'team-goal-groups', 'previous-month', 'v2'],
+    queryKey: ['team-intelligence', 'team-goal-groups', 'all-evidence', 'v3'],
     queryFn: getTeamGoalGroups,
     ...teamIntelligenceQueryOptions,
   });

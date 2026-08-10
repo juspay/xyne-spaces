@@ -381,8 +381,6 @@ export interface TeamGoalGroupTeam extends Team {
 }
 
 export interface TeamGoalGroupsResponse {
-  from: string;
-  to: string;
   totalTeams: number;
   groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
   warnings: Array<{

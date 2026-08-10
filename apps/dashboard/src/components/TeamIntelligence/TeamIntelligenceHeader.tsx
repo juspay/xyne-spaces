@@ -65,7 +65,6 @@ const TeamIntelligenceHeader = ({
     { value: TimeRange.THIS_WEEK, label: 'This Week' },
     { value: TimeRange.LAST_WEEK, label: 'Last Week' },
     { value: TimeRange.THIS_MONTH, label: 'This Month' },
-    { value: TimeRange.PREVIOUS_MONTH, label: 'Previous Month' },
   ];
 
   return (

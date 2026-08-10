@@ -204,73 +204,73 @@ async function llmGenerate(
     return await withTeamIntelligenceLlmSlot(
       { scope: 'user', purpose: options.purpose, promptChars: prompt.length },
       async () => {
-    const response = await llmClient.generateStream({
-      model: appConfig.teamIntelligence.model,
-      messages: [createUserMessage(prompt)],
-    });
-    const finalMessagePromise = response.finalMessage.catch((error) => {
-      logger.warn('[TEAM-INTEL-SUMMARY] Streaming final message accumulation failed', {
-        purpose: options.purpose,
-        error,
-      });
-      return null;
-    });
-    let chunkCount = 0;
-    let contentChunkCount = 0;
-    let thinkingChunkCount = 0;
-    let streamedThinkingChars = 0;
-    let finalFinishReason: string | undefined;
-    let streamedContent = '';
-    let streamError: unknown = null;
-    try {
-      for await (const chunk of response.stream) {
-        chunkCount += 1;
-        if (chunk.type === 'content' && chunk.content) {
-          contentChunkCount += 1;
-          streamedContent += chunk.content;
+        const response = await llmClient.generateStream({
+          model: appConfig.teamIntelligence.model,
+          messages: [createUserMessage(prompt)],
+        });
+        const finalMessagePromise = response.finalMessage.catch((error) => {
+          logger.warn('[TEAM-INTEL-SUMMARY] Streaming final message accumulation failed', {
+            purpose: options.purpose,
+            error,
+          });
+          return null;
+        });
+        let chunkCount = 0;
+        let contentChunkCount = 0;
+        let thinkingChunkCount = 0;
+        let streamedThinkingChars = 0;
+        let finalFinishReason: string | undefined;
+        let streamedContent = '';
+        let streamError: unknown = null;
+        try {
+          for await (const chunk of response.stream) {
+            chunkCount += 1;
+            if (chunk.type === 'content' && chunk.content) {
+              contentChunkCount += 1;
+              streamedContent += chunk.content;
+            }
+            if (chunk.type === 'thinking' && chunk.thinking) {
+              thinkingChunkCount += 1;
+              streamedThinkingChars += chunk.thinking.length;
+            }
+            if (chunk.metadata?.finishReason) {
+              finalFinishReason = chunk.metadata.finishReason;
+            }
+            if (chunk.type === 'error' && chunk.error) {
+              throw new Error(chunk.error);
+            }
+          }
+        } catch (error) {
+          streamError = error;
         }
-        if (chunk.type === 'thinking' && chunk.thinking) {
-          thinkingChunkCount += 1;
-          streamedThinkingChars += chunk.thinking.length;
+        const finalMessage = await finalMessagePromise;
+        const content = (finalMessage?.content || streamedContent).trim();
+        if (streamError && content) {
+          logger.warn('[TEAM-INTEL-SUMMARY] Using streamed content after stream error', {
+            purpose: options.purpose,
+            durationMs: Date.now() - startedAt,
+            responseChars: content.length,
+            error: streamError,
+          });
         }
-        if (chunk.metadata?.finishReason) {
-          finalFinishReason = chunk.metadata.finishReason;
+        if (streamError && !content) {
+          throw streamError;
         }
-        if (chunk.type === 'error' && chunk.error) {
-          throw new Error(chunk.error);
+        if (!content) {
+          throw new Error(
+            `LLM returned an empty response (chunks=${chunkCount}, contentChunks=${contentChunkCount}, thinkingChunks=${thinkingChunkCount}, thinkingChars=${streamedThinkingChars}, finishReason=${finalFinishReason ?? 'unknown'})`
+          );
         }
-      }
-    } catch (error) {
-      streamError = error;
-    }
-    const finalMessage = await finalMessagePromise;
-    const content = (finalMessage?.content || streamedContent).trim();
-    if (streamError && content) {
-      logger.warn('[TEAM-INTEL-SUMMARY] Using streamed content after stream error', {
-        purpose: options.purpose,
-        durationMs: Date.now() - startedAt,
-        responseChars: content.length,
-        error: streamError,
-      });
-    }
-    if (streamError && !content) {
-      throw streamError;
-    }
-    if (!content) {
-      throw new Error(
-        `LLM returned an empty response (chunks=${chunkCount}, contentChunks=${contentChunkCount}, thinkingChunks=${thinkingChunkCount}, thinkingChars=${streamedThinkingChars}, finishReason=${finalFinishReason ?? 'unknown'})`
-      );
-    }
-    logger.info('[TEAM-INTEL-SUMMARY] LLM call completed', {
-      purpose: options.purpose,
-      durationMs: Date.now() - startedAt,
-      chunkCount,
-      contentChunkCount,
-      thinkingChunkCount,
-      finishReason: finalFinishReason,
-      responseChars: content.length,
-    });
-    return content;
+        logger.info('[TEAM-INTEL-SUMMARY] LLM call completed', {
+          purpose: options.purpose,
+          durationMs: Date.now() - startedAt,
+          chunkCount,
+          contentChunkCount,
+          thinkingChunkCount,
+          finishReason: finalFinishReason,
+          responseChars: content.length,
+        });
+        return content;
       }
     );
   } catch (error) {
@@ -722,12 +722,16 @@ function buildEvidenceChunkPrompt(input: {
 
   return [
     'You are extracting detailed, evidence-backed facts from one chunk of raw daily Team Intelligence data.',
-    'This is NOT the final manager brief. Preserve detail so a later synthesis step can answer manager questions accurately.',
+    'This is NOT the final manager brief. Preserve enough concrete detail for later synthesis, but only for facts that pass the importance gate below.',
     '',
     'Rules:',
     '- Use only the supplied chunk.',
     '- Every extracted fact must cite exact evidenceId values from the chunk.',
-    '- Keep concrete names, projects, statuses, dates, blockers, decisions, dependencies, risks, and next steps.',
+    '- Preserve concrete names, projects, statuses, dates, blockers, decisions, dependencies, risks, and next steps only when they could materially change a manager decision or understanding.',
+    '- Optimize for signal, not coverage. Large input volume must not produce a long inventory of routine activity.',
+    '- Keep only candidate facts involving a meaningful outcome, goal movement, material change, blocker, risk, decision, dependency, ownership/load concern, or required action.',
+    '- Omit routine updates, raw activity counts, minor implementation detail, social chatter, repeated evidence, and facts whose absence would not change a manager action or conclusion.',
+    '- Rank candidates by impact, urgency, and evidence strength. Return at most 5 items in each fact array; fewer or none is preferred when evidence is not important.',
     '- Do not judge performance. Describe visible work state and evidence.',
     '- If the chunk has no useful manager signal, return empty arrays rather than filler.',
     '',
@@ -878,9 +882,10 @@ function buildDigestMergePrompt(input: {
 
   return [
     'You are merging detailed Team Intelligence evidence digests so a final manager brief can fit in one prompt.',
-    'Preserve concrete facts, exact evidenceId references, names, dates, blockers, decisions, dependencies, risks, and next steps.',
+    'Preserve only decision-relevant concrete facts and their exact evidenceId references: material outcomes, goal movement, blockers, decisions, dependencies, risks, ownership/load concerns, and required next steps.',
     'Remove duplicates only when they clearly describe the same underlying evidence-backed fact.',
     'Do not introduce any evidenceId that is not present in the supplied digests.',
+    'Optimize for signal, not coverage. Rank by impact, urgency, and evidence strength; retain at most 5 items per fact array and drop routine, low-impact, stale, weak, or redundant facts.',
     '',
     'Return one valid JSON object only with this shape:',
     JSON.stringify({
@@ -1007,20 +1012,16 @@ async function buildPromptSourceData(input: {
     sourceCounts,
   });
 
-  const digests = await mapWithConcurrency(
-    chunks,
-    3,
-    async (chunk) => {
-      const rawDigest = await llmGenerate(
-        input.llmClient,
-        buildEvidenceChunkPrompt({ ...input, chunk }),
-        {
-          purpose: `user-evidence-chunk:${chunk.chunkId}`,
-        }
-      );
-      return parseChunkDigest(rawDigest, chunk);
-    }
-  );
+  const digests = await mapWithConcurrency(chunks, 3, async (chunk) => {
+    const rawDigest = await llmGenerate(
+      input.llmClient,
+      buildEvidenceChunkPrompt({ ...input, chunk }),
+      {
+        purpose: `user-evidence-chunk:${chunk.chunkId}`,
+      }
+    );
+    return parseChunkDigest(rawDigest, chunk);
+  });
 
   const makeChunkedSourceData = (
     currentDigests: Record<string, unknown>[],
@@ -1321,6 +1322,14 @@ function buildUserSectionPrompt(input: {
     '- Distinguish completed work from current work and planned work.',
     '- Avoid judging individual performance. Describe visible work state, load, focus, dependencies, and risk.',
     '- All arrays must be empty when unsupported; never add placeholder objects.',
+    '- Apply a mandatory importance gate: include an insight only when omitting it could cause the manager to miss a material outcome, meaningful goal movement, significant change, blocker, risk, unresolved decision, dependency, ownership/load concern, or concrete action.',
+    '- Optimize for decision value, not coverage. Input volume must never increase output volume by itself.',
+    '- Exclude routine status updates, ordinary completed tasks, raw activity counts, minor implementation details, duplicated signals, stale context with no current consequence, and weak inference.',
+    '- Completed work is important only when it creates a material outcome, advances a meaningful goal, changes risk, unlocks others, or requires recognition/leadership awareness; a PR, commit, ticket, call, or message is not important merely because it exists.',
+    '- Treat missing data as one consolidated insight only when it materially changes confidence or requires corrective action. Never generate multiple bullets from the same visibility gap.',
+    '- Rank candidates by impact, urgency, evidence strength, and actionability. Return only the strongest non-overlapping insights.',
+    '- Unless this section explicitly requires fewer, return at most 3 top-level insight items per array. This cap does not apply to evidenceRefs/evidenceIds or identity/reference arrays inside a selected insight.',
+    '- Empty or short output is correct when nothing crosses the importance threshold. Never fill space for completeness or symmetry.',
     '- Do not include immutable identity fields or unrelated sections in this fragment.',
     '',
     `SECTION: ${input.section.name}`,
@@ -2239,13 +2248,13 @@ async function generateUserSummarySections(input: {
       '- Return one final dependent summary object only.',
       '- Base overallConfidence on evidence breadth, recency, specificity, and consistency across the generated sections.',
       '- Synthesize the generated sections and the full input without adding unsupported facts.',
-      '- executiveSummary must be one concise, concrete, neutral, manager-ready string.',
-      '- managerSummaryBullets must contain ONLY the 5 to 7 most important, non-overlapping, manager-ready takeaways for this person — the things their manager absolutely must see today. Drop low-signal routine updates and merge related points. Cap at 7 bullets total.',
+      '- executiveSummary must be one concise, concrete, neutral, manager-ready string of at most 100 words. Lead with the single most important conclusion and omit source-by-source narration.',
+      '- managerSummaryBullets must contain only the 3 to 5 most important, non-overlapping, manager-ready takeaways for this person — facts whose omission could change the manager’s understanding or action. Drop routine updates and merge related points. Return fewer than 3 when the evidence does not justify them; never exceed 5.',
     ],
     outputShape: {
       overallConfidence: 'HIGH|MEDIUM|LOW',
       executiveSummary: 'string',
-      managerSummaryBullets: ['string'], // max 7 — only the most important person-specific takeaways
+      managerSummaryBullets: ['string'], // max 5 — only decision-relevant person-specific takeaways
     },
     priorSections: compactForPriorSections({
       whoIsDoingWhat,
