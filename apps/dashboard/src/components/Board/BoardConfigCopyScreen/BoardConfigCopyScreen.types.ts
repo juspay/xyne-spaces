@@ -72,6 +72,8 @@ export interface ExecuteCopyStagesSummary {
 export interface ExecuteCopySummary {
   customFieldsCopied: boolean;
   rolesCopied: boolean;
+  // Object-storage path of the pre-copy backup of the target board, kept for 7 days.
+  snapshotPath?: string;
   stages?: ExecuteCopyStagesSummary;
   warnings: string[];
 }

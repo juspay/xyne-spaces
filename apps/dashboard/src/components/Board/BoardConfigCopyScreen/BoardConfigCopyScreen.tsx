@@ -82,10 +82,6 @@ const BoardConfigCopyScreen = ({
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
   const [summary, setSummary] = useState<ExecuteCopySummary | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
-  // A completed/failed job from a PRIOR run, found on mount — surfaced as a dismissible
-  // banner on the select step rather than forcing the admin into the result screen every
-  // time they reopen this board's copy-config modal (jobId is deterministic per target
-  // board, so that job stays queryable until the next run overwrites it).
   const [previousJobStatus, setPreviousJobStatus] = useState<JobStatusResponse | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -557,6 +553,31 @@ const BoardConfigCopyScreen = ({
                           Copy {summary.stages.failedTicketIds.length} failed ticket ID(s)
                         </Button>
                       )}
+                    </div>
+                  )}
+                  {summary.snapshotPath && (
+                    <div className='border border-border rounded-md px-3 py-2 space-y-1'>
+                      <p className='text-xs text-muted-foreground'>
+                        A backup of this board was saved before the copy and is kept for 7 days.
+                      </p>
+                      <div className='flex items-center gap-2'>
+                        <code className='text-xs text-foreground break-all'>
+                          {summary.snapshotPath}
+                        </code>
+                        <Button
+                          variant='secondary'
+                          size='sm'
+                          data-track-category='BOARD_CONFIG_COPY'
+                          data-track-name='copy_snapshot_path'
+                          onClick={() =>
+                            void copyTextToClipboard(summary.snapshotPath!).then(() =>
+                              toast.success('Backup path copied to clipboard'),
+                            )
+                          }
+                        >
+                          Copy path
+                        </Button>
+                      </div>
                     </div>
                   )}
                   {summary.warnings.length > 0 && (

@@ -31,6 +31,10 @@ export interface BoardConfigCopyTransitionInput {
 export interface BoardConfigCopyOldStage {
   id: string;
   name: string;
+  // Carried so the worker's straggler-repair pass can pick a same-category landing stage
+  // for a ticket that appears on an old stage which was empty at plan time (and therefore
+  // has no entry in ticketRemapByOldStageId).
+  defaultTicketStatusV2: string;
 }
 
 export interface BoardConfigCopyTicketRemapTarget {
@@ -52,16 +56,30 @@ export interface BoardConfigCopyJobData {
   oldStages: BoardConfigCopyOldStage[];
   // keyed by oldStageId
   ticketRemapByOldStageId: Record<string, BoardConfigCopyTicketRemapTarget>;
+  // keyed by new stage id — lets the worker synthesise a landing target for an old stage
+  // that had no tickets at plan time, without re-deriving the board-type-specific formula.
+  futureStagesEtaHoursByNewStageId: Record<string, number>;
   // Whether customFields/roles were already copied synchronously in executeCopy before
   // this job was enqueued — carried through so the worker's returned summary reflects
   // what actually happened instead of hardcoding false for the async (stages) leg.
   customFieldsCopied: boolean;
   rolesCopied: boolean;
+  // Non-fatal issues surfaced while copying custom fields (e.g. a same-named field with a
+  // different type on the two boards) — carried through so the worker's returned summary
+  // includes them alongside any stage-remap warnings.
+  customFieldWarnings: string[];
+  // Object-storage path of the pre-copy snapshot. Required, not optional: executeCopy
+  // aborts before mutating anything if the snapshot can't be written, so a job can never
+  // legitimately exist without one.
+  snapshotPath: string;
 }
 
 export interface BoardConfigCopySummary {
   customFieldsCopied: boolean;
   rolesCopied: boolean;
+  // Always set for a real run. Absent only on a dry run, which writes nothing and so has
+  // nothing to back up.
+  snapshotPath?: string;
   stages: {
     batches: number;
     processed: number;
