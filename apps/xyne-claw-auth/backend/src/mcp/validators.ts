@@ -109,7 +109,37 @@ async function validateTargetConversationId(
       auth,
     )) as unknown[];
     if (Array.isArray(rows) && rows.length === 0) {
-      return `channel ${channelId} not found — use a real Spaces channel id (resolve it from the triggering thread or the channel tools first)`;
+      // Did-you-mean recovery: ids that reach us corrupted are almost always
+      // near-misses of a real id the model re-typed from its own prose
+      // (prod 2026-08-10: fe-autocoder dropped 2 chars mid-cuid). Cuids share
+      // long time-ordered prefixes, so a prefix lookup names the intended
+      // channel and lets the agent self-correct in ONE step instead of
+      // guessing. Suggestions only — never silently substitute a write target.
+      let suggestion = "";
+      try {
+        const prefix = channelId.slice(0, 12);
+        if (prefix.length >= 8) {
+          const near = (await interact(
+            {
+              model: "channel",
+              operation: "findMany",
+              where: { id: { startsWith: prefix } },
+              select: { id: true, name: true },
+              take: 3,
+            },
+            auth,
+          )) as Array<{ id?: string; name?: string }>;
+          if (Array.isArray(near) && near.length > 0) {
+            suggestion =
+              " Close id matches: " +
+              near.map((c) => `${c.name ?? "(unnamed)"} = ${c.id}`).join("; ") +
+              ". If one of these is the intended channel, retry with that EXACT id (copy it verbatim).";
+          }
+        }
+      } catch {
+        // best-effort — the not-found error below stands on its own
+      }
+      return `channel ${channelId} not found — use a real Spaces channel id (resolve it with the spaces-channels tool by exact name, or from the triggering thread).${suggestion}`;
     }
     return null;
   } catch (err) {

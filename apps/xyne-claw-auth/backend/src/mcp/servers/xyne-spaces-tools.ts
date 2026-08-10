@@ -2515,7 +2515,9 @@ const spacesChannels: ToolDef = {
   name: "spaces-channels",
   description:
     "List channels in Spaces. Can filter by channel name, visibility (PUBLIC/PRIVATE), scope type (DEFAULT/DM/TICKET/GROUP_DM), " +
-    "and participant name. Use the name filter to find a specific channel by name. " +
+    "and participant name. This is the AUTHORITATIVE way to resolve a channel name to its id (direct database match, " +
+    "works for private channels too — unlike spaces-search, which is a fuzzy index). ALWAYS re-resolve here and copy the " +
+    "returned id verbatim before any write action (create-ticket, send-message); never re-type a channel id from memory or prose. " +
     "To find a DM between two people, use scopeType='DM' and participantName to filter by one of them. " +
     "Returns per channel: name, member COUNT, creator, created / updated / last-active times, archived status, " +
     "and (when the channel has recent activity) its latest-thread conversation ID to pass to spaces-messages — no follow-up call needed. " +
