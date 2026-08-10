@@ -165,6 +165,21 @@ class AgentAuthService {
       } else if (req.method === 'POST' && url.pathname.startsWith('/chat/postMessage/')) {
         const conversationId = url.pathname.split('/chat/postMessage/')[1];
         await this.handleProxyPost(req, res, `/api/conversations/${conversationId}/messages`);
+      } else if (
+        req.method === 'POST' &&
+        url.pathname.startsWith('/channels/') &&
+        url.pathname.endsWith('/conversations')
+      ) {
+        const channelId = url.pathname.slice('/channels/'.length, -'/conversations'.length);
+        if (!channelId || channelId.includes('/')) {
+          this.sendJson(res, 400, { error: 'Invalid channelId' });
+        } else {
+          await this.handleProxyPost(
+            req,
+            res,
+            `/api/channels/${encodeURIComponent(channelId)}/conversations`,
+          );
+        }
       } else if (req.method === 'POST' && url.pathname === '/ticket/create') {
         await this.handleProxyPost(req, res, '/api/tickets');
       } else if (req.method === 'POST' && url.pathname === '/calls/schedule') {
