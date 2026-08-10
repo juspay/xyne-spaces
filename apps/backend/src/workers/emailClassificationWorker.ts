@@ -18,6 +18,8 @@ import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
+const EMAIL_FETCH_MAX_RETRIES = 3;
+const EMAIL_FETCH_RETRY_DELAY_MS = 500;
 
 function shouldAssignTicketPerson(
   boardId: string | null,
@@ -93,10 +95,15 @@ class EmailClassificationWorker {
       return;
     }
 
-    const emailRecord = await prisma.email.findUnique({
+    const fetchEmailRecord = () => prisma.email.findUnique({
       where: { id: emailId },
       select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true, type: true },
     });
+    let emailRecord = await fetchEmailRecord();
+    for (let retry = 0; !emailRecord && retry < EMAIL_FETCH_MAX_RETRIES; retry++) {
+      await new Promise(resolve => setTimeout(resolve, EMAIL_FETCH_RETRY_DELAY_MS));
+      emailRecord = await fetchEmailRecord();
+    }
     if (!emailRecord) {
       logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Email ${emailId} not found, skipping classification for ticket ${ticketId}`);
       return;
