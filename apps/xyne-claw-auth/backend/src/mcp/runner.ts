@@ -336,7 +336,8 @@ export async function listToolsForUser(
 
   const definition = await resolveConnectorDefinition(serverType);
   const writeTools = definition?.writeTools ?? [];
-  return { serverType, serverName, tools, writeTools };
+  const forwardFileInputs = definition?.forwardFileInputs === true;
+  return { serverType, serverName, tools, writeTools, forwardFileInputs };
 }
 
 // Servers whose tools' binary output should be forwarded to the user as a file

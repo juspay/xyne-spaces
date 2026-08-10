@@ -11,6 +11,10 @@ export interface McpServerTools {
   readonly serverType: string;
   readonly serverName: string;
   readonly displayName?: string;
+  /** When true, this server accepts inbound workspace files: the pod expands a
+   *  `{{file:<path>}}` marker in outbound tool args into base64 before the call
+   *  leaves the pod. Sourced from McpServer.forwardFileInputs. */
+  readonly forwardFileInputs?: boolean;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
 }
@@ -115,6 +119,10 @@ export interface ResolvedConnectorDefinition {
   /** When true, binary content (EmbeddedResource blob / image / audio) returned
    *  by this server's tools is forwarded to the user as a file attachment. */
   readonly forwardFiles: boolean;
+  /** When true, the xyne-claw runtime may expand a `{{file:<path>}}` marker in
+   *  this server's outbound tool args into the base64 of a workspace file before
+   *  the MCP call leaves the pod (inbound file → MCP). DB-driven admin toggle. */
+  readonly forwardFileInputs: boolean;
   buildStdioCommand(credentials: Record<string, unknown>): StdioLaunchConfig;
   buildHttpConfig(credentials: Record<string, unknown>): HttpLaunchConfig;
 }

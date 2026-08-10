@@ -97,6 +97,7 @@ function buildDynamicDefinition(row: McpServer): ResolvedConnectorDefinition {
     writeTools: writeToolsFromPolicy(writePolicy),
     staticTools: [],
     forwardFiles: row.forwardFiles === true,
+    forwardFileInputs: row.forwardFileInputs === true,
     buildStdioCommand(credentials) {
       const envTemplate = asRecord(launch["env"]);
       const args = Array.isArray(launch["args"]) ? launch["args"].map((a) => applyTemplate(String(a), credentials)) : [];
@@ -133,6 +134,10 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
     // Code-defined adapters don't forward files (none return binary today). Add
     // a flag to StdioMcpAdapter if one ever needs it.
     forwardFiles: false,
+    // Base value only. The file-forwarding toggles are overlaid from the DB row
+    // in resolveConnectorDefinition() so static HTTP adapters (e.g. jusbiz-mcp,
+    // whose row has no httpConfigTemplate) can still be enabled by an admin.
+    forwardFileInputs: false,
     buildStdioCommand(credentials): StdioLaunchConfig {
       if (adapter.transport !== "stdio") return { cmd: "", args: [], env: {} };
       const cmd = adapter.buildCommand(credentials);
@@ -161,13 +166,15 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
  */
 const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin"]);
 
-export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
+async function resolveBaseConnectorDefinition(
+  serverType: string,
+  row: McpServer | null,
+): Promise<ResolvedConnectorDefinition | undefined> {
   if (STATIC_FIRST_TYPES.has(serverType)) {
     const staticDef = fromStaticAdapter(serverType);
     if (staticDef) return staticDef;
   }
 
-  const row = await prisma.mcpServer.findUnique({ where: { type: serverType } });
   if (row && row.enabled) {
     // Only use the dynamic (DB-driven) path when the row has an actual launch
     // config — launchConfigTemplate for stdio or httpConfigTemplate for http.
@@ -195,6 +202,31 @@ export async function resolveConnectorDefinition(serverType: string): Promise<Re
     }
   }
   return fromStaticAdapter(serverType);
+}
+
+/**
+ * Resolve a connector definition and overlay the DB-driven admin file-forwarding
+ * toggles (forwardFiles = MCP -> user, forwardFileInputs = user -> MCP) onto it.
+ *
+ * The overlay is applied for EVERY connector — including static adapters whose
+ * row has no launchConfigTemplate/httpConfigTemplate and therefore never reaches
+ * buildDynamicDefinition() (e.g. jusbiz-mcp). These two booleans do not affect
+ * the launch/spawn command (the security-sensitive part gated by STATIC_FIRST_TYPES
+ * and the stdio rules in resolveBaseConnectorDefinition), so DB-driving them for
+ * static adapters does not weaken the "never spawn from a DB row" guarantee.
+ */
+export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
+  const row = await prisma.mcpServer.findUnique({ where: { type: serverType } });
+  const base = await resolveBaseConnectorDefinition(serverType, row);
+  if (!base) return undefined;
+  if (row && row.enabled) {
+    return {
+      ...base,
+      forwardFiles: row.forwardFiles === true,
+      forwardFileInputs: row.forwardFileInputs === true,
+    };
+  }
+  return base;
 }
 
 export async function hasConnectorDefinition(serverType: string): Promise<boolean> {

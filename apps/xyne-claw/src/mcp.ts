@@ -58,6 +58,11 @@ interface McpServerTools {
   readonly serverType: string;
   readonly serverName: string;
   readonly displayName?: string;
+  // DB-driven (McpServer.forwardFileInputs), surfaced via /mcp/tools. When true
+  // this server may receive inbound workspace files as base64. Primary source of
+  // truth; the CLAW_FILE_INPUT_FORWARDING_SERVERS env allowlist is a deprecated
+  // rollout fallback only.
+  readonly forwardFileInputs?: boolean;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
 }
@@ -114,8 +119,11 @@ export interface McpToolGroup {
 // symlink escape) so the agent cannot exfiltrate host files (claw-auth secrets,
 // /etc/*, or another session's data).
 //
-// Allowlist source: the CLAW_FILE_INPUT_FORWARDING_SERVERS env var (comma-
-// separated serverTypes). Mirrors claw-auth's FILE_FORWARDING_SERVERS pattern.
+// Allowlist source (DEPRECATED fallback): the CLAW_FILE_INPUT_FORWARDING_SERVERS
+// env var (comma-separated serverTypes). The primary source of truth is now the
+// per-server DB flag McpServer.forwardFileInputs, surfaced on each McpServerTools
+// entry via /mcp/tools. This env set is OR'd in only so existing deployments keep
+// working during rollout; remove it once every enabled server sets the DB flag.
 const FILE_INPUT_FORWARDING_SERVERS = new Set<string>(
   (process.env["CLAW_FILE_INPUT_FORWARDING_SERVERS"] ?? "")
     .split(",")
@@ -249,7 +257,10 @@ export async function loadMcpToolsForUser(
       // the last dot, breaking tool dispatch. Replace everything except
       // alphanumerics, underscores, and hyphens.
       const safeName = `${server.serverName}__${mcpTool.name}`.replace(/[^a-zA-Z0-9_\-]/g, "_");
-      const acceptsFiles = isFileInputForwardingServer(server.serverType);
+      // DB flag (McpServer.forwardFileInputs) is authoritative; the env allowlist
+      // is a deprecated rollout fallback (see FILE_INPUT_FORWARDING_SERVERS).
+      const acceptsFiles =
+        server.forwardFileInputs === true || isFileInputForwardingServer(server.serverType);
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
       const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string } = {
         name: safeName,
