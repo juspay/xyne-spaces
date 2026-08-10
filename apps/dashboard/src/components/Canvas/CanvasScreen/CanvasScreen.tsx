@@ -29,7 +29,14 @@ import { Dialog } from '../../ui/Dialog';
 import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
-import { ArrowLeft, CheckCircle, GitCompare, Loader2, RotateCcw } from 'lucide-react';
+import {
+  ArrowLeft,
+  CheckCircle,
+  GitCompare,
+  Loader2,
+  MessageSquare,
+  RotateCcw,
+} from 'lucide-react';
 import {
   CheckTickSingle,
   ColorPalette,
@@ -177,6 +184,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   );
 
   const [selectedCanvas, setSelectedCanvas] = useState<Canvas | null>(null);
+  const [openCommentCount, setOpenCommentCount] = useState(0);
+  useEffect(() => {
+    setOpenCommentCount(0);
+  }, [selectedCanvas?.id]);
   const [isCreating, setIsCreating] = useState(false);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
@@ -217,6 +228,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const previewVersionRef = useRef<CanvasVersionRecord | null>(null);
   const pendingAutoVersionSnapshotsRef = useRef<Set<string>>(new Set());
   const saveCanvasExitSnapshotRef = useRef<(() => void) | null>(null);
+  const flushCollaborativeCanvasTimestampRef = useRef<(() => void) | null>(null);
   const hasPendingSaveRef = useRef(false);
   const currentCanvasIdRef = useRef<string | null>(null); // Track the current canvas ID for file uploads
   const initializedCanvasIdRef = useRef<string | null>(null); // Track which canvas has been initialized to avoid overwriting local edits
@@ -720,6 +732,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       }),
     );
   }, [z]);
+  flushCollaborativeCanvasTimestampRef.current = flushCollaborativeCanvasTimestamp;
 
   const handleCollaborativeContentChange = useCallback((blocks: PartialBlock[]): void => {
     latestContentRef.current = blocks;
@@ -728,10 +741,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   useEffect(() => {
     return (): void => {
-      flushCollaborativeCanvasTimestamp();
+      flushCollaborativeCanvasTimestampRef.current?.();
       saveCanvasExitSnapshotRef.current?.();
     };
-  }, [selectedCanvas?.id, flushCollaborativeCanvasTimestamp]);
+  }, [selectedCanvas?.id]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent): void => {
@@ -741,7 +754,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       if (!contentElement || !(target instanceof Node)) return;
       if (contentElement.contains(target)) return;
 
-      flushCollaborativeCanvasTimestamp();
+      flushCollaborativeCanvasTimestampRef.current?.();
       saveCanvasExitSnapshotRef.current?.();
     };
 
@@ -749,7 +762,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     return (): void => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, [flushCollaborativeCanvasTimestamp]);
+  }, []);
 
   const handlePreviewVersion = useCallback((version: CanvasVersionRecord): void => {
     if (!previewVersionRef.current) {
@@ -1025,7 +1038,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   // Shared metrics for the header's 28px icon buttons.
   const headerIconButtonClass =
-    'flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+    'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
@@ -1162,6 +1175,26 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             ))}
                           </div>
                         </Popover>
+
+                        {/* Comments */}
+                        <button
+                          type='button'
+                          onClick={() => editorRef.current?.toggleComments()}
+                          className={headerIconButtonClass}
+                          title='Comments'
+                          aria-label='Open comment activity'
+                          data-testid='canvas-comments-button'
+                          data-track-category='CANVAS'
+                          data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
+                          data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                        >
+                          <MessageSquare size={16} className='shrink-0 opacity-60' />
+                          {openCommentCount > 0 && (
+                            <span className='absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground'>
+                              {openCommentCount > 99 ? '99+' : openCommentCount}
+                            </span>
+                          )}
+                        </button>
 
                         {/* Share */}
                         <button
@@ -1416,6 +1449,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasTitle={currentTitle}
                   initialBlockIdToFocus={blockIdFromUrl}
                   initialCommentThreadId={commentThreadIdFromUrl}
+                  onOpenCommentCountChange={setOpenCommentCount}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
                   currentUserRole={selectedCanvas?.accessLevel ?? null}
@@ -1438,6 +1472,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   initialLegacyContent={selectedCanvas.content}
                   initialBlockIdToFocus={blockIdFromUrl}
                   initialCommentThreadId={commentThreadIdFromUrl}
+                  onOpenCommentCountChange={setOpenCommentCount}
                   autoFocus={!skipAutoFocus}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
@@ -1459,6 +1494,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   onMentionInsert={handleMentionInsert}
                   initialBlockIdToFocus={blockIdFromUrl}
                   initialCommentThreadId={commentThreadIdFromUrl}
+                  onOpenCommentCountChange={setOpenCommentCount}
                   autoFocus={!skipAutoFocus}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
