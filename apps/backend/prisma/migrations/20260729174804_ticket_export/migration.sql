@@ -12,10 +12,5 @@ CREATE TABLE "public"."ticket_exports" (
 );
 
 -- CreateIndex
-CREATE INDEX "ticket_exports_workspaceId_status_idx" ON "public"."ticket_exports"("workspaceId", "status");
-
--- CreateIndex
-CREATE INDEX "ticket_exports_workspaceId_requestedBy_idx" ON "public"."ticket_exports"("workspaceId", "requestedBy");
-
--- CreateIndex
-CREATE INDEX "ticket_exports_workspaceId_createdAt_idx" ON "public"."ticket_exports"("workspaceId", "createdAt");
+CREATE INDEX "ticket_exports_workspaceId_requestedBy_createdAt_idx"
+  ON "public"."ticket_exports"("workspaceId", "requestedBy", "createdAt" DESC);
