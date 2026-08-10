@@ -48,7 +48,7 @@ export const DmListItem = ({
   // Use the provided latestConversation prop (from batched query in parent)
   // instead of making individual queries per DM channel
   const lastMessage = latestConversation
-    ? getInitialMessageFromConversation(latestConversation, context.userID)
+    ? getInitialMessageFromConversation(latestConversation)
     : undefined;
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
