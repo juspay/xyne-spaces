@@ -11,6 +11,8 @@ import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 import type { VespaFileDocument, VespaChunkMeta } from '@/vespa/src/types';
 import { CollectionPermission, Collection } from '@prisma/client';
+import { DatabaseClient } from '@/database/client';
+import { v4 as uuidv4 } from 'uuid';
 import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
@@ -73,6 +75,97 @@ export class CollectionController {
     constructor() {
         this.collectionRepository = new CollectionRepository();
     }
+
+    createCollection = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const user = req.user;
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+            const parsed = z.object({
+                scopeType: z.string().optional().default('CHANNEL'),
+                scopeId: z.string().min(1),
+                name: z.string().min(1).max(200),
+                description: z.string().nullable().optional(),
+                isPrivate: z.boolean().optional().default(false),
+                duplicateStrategy: z.enum(['use-existing', 'fail']).optional().default('use-existing'),
+            }).parse(req.body ?? {});
+            const name = parsed.name.trim();
+            if (!name) { res.status(400).json({ error: 'Collection name is required' }); return; }
+
+            const db = DatabaseClient.getInstance();
+            if (parsed.scopeType === 'CHANNEL') {
+                const channel = await db.channel.findFirst({
+                    where: { id: parsed.scopeId, workspaceId: user.workspaceId, participants: { some: { userId: user.id } } },
+                    select: { id: true },
+                });
+                if (!channel) { res.status(403).json({ error: 'Collection creation failed: you must be a channel participant' }); return; }
+            }
+
+            const existing = await db.collection.findFirst({
+                where: { ownerId: user.id, name: { equals: name, mode: 'insensitive' }, scopeType: parsed.scopeType, scopeId: parsed.scopeId, parentId: null, deletedAt: null, workspaceId: user.workspaceId },
+                select: { id: true, name: true },
+            });
+            if (existing) {
+                if (parsed.duplicateStrategy === 'use-existing') { res.status(200).json({ success: true, created: false, collectionId: existing.id, name: existing.name }); return; }
+                res.status(409).json({ error: `Collection "${name}" already exists`, collectionId: existing.id }); return;
+            }
+
+            const id = uuidv4();
+            const now = new Date();
+            await db.$transaction([
+                db.collection.create({ data: { id, workspaceId: user.workspaceId, scopeType: parsed.scopeType, scopeId: parsed.scopeId, name, description: parsed.description ?? null, ownerId: user.id, isPrivate: parsed.isPrivate, rootCollectionId: id, createdAt: now, updatedAt: now } }),
+                db.collectionPermission.create({ data: { id: uuidv4(), workspaceId: user.workspaceId, collectionId: id, userId: user.id, role: CollectionRole.OWNER, canShare: true, grantedBy: user.id, createdAt: now, updatedAt: now } }),
+            ]);
+            res.status(201).json({ success: true, created: true, collectionId: id, name });
+        } catch (error) {
+            if (error instanceof z.ZodError) { res.status(400).json({ error: error.message }); return; }
+            logger.error('Error creating collection:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+
+    createFolder = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const { collectionId } = req.params;
+            const user = req.user;
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+            if (!collectionId || typeof collectionId !== 'string' || collectionId.trim() === '') { res.status(400).json({ error: 'Collection ID is required' }); return; }
+
+            const parsed = z.object({
+                parentId: z.string().optional().nullable(),
+                name: z.string().min(1).max(200),
+                duplicateStrategy: z.enum(['use-existing', 'fail']).optional().default('use-existing'),
+            }).parse(req.body ?? {});
+            const parentId = (parsed.parentId ?? collectionId).trim();
+            const name = parsed.name.trim();
+            if (!name) { res.status(400).json({ error: 'Folder name is required' }); return; }
+
+            const db = DatabaseClient.getInstance();
+            const parent = await db.collection.findFirst({
+                where: { id: parentId, deletedAt: null, workspaceId: user.workspaceId },
+                select: { id: true, rootCollectionId: true, scopeType: true, scopeId: true },
+            });
+            if (!parent) { res.status(404).json({ error: 'Parent collection/folder not found' }); return; }
+
+            const rootCollectionId = parent.rootCollectionId ?? parent.id;
+            const { role } = await this.getCollectionOrRole(rootCollectionId, user.id, user.workspaceId);
+            if (!role || role === CollectionRole.VIEWER) { res.status(403).json({ error: 'Folder creation failed: requires EDITOR or OWNER permission' }); return; }
+
+            const existing = await this.collectionRepository.findFolderByName(parentId, name);
+            if (existing) {
+                if (parsed.duplicateStrategy === 'use-existing') { res.status(200).json({ success: true, created: false, folderId: existing.id, name: existing.name, parentId }); return; }
+                res.status(409).json({ error: `Folder "${name}" already exists`, folderId: existing.id }); return;
+            }
+
+            const folder = await this.collectionRepository.createFolder({ parentFolderId: parentId, name, ownerId: user.id, scopeType: parent.scopeType, scopeId: parent.scopeId });
+            await vespaQueue.addJob({ schema: 'file', docId: folder.id, jobType: 'feed', userId: user.id, app: SubApp.COLLECTIONS });
+            res.status(201).json({ success: true, created: true, folderId: folder.id, name: folder.name, parentId });
+        } catch (error) {
+            if (error instanceof z.ZodError) { res.status(400).json({ error: error.message }); return; }
+            logger.error('Error creating collection folder:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
 
 uploadFiles = async (req: Request, res: Response): Promise<void> => {
         try {

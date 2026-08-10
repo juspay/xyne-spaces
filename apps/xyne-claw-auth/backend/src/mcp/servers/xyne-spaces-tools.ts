@@ -3048,6 +3048,7 @@ const spacesCanvases: ToolDef = {
         const parts = [c.title];
         parts.push(`  Type: ${c.docType ?? "Canvas"} · Visibility: ${c.visibility}`);
         if (c.channelId) parts.push(`  ChannelID: ${c.channelId}`);
+        if (c.folderId) parts.push(`  FolderID: ${c.folderId}`);
         if (c.createdBy) parts.push(`  Created by: ${c.createdBy}`);
         if (c.lastEditedAt) parts.push(`  Last edited: ${toIST(c.lastEditedAt)}`);
         else if (c.updatedAt) parts.push(`  Updated: ${toIST(c.updatedAt)}`);
@@ -3071,6 +3072,7 @@ interface CanvasRow {
   docType?: string;
   visibility: string;
   channelId?: string;
+  folderId?: string | null;
   createdBy?: string;
   lastEditedAt?: string;
   updatedAt?: string;
@@ -3078,6 +3080,69 @@ interface CanvasRow {
   /** JSON column; parsed for the call-generated exclusion post-filter. */
   metadata?: unknown;
 }
+
+
+// ── spaces-canvas-folders ────────────────────────────────────────────
+
+interface CanvasFolderRow {
+  id: string;
+  name: string;
+  projectId?: string | null;
+  channelId?: string | null;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+const spacesCanvasFolders: ToolDef = {
+  name: "spaces-canvas-folders",
+  description:
+    "List Canvas folders in a Spaces channel. Use this before copying canvases to the Knowledge Base " +
+    "when you need to preserve the source Canvas folder structure. Returns folder IDs and names so " +
+    "canvas.folderId from spaces-canvases can be mapped to a folder path/name.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: { type: "string", description: "Required. Channel id whose Canvas folders should be listed." },
+      projectId: { type: "string", description: "Optional. Restrict to folders in this project." },
+      limit: { type: "number", minimum: 1, maximum: 200, default: 200, description: "Max folders to return (default 200, max 200)." },
+      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
+    },
+    required: ["channelId"],
+  },
+  async handler(args) {
+    try {
+      const channelId = (args["channelId"] as string | undefined)?.trim() || "";
+      if (!channelId) return err("channelId is required");
+      const where: Record<string, unknown> = { channelId: { equals: channelId } };
+      const projectId = (args["projectId"] as string | undefined)?.trim() || "";
+      if (projectId) where["projectId"] = { equals: projectId };
+      const limit = Math.min(Math.max(Number(args["limit"] ?? 200), 1), 200);
+      const offset = Math.max(Number(args["offset"] ?? 0), 0);
+
+      const rows = (await interact({
+        model: "canvasFolder",
+        operation: "findMany",
+        where,
+        orderBy: [{ name: "asc" }],
+        take: limit,
+        skip: offset,
+      })) as CanvasFolderRow[];
+
+      if (!rows || rows.length === 0) return ok("No Canvas folders found.");
+      const lines = rows.map((f, idx) => prefixChunk(idx + 1, f.name, [
+        `  ID: ${f.id}`,
+        ...(f.channelId ? [`  ChannelID: ${f.channelId}`] : []),
+        ...(f.projectId ? [`  ProjectID: ${f.projectId}`] : []),
+        ...(f.createdBy ? [`  Created by: ${f.createdBy}`] : []),
+        ...(f.updatedAt ? [`  Updated: ${toIST(f.updatedAt)}`] : []),
+      ]));
+      return ok(`${rows.length} Canvas folder(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`);
+    } catch (e) {
+      return err(`Canvas folders error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
 
 // ── spaces-calls ────────────────────────────────────────────────────
 
@@ -4268,6 +4333,8 @@ const spacesUploadToKb: ToolDef = {
       fileName: { type: "string", description: "File name for content mode (e.g. 'session-learnings.md'). Defaults to session-learning-<timestamp>.md. Ignored when attachment(s) are given." },
       collectionId: { type: "string", description: "Target KB collection id. If omitted, provide channelId and the tool resolves the channel's KB collection." },
       channelId: { type: "string", description: "Channel id whose Knowledge Base collection should receive the file(s). Used only when collectionId is not given." },
+      folderId: { type: "string", description: "Optional. Existing KB folder id (Collection.id) to upload into. Provide folderId OR folderPath, not both." },
+      folderPath: { type: "string", description: "Optional. Root-relative KB folder path to create/resolve before upload, e.g. 'test-canvas-folder'. Provide folderId OR folderPath, not both." },
       duplicateStrategy: { type: "string", enum: ["skip", "rename", "overwrite"], description: "How to handle a filename clash in the collection. Default 'rename'." },
     },
     required: [],
@@ -4293,6 +4360,15 @@ const spacesUploadToKb: ToolDef = {
       const channelId = (args["channelId"] as string | undefined)?.trim() || "";
       const dupRaw = String(args["duplicateStrategy"] ?? "rename").toLowerCase();
       const duplicateStrategy = dupRaw === "skip" || dupRaw === "overwrite" ? dupRaw : "rename";
+      const folderId = (args["folderId"] as string | undefined)?.trim() || "";
+      const rawFolderPath = (args["folderPath"] as string | undefined)?.trim() || "";
+      const folderPath = rawFolderPath
+        .replace(/\\/g, "/")
+        .split("/")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0 && part !== "." && part !== "..")
+        .join("/");
+      if (folderId && folderPath) return err("Provide only one of folderId or folderPath.");
 
       const hasAttachment = attachmentIds.length > 0;
       const hasContent = content.trim().length > 0;
@@ -4379,6 +4455,7 @@ const spacesUploadToKb: ToolDef = {
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       };
       const targetDesc = collectionLabel ? `${collectionLabel} (${collectionId})` : collectionId;
+      const folderDesc = folderId ? `folderId=${folderId}` : (folderPath ? `folderPath=${folderPath}` : "root");
 
       // Upload a single file to the collection. Shared by content mode and
       // every attachment in the batch. Returns an item-level result rather than
@@ -4392,6 +4469,8 @@ const spacesUploadToKb: ToolDef = {
           const formData = new FormData();
           formData.append("files", new Blob([buffer], { type: mimetype }), fileName);
           formData.append("duplicateStrategy", duplicateStrategy);
+          if (folderId) formData.append("parentId", folderId);
+          if (folderPath) formData.append("paths", JSON.stringify([folderPath]));
           const response = await fetch(uploadUrl, {
             method: "POST",
             headers: uploadHeaders,
@@ -4433,6 +4512,7 @@ const spacesUploadToKb: ToolDef = {
             "Source: inline content",
             `File: ${fileName} (${mimetype}, ${buffer.length}B)`,
             `Collection: ${targetDesc}`,
+            `Folder target: ${folderDesc}`,
             `Duplicate strategy: ${duplicateStrategy}`,
             "Ingestion: queued in the background (status starts PENDING). It becomes searchable in the KB once indexing completes — not instantly.",
           ].join("\n"),
@@ -4485,6 +4565,7 @@ const spacesUploadToKb: ToolDef = {
       const summary = [
         `Queued ${uploaded.length}/${results.length} file(s) for the Knowledge Base.`,
         `Collection: ${targetDesc}`,
+        `Folder target: ${folderDesc}`,
         `Duplicate strategy: ${duplicateStrategy}`,
         "Files:",
         ...lines,
@@ -4496,6 +4577,88 @@ const spacesUploadToKb: ToolDef = {
       return ok(summary);
     } catch (e) {
       return err(`Upload-to-KB error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+
+// ── spaces-create-kb-collection ──────────────────────────────────────
+
+const spacesCreateKbCollection: ToolDef = {
+  name: "spaces-create-kb-collection",
+  description:
+    "Create or resolve a channel-scoped Knowledge Base root collection. This is a write action and requires approval. " +
+    "Use duplicateStrategy=use-existing to return an existing same-name collection instead of failing.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: { type: "string", description: "Required. Channel id that owns the KB collection." },
+      name: { type: "string", description: "Required. KB collection name." },
+      description: { type: "string", description: "Optional collection description." },
+      isPrivate: { type: "boolean", description: "Whether the collection should be private. Default false." },
+      duplicateStrategy: { type: "string", enum: ["use-existing", "fail"], description: "Default use-existing." },
+    },
+    required: ["channelId", "name"],
+  },
+  async handler(args) {
+    try {
+      const channelId = (args["channelId"] as string | undefined)?.trim() || "";
+      const name = (args["name"] as string | undefined)?.trim() || "";
+      if (!channelId || !name) return err("channelId and name are required");
+      const resp = await spacesFetch("/api/collections", {
+        method: "POST",
+        body: JSON.stringify({
+          scopeType: "CHANNEL",
+          scopeId: channelId,
+          name,
+          description: typeof args["description"] === "string" ? args["description"] : undefined,
+          isPrivate: args["isPrivate"] === true,
+          duplicateStrategy: args["duplicateStrategy"] === "fail" ? "fail" : "use-existing",
+        }),
+      }) as { success?: boolean; created?: boolean; collectionId?: string; name?: string; error?: string };
+      if (resp?.error) return err(resp.error);
+      return ok(JSON.stringify(resp, null, 2));
+    } catch (e) {
+      return err(`Create KB collection error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+// ── spaces-create-kb-folder ──────────────────────────────────────────
+
+const spacesCreateKbFolder: ToolDef = {
+  name: "spaces-create-kb-folder",
+  description:
+    "Create or resolve a folder inside a Knowledge Base collection/folder. This is a write action and requires approval. " +
+    "Use duplicateStrategy=use-existing to return an existing same-name folder instead of failing.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      collectionId: { type: "string", description: "Required. Root KB collection id." },
+      parentId: { type: "string", description: "Optional. Parent folder id. Defaults to collectionId/root." },
+      name: { type: "string", description: "Required. Folder name to create under the parent." },
+      duplicateStrategy: { type: "string", enum: ["use-existing", "fail"], description: "Default use-existing." },
+    },
+    required: ["collectionId", "name"],
+  },
+  async handler(args) {
+    try {
+      const collectionId = (args["collectionId"] as string | undefined)?.trim() || "";
+      const name = (args["name"] as string | undefined)?.trim() || "";
+      const parentId = (args["parentId"] as string | undefined)?.trim() || undefined;
+      if (!collectionId || !name) return err("collectionId and name are required");
+      const resp = await spacesFetch(`/api/collections/${encodeURIComponent(collectionId)}/folders`, {
+        method: "POST",
+        body: JSON.stringify({
+          parentId,
+          name,
+          duplicateStrategy: args["duplicateStrategy"] === "fail" ? "fail" : "use-existing",
+        }),
+      }) as { success?: boolean; created?: boolean; folderId?: string; name?: string; parentId?: string; error?: string };
+      if (resp?.error) return err(resp.error);
+      return ok(JSON.stringify(resp, null, 2));
+    } catch (e) {
+      return err(`Create KB folder error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
@@ -5845,12 +6008,15 @@ export const tools: ToolDef[] = [
   spacesProjects,
   spacesProjectTeamMembers,
   spacesCanvases,
+  spacesCanvasFolders,
   spacesCalls,
   spacesBoards,
   spacesEmails,
   spacesThreadAttachments,
   spacesFetchAttachment,
   spacesUploadToKb,
+  spacesCreateKbCollection,
+  spacesCreateKbFolder,
   spacesCreateTicket,
   spacesUpdateTicket,
   spacesScheduleCall,

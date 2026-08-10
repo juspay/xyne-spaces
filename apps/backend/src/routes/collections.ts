@@ -11,6 +11,9 @@ const collectionController = new CollectionController();
 // as a collection id.
 router.get('/accessible', collectionController.listAccessibleCollections);
 
+// Create a root Knowledge Base collection
+router.post('/', collectionController.createCollection);
+
 // Search items in a collection
 router.get('/:collectionId/search', collectionController.searchItems);
 
@@ -25,6 +28,9 @@ router.get('/items/:itemId/vespa-doc', collectionController.getFileVespaDocument
 
 // Download folder as zip
 router.get('/items/:itemId/download-folder', collectionController.downloadFolder);
+
+// Create a sub-folder inside a Knowledge Base collection/folder
+router.post('/:collectionId/folders', collectionController.createFolder);
 
 // Upload files to collection (streaming — files go directly to GCS, no memory buffer)
 router.post('/:collectionId/upload', collectionUpload.array('files', 50), collectionController.uploadFiles);
