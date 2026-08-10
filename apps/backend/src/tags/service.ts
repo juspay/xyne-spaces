@@ -246,6 +246,22 @@ export class TagService {
     await tagRepository.softDeleteTagRow(existing.id, deletedBy);
   }
 
+  /**
+   * Flip an existing (AI-suggested) Tag row's method to `manual` in place —
+   * same id, so any array of Tag ids referencing it (e.g. Call.labels) needs
+   * no update. Used to "confirm" an AI-suggested tag from a tick/cross UI.
+   * Idempotent: confirming an already-manual tag is a no-op.
+   */
+  async confirmTag(tagId: string, workspaceId: string, updatedBy?: string | null): Promise<Tag> {
+    const existing = await tagRepository.findById(tagId, workspaceId);
+    if (!existing) {
+      throw new TagServiceError(`No active tag found for id "${tagId}"`, 404);
+    }
+    if (existing.method === TagMethod.MANUAL) return existing;
+
+    return tagRepository.updateTagMethod(tagId, TagMethod.MANUAL, updatedBy);
+  }
+
   async getUniqueTagValues(
     workspaceId: string,
     sourceType: string,

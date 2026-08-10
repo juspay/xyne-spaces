@@ -7,6 +7,11 @@ import {
   hydrateTicketBoundPayload,
 } from './ticket-context';
 import type { TicketCreatedEventPayload } from '../types/automation-events';
+import {
+  TicketChangeSchema,
+  FormFieldConditionSchema,
+  type FormFieldCondition,
+} from './ticket-updated.trigger';
 
 export const TICKET_CREATED_EVENT = 'TICKET_CREATED';
 
@@ -23,11 +28,23 @@ const TicketCreatedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Limit to tickets posted to these channels. Empty matches every channel.'),
+  formFieldConditions: z
+    .array(FormFieldConditionSchema)
+    .optional()
+    .describe(
+      'Fire only when form fields are set at creation and optional value filters match (contains).',
+    ),
 });
 
-export const TicketCreatedOutputSchema = TicketContextSchema;
+export const TicketCreatedOutputSchema = TicketContextSchema.extend({
+  formFieldChanges: z.record(z.string(), TicketChangeSchema).optional(),
+  performedBy: z.object({
+    id: z.string().nullable(),
+  }).optional(),
+});
 
 type TicketCreatedConfig = z.infer<typeof TicketCreatedConfigSchema>;
+type TicketCreatedPayload = z.infer<typeof TicketCreatedOutputSchema>;
 
 export class TicketCreatedTrigger extends BaseTrigger<typeof TicketCreatedConfigSchema> {
   readonly type = TICKET_CREATED_EVENT;
@@ -48,12 +65,30 @@ export class TicketCreatedTrigger extends BaseTrigger<typeof TicketCreatedConfig
     payload: Record<string, unknown>,
   ): boolean {
     const cfg = filter as TicketCreatedConfig;
+    const p = payload as TicketCreatedPayload;
     const ticket = (
       payload as {
         ticket?: { boardId?: string | null; projectId?: string | null; channelId?: string | null };
       }
     ).ticket;
-    return matchTicketScopeFilters(cfg, ticket);
+    if (!matchTicketScopeFilters(cfg, ticket)) return false;
+
+    const formFieldConditions: FormFieldCondition[] = (cfg.formFieldConditions ?? []).map(c => ({
+      fieldId: c.fieldId,
+      match: c.match ?? 'changed',
+      value: c.value,
+    }));
+    if (formFieldConditions.length === 0) return true;
+
+    return formFieldConditions.some(c => {
+      const change = p.formFieldChanges?.[c.fieldId];
+      if (!change) return false;
+      if ((c.match ?? 'changed') === 'changed') return true;
+      const needle = (c.value ?? '').toString().trim();
+      if (!needle) return false;
+      if (change.newValue === null || change.newValue === undefined) return false;
+      return String(change.newValue).toLowerCase().includes(needle.toLowerCase());
+    });
   }
 }
 

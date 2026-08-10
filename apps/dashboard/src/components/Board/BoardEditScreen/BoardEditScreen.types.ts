@@ -35,7 +35,6 @@ export interface TicketField {
     | 'board'
     | 'project'
     | 'boolean'
-    | 'workflow'
     | 'doc'
     | 'tags'
     | 'ticketType';
@@ -140,15 +139,6 @@ export const DEFAULT_TICKET_FIELDS: TicketField[] = [
     label: 'Assignee',
     required: false,
     order: 4,
-    visibleInCreate: true,
-  },
-  {
-    id: '10',
-    name: 'workflowType',
-    type: 'workflow',
-    label: 'Workflow',
-    required: false,
-    order: 5,
     visibleInCreate: true,
   },
   {

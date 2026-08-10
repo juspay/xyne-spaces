@@ -6,7 +6,10 @@ import { CallStatus } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
-import { usePaginatedOatsRecordings } from '../../hooks/usePaginatedOatsRecordings';
+import {
+  usePaginatedOatsRecordings,
+  type OatsRecordingEntry,
+} from '../../hooks/usePaginatedOatsRecordings';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useSelf, useUsers } from '../../hooks/useUsers';
@@ -19,6 +22,7 @@ import RecordingControlsOverlay from './components/RecordingControlsOverlay';
 import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
+import RecordingAskAIModal from './components/RecordingAskAIModal';
 import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
@@ -45,6 +49,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
+  const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
   const {
     recordings,
     hasMoreRecordings,
@@ -200,11 +205,24 @@ const RecordingsV2Screen = (): ReactElement => {
   );
 
   const handleOpenAskAI = useCallback((): void => {
+    setShowAskAIContextModal(true);
+  }, []);
+
+  const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
     xyneAIActor.send({
       type: 'OPEN',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
+      initialContextSelections: {
+        canvases: [],
+        recordings: selected.map(recording => ({
+          id: recording.id,
+          title: recording.title || DEFAULT_RECORDING_TITLE,
+          externalId: recording.externalId,
+          ...(recording.channelId ? { channelId: recording.channelId } : {}),
+        })),
+      },
     });
   }, []);
 
@@ -456,6 +474,18 @@ const RecordingsV2Screen = (): ReactElement => {
           />
         )}
       </AnimatePresence>
+
+      {showAskAIContextModal && (
+        <RecordingAskAIModal
+          open={showAskAIContextModal}
+          recordings={ownershipFilteredRecordings}
+          users={users}
+          currentUserId={currentUser?.id}
+          resolveLabel={resolveLabel}
+          onOpenChange={setShowAskAIContextModal}
+          onConfirm={handleConfirmAskAIContext}
+        />
+      )}
     </div>
   );
 };

@@ -2,6 +2,10 @@
  * Shared type definitions for Xyne Spaces
  */
 
+// Flow-board plan types, schema, and the FlowPlanModel read-model live in
+// their own module; re-exported here so `@xyne/shared` consumers are unchanged.
+export * from './flow-plan';
+
 export interface TicketFormConfig {
   userGroupsOnly?: {
     enabled: boolean;

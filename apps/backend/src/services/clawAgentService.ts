@@ -250,11 +250,6 @@ export interface S2SRunAgentResponse {
   error?: string;
 }
 
-export interface ConversationInsight {
-  reasoning: string | null;
-  content: string | null;
-  toolInvocations: unknown[];
-}
 
 
 // ============================================================================
@@ -1433,13 +1428,34 @@ async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Pro
   };
 }
 
+interface ClawChatMessage {
+  id: string;
+  role: string;
+  reasoning?: string | null;
+  content?: string | null;
+}
+
+interface ClawMessagesPayload {
+  success?: boolean;
+  data?: ClawChatMessage[];
+  toolInvocations?: unknown[];
+  invocationsByMsgId?: Record<string, unknown[]>;
+  icons?: Record<string, string>;
+  runByMsgId?: Record<string, string>;
+  ratingByMsgId?: Record<string, unknown>;
+}
+
 /** Fetch the latest assistant reasoning and tool invocations from a claw conversation. Used by email auto-draft. */
-export async function getConversationInsight(params: {
+async function fetchClawChatMessages(params: {
   agentSlug: string;
   conversationId: string;
   userId: string;
   spacesWorkspaceId?: string;
-}): Promise<ConversationInsight> {
+}): Promise<{
+  messages: ClawChatMessage[];
+  invocationsByMsgId: Record<string, unknown[]>;
+  raw: ClawMessagesPayload;
+}> {
   const { agentSlug, conversationId, userId, spacesWorkspaceId } = params;
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(conversationId)}/messages`;
   let res: globalThis.Response;
@@ -1455,31 +1471,66 @@ export async function getConversationInsight(params: {
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] getConversationInsight: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
+      `[ClawAgentService] fetchClawChatMessages: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
   if (!res.ok) {
     const body = await safeReadText(res);
-    throw new Error(`[ClawAgentService] getConversationInsight: HTTP ${res.status} — ${body}`);
+    throw new Error(`[ClawAgentService] fetchClawChatMessages: HTTP ${res.status} — ${body}`);
   }
 
-  const json = (await res.json()) as {
-    success?: boolean;
-    data?: Array<{ id: string; role: string; reasoning?: string | null; content?: string | null }>;
-    invocationsByMsgId?: Record<string, unknown[]>;
+  const json = (await res.json()) as ClawMessagesPayload;
+  return {
+    messages: Array.isArray(json.data) ? json.data : [],
+    invocationsByMsgId: json.invocationsByMsgId ?? {},
+    raw: json,
   };
-  const messages = Array.isArray(json.data) ? json.data : [];
-  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-  const reasoning =
-    lastAssistant?.reasoning && lastAssistant.reasoning.trim() ? lastAssistant.reasoning : null;
-  const content =
-    lastAssistant?.content && lastAssistant.content.trim() ? lastAssistant.content : null;
-  const toolInvocations =
-    lastAssistant && Array.isArray(json.invocationsByMsgId?.[lastAssistant.id])
-      ? (json.invocationsByMsgId![lastAssistant.id] as unknown[])
-      : [];
-  return { reasoning, content, toolInvocations };
+}
+
+export async function getConversationTranscript(params: {
+  agentSlug: string;
+  conversationId: string;
+  userId: string;
+  spacesWorkspaceId?: string;
+}): Promise<ClawMessagesPayload> {
+  const { raw } = await fetchClawChatMessages(params);
+  return raw;
+}
+
+export async function forkClawConversation(params: {
+  agentSlug: string;
+  sourceConversationId: string;
+  targetConversationId: string;
+  userId: string;
+  spacesWorkspaceId?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { agentSlug, sourceConversationId, targetConversationId, userId, spacesWorkspaceId } =
+    params;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(sourceConversationId)}/fork`;
+  let res: globalThis.Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extractUserIdHeader(userId, spacesWorkspaceId),
+        ...getS2SHeaders(),
+      },
+      body: JSON.stringify({ targetConversationId }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new Error(
+      `[ClawAgentService] forkClawConversation: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+  if (!res.ok || json.success !== true) {
+    return { success: false, error: json.error ?? `fork HTTP ${res.status}` };
+  }
+  return { success: true };
 }
 
 async function safeReadText(res: globalThis.Response): Promise<string> {

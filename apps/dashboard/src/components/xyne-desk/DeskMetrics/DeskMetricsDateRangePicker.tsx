@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { CalendarView, type DateRangeValue } from '../../ui/DateRangeFilter';
 
-const MAX_CUSTOM_DAYS = 31;
+const MAX_CUSTOM_DAYS = 30;
 
 const startOfDay = (d: Date): Date => {
   const r = new Date(d);

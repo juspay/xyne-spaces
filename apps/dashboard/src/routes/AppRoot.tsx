@@ -6,7 +6,7 @@ import HomeScreen from './HomeScreen';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
-import OnboardingScreen from './OnboardingScreen/OnboardingScreen';
+import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
@@ -159,6 +159,7 @@ import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
+import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
@@ -900,7 +901,7 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'onboarding',
-                element: <OnboardingScreen />,
+                element: <QuestionnaireScreen />,
               },
               {
                 path: 'rca',
@@ -1113,6 +1114,14 @@ export const router = createBrowserRouter([
                 element: (
                   <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
                     <ProductInsightsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'ticket-reports',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
+                    <TicketReportsScreen />
                   </ResourceProtectedRoute>
                 ),
               },

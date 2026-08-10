@@ -36,6 +36,7 @@ import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { keyBetween, sumSectionUnread } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
+import UnreadMentionsPill, { useOffscreenUnreadSections } from './UnreadMentionsPill';
 import { useMutation } from '@tanstack/react-query';
 import { useSelector } from '@xstate/react';
 import {
@@ -82,7 +83,7 @@ import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
 import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
-import { stateMachineActor } from '../../../machines/stateMachine';
+import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
 
 const ContainerDropZone = ({
@@ -227,6 +228,30 @@ const ChatDirectory = ({
 
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
+  const unreadSectionIds = useMemo(() => {
+    const hasBadge = (list: VisibleChannel[]): boolean =>
+      list.some(c => (unreadCounts[c.id] ?? 0) > 0 && c.id !== activeChannelId);
+
+    const ids: string[] = [];
+    if (hasBadge(starredDisplayChannels)) ids.push(ChannelCategory.STARRED);
+    for (const { section, channels: sectionChannels } of displaySectioned) {
+      if (hasBadge(sectionChannels)) ids.push(section.id);
+    }
+    if (hasBadge(defaultDisplayChannels)) ids.push(ChannelCategory.CHANNELS);
+    if (hasBadge(dmDisplayChannels)) ids.push(ChannelCategory.DIRECT_MESSAGES);
+    return ids;
+  }, [
+    starredDisplayChannels,
+    displaySectioned,
+    defaultDisplayChannels,
+    dmDisplayChannels,
+    unreadCounts,
+    activeChannelId,
+  ]);
+  const { above: unreadSectionAbove, below: unreadSectionBelow } = useOffscreenUnreadSections(
+    listContainerRef,
+    unreadSectionIds,
+  );
 
   const unreadActivityStats = useMemo(() => {
     const allOrdered = [...starred, ...channels, ...directMessages];
@@ -481,7 +506,7 @@ const ChatDirectory = ({
       <div className='w-full h-[52px] shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
+      <div className='relative flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
         <div className='block sm:hidden -mx-2 px-2 bg-background/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
           <div className='px-2 pt-2 pb-3 flex items-center justify-between'>
             <div className='flex items-center gap-2'>
@@ -501,10 +526,13 @@ const ChatDirectory = ({
             </div>
           </div>
         </div>
-        <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2 shrink-0'>
+        <div className='relative hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2 shrink-0'>
           <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
             Inbox
           </h2>
+          <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
+            <UnreadMentionsPill target={unreadSectionAbove} direction='up' />
+          </div>
         </div>
 
         <div
@@ -690,7 +718,10 @@ const ChatDirectory = ({
             <DndContext {...dndContextProps}>
               <ContainerDropZone id={`section-drop-${STARRED_CONTAINER}`}>
                 {(starred.length > 0 || activeOverlayChannel !== null) && (
-                  <Accordion.Item value={ChannelCategory.STARRED}>
+                  <Accordion.Item
+                    value={ChannelCategory.STARRED}
+                    data-sidebar-section={ChannelCategory.STARRED}
+                  >
                     <Accordion.Trigger asChild>
                       <button className='group flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium px-3'>
                         <span className='size-4 flex items-center justify-center shrink-0'>
@@ -785,7 +816,10 @@ const ChatDirectory = ({
               )}
 
               {/* Channels  */}
-              <Accordion.Item value={ChannelCategory.CHANNELS}>
+              <Accordion.Item
+                value={ChannelCategory.CHANNELS}
+                data-sidebar-section={ChannelCategory.CHANNELS}
+              >
                 <Accordion.Header asChild>
                   <div className='group px-3 flex items-center justify-between gap-2 '>
                     <Accordion.Trigger asChild>
@@ -969,7 +1003,10 @@ const ChatDirectory = ({
                 </Accordion.Content>
               </Accordion.Item>
               {/* DMS  */}
-              <Accordion.Item value={ChannelCategory.DIRECT_MESSAGES}>
+              <Accordion.Item
+                value={ChannelCategory.DIRECT_MESSAGES}
+                data-sidebar-section={ChannelCategory.DIRECT_MESSAGES}
+              >
                 <Accordion.Header asChild>
                   <div className='group px-3 flex items-center justify-between gap-2 '>
                     <Accordion.Trigger asChild>
@@ -1036,6 +1073,10 @@ const ChatDirectory = ({
               </Accordion.Item>
             </DndContext>
           </Accordion.Root>
+        </div>
+
+        <div className='pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center'>
+          <UnreadMentionsPill target={unreadSectionBelow} direction='down' />
         </div>
 
         <Dialog

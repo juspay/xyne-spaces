@@ -1,5 +1,9 @@
 import { useQuery, UseQueryResult } from '@tanstack/react-query';
-import type { DeskMetricsAggregateResponse, DeskMetricsResponse } from '@xyne/shared';
+import type {
+  DeskMetricsAggregateResponse,
+  DeskMetricsResponse,
+  TicketPriority,
+} from '@xyne/shared';
 import {
   getAggregateDeskMetrics,
   getDeskMetrics,
@@ -10,12 +14,37 @@ export function useDeskMetrics(
   channelId: string | null,
   timeRange: string,
   enabled: boolean,
-  assigneeId?: string | null,
+  assigneeIds?: string[],
   customFieldFilter?: CustomFieldFilter,
+  stageNames?: string[],
+  priorities?: TicketPriority[],
+  userGroupIds?: string[],
 ): UseQueryResult<DeskMetricsResponse> {
+  const sortedStageNames = [...(stageNames ?? [])].sort();
+  const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
+  const sortedPriorities = [...(priorities ?? [])].sort();
+  const sortedUserGroupIds = [...(userGroupIds ?? [])].sort();
   return useQuery({
-    queryKey: ['desk-metrics', channelId, timeRange, assigneeId ?? null, customFieldFilter ?? null],
-    queryFn: () => getDeskMetrics(channelId as string, timeRange, assigneeId, customFieldFilter),
+    queryKey: [
+      'desk-metrics',
+      channelId,
+      timeRange,
+      sortedAssigneeIds,
+      customFieldFilter ?? null,
+      sortedStageNames,
+      sortedPriorities,
+      sortedUserGroupIds,
+    ],
+    queryFn: () =>
+      getDeskMetrics(
+        channelId as string,
+        timeRange,
+        sortedAssigneeIds,
+        customFieldFilter,
+        sortedStageNames,
+        sortedPriorities,
+        sortedUserGroupIds,
+      ),
     enabled: enabled && !!channelId,
     retry: 1,
   });
@@ -25,20 +54,39 @@ export function useAggregateDeskMetrics(
   channelIds: string[],
   timeRange: string,
   enabled: boolean,
-  assigneeId?: string | null,
+  assigneeIds?: string[],
   customFieldFilter?: CustomFieldFilter,
+  stageNames?: string[],
+  priorities?: TicketPriority[],
+  userGroupIds?: string[],
 ): UseQueryResult<DeskMetricsAggregateResponse> {
   const sortedIds = [...channelIds].sort();
+  const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
+  const sortedStageNames = [...(stageNames ?? [])].sort();
+  const sortedPriorities = [...(priorities ?? [])].sort();
+  const sortedUserGroupIds = [...(userGroupIds ?? [])].sort();
   const idsKey = sortedIds.join(',');
   return useQuery({
     queryKey: [
       'desk-metrics-aggregate',
       idsKey,
       timeRange,
-      assigneeId ?? null,
+      sortedAssigneeIds,
       customFieldFilter ?? null,
+      sortedStageNames,
+      sortedPriorities,
+      sortedUserGroupIds,
     ],
-    queryFn: () => getAggregateDeskMetrics(sortedIds, timeRange, assigneeId, customFieldFilter),
+    queryFn: () =>
+      getAggregateDeskMetrics(
+        sortedIds,
+        timeRange,
+        sortedAssigneeIds,
+        customFieldFilter,
+        sortedStageNames,
+        sortedPriorities,
+        sortedUserGroupIds,
+      ),
     enabled: enabled && sortedIds.length > 0,
     retry: 1,
   });

@@ -9,8 +9,15 @@ import { activityService } from '@/services/activity/activityService';
 import {
   emailFetchQueue,
   type EmailFetchJobData,
+  type EmailFetchQueueJobData,
+  type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { getHttpStatus } from '@/services/googleService';
+import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
+import { seedSyncCursor } from '@/services/syncCursorRecovery';
+
+const externalSourceRepo = new ExternalSourceRepository();
 
 class EmailFetchWorker {
   private isInitialized = false;
@@ -22,21 +29,91 @@ class EmailFetchWorker {
 
     const queue = emailFetchQueue.getQueue();
 
-    queue.process('refetch', 1, async (job: Bull.Job<EmailFetchJobData>) => {
-      return this.processJob(job);
+    queue.process('refetch', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
+      return this.processJob(job as Bull.Job<EmailFetchJobData>);
+    });
+
+    queue.process('cursor-catchup', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
+      return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
     queue.on('failed', (job, err) => {
       logger.error(
-        `[EMAIL-FETCH-WORKER] Job ${job.id} failed — source ${job.data.sourceId}:`,
+        `[EMAIL-FETCH-WORKER] Job ${job.id} (${job.name}) failed — source ${job.data.sourceId}:`,
         err,
       );
 
-      void this.notifyFailure(job.data, err);
+      if (job.name === 'refetch') {
+        void this.notifyFailure(job.data as EmailFetchJobData, err);
+      }
     });
 
     this.isInitialized = true;
     logger.info('[EMAIL-FETCH-WORKER] Started, ready to process jobs');
+  }
+
+  private async processCursorCatchup(
+    job: Bull.Job<CursorCatchupJobData>,
+  ): Promise<void> {
+    const { sourceId, watchHistoryId, requesterUserId } = job.data;
+    const source = await externalSourceRepo.findById(sourceId);
+    if (!source || !source.isActive) {
+      logger.warn(`[EMAIL-FETCH-WORKER] Catchup: source ${sourceId} missing or inactive — skipping`);
+      return;
+    }
+
+    const { workspaceId, channelId } = source;
+    if (!workspaceId) {
+      logger.error(`[EMAIL-FETCH-WORKER] Catchup: source has no workspace — skipping`, {
+        sourceId,
+        sourceName: source.name,
+      });
+      return;
+    }
+
+    const cursor = source.lastSyncCursor;
+    if (!cursor) {
+      await seedSyncCursor({
+        source,
+        seedHistoryId: watchHistoryId,
+        reason: 'no-cursor',
+        requesterUserId,
+      });
+      return;
+    }
+
+    const adapter = adapterRegistry.getAdapter(source.name);
+    try {
+      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
+        catchUpFromCursor(source, adapter, cursor),
+      );
+
+      logger.info(
+        `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
+      );
+
+      if (result.newTickets > 0 && requesterUserId && channelId) {
+        await this.notifySuccess(
+          { sourceId, workspaceId, channelId, requesterUserId },
+          result,
+        );
+      }
+    } catch (error) {
+      if (getHttpStatus(error) !== 404) {
+        logger.warn(`[EMAIL-FETCH-WORKER] Catchup failed transiently — retrying`, {
+          sourceId,
+          sourceName: source.name,
+          status: getHttpStatus(error),
+        });
+        throw error;
+      }
+      await seedSyncCursor({
+        source,
+        seedHistoryId: watchHistoryId,
+        reason: 'cursor-expired',
+        requesterUserId,
+      });
+    }
   }
 
   private async processJob(job: Bull.Job<EmailFetchJobData>): Promise<void> {

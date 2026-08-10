@@ -21,7 +21,7 @@
   /* Classic theme - default light theme */
   [data-theme="classic"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper.png");
+    --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -119,6 +119,13 @@
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
 
+    /* FLOW decision nodes and route labels */
+    --flow-decision-bg: 48 100% 96%;
+    --flow-decision-border: 46 97% 65%;
+    --flow-decision-fg: 32 95% 29%;
+    --flow-decision-divider: 48 96% 77%;
+    --flow-decision-hover: 48 96% 89%;
+
     /* Desk Settings tokens */
     --desk-helper-foreground: #a0a7ab;
     --desk-muted-foreground: #9da4a8;
@@ -148,7 +155,7 @@
   /* Classic theme - default theme with current design */
   [data-theme="summer_breeze"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper.png");
+    --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -237,6 +244,13 @@
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
+
+    /* FLOW decision nodes and route labels */
+    --flow-decision-bg: 48 100% 96%;
+    --flow-decision-border: 46 97% 65%;
+    --flow-decision-fg: 32 95% 29%;
+    --flow-decision-divider: 48 96% 77%;
+    --flow-decision-hover: 48 96% 89%;
 
     /* Desk Settings tokens */
     --desk-helper-foreground: #a0a7ab;
@@ -370,6 +384,13 @@
 
     /* Ticket accent color - lighter for dark mode visibility */
     --ticket-accent: #5b7ce6;
+
+    /* FLOW decision nodes and route labels */
+    --flow-decision-bg: 32 30% 18%;
+    --flow-decision-border: 38 92% 50%;
+    --flow-decision-fg: 46 97% 65%;
+    --flow-decision-divider: 32 62% 32%;
+    --flow-decision-hover: 32 45% 24%;
 
     /* Desk Settings tokens */
     --desk-helper-foreground: #b0b4ba;
@@ -4430,6 +4451,53 @@ img.inline-emoji,
 [data-theme="midnight"] .email-read-card {
   --card: 216 5% 18.5%;
   --background: 216 5% 18.5%;
+}
+
+/* Flow plan editor: make edge-reconnect grab points visible when hovering an
+   edge. React Flow renders them as transparent circles at the edge endpoints —
+   CSS fill/stroke override its presentation attributes. */
+.flow-plan-editor .react-flow__edge:hover .react-flow__edgeupdater,
+.flow-plan-editor .react-flow__edge.updating .react-flow__edgeupdater {
+  fill: #6276be;
+  fill-opacity: 0.35;
+  stroke: #6276be;
+  stroke-opacity: 0.7;
+  stroke-width: 1.5px;
+}
+.flow-plan-editor .react-flow__edgeupdater:hover {
+  fill: #6276be;
+  fill-opacity: 0.6;
+  stroke: #6276be;
+  stroke-opacity: 1;
+  stroke-width: 1.5px;
+}
+
+/* Flow plan editor: the edge × delete buttons render in the edge-label layer,
+   which by default sits below the group cover node — so the cover swallows the
+   click inside a group. Lift the layer above the nodes. The layer itself is
+   pointer-events:none (only the buttons capture clicks), so dragging the cover
+   and cards is unaffected. */
+.flow-plan-editor .react-flow__edgelabel-renderer {
+  z-index: 1001;
+}
+
+/* Override React Flow's pointer cursor while drawing a group-selection box. */
+.flow-plan-editor--group-selection,
+.flow-plan-editor--group-selection * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.flow-plan-editor--group-selection .react-flow__pane,
+.flow-plan-editor--group-selection .react-flow__pane.selection,
+.flow-plan-editor--group-selection .react-flow__node {
+  cursor: crosshair !important;
+}
+
+/* Flow run view: edges are display-only — no pointer cursor / hover hit area */
+.flow-run-view .react-flow__edge {
+  cursor: default;
+  pointer-events: none;
 }
 
 /* ----------------------------
