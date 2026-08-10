@@ -172,6 +172,49 @@ describe('gates before any scoping', () => {
     expect(row).toEqual({ id: 's-1' });
   });
 
+  it('refuses a filter naming another workspace inside a transaction when the switch is on', async () => {
+    asUser();
+    enforce.workspaceImmutable = true;
+    const { hook, txWrapper } = build();
+    const query = jest.fn();
+
+    await expect(
+      inTransaction(txWrapper, () =>
+        hook({
+          model: 'Message',
+          operation: 'findMany',
+          args: { where: { workspaceId: OTHER_WS } },
+          query,
+        }),
+      ),
+    ).rejects.toThrow(/No Message found for the current workspace/);
+
+    expect(query).not.toHaveBeenCalled();
+    expect(tags()).toContain('[acl] filter names a different workspace');
+  });
+
+  it('reports a foreign filter but still bounds the query when the switch is off', async () => {
+    asUser();
+    enforce.workspaceImmutable = false;
+    const { hook, txWrapper } = build();
+    const query = jest.fn().mockResolvedValue([]);
+
+    await inTransaction(txWrapper, () =>
+      hook({
+        model: 'Message',
+        operation: 'findMany',
+        args: { where: { workspaceId: OTHER_WS } },
+        query,
+      }),
+    );
+
+    // Off means reported and corrected, never allowed: the enforced workspace still applies.
+    expect(query).toHaveBeenCalledWith({
+      where: { AND: [{ workspaceId: OTHER_WS }, { workspaceId: WS }] },
+    });
+    expect(tags()).toContain('[acl] filter names a different workspace');
+  });
+
   it('passes through when no workspace is resolved, and says why', async () => {
     ctxState.ctx = { actor: 'user', userId: 'u-1', workspaceId: null };
     ctxState.ws = null;

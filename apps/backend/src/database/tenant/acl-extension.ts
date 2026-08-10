@@ -185,6 +185,22 @@ function scopeTransactionArgs(
   const a = (scoped ?? {}) as Record<string, unknown> & {
     where?: Record<string, unknown>;
   };
+
+  // A filter naming another workspace. Reported every time, and refused where the switch is
+  // on. Left on, the enforced value below still wins either way — the caller is told their
+  // filter did not mean what it said, rather than the query quietly reading their own rows.
+  const givenWs = a.where?.workspaceId;
+  if (typeof givenWs === 'string' && givenWs !== workspaceId) {
+    warnLogEvery('[acl] filter names a different workspace', model, operation, {
+      given: givenWs,
+      enforced: workspaceId,
+      refused: config.aclEnforcement.workspaceImmutable,
+    });
+    if (config.aclEnforcement.workspaceImmutable) {
+      throw outOfScope(model);
+    }
+  }
+
   const workspaceWhere = { workspaceId };
   // Prisma 5's extended WhereUniqueInput permits additional non-unique fields, but still
   // requires its unique selector at the top level (putting it only inside AND is invalid).
@@ -421,41 +437,42 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          if (txStorage.getStore() === true) {
+          const ctx = getContextOrNull();
+          const ws = currentWorkspaceId();
+          const inTransaction = txStorage.getStore() === true;
+
+          // Raw queries carry no model and are handled by their call sites.
+          if (!ws || !model) {
+            // `system` is intentional; anything else reaching here has no scope to apply.
+            if (ctx?.actor !== 'system') {
+              warnLogOnce('[acl] query ran with no tenant scope', model, operation, {
+                reason: `${inTransaction ? 'transaction-' : ''}${ctx ? 'no-workspace' : 'no-context'}`,
+              });
+            }
+            // Refused only inside a transaction, where the argument rewrite below is the whole
+            // of the boundary. The ordinary path still filters per query, and authentication
+            // reaches it before a workspace is resolved. Gated so the log above can name the
+            // callers first.
+            if (
+              inTransaction &&
+              config.aclEnforcement.noContext &&
+              isWorkspaceScopedModel(model ?? '') &&
+              ctx?.actor !== 'system'
+            ) {
+              throw new Error(
+                `workspaceId required for ${model}.${operation} inside an interactive transaction`,
+              );
+            }
+            return query(args);
+          }
+
+          if (inTransaction) {
             // The normal path's pre-query reads go through `base` and would escape the
             // transaction, so the workspace boundary is enforced in the operation arguments
             // instead. Per-table and per-user policy still only applies outside a transaction.
             warnLogOnce('[acl] ran inside a transaction', model, operation);
-            const ctx = getContextOrNull();
-            const ws = currentWorkspaceId();
-            if (!ws || !model) {
-              if (ctx?.actor !== 'system') {
-                warnLogOnce('[acl] query ran with no tenant scope', model, operation, {
-                  reason: ctx ? 'transaction-no-workspace' : 'transaction-no-context',
-                });
-              }
-              // A typed operation on a tenant table must never silently become cross-workspace.
-              // Background jobs open runAsServiceActor with their parent entity's workspace;
-              // intentional cross-workspace maintenance uses runAsSystem. Refused only where
-              // ACL_ENFORCE_NO_CONTEXT is on, so the log above can name the callers first.
-              if (config.aclEnforcement.noContext && model && isWorkspaceScopedModel(model) && ctx?.actor !== 'system') {
-                throw new Error(
-                  `workspaceId required for ${model}.${operation} inside an interactive transaction`,
-                );
-              }
-              return query(args);
-            }
             const scoped = scopeTransactionArgs(model, operation, args, ws);
             return scoped === args ? query(args) : query(scoped as typeof args);
-          }
-          const ctx = getContextOrNull();
-          const ws = currentWorkspaceId();
-          // Raw queries carry no model and are handled by their call sites.
-          if (!ws || !model) {
-            // `system` is intentional; anything else reaching here has no scope to apply.
-            if (ctx?.actor !== 'system')
-              warnLogOnce('[acl] query ran with no tenant scope', model, operation, { reason: ctx ? 'no-workspace' : 'no-context' });
-            return query(args);
           }
 
           // Prisma types `operation` as a partial union (omits create/upsert literals), so
