@@ -93,9 +93,7 @@ export const SocialMediaDeskIntegrationCard = ({
         await disconnectGooglePlayApp(channelId, sourceId);
       }
       clearChannelConnectedEmailCache(channelId);
-      toast.success(
-        reconnect ? 'Google Play app reconnection started.' : 'Google Play app disconnected.',
-      );
+      toast.success(reconnect ? 'Google Play app reconnected.' : 'Google Play app disconnected.');
     } catch (error) {
       toast.error(
         error instanceof Error

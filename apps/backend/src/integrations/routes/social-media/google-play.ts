@@ -23,7 +23,6 @@ import {
 } from '../../adapters/social-media/google-play/client';
 import { googlePlayOAuthStateService } from '../../adapters/social-media/google-play/oauthStateService';
 import { buildGooglePlaySourceRecords } from '../../adapters/social-media/google-play/sourceRecords';
-import { socialMediaService } from '../../social-media/socialMediaService';
 import { authorizeSocialMediaManager } from './access';
 
 const TAG = '[GooglePlayRoutes]';
@@ -717,13 +716,7 @@ router.post(
         where: { id: source.id },
         data: { isActive: true },
       });
-      void socialMediaService.syncSource(source.id).catch((error) => {
-        logger.error(`${TAG} Google Play app sync after reconnection failed`, {
-          sourceId: source.id,
-          error,
-        });
-      });
-      res.status(202).json({ message: 'Google Play app reconnection started' });
+      res.json({ message: 'Google Play app reconnected' });
     } catch (error) {
       const providerStatus =
         typeof error === 'object' &&

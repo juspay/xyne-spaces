@@ -1976,8 +1976,6 @@ model Email {
   @@index([channelId, rfcMessageId])
   @@index([conversationId, id])
   @@index([sentByUserId, createdAt(sort: Desc)]) // "Sent by me" list, ordered newest-first
-  @@index([workspaceId, rating])
-  @@index([workspaceId, clientVersionName])
   @@map("emails")
   @@schema("public")
 }
