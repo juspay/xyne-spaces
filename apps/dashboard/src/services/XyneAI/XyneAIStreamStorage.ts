@@ -40,7 +40,6 @@ export interface StreamRecord {
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
   attachments: MessageAttachment[];
-  version?: 'v1' | 'v2';
 }
 
 class XyneAIStreamStorage {
@@ -92,7 +91,6 @@ class XyneAIStreamStorage {
     deepResearchEnabled: boolean,
     attachments: MessageAttachment[],
     initialMessages: Message[],
-    version?: 'v1' | 'v2',
   ): Promise<void> {
     try {
       const db = await this.openDB();
@@ -117,7 +115,6 @@ class XyneAIStreamStorage {
         webSearchEnabled,
         deepResearchEnabled,
         attachments,
-        ...(version && { version }),
       };
 
       return new Promise((resolve, reject) => {

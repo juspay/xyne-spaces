@@ -49,7 +49,6 @@ interface UseXyneAIStreamParams {
   collectionIds?: string[];
   fileIds?: string[];
   createCanvasEnabled?: boolean;
-  isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
   ticketIds?: string[];
   canvasIds?: string[];
@@ -82,22 +81,6 @@ function activitiesToAttachedContext(activities: UserActivity[]): AttachedContex
   }));
 }
 
-// Canvas creation instruction appended when createCanvasEnabled is true
-const CANVAS_CREATION_INSTRUCTION = `
-<mandatory_final_step>
-You MUST perform these steps after completing your analysis:
-
-1. Call the <tool>create_canvas</tool> tool with:
-   - title: A descriptive title for the document
-   - markdown: Your complete response formatted in markdown with proper headings, sections, and structure
-
-2. After the tool returns, you MUST include the canvas URL from the tool output in your response.
-   The tool will return: "Canvas created successfully! Title: ... URL: https://spaces.xyne.juspay.net/chat/canvas/..."
-   Extract and display this URL so the user can click on it.
-
-This is MANDATORY - the user requires the output in a canvas document with a clickable link.
-</mandatory_final_step>`;
-
 export const useXyneAIStream = ({
   channelIds,
   conversationId,
@@ -114,7 +97,6 @@ export const useXyneAIStream = ({
   collectionIds,
   fileIds,
   createCanvasEnabled = false,
-  isV2 = false,
   channelId,
   ticketIds,
   canvasIds,
@@ -310,12 +292,6 @@ export const useXyneAIStream = ({
         internalQuery = internalQuery + canvasContextHint;
       }
 
-      // Append hidden canvas instruction when create canvas is enabled (v1 only)
-      // For v2, canvas creation is handled via additionalInstructions in the backend
-      if (eCreateCanvasEnabled && !isV2) {
-        internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
-      }
-
       // Get current messages synchronously
       // Strip any still-streaming messages — they may not have been cleared yet if abortCurrentRequest
       // was called just before submitQuery (React batches the state update, so prev still shows them).
@@ -418,11 +394,8 @@ export const useXyneAIStream = ({
           callIds: eCallIds,
           attachedContext: combinedAttachedContext,
           agentSlug: agentSlug ?? undefined,
-          // v1 resolves its model from env and ignores the pin, so only send it
-          // on v2 rather than letting a stale pick ride along invisibly.
-          ...(isV2 && model ? { model } : {}),
+          ...(model ? { model } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
-          version: isV2 ? 'v2' : 'v1',
         },
         allMessages,
       );
@@ -442,7 +415,6 @@ export const useXyneAIStream = ({
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
-      isV2,
       syncMessagesRef,
       ticketIds,
       canvasIds,
