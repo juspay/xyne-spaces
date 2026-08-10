@@ -572,7 +572,10 @@ export class AiProvisioningBackfillController {
 
   // ── ENTRY POINT ──────────────────────────────────────────────────────
 
-  static async triggerBackfill(req: Request, res: Response<ApiResponse>) {
+  // These handlers are passed directly to Express by the private backfill
+  // route. Keep them as arrow properties so the controller class remains the
+  // `this` receiver when the route invokes them.
+  static triggerBackfill = async (req: Request, res: Response<ApiResponse>) => {
     try {
       const options = this.buildOptions(req.body);
       logger.info('[AiProvisioningBackfill] Starting', options);
@@ -659,7 +662,7 @@ export class AiProvisioningBackfillController {
     }
   }
 
-  static async getStatus(_req: Request, res: Response<ApiResponse>) {
+  static getStatus = async (_req: Request, res: Response<ApiResponse>) => {
     try {
       const [orgs, workspaces, users] = await Promise.all([
         this.prisma.organization.count(),
