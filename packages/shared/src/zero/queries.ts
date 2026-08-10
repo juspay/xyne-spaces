@@ -27,7 +27,6 @@ import {
   EmailType,
   schema,
   LinkVisibility,
-  MessageType,
   NudgeState,
   Status,
   TicketPriority,
@@ -3180,10 +3179,7 @@ export const queries = defineQueries({
                 messageQuery.where(helpers =>
                   helpers.or(
                     helpers.cmp('visibleTo', 'IS', null),
-                    helpers.and(
-                      helpers.cmp('visibleTo', '=', ctx.userID),
-                      helpers.cmp('msgType', '!=', MessageType.SYSTEM),
-                    ),
+                    helpers.cmp('visibleTo', '=', ctx.userID),
                   ),
                 ),
               )
