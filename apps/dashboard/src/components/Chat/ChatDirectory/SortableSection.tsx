@@ -94,6 +94,7 @@ const SortableSection = ({
       }}
       style={style}
       value={section.id}
+      data-sidebar-section={section.id}
       className='group/item'
     >
       {/* The header itself is the drag handle: a click toggles the section, a
