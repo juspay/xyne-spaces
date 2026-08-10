@@ -1899,6 +1899,24 @@ export const mutators = defineMutators({
           if (parsed?.title) forwardedContent = parsed.title;
         }
         const forwardedHasAttachment = useOptionalText ? false : originalMessage.hasAttachment;
+        const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
+        const isOriginalMarkdownContent =
+          !useOptionalText && originalMetadata?.['contentFormat'] === 'markdown';
+        const isCallMessage = originalMetadata?.['isCallMessage'] === true;
+
+        // Define metadata for the new forwarded message.
+        // Preserve markdown content format so forwarded previews/bubbles render the
+        // nested forwarded content with the same renderer as the original message.
+        const forwardedMessageMetadata = {} as Record<string, unknown>;
+        if (isOriginalMarkdownContent) {
+          forwardedMessageMetadata['contentFormat'] = 'markdown';
+        }
+        if (isCallMessage) {
+          forwardedMessageMetadata['isCallMessage'] = true;
+          if (originalMetadata?.['callId']) {
+            forwardedMessageMetadata['callId'] = originalMetadata['callId'];
+          }
+        }
 
         const now = timestamp;
 
@@ -1935,6 +1953,7 @@ export const mutators = defineMutators({
             msgType: MessageType.FORWARDED,
             hasAttachment: forwardedHasAttachment,
             createdAt: now,
+            metadata: forwardedMessageMetadata,
           }),
         });
 
@@ -1964,17 +1983,6 @@ export const mutators = defineMutators({
         // --- Call Message Forwarding Specifics ---
 
         let replyCount = 0;
-        const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
-        const isCallMessage = originalMetadata?.['isCallMessage'] === true;
-
-        // Define metadata for the new forwarded message
-        const forwardedMessageMetadata = {} as Record<string, unknown>;
-        if (isCallMessage) {
-          forwardedMessageMetadata['isCallMessage'] = true;
-          if (originalMetadata?.['callId']) {
-            forwardedMessageMetadata['callId'] = originalMetadata['callId'];
-          }
-        }
 
         // If it is a call message, we want to clone all non-user bot messages (like transcipts/summaries)
         if (isCallMessage) {

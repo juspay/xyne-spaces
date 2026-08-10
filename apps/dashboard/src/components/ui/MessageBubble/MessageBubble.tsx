@@ -602,15 +602,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
-  // Detect any message with markdown content format (call_summary, call_prd, etc.)
+  // Detect any message with markdown content format (call_summary, call_prd, etc.).
+  // Forwarded messages store the original body inside forwarded XML, so keep the
+  // forwarded branch in charge and render only that nested body as markdown.
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
+  const shouldRenderMessageAsMarkdown = isMarkdownContent && !isForwardedMessage;
+  const shouldRenderForwardedContentAsMarkdown = isMarkdownContent && isForwardedMessage;
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
   const parsedMarkdown = useMemo(() => {
-    if (isMarkdownContent) {
+    if (shouldRenderMessageAsMarkdown) {
       return parseMarkdownWithTicketSuggestions(message.content, hasSuggestedTickets);
     }
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
-  }, [isMarkdownContent, hasSuggestedTickets, message.content]);
+  }, [shouldRenderMessageAsMarkdown, hasSuggestedTickets, message.content]);
 
   const ticketSuggestions = parsedMarkdown.ticketSuggestions;
   const ticketsCreated = parsedMarkdown.ticketsCreated;
@@ -712,14 +716,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // Postgres and never hit the /messages sidebar path.
   const clawCitations = metadata?.['clawCitations'] as ToolInvocation[] | undefined;
   const clawCitationCtx = useMemo(() => {
-    if (!isMarkdownContent || !clawCitations?.length) return undefined;
+    if (!shouldRenderMessageAsMarkdown || !clawCitations?.length) return undefined;
     // Register the de-duplicated icon bytes so chip icons resolve at render time
     // (mirrors the sidebar's registerClawIcons on the /messages `icons` map).
     registerClawIcons(metadata?.['clawCitationIcons']);
     const toolNumbers = buildClawCitationToolNumbers(parsedMarkdown.content);
     if (toolNumbers.size === 0) return undefined;
     return { toolInvocations: clawCitations, toolNumbers };
-  }, [isMarkdownContent, clawCitations, metadata, parsedMarkdown.content]);
+  }, [shouldRenderMessageAsMarkdown, clawCitations, metadata, parsedMarkdown.content]);
 
   // Linkify inline [clf-…#n] tokens into the synthetic cite:/cite-group: links
   // the `a` override turns into chips. When no citation metadata is present
@@ -1210,7 +1214,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   emailId={message.messageId}
                   attachments={attachments}
                 />
-              ) : isMarkdownContent ? (
+              ) : shouldRenderMessageAsMarkdown ? (
                 <>
                   <MarkdownMessageRenderer
                     content={citationContent}
@@ -1350,7 +1354,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <div
                           className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
                         >
-                          {isMobile ? (
+                          {shouldRenderForwardedContentAsMarkdown ? (
+                            <MarkdownMessageRenderer
+                              content={resolvedForwardedContent}
+                              markdownComponents={markdownComponents}
+                              messageSubtype={metadata?.messageSubtype}
+                            />
+                          ) : isMobile ? (
                             <ExpandableMessage
                               message={resolvedForwardedContent}
                               showEdited={false}

@@ -478,6 +478,7 @@ export class ChannelController {
       let effectiveSenderName = originalSenderInfo.name || 'Unknown User';
 
       const meta = originalMessage.metadata as any;
+      const isOriginalMarkdownContent = !useOptionalText && meta?.contentFormat === 'markdown';
       const contentStr = typeof originalMessage.content === 'string' ? originalMessage.content : '';
       
       const isCall = 
@@ -522,6 +523,9 @@ export class ChannelController {
       });
 
         const forwardedMessageMetadata = {} as Record<string, unknown>;
+        if (isOriginalMarkdownContent) {
+          forwardedMessageMetadata['contentFormat'] = 'markdown';
+        }
         if (isCall) {
           forwardedMessageMetadata['isCallMessage'] = true;
           if (meta?.callId) {
