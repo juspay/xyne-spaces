@@ -6533,11 +6533,22 @@ router.post("/app/:spacesAppId", async (req: Request, res: Response): Promise<vo
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
+  // TEMPORARY (2026-08-10): s2s-authenticated callers that don't sign yet
+  // (SDLC surface's ClawAgentService) are let through with a loud warning
+  // instead of a 401. Scope is deliberately narrow: the s2s key must match
+  // AND the signature header must be entirely absent — a present-but-invalid
+  // signature still rejects, and non-s2s callers are unchanged. Remove once
+  // every s2s caller signs (the SDLC team is adding X-Xyne-Signature).
+  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
+  if (unsignedS2S) {
+    clog.warn(`[webhook/app] UNSIGNED s2s request allowed spacesAppId=${spacesAppId} — caller must add X-Xyne-Signature; this bypass is temporary`);
+  } else {
+    let verified = false;
+    await verifySpacesSignature(req, res, () => {
+      verified = true;
+    });
+    if (!verified || res.headersSent) return;
+  }
 
   if (isAutomationRequest) {
     const agent = await agentRepository.findBySpacesAppId(spacesAppId);
@@ -6568,11 +6579,19 @@ router.post("/:agentSlug", async (req: Request, res: Response): Promise<void> =>
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
+  // TEMPORARY (2026-08-10): same unsigned-s2s bypass as /app/:spacesAppId —
+  // warn and allow ONLY when the s2s key matches and the signature header is
+  // entirely absent. Remove once every s2s caller signs.
+  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
+  if (unsignedS2S) {
+    clog.warn(`[webhook] UNSIGNED s2s request allowed agentSlug=${agentSlug} — caller must add X-Xyne-Signature; this bypass is temporary`);
+  } else {
+    let verified = false;
+    await verifySpacesSignature(req, res, () => {
+      verified = true;
+    });
+    if (!verified || res.headersSent) return;
+  }
 
   if (isAutomationRequest) {
     await handleAutomationWebhook(req, res, agentSlug);
