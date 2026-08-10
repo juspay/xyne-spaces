@@ -1,4 +1,21 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronDown,
   ClockDefault,
@@ -7,7 +24,7 @@ import {
   EnvelopeDefault,
   Globe,
   Hashtag,
-  LockClose,
+  Lock02Close,
   MultipleCrossCancelDefault,
   PlusDefault,
   SearchDefault,
@@ -86,11 +103,97 @@ const EMPTY_SECTION = (): SummaryTemplateSection => ({
   description: '',
 });
 
+const MANDATORY_SECTIONS = [
+  {
+    id: 'mandatory-decisions',
+    key: 'decisions',
+    title: '✅ Decisions',
+    displayTitle: 'Decisions',
+    description:
+      'Every meeting decision, who made it, and why. High-confidence decisions are pinned to the timeline, uncertain ones appear as “Suggested” for verification.',
+    legacyDescriptions: ['- [Decision] — Owner: [Person] ([why / context])'],
+    dotClassName: 'bg-primary',
+  },
+  {
+    id: 'mandatory-action-items',
+    key: 'action items',
+    title: '📋 Action Items',
+    displayTitle: 'Action items',
+    description:
+      'Who does what by when — one line per task, owner attributed from the speaker. Each item links back to the moment it was said.',
+    legacyDescriptions: ['- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]'],
+    dotClassName: 'bg-action-primary',
+  },
+] as const;
+const MAX_TEMPLATE_TITLE_LENGTH = 120;
+const MAX_MEETING_CONTEXT_LENGTH = 500;
+const MAX_SECTION_TITLE_LENGTH = 100;
+const MAX_SECTION_DESCRIPTION_LENGTH = 500;
+const MAX_SYSTEM_PROMPT_LENGTH = 12_000;
+
+const MAX_TEMPLATE_SECTIONS = 20;
+const MAX_EDITABLE_SECTIONS = MAX_TEMPLATE_SECTIONS - MANDATORY_SECTIONS.length;
+
+const normalizedSectionTitle = (title: string): string =>
+  title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+const isReservedSectionTitle = (title: string): boolean =>
+  MANDATORY_SECTIONS.some(({ key }) => normalizedSectionTitle(title) === key);
+
+const isMandatorySection = (section: Pick<SummaryTemplateSection, 'id'>): boolean =>
+  MANDATORY_SECTIONS.some(({ id }) => section.id === id);
+
+/**
+ * Mandatory sections are stored in the regular sections payload so summary generation keeps
+ * using the existing API contract. Runtime checks use reserved IDs rather than editable titles,
+ * so a custom section named "Decisions" remains a normal editable section.
+ */
+const withMandatorySections = (sections: SummaryTemplateSection[]): SummaryTemplateSection[] => {
+  const editableSections = sections.filter(section => !isMandatorySection(section));
+  const mandatorySections = MANDATORY_SECTIONS.map(definition => ({
+    id: definition.id,
+    title: definition.title,
+    description: definition.description,
+  }));
+
+  return [...editableSections, ...mandatorySections];
+};
+
+// The default template is a static string so it can be used in the backend service to generate
+const normalizeIncomingSections = (
+  sections: SummaryTemplateSection[],
+  matchTitlesOnly = false,
+): SummaryTemplateSection[] => {
+  const migratedSectionIds = new Set<string>();
+
+  for (const definition of MANDATORY_SECTIONS) {
+    const hasReservedSection = sections.some(section => section.id === definition.id);
+    if (hasReservedSection) continue;
+
+    const legacySection = sections.find(
+      section =>
+        !migratedSectionIds.has(section.id) &&
+        normalizedSectionTitle(section.title) === definition.key &&
+        (matchTitlesOnly ||
+          section.description.trim() === definition.description ||
+          definition.legacyDescriptions.some(
+            description => section.description.trim() === description,
+          )),
+    );
+    if (legacySection) migratedSectionIds.add(legacySection.id);
+  }
+
+  return withMandatorySections(sections.filter(section => !migratedSectionIds.has(section.id)));
+};
+
 const NEW_TEMPLATE = (currentUserId: string): TemplateDraft => ({
   id: null,
   name: '',
   autoTriggerPrompt: '',
-  sections: [EMPTY_SECTION()],
+  sections: withMandatorySections([EMPTY_SECTION()]),
   systemPrompt: '',
   version: 1,
   defaultOutlet: DefaultOutlet.EMAIL,
@@ -105,7 +208,7 @@ function toDraft(template: SummaryTemplate): TemplateDraft {
     id: template.id,
     name: template.name,
     autoTriggerPrompt: template.autoTriggerPrompt,
-    sections: Array.isArray(template.sections) ? template.sections : [],
+    sections: normalizeIncomingSections(Array.isArray(template.sections) ? template.sections : []),
     systemPrompt: template.systemPrompt,
     version: template.version,
     defaultOutlet: template.defaultOutlet,
@@ -140,6 +243,115 @@ const GROUP_ORDER: TemplateGroup[] = [
   'STARTER',
 ];
 
+interface SortableTemplateSectionProps {
+  section: SummaryTemplateSection;
+  isEditable: boolean;
+  canRemove: boolean;
+  onUpdate: (
+    sectionId: string,
+    update: Partial<Pick<SummaryTemplateSection, 'title' | 'description'>>,
+  ) => void;
+  onRemove: (sectionId: string) => void;
+}
+
+const SortableTemplateSection = ({
+  section,
+  isEditable,
+  canRemove,
+  onUpdate,
+  onRemove,
+}: SortableTemplateSectionProps): ReactElement => {
+  const hasReservedTitle = isReservedSectionTitle(section.title);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: section.id,
+    disabled: !isEditable,
+  });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        'relative group flex flex-col items-start gap-1.5 rounded-xl border border-border bg-background p-3',
+        isDragging && 'z-10 opacity-70 shadow-md',
+      )}
+    >
+      <div className='flex gap-1.5 items-center w-full'>
+        <button
+          ref={setActivatorNodeRef}
+          type='button'
+          {...attributes}
+          {...listeners}
+          disabled={!isEditable}
+          title={isEditable ? 'Drag to reorder' : undefined}
+          aria-label={`Reorder ${section.title.trim() || 'untitled section'}`}
+          className='flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground/60 outline-none active:cursor-grabbing disabled:cursor-default focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
+        >
+          <DragableSixDots className='size-3.5' />
+        </button>
+        <input
+          value={section.title}
+          onChange={event => onUpdate(section.id, { title: event.target.value })}
+          readOnly={!isEditable}
+          placeholder='Section title'
+          aria-label='Section title'
+          aria-invalid={hasReservedTitle}
+          className={cn(
+            'w-full bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground/60',
+            hasReservedTitle && 'text-destructive',
+          )}
+          data-track-category='SummaryTemplates'
+          data-track-name='EditSectionTitle'
+        />
+      </div>
+      {hasReservedTitle && (
+        <p className='pl-5 text-xs text-destructive' role='alert'>
+          Decisions and Action Items are reserved titles. Use a different section title.
+        </p>
+      )}
+      <div className='pl-5 w-full'>
+        <textarea
+          value={section.description}
+          onChange={event => onUpdate(section.id, { description: event.target.value })}
+          readOnly={!isEditable}
+          rows={1}
+          placeholder='Instructions for this section…'
+          aria-label='Section description'
+          className='thin-scrollbar w-full min-h-[1lh] max-h-[3lh] resize-none overflow-y-auto bg-transparent text-sm leading-normal text-muted-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground/60'
+          data-track-category='SummaryTemplates'
+          data-track-name='EditSectionDescription'
+        />
+      </div>
+      {isEditable && canRemove && (
+        <Button
+          variant='ghost'
+          size='iconSm'
+          onClick={() => onRemove(section.id)}
+          className='absolute right-2 top-2 size-6 rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100'
+          title='Remove section'
+          aria-label='Remove section'
+          data-track-category='SummaryTemplates'
+          data-track-name='RemoveSection'
+        >
+          <MultipleCrossCancelDefault className='size-3.5' strokeWidth={2.5} />
+        </Button>
+      )}
+    </div>
+  );
+};
+
 export function SummaryTemplatesModal({
   templates,
   loading,
@@ -160,9 +372,15 @@ export function SummaryTemplatesModal({
   const [aiAction, setAiAction] = useState<'context' | 'sections' | 'systemPrompt' | null>(null);
   const [shareTemplate, setShareTemplate] = useState<SummaryTemplate | null>(null);
   const [shareCount, setShareCount] = useState<number | null>(null);
+  const [limitMessage, setLimitMessage] = useState<string | null>(null);
   const draftCreator = useUser(draft?.createdBy ?? '');
 
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const limitMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sectionSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     const templateId = draft?.id;
@@ -187,6 +405,15 @@ export function SummaryTemplatesModal({
   useEffect(() => {
     if (isCreatingTemplate && draft && !draft.id) nameInputRef.current?.focus();
   }, [isCreatingTemplate, draft?.id]);
+
+  useEffect(
+    () => () => {
+      if (limitMessageTimerRef.current) {
+        clearTimeout(limitMessageTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (draft) return;
@@ -229,15 +456,32 @@ export function SummaryTemplatesModal({
   const draftRequirements = useMemo(() => {
     const hasTitle = Boolean(draft?.name.trim());
     const hasMeetingContext = Boolean(draft?.autoTriggerPrompt?.trim());
-    const hasSections = Boolean(
+    const editableSectionCount =
+      draft?.sections.filter(section => !isMandatorySection(section)).length ?? 0;
+    const hasEditableSection = editableSectionCount > 0;
+    const hasReservedSectionTitles = Boolean(
+      draft?.sections.some(
+        section => !isMandatorySection(section) && isReservedSectionTitle(section.title),
+      ),
+    );
+    const hasCompleteSections = Boolean(
       draft?.sections.length &&
       draft.sections.every(section => section.title.trim() && section.description.trim()),
     );
+    const hasAllowedSectionCount = Boolean(draft && editableSectionCount <= MAX_EDITABLE_SECTIONS);
+    const hasSections =
+      hasEditableSection &&
+      hasCompleteSections &&
+      hasAllowedSectionCount &&
+      !hasReservedSectionTitles;
     const hasSystemPrompt = Boolean(draft?.systemPrompt.trim());
     const missing = [
       !hasTitle && 'template title',
       !hasMeetingContext && 'meeting context',
-      !hasSections && 'complete sections',
+      !hasEditableSection && 'at least one custom section',
+      !hasCompleteSections && 'complete sections',
+      !hasAllowedSectionCount && `no more than ${MAX_EDITABLE_SECTIONS} custom sections`,
+      hasReservedSectionTitles && 'rename sections using reserved titles',
       !hasSystemPrompt && 'system prompt',
     ].filter((field): field is string => Boolean(field));
 
@@ -261,20 +505,126 @@ export function SummaryTemplatesModal({
     setIsCreatingTemplate(false);
   };
 
+  const showTemporaryLimitMessage = (message: string): void => {
+    setLimitMessage(message);
+    if (limitMessageTimerRef.current) {
+      clearTimeout(limitMessageTimerRef.current);
+    }
+    limitMessageTimerRef.current = setTimeout(() => {
+      setLimitMessage(null);
+      limitMessageTimerRef.current = null;
+    }, 2500);
+  };
+
   const updateSection = (
     sectionId: string,
     update: Partial<Pick<SummaryTemplateSection, 'title' | 'description'>>,
   ): void => {
+    const nextUpdate = { ...update };
+    if (nextUpdate.title && nextUpdate.title.length > MAX_SECTION_TITLE_LENGTH) {
+      showTemporaryLimitMessage(
+        `Section title limit reached (${MAX_SECTION_TITLE_LENGTH} characters).`,
+      );
+      nextUpdate.title = nextUpdate.title.slice(0, MAX_SECTION_TITLE_LENGTH);
+    }
+    if (nextUpdate.description && nextUpdate.description.length > MAX_SECTION_DESCRIPTION_LENGTH) {
+      showTemporaryLimitMessage(
+        `Section description limit reached (${MAX_SECTION_DESCRIPTION_LENGTH} characters).`,
+      );
+      nextUpdate.description = nextUpdate.description.slice(0, MAX_SECTION_DESCRIPTION_LENGTH);
+    }
+
     setDraft(current =>
       current
         ? {
             ...current,
             sections: current.sections.map(section =>
-              section.id === sectionId ? { ...section, ...update } : section,
+              section.id === sectionId && !isMandatorySection(section)
+                ? { ...section, ...nextUpdate }
+                : section,
             ),
           }
         : current,
     );
+  };
+
+  const updateTemplateName = (name: string): void => {
+    if (name.length > MAX_TEMPLATE_TITLE_LENGTH) {
+      showTemporaryLimitMessage(
+        `Template title limit reached (${MAX_TEMPLATE_TITLE_LENGTH} characters).`,
+      );
+    }
+
+    setDraft(current =>
+      current ? { ...current, name: name.slice(0, MAX_TEMPLATE_TITLE_LENGTH) } : current,
+    );
+  };
+
+  const updateMeetingContext = (context: string): void => {
+    if (context.length > MAX_MEETING_CONTEXT_LENGTH) {
+      showTemporaryLimitMessage(
+        `Meeting context limit reached (${MAX_MEETING_CONTEXT_LENGTH} characters).`,
+      );
+    }
+
+    setDraft(current =>
+      current
+        ? { ...current, autoTriggerPrompt: context.slice(0, MAX_MEETING_CONTEXT_LENGTH) }
+        : current,
+    );
+  };
+
+  const updateSystemPrompt = (systemPrompt: string): void => {
+    if (systemPrompt.length > MAX_SYSTEM_PROMPT_LENGTH) {
+      showTemporaryLimitMessage(
+        `System prompt limit reached (${MAX_SYSTEM_PROMPT_LENGTH.toLocaleString()} characters).`,
+      );
+    }
+
+    setDraft(current =>
+      current
+        ? { ...current, systemPrompt: systemPrompt.slice(0, MAX_SYSTEM_PROMPT_LENGTH) }
+        : current,
+    );
+  };
+
+  const removeSection = (sectionId: string): void => {
+    setDraft(current => {
+      if (!current) return current;
+      const editableSectionCount = current.sections.filter(
+        section => !isMandatorySection(section),
+      ).length;
+      if (editableSectionCount <= 1) return current;
+
+      return {
+        ...current,
+        sections: current.sections.filter(
+          section => section.id !== sectionId || isMandatorySection(section),
+        ),
+      };
+    });
+  };
+
+  const handleSectionDragEnd = ({ active, over }: DragEndEvent): void => {
+    if (!over || active.id === over.id) return;
+
+    setDraft(current => {
+      if (!current?.canEdit) return current;
+      const currentEditableSections = current.sections.filter(
+        section => !isMandatorySection(section),
+      );
+      const fromIndex = currentEditableSections.findIndex(section => section.id === active.id);
+      const toIndex = currentEditableSections.findIndex(section => section.id === over.id);
+      if (fromIndex === -1 || toIndex === -1) return current;
+
+      return {
+        ...current,
+        sections: [
+          ...arrayMove(currentEditableSections, fromIndex, toIndex),
+          ...current.sections.filter(isMandatorySection),
+        ],
+      };
+    });
   };
 
   const saveDraft = async (): Promise<SummaryTemplate | null> => {
@@ -289,7 +639,7 @@ export function SummaryTemplatesModal({
     const input: SummaryTemplateInput = {
       name: draft.name.trim(),
       autoTriggerPrompt: draft.autoTriggerPrompt?.trim() || null,
-      sections: draft.sections.map(section => ({
+      sections: withMandatorySections(draft.sections).map(section => ({
         ...section,
         title: section.title.trim(),
         description: section.description.trim(),
@@ -359,9 +709,10 @@ export function SummaryTemplatesModal({
       ? templates.filter(template => template.id !== updated.id)
       : templates;
     if (isPrivateForAnotherUser && draft?.id === updated.id) {
-      const next = nextTemplates[0] ? toDraft(nextTemplates[0]) : NEW_TEMPLATE(currentUserId);
+      const nextTemplate = nextTemplates[0];
+      const next = nextTemplate ? toDraft(nextTemplate) : NEW_TEMPLATE(currentUserId);
       setDraft(next);
-      setOriginalDraft(next.id ? next : null);
+      setOriginalDraft(nextTemplate ? next : null);
       setIsCreatingTemplate(!next.id);
     } else if (draft?.id === updated.id) {
       const next = toDraft(updated);
@@ -397,9 +748,10 @@ export function SummaryTemplatesModal({
     try {
       await recordingService.deleteSummaryTemplate(draft.id);
       const remaining = templates.filter(template => template.id !== draft.id);
-      const next = remaining[0] ? toDraft(remaining[0]) : NEW_TEMPLATE(currentUserId);
+      const nextTemplate = remaining[0];
+      const next = nextTemplate ? toDraft(nextTemplate) : NEW_TEMPLATE(currentUserId);
       setDraft(next);
-      setOriginalDraft(next.id ? next : null);
+      setOriginalDraft(nextTemplate ? next : null);
       setIsCreatingTemplate(!next.id);
       toast.success('Template deleted');
     } catch (error) {
@@ -439,7 +791,9 @@ export function SummaryTemplatesModal({
         meetingContext: draft.autoTriggerPrompt,
         sections: draft.sections.map(({ title, description }) => ({ title, description })),
       });
-      setDraft(current => (current ? { ...current, sections } : current));
+      setDraft(current =>
+        current ? { ...current, sections: normalizeIncomingSections(sections, true) } : current,
+      );
     } catch (error) {
       toast.error('Unable to suggest sections', {
         description: getApiErrorMessage(error, 'Please try again.'),
@@ -469,6 +823,7 @@ export function SummaryTemplatesModal({
   };
 
   const isEditable = draft?.canEdit ?? false;
+  const editableSections = draft?.sections.filter(section => !isMandatorySection(section)) ?? [];
   const templateIcon = draft ? getTemplateIcon(draft.name) : '#';
   const creatorName = draft?.isSystem
     ? 'Xyne'
@@ -496,7 +851,7 @@ export function SummaryTemplatesModal({
         ? { icon: <ClockDefault className='size-3.5' />, label: 'Pending review' }
         : shareCount
           ? { icon: <UserTwo className='size-3.5' />, label: `Shared · ${shareCount}` }
-          : { icon: <LockClose className='size-3.5' />, label: 'Private' };
+          : { icon: <Lock02Close className='size-3.5' />, label: 'Private' };
 
   return (
     <div className='flex h-full min-h-0 flex-col bg-background text-foreground'>
@@ -657,13 +1012,8 @@ export function SummaryTemplatesModal({
                     ref={nameInputRef}
                     placeholder='Untitled template'
                     value={draft.name}
-                    onChange={event =>
-                      setDraft(current =>
-                        current ? { ...current, name: event.target.value } : current,
-                      )
-                    }
+                    onChange={event => updateTemplateName(event.target.value)}
                     readOnly={!isEditable}
-                    maxLength={120}
                     aria-label='Template name'
                     className='w-full bg-transparent py-0.5 text-2xl font-bold tracking-tight outline-none read-only:cursor-default placeholder:text-muted-foreground/40 placeholder:text-medium'
                     data-track-category='SummaryTemplates'
@@ -802,13 +1152,8 @@ export function SummaryTemplatesModal({
                 </div>
                 <textarea
                   value={draft.autoTriggerPrompt ?? ''}
-                  onChange={event =>
-                    setDraft(current =>
-                      current ? { ...current, autoTriggerPrompt: event.target.value } : current,
-                    )
-                  }
+                  onChange={event => updateMeetingContext(event.target.value)}
                   readOnly={!isEditable}
-                  maxLength={500}
                   rows={3}
                   placeholder='Describe the meeting and the summary you want…'
                   className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
@@ -849,77 +1194,29 @@ export function SummaryTemplatesModal({
                   </Button>
                 </div>
 
-                <div className='flex flex-col gap-2.5 w-full'>
-                  {draft.sections.map(section => (
-                    <div
-                      key={section.id}
-                      className='relative group flex flex-col items-start gap-1.5 rounded-xl border border-border bg-background p-3'
-                    >
-                      <div className='flex gap-1.5 items-center'>
-                        <span
-                          title='Drag to reorder'
-                          className='shrink-0 cursor-grab text-muted-foreground/60'
-                        >
-                          <DragableSixDots className='size-3.5' />
-                        </span>
-                        <input
-                          value={section.title}
-                          onChange={event =>
-                            updateSection(section.id, { title: event.target.value })
-                          }
-                          readOnly={!isEditable}
-                          maxLength={100}
-                          placeholder='Section title'
-                          aria-label='Section title'
-                          className='w-full bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground/60'
-                          data-track-category='SummaryTemplates'
-                          data-track-name='EditSectionTitle'
+                <DndContext
+                  sensors={sectionSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleSectionDragEnd}
+                >
+                  <SortableContext
+                    items={editableSections.map(section => section.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className='flex w-full flex-col gap-2.5'>
+                      {editableSections.map(section => (
+                        <SortableTemplateSection
+                          key={section.id}
+                          section={section}
+                          isEditable={isEditable}
+                          canRemove={editableSections.length > 1}
+                          onUpdate={updateSection}
+                          onRemove={removeSection}
                         />
-                      </div>
-                      <div className='pl-5 w-full'>
-                        <textarea
-                          value={section.description}
-                          onChange={event =>
-                            updateSection(section.id, { description: event.target.value })
-                          }
-                          readOnly={!isEditable}
-                          maxLength={500}
-                          rows={1}
-                          placeholder='Instructions for this section…'
-                          aria-label='Section description'
-                          className='w-full resize-none bg-transparent text-sm leading-normal text-muted-foreground outline-none placeholder:text-muted-foreground/60'
-                          data-track-category='SummaryTemplates'
-                          data-track-name='EditSectionDescription'
-                        />
-                      </div>
-                      {isEditable && draft.sections.length > 1 && (
-                        <Button
-                          variant='ghost'
-                          size='iconSm'
-                          onClick={() =>
-                            setDraft(current =>
-                              current
-                                ? {
-                                    ...current,
-                                    sections: current.sections.filter(
-                                      item => item.id !== section.id,
-                                    ),
-                                  }
-                                : current,
-                            )
-                          }
-                          className='absolute right-2 top-2 size-6 rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100'
-                          title='Remove section'
-                          aria-label='Remove section'
-                          data-track-category='SummaryTemplates'
-                          data-track-name='RemoveSection'
-                        >
-                          <MultipleCrossCancelDefault className='size-3.5' strokeWidth={2.5} />
-                        </Button>
-                      )}
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </SortableContext>
+                </DndContext>
 
                 {isEditable && (
                   <Button
@@ -932,15 +1229,45 @@ export function SummaryTemplatesModal({
                       )
                     }
                     className='hover:no-underline gap-1 !px-0 !py-0 text-sm font-medium text-muted-foreground hover:text-primary'
-                    disabled={draft.sections.length >= 20}
+                    disabled={editableSections.length >= MAX_EDITABLE_SECTIONS}
                     data-track-category='SummaryTemplates'
                     data-track-name='AddSection'
                   >
                     <PlusDefault className='size-4' /> Add section
                   </Button>
                 )}
+
+                <div className='flex w-full flex-col gap-2.5 pt-1'>
+                  {MANDATORY_SECTIONS.map(section => (
+                    <div
+                      key={section.key}
+                      aria-disabled='true'
+                      className='flex flex-col gap-1.5 rounded-xl border border-dashed border-border bg-muted/35 px-4 py-3.5'
+                    >
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <span
+                          className={cn('size-2 shrink-0 rounded-full', section.dotClassName)}
+                          aria-hidden='true'
+                        />
+                        <span className='text-sm font-semibold text-foreground'>
+                          {section.displayTitle}
+                        </span>
+                        <span className='inline-flex h-5 items-center gap-0.5 rounded-md border border-border bg-background/70 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60'>
+                          <Lock02Close className='size-3' strokeWidth={2.5} aria-hidden='true' />
+                          Always included
+                        </span>
+                      </div>
+                      <p className='pl-4 text-sm leading-normal text-muted-foreground'>
+                        {section.description}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </section>
 
+              <div className='py-5 w-full'>
+                <div className='h-px bg-border' />
+              </div>
               <section className='pb-3'>
                 <div className='mb-2.5 flex items-center gap-2.5'>
                   <div className='min-w-0 flex-1'>
@@ -976,13 +1303,8 @@ export function SummaryTemplatesModal({
 
                 <textarea
                   value={draft.systemPrompt}
-                  onChange={event =>
-                    setDraft(current =>
-                      current ? { ...current, systemPrompt: event.target.value } : current,
-                    )
-                  }
+                  onChange={event => updateSystemPrompt(event.target.value)}
                   readOnly={!isEditable}
-                  maxLength={12_000}
                   rows={4}
                   placeholder='Generate or write the instructions used to create summaries with this template…'
                   className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
@@ -1078,10 +1400,12 @@ export function SummaryTemplatesModal({
       </div>
 
       <footer className='flex shrink-0 items-center justify-between gap-2.5 border-t border-border px-5 py-3'>
-        <p className='min-w-0 text-xs text-muted-foreground'>
-          {willSaveDraft && !draftRequirements.isComplete
-            ? `Complete ${draftRequirements.missing.join(', ')} to save.`
-            : ''}
+        <p className='min-w-0 text-xs text-muted-foreground' aria-live='polite'>
+          {limitMessage
+            ? limitMessage
+            : willSaveDraft && !draftRequirements.isComplete
+              ? `Complete ${draftRequirements.missing.join(', ')} to save.`
+              : ''}
         </p>
         <div className='flex shrink-0 items-center gap-2.5'>
           <Button
