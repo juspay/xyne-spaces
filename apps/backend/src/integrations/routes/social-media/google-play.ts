@@ -16,7 +16,7 @@ import { decrypt, encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { buildSupportPath } from '../urlHelpers';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from '../../social-media/constants';
+import { ExternalSourcePlatform } from '../../core/types';
 import {
   googlePlayClient,
   type GooglePlayCredentials,
@@ -28,6 +28,15 @@ import { authorizeSocialMediaManager } from './access';
 
 const TAG = '[GooglePlayRoutes]';
 const router = express.Router();
+
+class GooglePlayPackageValidationError extends Error {
+  constructor(
+    readonly packageName: string,
+    readonly providerError: unknown,
+  ) {
+    super(`Google Play package validation failed for ${packageName}`);
+  }
+}
 
 const startSchema = z.object({
   channelName: z.string().trim().min(1).max(120),
@@ -65,6 +74,21 @@ function callbackUri(req: Request): string {
   return `${getBackendUrl(req)}/api/integrations/social-media/google-play/oauth/callback`;
 }
 
+async function validatePackages(
+  credentials: GooglePlayCredentials,
+  applications: Array<{ packageName: string }>,
+): Promise<void> {
+  await Promise.all(
+    applications.map(async (application) => {
+      try {
+        await googlePlayClient.validatePackage(credentials, application.packageName);
+      } catch (error) {
+        throw new GooglePlayPackageValidationError(application.packageName, error);
+      }
+    }),
+  );
+}
+
 function postOAuthRedirect(
   frontendUrl: string,
   path: string,
@@ -83,11 +107,16 @@ function redirectToDesk(
     channelId?: string;
     platform?: 'web' | 'electron';
     error?: string;
+    packageName?: string;
   }
 ): void {
-  const query = new URLSearchParams(
-    params.error ? { socialMediaError: params.error } : { socialMediaOAuth: 'success' }
-  );
+  const query = new URLSearchParams();
+  if (params.error) {
+    query.set('socialMediaError', params.error);
+    if (params.packageName) query.set('socialMediaPackage', params.packageName);
+  } else {
+    query.set('socialMediaOAuth', 'success');
+  }
   const path = buildSupportPath(params.workspaceId, params.channelId, query);
   res.redirect(postOAuthRedirect(getFrontendUrl(req), path, params.platform ?? 'web'));
 }
@@ -127,7 +156,7 @@ router.post(
         db.externalSource.findMany({
           where: {
             workspaceId,
-            sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+            sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
             externalIdentifier: { in: packageNames },
           },
           select: { externalIdentifier: true, isActive: true },
@@ -225,14 +254,13 @@ router.post(
           where: {
             channelId: req.params.channelId,
             workspaceId,
-            sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
-            isActive: true,
+            sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
           },
           select: {
             credentials: true,
             ownerUserId: true,
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
         }),
       ]);
       if (!channel?.projectId || !preference?.boardId || !credentialSource) {
@@ -244,7 +272,7 @@ router.post(
       const existingSources = await db.externalSource.findMany({
         where: {
           workspaceId,
-          sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
           externalIdentifier: { in: packageNames },
         },
         select: { externalIdentifier: true },
@@ -263,9 +291,7 @@ router.post(
       const credentials = JSON.parse(
         decrypt(credentialSource.credentials)
       ) as GooglePlayCredentials;
-      for (const application of parsed.data.applications) {
-        await googlePlayClient.validatePackage(credentials, application.packageName);
-      }
+      await validatePackages(credentials, parsed.data.applications);
 
       const sourceRecords = buildGooglePlaySourceRecords({
         workspaceId,
@@ -293,19 +319,22 @@ router.post(
         return;
       }
 
+      const providerError =
+        error instanceof GooglePlayPackageValidationError ? error.providerError : error;
       const providerStatus =
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof error.response === 'object' &&
-        error.response !== null &&
-        'status' in error.response
-          ? error.response.status
+        typeof providerError === 'object' &&
+        providerError !== null &&
+        'response' in providerError &&
+        typeof providerError.response === 'object' &&
+        providerError.response !== null &&
+        'status' in providerError.response
+          ? providerError.response.status
           : undefined;
       if (providerStatus === 401 || providerStatus === 403 || providerStatus === 404) {
         res.status(403).json({
-          error:
-            'The existing Google Play authorization is expired or cannot access one or more packages. Check the package names and Play Console permissions.',
+          error: error instanceof GooglePlayPackageValidationError
+            ? `The existing Google Play authorization cannot access ${error.packageName}. Check the package name and Play Console permissions.`
+            : 'The existing Google Play authorization is expired or cannot access one or more packages. Check the package names and Play Console permissions.',
         });
         return;
       }
@@ -363,11 +392,12 @@ router.post(
           where: {
             channelId: req.params.channelId,
             workspaceId,
-            sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+            sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
           },
           select: {
             externalIdentifier: true,
             displayName: true,
+            isActive: true,
           },
           orderBy: { createdAt: 'asc' },
         }),
@@ -380,14 +410,18 @@ router.post(
         res.status(409).json({ error: 'One or more Google Play sources are incomplete' });
         return;
       }
+      const activeSources = sources.filter((source) => source.isActive);
+      const reactivateAll = activeSources.length === 0;
+      const sourcesToValidate = reactivateAll ? sources : activeSources;
 
       const { state, codeChallenge } = await googlePlayOAuthStateService.create({
         mode: 'reconnect',
+        reactivateAll,
         userId,
         workspaceId,
         channelId: channel.id,
         channelName: channel.name,
-        applications: sources.map((source) => ({
+        applications: sourcesToValidate.map((source) => ({
           packageName: source.externalIdentifier!,
           displayName: source.displayName,
         })),
@@ -434,9 +468,7 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
       codeVerifier: state.codeVerifier,
       redirectUri: callbackUri(req),
     });
-    for (const application of state.applications) {
-      await googlePlayClient.validatePackage(authorization.credentials, application.packageName);
-    }
+    await validatePackages(authorization.credentials, state.applications);
 
     const encryptedCredentials = encrypt(JSON.stringify(authorization.credentials));
     const now = new Date();
@@ -459,9 +491,9 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
             where: {
               channelId: state.channelId,
               workspaceId: state.workspaceId,
-              sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+              sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
             },
-            select: { id: true, externalIdentifier: true },
+            select: { id: true, externalIdentifier: true, isActive: true },
           }),
         ]);
         if (
@@ -474,9 +506,12 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
         const expectedPackages = new Set(
           state.applications.map((application) => application.packageName)
         );
+        const sourcesToValidate = state.reactivateAll
+          ? sources
+          : sources.filter((source) => source.isActive);
         if (
-          sources.length !== expectedPackages.size ||
-          sources.some(
+          sourcesToValidate.length !== expectedPackages.size ||
+          sourcesToValidate.some(
             (source) =>
               !source.externalIdentifier || !expectedPackages.has(source.externalIdentifier)
           )
@@ -488,7 +523,7 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
           where: { id: { in: sources.map((source) => source.id) } },
           data: {
             credentials: encryptedCredentials,
-            isActive: true,
+            ...(state.reactivateAll && { isActive: true }),
           },
         });
         return {
@@ -573,6 +608,20 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
       platform: state.platform,
     });
   } catch (error) {
+    if (error instanceof GooglePlayPackageValidationError) {
+      logger.error(`${TAG} Google Play package validation failed`, {
+        packageName: error.packageName,
+        error: error.providerError,
+      });
+      redirectToDesk(req, res, {
+        workspaceId: state.workspaceId,
+        channelId: state.channelId,
+        platform: state.platform,
+        error: 'google_play_package_validation_failed',
+        packageName: error.packageName,
+      });
+      return;
+    }
     logger.error(`${TAG} Google Play OAuth callback failed`, { error });
     const duplicate =
       error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
@@ -607,7 +656,7 @@ router.post(
           id: req.params.sourceId,
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
         },
         data: { isActive: false },
       });
@@ -649,7 +698,7 @@ router.post(
           id: req.params.sourceId,
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
         },
         select: {
           id: true,

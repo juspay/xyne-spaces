@@ -160,7 +160,6 @@ export interface UpdateExternalInteractionParams {
   rating?: number | null;
   clientVersionName?: string | null;
   clientVersionCode?: string | null;
-  occurredAt: Date;
   syncTicket?: boolean;
   updatedBy?: string | null;
 }
@@ -456,7 +455,6 @@ export class EmailService {
       rating: params.rating ?? null,
       clientVersionName: params.clientVersionName ?? null,
       clientVersionCode: params.clientVersionCode ?? null,
-      createdAt: params.occurredAt,
     });
     const ticketChanged = hasExternalInteractionTicketChanged(currentTicket, {
       title: params.subject,
@@ -480,7 +478,6 @@ export class EmailService {
               rating: params.rating,
               clientVersionName: params.clientVersionName,
               clientVersionCode: params.clientVersionCode,
-              createdAt: params.occurredAt,
             },
           })
         : currentEmail;

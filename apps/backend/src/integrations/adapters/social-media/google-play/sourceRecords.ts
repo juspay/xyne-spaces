@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from '@/integrations/social-media/constants';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 export function buildGooglePlaySourceRecords(params: {
   workspaceId: string;
@@ -15,14 +15,14 @@ export function buildGooglePlaySourceRecords(params: {
   const connectedAt = new Date().toISOString();
   return params.applications.map((application) => ({
     name: [
-      SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+      ExternalSourcePlatform.GOOGLE_PLAY,
       crypto
         .createHash('sha256')
         .update(`${params.workspaceId}:${application.packageName}`)
         .digest('hex')
         .slice(0, 20),
     ].join('-'),
-    sourceType: SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY,
+    sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
     displayName: application.displayName,
     channelId: params.channelId,
     externalIdentifier: application.packageName,

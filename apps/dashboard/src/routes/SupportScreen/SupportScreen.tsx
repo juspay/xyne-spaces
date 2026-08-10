@@ -1841,17 +1841,25 @@ const SupportScreen = (): ReactElement => {
   useEffect(() => {
     const connected = searchParams.get('socialMediaOAuth') === 'success';
     const error = searchParams.get('socialMediaError');
+    const failedPackage = searchParams.get('socialMediaPackage');
     if (!connected && !error) return;
     if (connected) {
       toast.success('Google Play reviews connected successfully');
       if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
     }
-    if (error) toast.error(error.replaceAll('_', ' '));
+    if (error === 'google_play_package_validation_failed' && failedPackage) {
+      toast.error('Google Play app connection failed', {
+        description: `Could not access ${failedPackage}. Check its Play Console permissions.`,
+      });
+    } else if (error) {
+      toast.error(error.replaceAll('_', ' '));
+    }
     setSearchParams(
       previous => {
         const next = new URLSearchParams(previous);
         next.delete('socialMediaOAuth');
         next.delete('socialMediaError');
+        next.delete('socialMediaPackage');
         return next;
       },
       { replace: true },

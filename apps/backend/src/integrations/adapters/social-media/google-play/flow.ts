@@ -24,10 +24,10 @@ export class GooglePlayReviewsFlow extends BaseFlow {
   ): Promise<unknown[]> {
     if (!source) throw new Error('Google Play source is required');
     const syncStartedAt = new Date();
-    if (options?.ignoreSyncCursor) return googlePlayClient.listReviews(source.id);
+    if (options?.ignoreSyncCursor) return googlePlayClient.listReviews(source);
 
     const cutoff = getAutomaticSyncCutoff(source, syncStartedAt);
-    const reviews = await googlePlayClient.listReviews(source.id, new Date(cutoff));
+    const reviews = await googlePlayClient.listReviews(source, new Date(cutoff));
     return reviews.filter(
       (review) => getGooglePlayReviewLastModifiedAt(review) >= cutoff,
     );

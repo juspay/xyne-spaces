@@ -41,10 +41,12 @@ export async function disconnectSocialMediaDesk(channelId: string): Promise<void
 
 export async function fetchGooglePlayReviews(
   channelId: string,
-): Promise<{ synced: number; sourceCount: number }> {
-  const response = await apiInstance.post<{ synced: number; sourceCount: number }>(
-    `/integrations/social-media/${channelId}/sync`,
-  );
+): Promise<
+  { synced: number; sourceCount: number } | { success: true; queued: true; jobId: string }
+> {
+  const response = await apiInstance.post<
+    { synced: number; sourceCount: number } | { success: true; queued: true; jobId: string }
+  >(`/integrations/social-media/${channelId}/sync`);
   return response.data;
 }
 

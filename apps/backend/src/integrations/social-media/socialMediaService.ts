@@ -8,12 +8,12 @@ import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { externalSourceCore } from '@/integrations/core/core';
 import { InteractionReplyValidationError } from '@/integrations/core/baseInteractionReplySender';
-import type { IngestionOptions } from '@/integrations/core/types';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from './constants';
+import { ExternalSourcePlatform, type IngestionOptions } from '@/integrations/core/types';
 import { logger } from '@/utils/logger';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
 const TAG = '[SocialMediaDesk]';
+const SYNC_LOCK_TTL_SECONDS = 30 * 60;
 
 type SocialMediaSource = ExternalSource & {
   channelId: string;
@@ -53,7 +53,7 @@ class SocialMediaService {
     options?: IngestionOptions,
   ): Promise<{ synced: number }> {
     const lock = await acquireLock(`lock:social-media-sync:${sourceId}`, {
-      ttlSeconds: 10 * 60,
+      ttlSeconds: SYNC_LOCK_TTL_SECONDS,
     });
     if (!lock) {
       logger.debug(`${TAG} Source sync skipped because another worker owns the lock`, {
@@ -73,7 +73,8 @@ class SocialMediaService {
         source,
         options,
       );
-      if (source.sourceType === SOCIAL_MEDIA_SOURCE_TYPES.GOOGLE_PLAY) {
+      const synced = results.filter((result) => result.action === 'created').length;
+      if (source.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
         await db.externalSource.update({
           where: { id: source.id },
           data: { lastSyncCursor: syncStartedAt.toISOString() },
@@ -83,8 +84,9 @@ class SocialMediaService {
         sourceId,
         sourceType: source.sourceType,
         interactionCount: results.length,
+        newInteractionCount: synced,
       });
-      return { synced: results.length };
+      return { synced };
     } finally {
       await releaseLock(lock);
     }

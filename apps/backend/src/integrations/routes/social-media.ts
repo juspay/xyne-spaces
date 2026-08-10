@@ -2,8 +2,10 @@ import express, { type Request, type Response } from 'express';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config as appConfig } from '@/config/env';
+import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from '../social-media/constants';
+import { ExternalSourcePlatform } from '../core/types';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,
@@ -82,13 +84,29 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: { in: Object.values(SOCIAL_MEDIA_SOURCE_TYPES) },
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
           isActive: true,
         },
         select: { id: true },
       });
       if (sources.length === 0) {
         res.status(404).json({ error: 'Active social media source not found' });
+        return;
+      }
+
+      if (appConfig.enableEmailFetchWorker) {
+        if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+        const job = await emailFetchQueue.getQueue().add('social-media-refetch', {
+          sourceIds: sources.map((source) => source.id),
+          channelId: req.params.channelId,
+          requesterUserId: req.user!.id,
+          workspaceId,
+        });
+        res.status(202).json({
+          success: true,
+          queued: true,
+          jobId: String(job.id),
+        });
         return;
       }
 
@@ -128,7 +146,7 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: { in: Object.values(SOCIAL_MEDIA_SOURCE_TYPES) },
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
         },
         data: { isActive: false },
       });

@@ -103,6 +103,7 @@ export class ExternalSourceCore {
     const payloads = Array.isArray(enrichedPayload) ? enrichedPayload : [enrichedPayload];
 
     const allResults: IngestionResult[] = [];
+    let failedItemCount = 0;
     for (const payload of payloads) {
       if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
         const reason = (payload as any).__skipReason || 'unspecified';
@@ -124,9 +125,24 @@ export class ExternalSourceCore {
         ? parseResult.data
         : [parseResult.data];
       for (const normalizedData of normalizedItems) {
-        const results = await this.sync(adapter, sourceName, normalizedData, source);
-        allResults.push(...results);
+        try {
+          const results = await this.sync(adapter, sourceName, normalizedData, source);
+          allResults.push(...results);
+        } catch (error) {
+          failedItemCount += 1;
+          logger.error(`Failed to sync interaction from ${sourceName}`, {
+            externalId: normalizedData.externalId,
+            eventType: normalizedData.metadata.eventType,
+            error,
+          });
+        }
       }
+    }
+
+    if (failedItemCount > 0) {
+      throw new Error(
+        `Failed to sync ${failedItemCount} interaction${failedItemCount === 1 ? '' : 's'} from ${sourceName}`,
+      );
     }
 
     return allResults;
@@ -290,7 +306,6 @@ export class ExternalSourceCore {
               normalizedData.emailData.clientVersionName ?? existingEmail.clientVersionName,
             clientVersionCode:
               normalizedData.emailData.clientVersionCode ?? existingEmail.clientVersionCode,
-            occurredAt: normalizedData.metadata.timestamp,
             syncTicket: normalizedData.emailData.syncTicketOnUpdate,
             updatedBy: source.ownerUserId,
           });

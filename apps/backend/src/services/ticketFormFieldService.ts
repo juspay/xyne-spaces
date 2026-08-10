@@ -17,6 +17,31 @@ export interface TicketFormFieldDefinition {
   isOptional?: boolean;
 }
 
+async function hasAllBoardTicketFormFields(
+  boardId: string,
+  fields: TicketFormFieldDefinition[],
+): Promise<boolean> {
+  const mapping = await db.formContextMapping.findFirst({
+    where: {
+      contextId: boardId,
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    },
+    select: { formId: true },
+  });
+  if (!mapping) return false;
+
+  const form = await db.form.findUnique({
+    where: { id: mapping.formId },
+    select: { id: true },
+  });
+  if (!form) return false;
+
+  const existingFields = await repositories.forms.findFormFields(mapping.formId);
+  const existingNames = new Set(existingFields.map((field) => field.fieldName));
+  return fields.every((field) => existingNames.has(field.fieldName));
+}
+
 export async function ensureBoardTicketFormFields(params: {
   boardId: string;
   workspaceId: string;
@@ -24,6 +49,7 @@ export async function ensureBoardTicketFormFields(params: {
   fields: TicketFormFieldDefinition[];
 }): Promise<void> {
   if (params.fields.length === 0) return;
+  if (await hasAllBoardTicketFormFields(params.boardId, params.fields)) return;
 
   const lock = await acquireLock(`lock:ticket-form-fields:${params.boardId}`, {
     ttlSeconds: 60,

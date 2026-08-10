@@ -9,7 +9,6 @@ export interface ExternalInteractionEmailSnapshot {
   rating: number | null;
   clientVersionName: string | null;
   clientVersionCode: string | null;
-  createdAt: Date;
 }
 
 export function hasExternalInteractionEmailChanged(
@@ -26,8 +25,7 @@ export function hasExternalInteractionEmailChanged(
     current.sentByUserId !== next.sentByUserId ||
     current.rating !== next.rating ||
     current.clientVersionName !== next.clientVersionName ||
-    current.clientVersionCode !== next.clientVersionCode ||
-    current.createdAt.getTime() !== next.createdAt.getTime()
+    current.clientVersionCode !== next.clientVersionCode
   );
 }
 

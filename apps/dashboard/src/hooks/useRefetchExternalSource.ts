@@ -74,9 +74,14 @@ export const useRefetchExternalSource = (
             return;
           }
           if (result.queued) {
-            toast.success('Fetching emails in background', {
-              description: 'We’ll notify you when this finishes.',
-            });
+            toast.success(
+              isSocialMedia
+                ? 'Fetching Google Play reviews in background'
+                : 'Fetching emails in background',
+              {
+                description: 'We’ll notify you when this finishes.',
+              },
+            );
             return;
           }
           if (result.newTickets > 0) {
@@ -103,7 +108,7 @@ export const useRefetchExternalSource = (
         },
       });
     },
-    [channelId, mutation],
+    [channelId, isSocialMedia, mutation],
   );
 
   return { refetch, isPending: mutation.isPending };

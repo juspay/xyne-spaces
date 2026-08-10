@@ -1,5 +1,6 @@
 import { google, type androidpublisher_v3 } from 'googleapis';
 import { CodeChallengeMethod } from 'google-auth-library';
+import type { ExternalSource } from '@prisma/client';
 import { db } from '@/database/client';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { GOOGLE_PLAY_SCOPE } from './constants';
@@ -111,10 +112,9 @@ export class GooglePlayClient {
   }
 
   async listReviews(
-    sourceId: string,
+    source: ExternalSource,
     modifiedAfter?: Date,
   ): Promise<NormalizedGooglePlayReview[]> {
-    const source = await db.externalSource.findUniqueOrThrow({ where: { id: sourceId } });
     const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
     const auth = this.createOAuthClient(credentials);
     auth.on('tokens', (tokens) => {
@@ -127,7 +127,7 @@ export class GooglePlayClient {
       };
       void db.externalSource
         .update({
-          where: { id: sourceId },
+          where: { id: source.id },
           data: { credentials: encrypt(JSON.stringify(next)) },
         })
         .catch(() => {

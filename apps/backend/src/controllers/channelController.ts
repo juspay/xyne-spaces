@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
   buildAppDeskSourceName,
   buildSlackDeskSourceName,
@@ -1476,7 +1477,7 @@ export class ChannelController {
         packageName: string | null;
         isActive: boolean;
       }> = [];
-      if (source?.sourceType === 'app-desk') {
+      if (source?.sourceType === ExternalSourcePlatform.APP_DESK) {
         const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
@@ -1486,11 +1487,11 @@ export class ChannelController {
         outboundConfigured = Boolean(
           installedApp?.webhookUrl?.trim() && installedApp.app?.signingSecret,
         );
-      } else if (source?.sourceType === 'slack-desk') {
+      } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (source?.sourceType === 'google-play-reviews') {
+      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: 'google-play-reviews' },
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
           select: {
             id: true,
             displayName: true,
@@ -1499,17 +1500,17 @@ export class ChannelController {
           },
           orderBy: { createdAt: 'asc' },
         });
-        isConnected = reviewSources.some(reviewSource => reviewSource.isActive);
+        const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
+        isConnected = activeReviewSources.length > 0;
         googlePlayApps = reviewSources.map(reviewSource => ({
           id: reviewSource.id,
           displayName: reviewSource.displayName,
           packageName: reviewSource.externalIdentifier,
           isActive: reviewSource.isActive,
         }));
-        connectedLabel = reviewSources
-          .map(reviewSource => reviewSource.displayName ?? reviewSource.externalIdentifier)
-          .filter(Boolean)
-          .join(', ');
+        connectedLabel = activeReviewSources
+          .map(reviewSource => reviewSource.displayName)
+          .join(', ') || 'No active Google Play apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
