@@ -65,6 +65,7 @@ import {
   VCSProviderType,
   ReleaseTrackingMode,
 } from './schema.js';
+import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getNudgeActionBehavior } from '../nudges.js';
 import {
@@ -4196,16 +4197,18 @@ export const mutators = defineMutators({
         ctx,
         args: { subTicketId, timestamp, mappingId, title, description, ticketId, conversationId },
       }) => {
-        // A ticket that is itself mapped as a subticket cannot have its own subtickets
-        const parentAsSubTicket = await tx.run(
-          zql.sub_tickets.where('mappedTicketId', ticketId).one(),
-        );
-        if (parentAsSubTicket) {
-          throw new Error(
-            `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${ticketId} is already a sub-ticket.`,
+        const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
+        const parentBoard = parentTicket
+          ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+          : null;
+        if (parentBoard?.boardType !== BoardType.FLOW) {
+          const parentAsSubTicket = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
           );
+          if (parentAsSubTicket) {
+            throw new Error('Cannot create a sub-ticket under a sub-ticket');
+          }
         }
-
         // Create the subticket
         await tx.mutate.sub_tickets.insert({
           id: subTicketId,
@@ -4353,6 +4356,7 @@ export const mutators = defineMutators({
         name: z.string().optional(),
         alias: z.string().optional(),
         description: z.string().optional(),
+        reassignOnUnavailable: z.boolean().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4362,13 +4366,23 @@ export const mutators = defineMutators({
       async ({
         tx,
         ctx,
-        args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp },
+        args: {
+          userGroupId,
+          name,
+          alias,
+          description,
+          reassignOnUnavailable,
+          userResponsibilityUpdates,
+          userRoleUpdates,
+          timestamp,
+        },
       }) => {
         await tx.mutate.user_groups.update({
           id: userGroupId,
           ...(name !== undefined && { name }),
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
+          ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
           updatedAt: timestamp,
         });
 
@@ -4560,6 +4574,29 @@ export const mutators = defineMutators({
     ),
   },
   board: {
+    updateFlowPlan: defineMutator(
+      z.object({
+        boardId: z.string(),
+        plan: FlowPlanSchema,
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { boardId, plan, timestamp } }) => {
+        const board = await tx.run(zql.boards.where('id', boardId).one());
+        if (!board) {
+          throw new Error('Board not found');
+        }
+        if (board.boardType !== BoardType.FLOW) {
+          throw new Error('Flow plans can only be set on Flow boards');
+        }
+        validateFlowPlan(plan);
+        await tx.mutate.boards.update({
+          id: boardId,
+          flowPlan: serializeFlowPlan(plan),
+          updatedBy: ctx.userID,
+          updatedAt: timestamp,
+        });
+      },
+    ),
     update: defineMutator(
       z.object({
         boardId: z.string(),
@@ -4623,6 +4660,15 @@ export const mutators = defineMutators({
           }
           if (boardType !== undefined && boardType !== BoardType.RELEASE) {
             throw new Error('Release boards cannot be converted to a normal board');
+          }
+        }
+
+        if (boardType !== undefined && boardType !== board.boardType) {
+          if (board.boardType === BoardType.FLOW) {
+            throw new Error('Flow boards cannot be converted to another board type');
+          }
+          if (boardType === BoardType.FLOW) {
+            throw new Error('Existing boards cannot be converted to a Flow board');
           }
         }
 

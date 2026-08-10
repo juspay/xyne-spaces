@@ -30,6 +30,9 @@ export default {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
       },
+      maxWidth: {
+        'ai-content': '50rem',
+      },
       colors: {
         // Xyne Foundation Theme Colors
         'xyne-gray': XYNE_FOUNDATION_TOKENS.colors.gray,

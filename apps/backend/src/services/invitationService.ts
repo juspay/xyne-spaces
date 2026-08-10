@@ -94,11 +94,14 @@ export class InvitationService {
       // Ensure the invitee exists in the org_members table (any org)
       if (role !== 'GUEST') {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
-        const inviteeInOrg = await withWorkspaceScope(() =>
-          this.prisma.orgMember.findFirst({
+        // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
+        // outside would execute the query after withWorkspaceScope has exited — back in the
+        // request context where OrgMembersACL scopes it to the caller's own membership.
+        const inviteeInOrg = await withWorkspaceScope(async () => {
+          return await this.prisma.orgMember.findFirst({
             where: { email, leftAt: null },
-          }),
-        );
+          });
+        });
 
         if (!inviteeInOrg) {
           throw new Error(
@@ -109,11 +112,11 @@ export class InvitationService {
     }
 
     if (role === 'GUEST') {
-      const inviteeOrgMember = await withWorkspaceScope(() =>
-        this.prisma.orgMember.findUnique({
+      const inviteeOrgMember = await withWorkspaceScope(async () => {
+        return await this.prisma.orgMember.findUnique({
           where: { email },
-        }),
-      );
+        });
+      });
       if (inviteeOrgMember && inviteeOrgMember.leftAt) {
         throw new Error(
           `${email} is no longer part of an organization and cannot be invited as a guest`
@@ -874,7 +877,7 @@ export class InvitationService {
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
 
     try {
-      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.id);
+      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.orgMemberId);
     } catch (error) {
       logger.error('[InvitationService] Failed to enqueue AI user provisioning', {
         userId: newWorkspaceUser.id,

@@ -792,6 +792,10 @@ export class EmailController {
         agentSlug,
         conversationId,
         userId: personaUserId,
+        // The insight is scoped to the current channel, so use the
+        // authenticated viewer's verified workspace context to disambiguate
+        // the persona's Spaces surface identity for the S2S Claw request.
+        spacesWorkspaceId: req.user?.workspaceId,
       });
 
       res.setHeader('Cache-Control', 'no-store');

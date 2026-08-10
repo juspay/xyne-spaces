@@ -74,6 +74,16 @@ export function getRecordingStatus(): RecordingState['status'] {
   return store.getSnapshot().context.status;
 }
 
+/** Stop whatever is in flight because the page or the machine is going away. */
+export function stopRecordingForTeardown(): void {
+  const status = getRecordingStatus();
+  if (status === 'starting') {
+    sendRecordingEvent({ type: 'requestStop' });
+  } else if (status === 'recording' || status === 'paused') {
+    sendRecordingEvent({ type: 'stopRecording' });
+  }
+}
+
 export interface UseTranscriptStreamReturn {
   transcripts: TranscriptEntry[];
 }

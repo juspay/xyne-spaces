@@ -5,6 +5,7 @@ import type {
   TicketAssignment,
   TicketStageEta,
   TicketTagMapping,
+  FlowStepVisibilityOptions,
 } from '@xyne/shared';
 import { queries, parseAssigneeFilter } from '../../zero/queries';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
@@ -34,7 +35,7 @@ export type KanbanPageGroupBy =
       fieldType?: string;
     };
 
-export type KanbanTicketsPageBaseArgs = {
+export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   viewMode: KanbanViewMode;
   projectId?: string;
   boardId?: string;
@@ -92,6 +93,14 @@ const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
 const ceilToMinute = (timestamp: number): number => Math.ceil(timestamp / MINUTE_MS) * MINUTE_MS;
 const MISSING_FORM_FIELD_GROUP_KEYS = new Set(['No Value', 'Unassigned']);
+
+const isMaterializedFlowStep = (ticket: KanbanTicketsPageRow): boolean => {
+  const metadata = ticket.metadata as
+    | { flow?: { planNodeId?: unknown } | undefined }
+    | null
+    | undefined;
+  return typeof metadata?.flow?.planNodeId === 'string';
+};
 
 type TicketsState = {
   queryKey: string;
@@ -235,6 +244,7 @@ export const buildKanbanTicketsPageArgs = (
   boardId: options.boardId,
   userId: options.userId,
   groupId: options.groupId,
+  excludeFlowSteps: options.excludeFlowSteps,
   columnType: options.columnType,
   stageName: options.stageName,
   limit: options.pageSize ?? DEFAULT_PAGE_SIZE,
@@ -476,7 +486,10 @@ export const useKanbanTicketsPage = (
     isLoadingMoreRef.current = false;
 
     const rawPageRows = (effectivePage ?? []) as KanbanTicketsPageRow[];
-    const pageRows = sortByKanbanPosition(rawPageRows);
+    const visiblePageRows = options.excludeFlowSteps
+      ? rawPageRows.filter(ticket => !isMaterializedFlowStep(ticket))
+      : rawPageRows;
+    const pageRows = sortByKanbanPosition(visiblePageRows);
     if (typeof window !== 'undefined') {
       const debugDynamicFieldIds = new Set<string>();
       if (options.filters?.dynamicFields) {
@@ -488,7 +501,7 @@ export const useKanbanTicketsPage = (
         debugDynamicFieldIds.add(options.groupBy.fieldId);
       }
     }
-    if (pageRows.length === 0) {
+    if (rawPageRows.length === 0) {
       if (fetchCursor === null) {
         setTicketsState(prev =>
           prev.queryKey === queryKey && prev.tickets.length === 0
@@ -518,7 +531,7 @@ export const useKanbanTicketsPage = (
       return;
     }
 
-    setHasMore(pageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE));
+    setHasMore(rawPageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE));
 
     const lastItemOfPage = rawPageRows.at(-1);
     if (lastItemOfPage) {
@@ -533,6 +546,7 @@ export const useKanbanTicketsPage = (
     fetchCursor,
     queryKey,
     options.pageSize,
+    options.excludeFlowSteps,
     effectivePage,
     effectivePageDetailsType,
     shouldUseDirectVespaRows,

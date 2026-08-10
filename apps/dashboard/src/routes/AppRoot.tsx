@@ -24,6 +24,7 @@ import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
 import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
+import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
 import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
 import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
 import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
@@ -105,6 +106,7 @@ import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -206,13 +208,18 @@ import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
-import AILibraryScreen from './AIScreen/AILibraryScreen';
-import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
-import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
-import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
-import AIAgentDetailScreen from './AIScreen/AIAgentDetailScreen';
-import AIAgentEditScreen from './AIScreen/AIAgentEditScreen';
-import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
+import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
+import AIAdminScreen from './AIScreen/screens/AIAdminScreen';
+import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
+import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
+import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
+import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
+import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
+import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
+import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
+import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
+import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import UserGuideScreen from './UserGuideScreen';
 import DailyBriefScreen from './DailyBriefScreen';
@@ -323,6 +330,17 @@ const AppRoot = (): ReactElement => {
     setPendingRecordingFilePath(filePath);
     setIsErrorReportOpen(true);
   });
+
+  // Do not stop an active recording merely because the document becomes hidden:
+  // that also happens when a user locks their screen or switches apps. Browsers
+  // do not expose a reliable lid-close event, so retain only the actual page
+  // unload safeguard below.
+  useEffect(() => {
+    window.addEventListener('pagehide', stopRecordingForTeardown);
+    return (): void => {
+      window.removeEventListener('pagehide', stopRecordingForTeardown);
+    };
+  }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
   useShortcutById(
     'global.composeMessage',
@@ -840,11 +858,23 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
+                  {
+                    path: 'admin',
+                    element: (
+                      <RequireClawAdmin>
+                        <AIAdminScreen />
+                      </RequireClawAdmin>
+                    ),
+                  },
                   { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
                   { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
                   { path: 'library/skill/create', element: <AISkillCreateScreen /> },
                   { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
                   { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+                  { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
+                  { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
+                  { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
+                  { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
                   {
                     element: <AISectionLayout />,

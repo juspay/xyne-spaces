@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, powerMonitor, powerSaveBlocker } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
 import { showRecordingPill, hideRecordingPill, isPillWindow } from './recording-pill-window';
@@ -23,6 +23,8 @@ let startTime: number | null = null;
 let externalStartExpiry: ReturnType<typeof setTimeout> | null = null;
 
 let minimized = false;
+
+let powerSaveBlockerId: number | null = null;
 
 let rendererReady = false;
 let rendererReadyWaiters: Array<() => void> = [];
@@ -62,6 +64,10 @@ function watchRendererLifecycle(win: BrowserWindow): void {
   watchedRenderers.add(win);
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
+  });
+  win.webContents.on('render-process-gone', () => {
+    rendererReady = false;
+    syncRecordingState(false);
   });
 }
 
@@ -121,6 +127,15 @@ function isMainWindowFocused(): boolean {
   return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
 }
 
+function syncPowerSaveBlocker(): void {
+  if (active && powerSaveBlockerId === null) {
+    powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  } else if (!active && powerSaveBlockerId !== null) {
+    powerSaveBlocker.stop(powerSaveBlockerId);
+    powerSaveBlockerId = null;
+  }
+}
+
 function cancelPendingPillSync(): void {
   if (pillSyncTimer) {
     clearTimeout(pillSyncTimer);
@@ -169,11 +184,31 @@ export function initRecordingPillVisibility(): void {
   app.on('browser-window-focus', handleWindowFocus);
   app.on('browser-window-blur', handleWindowBlur);
 
+  // A screen lock is not necessarily a lid close (it can be automatic or
+  // user-initiated), so only react to system suspension. This includes lid
+  // close while leaving an active recording alone when the screen merely locks.
+  const handleSuspend = (): void => {
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('recording:system-suspend');
+    }
+
+    if (!active) return;
+    syncRecordingState(false);
+    log.info('[RecordingController] Stop requested because the system is suspending');
+  };
+  powerMonitor.on('suspend', handleSuspend);
+
   app.once('will-quit', () => {
     cancelPendingPillSync();
     clearFocusRequested();
     app.removeListener('browser-window-focus', handleWindowFocus);
     app.removeListener('browser-window-blur', handleWindowBlur);
+    powerMonitor.removeListener('suspend', handleSuspend);
+    if (powerSaveBlockerId !== null) {
+      powerSaveBlocker.stop(powerSaveBlockerId);
+      powerSaveBlockerId = null;
+    }
   });
 }
 
@@ -249,6 +284,7 @@ export function syncRecordingState(nextActive: boolean, nextStartTime?: number):
   }
   if (!nextActive) minimized = false;
 
+  syncPowerSaveBlocker();
   syncPillVisibility();
 
   notifyListeners();

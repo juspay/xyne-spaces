@@ -749,6 +749,7 @@ export enum BoardType {
   DEFAULT = 'DEFAULT',
   RELEASE = 'RELEASE',
   NON_LINEAR = 'NON_LINEAR',
+  FLOW = 'FLOW',
 }
 
 // @ts-ignore TS1294

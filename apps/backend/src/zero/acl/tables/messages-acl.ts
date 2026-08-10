@@ -90,8 +90,8 @@ export class MessagesACL extends BaseACL<'messages'> {
       throw new MutationACLError('Message delete failed: message does not exist', 'messages');
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
-    if (message.msgType === MessageType.SYSTEM) {
-      throw new MutationACLError('Message delete failed: system messages cannot be deleted', 'messages');
+    if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
+      return
     }
     if (message.senderId !== this.ctx.userID) {
       throw new MutationACLError('Message delete failed: only the original sender can delete this message', 'messages');

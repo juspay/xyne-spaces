@@ -361,6 +361,7 @@ async function main() {
     if (interactive && !wantsPlain) {
       console.warn("mprocs is not installed — run `pnpm install`. Falling back to concurrently.");
     }
+    releaseXyneBanner();
     return runPnpm(buildConcurrentlyArgs(selection));
   }
 
