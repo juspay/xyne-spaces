@@ -397,6 +397,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     if (!recordingId || isLive || !recording || recording.hasRecording) return;
 
+    // A terminal egress/upload failure will never produce audio — stop immediately
+    // and surface the failure instead of polling for minutes then showing a vague
+    // "unavailable" indistinguishable from an old audio-less recording.
+    if (recording.recordingFailed) {
+      setAudioPollExhausted(true);
+      return;
+    }
+
     // A recording that ended long ago and still has no audio is never going to get
     // one — mark playback unavailable immediately instead of polling for minutes.
     const endedAtMs = recording.endedAt ? new Date(recording.endedAt).getTime() : null;
@@ -424,6 +432,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               ? {
                   ...current,
                   hasRecording: !!fresh.hasRecording,
+                  recordingFailed: !!fresh.recordingFailed,
                   durationMs: fresh.durationMs ?? current.durationMs,
                 }
               : current,
@@ -433,7 +442,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     }, AUDIO_POLL_INTERVAL_MS);
 
     return (): void => window.clearInterval(timer);
-  }, [recordingId, isLive, recording?.hasRecording, recording?.endedAt]);
+  }, [recordingId, isLive, recording?.hasRecording, recording?.recordingFailed, recording?.endedAt]);
 
   const loadRecording = async (id: string): Promise<void> => {
     try {
@@ -685,6 +694,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Polling has given up (or was skipped for an old recording) and there is still no
   // stitched audio, so the control bar shows an unavailable indicator, not a spinner.
   const audioUnavailable = !isLive && !recording.hasRecording && audioPollExhausted;
+  // A specific kind of unavailability: the recording is known to have failed egress/upload.
+  const audioFailed = audioUnavailable && !!recording.recordingFailed;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const isOwner = recording.createdByUserId === currentUser?.id;
   const selectedSummaryTemplate =
@@ -757,6 +768,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 onStopped={() => void loadRecording(recording.externalId)}
                 isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
                 isAudioUnavailable={audioUnavailable}
+                isAudioFailed={audioFailed}
                 {...(showAudioPlayer
                   ? {
                       onLoadAudio: (signal: AbortSignal) =>

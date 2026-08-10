@@ -1035,6 +1035,20 @@ export enum RecordingStatus {
   RECORDING_DELETED = 'RECORDING_DELETED',
 }
 
+/**
+ * Terminal recording states where egress/upload failed and the recording will
+ * never produce playable audio on its own. PROCESSING_FAILED is intentionally
+ * excluded: the stitch queue retries it, so it may still recover.
+ */
+export function isRecordingFailure(
+  status: RecordingStatus | string | null | undefined,
+): boolean {
+  return (
+    status === RecordingStatus.RECORDING_FAILED ||
+    status === RecordingStatus.RECORDING_UPLOAD_FAILED
+  );
+}
+
 // @ts-ignore TS1294
 export enum SessionRecordingProcessStatus {
   PENDING = 'PENDING',
