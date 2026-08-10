@@ -29,6 +29,10 @@ export type FlowComponentType =
   | 'call_schedule'
   | 'agent';
   | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart'
   | 'agent'
   | 'mcpConfigure';
 
