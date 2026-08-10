@@ -2203,8 +2203,17 @@ export const sandboxRepoSetup: ToolDefinition = {
       // REPO_CONFIGS mirror, serve the fast read-only sbx-git sandbox instead
       // (seconds, no credentials). Otherwise point the agent at its canvases.
       if (!operation && !executionId && !sessionId) {
-        if (!wantWrite && REPO_CONFIGS[repoName]) {
-          return resolveSbxGit(repoName, context);
+        // The SDLC repo row's display name ("Xyne Spaces") rarely matches a
+        // REPO_CONFIGS key ("xyne-spaces") — try the caller's requested name
+        // and a slugified display name before giving up on the local mirror.
+        const mirrorCandidates = [
+          repoName,
+          typeof params["repoName"] === "string" ? (params["repoName"] as string) : "",
+          repoName.trim().toLowerCase().replace(/\s+/g, "-"),
+        ].filter(Boolean);
+        const mirrorName = mirrorCandidates.find((name) => REPO_CONFIGS[name]);
+        if (!wantWrite && mirrorName) {
+          return resolveSbxGit(mirrorName, context);
         }
         return (
           "Error: Repository cloning is only available inside dispatched SDLC executions (setup/artifact/work). " +
