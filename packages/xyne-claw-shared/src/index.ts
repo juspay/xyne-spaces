@@ -1,4 +1,4 @@
-export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse } from "./tools/types.js";
+export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse, UserQuestion, UserQuestionType } from "./tools/types.js";
 export { getAllCustomTools, getCustomTool, getToolsBySource } from "./tools/registry.js";
 export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/add-citations/tools.js";
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";

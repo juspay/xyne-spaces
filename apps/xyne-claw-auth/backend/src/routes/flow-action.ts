@@ -21,7 +21,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
 import { clearActivePlanCard, setPlanExecMeta, clearPlanExecMeta, normalizePlanTitle } from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
@@ -966,15 +966,17 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
     // ── 3. User question answer ───────────────────────────────────────────────
     if (actionType === "user-answer") {
+      const isQuestionDismissal = actionId === "dismiss-user-question";
       const questionId = data["questionId"] as string;
       const answerAgentSlug = data["agentSlug"] as string;
       const answerSpacesAppId = data["spacesAppId"] as string | undefined;
       const answerChannelId = data["channelId"] as string;
       const answerConversationId = data["conversationId"] as string;
       const answerUserId = data["userId"] as string;
-      const answer = values["answer"] as string | undefined;
+      const rawAnswers = values["answers"];
+      const rawNotes = values["notes"];
 
-      if (!questionId || !answer || !answerUserId) {
+      if (!questionId || !answerUserId) {
         res.status(400).json({ type: "error", message: "Missing user-answer fields" } satisfies AppActionResponse);
         return;
       }
@@ -986,19 +988,87 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // Acknowledge immediately so the widget closes
-      resp = { type: "close_screen", finalMessage: `✅ You answered: "${answer}"` };
-      res.json(resp);
-      void replaceFlowCardWithText(messageId, answerAgentSlug, `✅ You answered: **"${answer}"**`, answerConversationId);
-
-      // Fire-and-forget: start new /run with the answer as context
       try {
         const { getQuestion, deleteQuestion } = await import("./pending-questions.js");
         const { setSession } = await import("./webhook.js");
 
-        const question = await getQuestion(questionId);
-        const questionText = question?.question ?? "a question";
-        const optionsList = question?.options?.join(", ") ?? "";
+        const questionSet = await getQuestion(questionId);
+        if (!questionSet) {
+          res.status(404).json({ type: "error", message: "This question set has expired." } satisfies AppActionResponse);
+          return;
+        }
+        if (isQuestionDismissal) {
+          resp = { type: "close_screen", finalMessage: "Question dismissed." };
+          res.json(resp);
+          void replaceFlowCardWithFlow(messageId, answerAgentSlug, buildUserQuestionFlow(questionSet.questions, {
+            questionId,
+            agentSlug: answerAgentSlug,
+            channelId: answerChannelId,
+            conversationId: answerConversationId,
+            userId: answerUserId,
+          }, { phase: "declined", decidedAt: new Date().toISOString() }), answerConversationId, undefined, answerSpacesAppId);
+          await deleteQuestion(questionId).catch(() => {});
+          return;
+        }
+        const answers = rawAnswers && typeof rawAnswers === "object" && !Array.isArray(rawAnswers)
+          ? rawAnswers as Record<string, unknown>
+          : {};
+        const persistedAnswers: Record<string, string | string[]> = {};
+        const persistedNotes: Record<string, string> = {};
+        const renderedAnswers: string[] = [];
+        for (const prompt of questionSet.questions) {
+          const answer = answers[prompt.id];
+          const required = prompt.required !== false;
+          const note = rawNotes && typeof rawNotes === "object" && !Array.isArray(rawNotes)
+            ? (rawNotes as Record<string, unknown>)[prompt.id]
+            : undefined;
+          const noteText = typeof note === "string" ? note.trim() : "";
+          const hasNote = noteText.length > 0;
+          if (prompt.type === "open_ended") {
+            if ((typeof answer !== "string" || !answer.trim()) && required && !hasNote) {
+              res.status(400).json({ type: "error", message: `Please answer: ${prompt.question}` } satisfies AppActionResponse);
+              return;
+            }
+            if (typeof answer === "string" && answer.trim()) {
+              persistedAnswers[prompt.id] = answer.trim();
+              renderedAnswers.push(`${prompt.question}: ${answer.trim()}`);
+            }
+          if (hasNote) {
+              persistedNotes[prompt.id] = noteText;
+              renderedAnswers.push(`${prompt.question} — Notes: ${noteText}`);
+            }
+            continue;
+          }
+          const selected = prompt.type === "multiple_choice" ? (Array.isArray(answer) ? answer : []) : (typeof answer === "string" ? [answer] : []);
+          if ((required && selected.length === 0 && !hasNote) || selected.some(value => typeof value !== "string" || !prompt.options?.includes(value))) {
+            res.status(400).json({ type: "error", message: `Please choose a valid answer for: ${prompt.question}` } satisfies AppActionResponse);
+            return;
+          }
+          if (selected.length) {
+            const validSelected = selected as string[];
+            persistedAnswers[prompt.id] = prompt.type === "multiple_choice" ? validSelected : validSelected[0]!;
+            renderedAnswers.push(`${prompt.question}: ${validSelected.join(", ")}`);
+          }
+          if (hasNote) {
+            persistedNotes[prompt.id] = noteText;
+            renderedAnswers.push(`${prompt.question} — Notes: ${noteText}`);
+          }
+        }
+        const answerSummary = renderedAnswers.join("\n");
+        resp = { type: "close_screen", finalMessage: "✅ Answers submitted" };
+        res.json(resp);
+        void replaceFlowCardWithFlow(messageId, answerAgentSlug, buildUserQuestionFlow(questionSet.questions, {
+          questionId,
+          agentSlug: answerAgentSlug,
+          channelId: answerChannelId,
+          conversationId: answerConversationId,
+          userId: answerUserId,
+        }, {
+          phase: "answered",
+          answers: persistedAnswers,
+          ...(Object.keys(persistedNotes).length ? { notes: persistedNotes } : {}),
+          decidedAt: new Date().toISOString(),
+        }), answerConversationId, undefined, answerSpacesAppId);
 
         const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
         const appToken = agent?.spacesAppToken
@@ -1019,8 +1089,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           },
           body: JSON.stringify({
             userId: answerUserId,
-            task: `The user answered "${answer}" to your question: "${questionText}". Continue the task based on this answer.`,
-            context: `Previous question: ${questionText}\nOptions: ${optionsList}\nUser's answer: ${answer}`,
+            task: `The user answered your questions. Continue the task based on these answers:\n${answerSummary}`,
+            context: `User answers:\n${answerSummary}`,
             conversationId: answerConversationId,
             channelId: answerChannelId,
             agentSlug: answerAgentSlug,
@@ -1031,6 +1101,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
         const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
         if (runBody.success && runBody.sessionId && agent) {
+          // Like plan approval, this direct /internal/run dispatch skips the
+          // mention path that ordinarily lights the thread's working pill.
+          void emitAgentWorkingSignal({
+            conversationId: answerConversationId,
+            channelId: answerChannelId,
+            agentSlug: answerAgentSlug,
+            spacesAppUserId: agent.spacesAppUserId ?? undefined,
+            appToken,
+            toolLabel: "Working on your answers…",
+          });
           await setSession(runBody.sessionId, {
             mentionedUserId: agent.spacesAppUserId ?? "",
             senderId: answerUserId,
@@ -1038,7 +1118,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             channelId: answerChannelId,
             channelName: answerChannelId,
             conversationId: answerConversationId,
-            task: `User answered: ${answer}`,
+            task: `User answers:\n${answerSummary}`,
             agentId: agent.id,
             agentOrgId: agent.orgId,
             agentSlug: answerAgentSlug,
@@ -1049,7 +1129,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           });
         }
 
-        log.info(`[flow-action] User answered "${answer}" → new /run (session=${runBody.sessionId})`);
+        log.info(`[flow-action] User answered question set ${questionId} → new /run (session=${runBody.sessionId})`);
         await deleteQuestion(questionId).catch(() => {});
       } catch (err) {
         log.error("[flow-action] Failed to start new run with answer:", err);

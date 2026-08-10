@@ -13,6 +13,7 @@
 import { Router, type Request, type Response } from "express";
 import { redisService } from "../redis.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
+import type { UserQuestion } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("pending-questions");
@@ -27,8 +28,7 @@ export interface StoredQuestion {
   agentSlug: string;
   channelId: string;
   conversationId: string;
-  question: string;
-  options: string[];
+  questions: UserQuestion[];
 }
 
 export async function getQuestion(questionId: string): Promise<StoredQuestion | null> {
@@ -46,18 +46,17 @@ export async function deleteQuestion(questionId: string): Promise<void> {
 // POST / — store a pending question
 router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
   try {
-    const { questionId, userId, agentSlug, channelId, conversationId, question, options } = req.body as {
+    const { questionId, userId, agentSlug, channelId, conversationId, questions } = req.body as {
       questionId?: string;
       userId?: string;
       agentSlug?: string;
       channelId?: string;
       conversationId?: string;
-      question?: string;
-      options?: string[];
+      questions?: UserQuestion[];
     };
 
-    if (!questionId || !question || !options?.length) {
-      res.status(400).json({ success: false, error: "questionId, question, and options are required" });
+    if (!questionId || !Array.isArray(questions) || questions.length === 0) {
+      res.status(400).json({ success: false, error: "questionId and questions are required" });
       return;
     }
 
@@ -67,14 +66,13 @@ router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
       agentSlug: agentSlug ?? "",
       channelId: channelId ?? "",
       conversationId: conversationId ?? "",
-      question,
-      options,
+      questions,
     };
 
     const redis = redisService.getConnection();
     await redis.set(`${PREFIX}${questionId}`, JSON.stringify(data), "EX", TTL);
 
-    log.info(`[pending-questions] Stored question ${questionId}: "${question}" (${options.length} options)`);
+    log.info(`[pending-questions] Stored question set ${questionId} (${questions.length} questions)`);
     res.json({ success: true });
   } catch (err) {
     log.error("[pending-questions] Store error:", err);

@@ -3766,7 +3766,7 @@ async function processTask(
     }
 
     clog.info(
-      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
+      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options?.length ?? 0}`,
     );
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,
