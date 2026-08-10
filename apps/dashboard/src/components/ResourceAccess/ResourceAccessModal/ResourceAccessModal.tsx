@@ -76,7 +76,10 @@ export const ResourceAccessModal = ({
   const editableResourceNames = useMemo(() => {
     const names = new Set<string>();
     for (const permission of viewerPermissions) {
-      if (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN') {
+      if (
+        permission.accessType === AccessType.WRITE ||
+        permission.accessType === AccessType.ADMIN
+      ) {
         names.add(permission.resourceName);
       }
     }
