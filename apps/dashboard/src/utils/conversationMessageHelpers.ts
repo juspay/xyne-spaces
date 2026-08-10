@@ -58,15 +58,6 @@ export function getInitialMessageFromConversation(
   return initialMessageSummaryToMessage(summary, conversation.workspaceId);
 }
 
-export function isConversationVisibleToUser(
-  conversation: { initial_message_md?: string | null },
-  userId: string | undefined,
-): boolean {
-  const summary = parseInitialMessageMd(conversation.initial_message_md);
-  if (!summary) return false;
-  return !summary.visibleTo || summary.visibleTo === userId;
-}
-
 /**
  * Get the parent message summary from a conversation's denormalized parent_message_md field.
  */

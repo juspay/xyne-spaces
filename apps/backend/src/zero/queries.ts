@@ -3638,7 +3638,12 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .limit(limit)
         .related('channel', channelQuery =>
         channelQuery.related('conversations', conversationQuery =>
-          conversationQuery.orderBy('createdAt', 'desc').limit(1),
+          conversationQuery
+            .whereExists('initialMessage', messageQuery =>
+              messageQuery.where('visibleTo', 'IS', null),
+            )
+            .orderBy('createdAt', 'desc')
+            .limit(1),
         ),
       );
     },

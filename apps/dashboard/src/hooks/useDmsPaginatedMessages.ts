@@ -4,8 +4,6 @@ import { useCachedQuery } from './useCachedQuery';
 import { useZero } from './useZero';
 import { queries } from '../zero/queries';
 import { useAllVisibleChannels, useUserChannelStatuses } from './useChannels';
-import { useAuthContextValues } from './useAuth';
-import { isConversationVisibleToUser } from '../utils/conversationMessageHelpers';
 import { ChannelScopeType } from '@xyne/shared';
 
 type DmStatsPageResult = QueryResultType<typeof queries.dmChannelsLatestMessagesPaginated>;
@@ -62,7 +60,6 @@ export const useDmsPaginatedMessages = (
 ): UseDmsPaginatedMessagesReturn => {
   const { selectedChannelId } = options;
   const zero = useZero();
-  const { userID } = useAuthContextValues();
 
   // Keep a ref so jumpToChannel can read the current visible channels list
   // synchronously without a stale closure, without re-creating the callback.
@@ -328,13 +325,11 @@ export const useDmsPaginatedMessages = (
   const messagesMap = useMemo(() => {
     const map = new Map<string, DmConversation>();
     for (const { channelId, channel } of rows) {
-      const visible = channel?.conversations?.find(conversation =>
-        isConversationVisibleToUser(conversation, userID),
-      );
-      if (visible) map.set(channelId, visible);
+      const first = channel?.conversations?.[0];
+      if (first) map.set(channelId, first);
     }
     return map;
-  }, [rows, userID]);
+  }, [rows]);
 
   return {
     messagesMap,
