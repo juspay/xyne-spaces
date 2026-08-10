@@ -199,6 +199,8 @@ import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
 import {
   channelService,
   CreateChannelFormData,
@@ -2378,6 +2380,25 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
+                      {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
+                        <Tooltip content='Ask AI' side='bottom'>
+                          <button
+                            onClick={() => {
+                              if (!selectedChannelId) return;
+                              trackAskAIOpened(
+                                emailChannels?.find(c => c.id === selectedChannelId)?.scopeType,
+                              );
+                              xyneAIActor.send({ type: 'OPEN', channelId: selectedChannelId });
+                            }}
+                            className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
+                            data-track-category='Support'
+                            data-track-name='OPEN_XYNE_AI'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <XyneAIStar />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         channelPreference?.metricsEnabled && (
