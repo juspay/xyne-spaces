@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xyne Lens"
+  short_description: "Create reliable Manim CE explainers"
+  default_prompt: "Use $xyne-lens to create a concise explainer animation."
