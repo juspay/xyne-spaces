@@ -1,14 +1,7 @@
 import { z } from 'zod';
 import * as XLSX from 'xlsx';
-import {
-  AccessType,
-  Prisma,
-  ProjectType,
-  TicketPriority,
-  TicketStatusV2,
-  UserStatus,
-  type WorkspaceRole,
-} from '@prisma/client';
+import { AccessType, ProjectType, TicketPriority, TicketStatusV2, UserStatus, WorkspaceRole } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { AppError } from '@/middleware/errorHandler';

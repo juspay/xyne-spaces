@@ -3741,6 +3741,11 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     sourceField: ["id"],
     destField: ["workspaceId"],
     destSchema: roleTable,
+  }),
+  ticketExports: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: ticketExportTable,
   })
 }));
 

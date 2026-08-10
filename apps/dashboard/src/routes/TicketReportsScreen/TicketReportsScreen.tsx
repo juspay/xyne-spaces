@@ -14,7 +14,7 @@ import {
   type TicketExportFilters,
   type TicketExportStatus,
 } from '../../api/ticketReportsApi';
-import { FormEntityType, UserStatus } from '@xyne/shared';
+import { AccessType, FormEntityType, UserStatus } from '@xyne/shared';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -135,7 +135,7 @@ const TicketReportsScreen = ({
   const exportPermission = permissions.find(
     permission => permission.resourceName === 'TICKET-REPORTS',
   );
-  const requiresProject = exportPermission?.accessType === 'WRITE';
+  const requiresProject = exportPermission?.accessType === AccessType.WRITE;
   const standardColumns = useMemo(
     () =>
       [
