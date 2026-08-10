@@ -12,6 +12,7 @@ import { ReleaseReportController } from '@/controllers/releaseReportController';
 import { authorize } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 import { FlowRunExportController } from '@/controllers/flowRunExportController';
+import { TicketPullRequestController } from '@/controllers/ticketPullRequestController';
 
 const router = Router();
 const ticketController = new TicketController();
@@ -20,6 +21,7 @@ const analyticsController = new AnalyticsController();
 const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
 const flowRunExportController = new FlowRunExportController();
+const ticketPullRequestController = new TicketPullRequestController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
@@ -49,6 +51,41 @@ router.get('/:ticketId/pending-human-intervention', ticketController.getPendingH
 router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
+
+// ── Ticket ⇄ Bitbucket Pull Request integration (SDLCT-0001) ────────────────
+// Reads require TICKETS.READ; mutations require TICKETS.WRITE. Feature-flag
+// gating (panel/create/link/strict) is enforced inside the service so the
+// endpoints ship dark until rolled out.
+router.get(
+  '/pull-requests/flags',
+  authorize('TICKETS', AccessType.READ),
+  ticketPullRequestController.getFlags,
+);
+router.get(
+  '/:ticketId/pull-requests',
+  authorize('TICKETS', AccessType.READ),
+  ticketPullRequestController.list,
+);
+router.post(
+  '/:ticketId/pull-requests',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketPullRequestController.create,
+);
+router.post(
+  '/:ticketId/pull-requests/link',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketPullRequestController.link,
+);
+router.post(
+  '/:ticketId/pull-requests/:pullRequestId/refresh',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketPullRequestController.refresh,
+);
+router.delete(
+  '/:ticketId/pull-requests/:pullRequestId',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketPullRequestController.unlink,
+);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
 router.post(

@@ -4,6 +4,19 @@ import { transformBitbucketDiff } from '@/utils/diffUtils';
 import { PullRequestData, BitbucketDuplicatePRError } from '@/types/bitbucket';
 import { config } from '@/config/env';
 
+/** Normalized, credential-free view of a Bitbucket pull request. */
+export interface BitbucketPullRequestDetails {
+  prId: number;
+  title: string;
+  description: string;
+  state: string; // OPEN | MERGED | DECLINED (Bitbucket raw states)
+  sourceBranchName: string;
+  destinationBranchName: string;
+  prUrl: string;
+  commentCount: number;
+  reviewers: Array<{ name: string; email?: string; approved?: boolean }>;
+}
+
 const BASE_URL = config.bitbucket.baseUrl;
 
 export class BitbucketManager {
@@ -114,6 +127,52 @@ export class BitbucketManager {
         return null;
       }
     }
+
+  /**
+   * Fetch a single pull request's details from Bitbucket.
+   * Used by the ticket-initiated link/refresh flows. Returns a normalized,
+   * credential-free view of the PR. Returns null when the PR cannot be read
+   * (not found / inaccessible) so callers can surface a redacted error.
+   */
+  async getPullRequestById(
+    projectKey: string,
+    repoSlug: string,
+    prId: number,
+  ): Promise<BitbucketPullRequestDetails | null> {
+    try {
+      const url = this.buildPullRequestUrl(projectKey, repoSlug, prId);
+      const { data, status } = await this.makeRequest<any>(url, 'GET');
+      if (status < 200 || status >= 300) {
+        logger.warn(`[Bitbucket-API] getPullRequestById ${prId} returned status ${status}`);
+        return null;
+      }
+      const reviewers = Array.isArray(data?.reviewers)
+        ? data.reviewers.map((r: any) => ({
+            name: r?.user?.displayName ?? r?.user?.name ?? 'Unknown',
+            email: r?.user?.emailAddress ?? undefined,
+            approved: Boolean(r?.approved),
+          }))
+        : [];
+      return {
+        prId: data?.id ?? prId,
+        title: data?.title ?? '',
+        description: data?.description ?? '',
+        state: data?.state ?? 'OPEN',
+        sourceBranchName: data?.fromRef?.displayId ?? '',
+        destinationBranchName: data?.toRef?.displayId ?? '',
+        prUrl: data?.links?.self?.[0]?.href ?? '',
+        commentCount:
+          typeof data?.properties?.commentCount === 'number'
+            ? data.properties.commentCount
+            : 0,
+        reviewers,
+      };
+    } catch (error) {
+      // Do NOT surface raw provider errors (may contain credentials/host detail).
+      logger.error(`[Bitbucket-API] Error fetching PR ${prId}:`, error);
+      return null;
+    }
+  }
 
   async raisePr(
     repoUrl: string,
