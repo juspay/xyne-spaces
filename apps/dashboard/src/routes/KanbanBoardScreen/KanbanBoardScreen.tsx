@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { logger, Event } from '../../utils/logger';
 import { useAuth } from '../../hooks/useAuth';
-import { useCanCreateTicket } from '../../hooks/usePermissions';
+import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import {
@@ -38,6 +38,7 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { CalendarView } from '../../components/Tickets/CalendarView';
+import TicketReportsScreen from '../../routes/TicketReportsScreen/TicketReportsScreen';
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -90,6 +91,7 @@ import {
   TicketStatusV2,
   ActivityType,
   FormContextType,
+  AccessType,
   FormEntityType,
   FormFieldType,
   ChannelType,
@@ -364,6 +366,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
   const canCreateTicket = useCanCreateTicket(); // Check ticket permissions
+  const permissions = usePermissions();
+  const canExportTickets = permissions.some(
+    permission =>
+      permission.resourceName === 'TICKET-REPORTS' &&
+      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
+  );
   const zero = useZero();
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const isDraggingRef = useRef(false);
@@ -590,6 +598,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       ? requestedLayoutView
       : 'kanban';
   const isKanbanLayout = layoutView === 'kanban';
+  const showTicketReport = searchParams.get('ticketReport') === '1';
   // Flow view: the open run lives in the URL so browser back returns to the
   // main-tickets grid and run links are shareable.
   const selectedGraphRootTicketId = layoutView === 'flow' ? searchParams.get('run') : null;
@@ -3071,6 +3080,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return availableColumns.filter(col => col.key !== 'status');
   }, [layoutView, availableColumns]);
 
+  if (showTicketReport && channelId && effectiveProjectId) {
+    return (
+      <TicketReportsScreen
+        embedded
+        lockedProjectId={effectiveProjectId}
+        sourceChannelId={channelId}
+        onClose={() => {
+          setSearchParams(
+            previous => {
+              const next = new URLSearchParams(previous);
+              next.delete('ticketReport');
+              return next;
+            },
+            { replace: true },
+          );
+        }}
+      />
+    );
+  }
+
   return (
     <div
       data-testid='projects-board-page'
@@ -3116,6 +3145,41 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
               hasActiveView={!!selectedViewId}
               workspaceView={isWorkspaceView}
+              trailingControl={
+                canExportTickets ? (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='rounded-[10px] border-border'
+                    onClick={() => {
+                      if (channelId && effectiveProjectId) {
+                        setSearchParams(previous => {
+                          const next = new URLSearchParams(previous);
+                          next.set('ticketReport', '1');
+                          return next;
+                        });
+                        return;
+                      }
+                      const params = new URLSearchParams();
+                      if (effectiveProjectId) {
+                        params.set('projectId', effectiveProjectId);
+                        params.set('lockProject', '1');
+                      }
+                      if (boardId) params.set('boardId', boardId);
+                      const prefix = user?.workspaceId ? `/${user.workspaceId}` : '';
+                      void navigate(
+                        `${prefix}/ticket-reports${params.size ? `?${params.toString()}` : ''}`,
+                      );
+                    }}
+                    data-track-category='TicketReports'
+                    data-track-name='OpenTicketReports'
+                  >
+                    <Download className='size-4' />
+                    <span>Export report</span>
+                  </Button>
+                ) : undefined
+              }
               {...(isWorkspaceView
                 ? {
                     leadingControl: (
