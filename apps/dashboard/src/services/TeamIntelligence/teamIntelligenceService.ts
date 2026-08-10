@@ -32,6 +32,14 @@ export interface LeadershipItem {
   progressDescription?: string;
   signal?: string;
   expectedOutcome?: string;
+  summary?: string;
+  goalId?: string;
+  track?: string | null;
+  visibility?: string | null;
+  matchStrength?: string;
+  isTeamWorkingTowardsGoal?: boolean;
+  matchedSignals?: string[];
+  evidenceSourceTypes?: string[];
   priority?: LeadershipPriority;
   severity?: LeadershipPriority;
   riskLevel?: LeadershipPriority;
@@ -58,7 +66,7 @@ export interface LeadershipBullet {
   id: string;
   title: string;
   text: string;
-  category: string;
+  category?: string;
   contributorTeamIds?: string[];
   contributorUserIds?: string[];
   teamSignalRefs?: LeadershipReference[];
@@ -167,6 +175,7 @@ export interface TeamLeadershipSummary {
       successSignals?: string[];
     };
   };
+  team10xGoal?: LeadershipItem[];
   recommendedActions: LeadershipItem[];
   processingCoverage: {
     expectedMembers: number;
@@ -363,6 +372,21 @@ export interface TeamsResponse {
   data: Team[];
 }
 
+export type TeamGoalGroupKey = '10X' | '5X' | '2X' | 'READY_TO_ACCELERATE' | 'NO_GOAL_DATA';
+
+export interface TeamGoalGroupTeam extends Team {
+  highestTrack: '10X' | '5X' | '2X' | null;
+  activeGoalCount: number;
+  matchedGoalCount: number;
+}
+
+export interface TeamGoalGroupsResponse {
+  from: string;
+  to: string;
+  totalTeams: number;
+  groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
+}
+
 export interface TeamMember {
   about_me: string | null;
   assigned_emp_id: string;
@@ -395,6 +419,33 @@ export interface TeamMembersResponse {
   active_employee_count?: number;
   description?: string | null;
   employee_list?: TeamMember[];
+  pagination: LeadershipPagination;
+}
+
+export interface LeadershipPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export type LeadershipScope = 'org' | 'team' | 'user';
+
+export interface LeadershipSectionResponse<T = LeadershipItem> extends LeadershipPagination {
+  snapshotId: string;
+  section: string;
+  items: T[];
+}
+
+export interface LeadershipSectionParams {
+  scope: LeadershipScope;
+  section: string;
+  from: string;
+  to: string;
+  page: number;
+  limit?: number;
+  teamId?: string;
+  userEmail?: string;
 }
 
 export const getOrgLeadershipSnapshots = async (params: {
@@ -421,6 +472,13 @@ export const getTeams = async (): Promise<TeamsResponse> => {
   return response.data;
 };
 
+export const getTeamGoalGroups = async (): Promise<TeamGoalGroupsResponse> => {
+  const response = await apiInstance.get<TeamGoalGroupsResponse>(
+    '/team-intelligence-dashboard/org/team-goal-groups',
+  );
+  return response.data;
+};
+
 export const getTeamLeadershipSnapshots = async (
   teamId: string,
   params: { from: string; to: string },
@@ -438,12 +496,30 @@ export const getTeamLeadershipSnapshots = async (
   return response.data;
 };
 
-export const getTeamMembers = async (teamId: string): Promise<TeamMembersResponse> => {
+export const getTeamMembers = async (
+  teamId: string,
+  page: number,
+  limit = 12,
+): Promise<TeamMembersResponse> => {
   const response = await apiInstance.get<TeamMembersResponse>('/mettle/team-members', {
     params: {
       teamId,
+      page,
+      limit,
     },
   });
+  return response.data;
+};
+
+export const getLeadershipSection = async <T = LeadershipItem>({
+  scope,
+  section,
+  ...params
+}: LeadershipSectionParams): Promise<LeadershipSectionResponse<T>> => {
+  const response = await apiInstance.get<LeadershipSectionResponse<T>>(
+    `/team-intelligence-dashboard/${scope}/leadership-sections/${section}`,
+    { params },
+  );
   return response.data;
 };
 

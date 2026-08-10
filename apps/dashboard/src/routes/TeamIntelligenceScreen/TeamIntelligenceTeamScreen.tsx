@@ -1,18 +1,13 @@
 import { ReactElement } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { TeamLeadershipDashboard } from '@/components/TeamIntelligence/LeadershipDashboard';
-import { useTeamLeadershipSnapshots, useTeamMembers } from '@/hooks/useTeamIntelligence';
+import { useTeamLeadershipSnapshots } from '@/hooks/useTeamIntelligence';
 import { TeamIntelligenceOutletContext } from './TeamIntelligenceScreen';
 
 const TeamIntelligenceTeamScreen = (): ReactElement => {
   const { teamId } = useParams<{ teamId: string }>();
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
   const { data, isLoading, isError } = useTeamLeadershipSnapshots(teamId ?? '', dateRange);
-  const {
-    data: teamMembers,
-    isLoading: isMembersLoading,
-    isError: isMembersError,
-  } = useTeamMembers(teamId ?? '');
   const snapshot = data?.snapshots[0] ?? null;
 
   if (!teamId) {
@@ -28,9 +23,8 @@ const TeamIntelligenceTeamScreen = (): ReactElement => {
       snapshot={snapshot}
       isLoading={isLoading}
       isError={isError}
-      teamMembers={teamMembers}
-      isMembersLoading={isMembersLoading}
-      isMembersError={isMembersError}
+      teamId={teamId}
+      sectionRequest={{ scope: 'team', teamId, ...dateRange }}
     />
   );
 };

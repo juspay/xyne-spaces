@@ -27,7 +27,7 @@ export function createTeamIntelligenceLlmClient(): LLMClient | null {
         timeout: appConfig.llm.teamIntelligenceRequestTimeoutMs,
       },
     },
-    defaultModel: appConfig.workflow.defaultModelName,
+    defaultModel: appConfig.teamIntelligence.model,
     // Section-level fallback owns Team Intelligence recovery. Keeping provider
     // retries to one attempt prevents a long LLM timeout from multiplying into
     // several hidden waits inside every section call.

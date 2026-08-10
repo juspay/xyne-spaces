@@ -8,6 +8,10 @@ router.get('/bullets', teamIntelligenceTeamController.getTeamBullets);
 
 // GET /api/team-intelligence-dashboard/team/leadership-snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
 router.get('/leadership-snapshots', teamIntelligenceTeamController.getTeamLeadershipSnapshots);
+router.get(
+  '/leadership-sections/:section',
+  teamIntelligenceTeamController.getTeamLeadershipSection
+);
 
 // GET /api/team-intelligence-dashboard/team/pr?from=YYYY-MM-DD&to=YYYY-MM-DD&prId=3110
 router.get('/pr', teamIntelligenceTeamController.getPrByDate);

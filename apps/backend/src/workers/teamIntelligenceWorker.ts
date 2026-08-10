@@ -1,9 +1,6 @@
 import Bull from 'bull';
-import {
-  Prisma,
-  TeamIntelligenceBatchStatus,
-  TeamIntelligenceUserIngestionStatus,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { teamIntelligenceTeamSummaryQueue } from '@/team-intelligence/team-summary.queue';
@@ -13,6 +10,7 @@ import { teamIntelligenceSummaryService } from '@/team-intelligence/services/tea
 import { teamIntelligenceTeamSummaryService } from '@/team-intelligence/services/team-intelligence-team-summary.service';
 import { teamIntelligenceOrgSummaryService } from '@/team-intelligence/services/team-intelligence-org-summary.service';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import { mettleTeamGoalsService } from '@/services/mettleTeamGoalsService';
 import type {
   TeamIntelligenceOrgSummaryQueuedJobData,
   TeamIntelligenceQueuedJobData,
@@ -570,6 +568,8 @@ class TeamIntelligenceWorker {
         }
       }
 
+      const teamGoals = await mettleTeamGoalsService.fetchActiveTeamGoals(teamId);
+
       const generated = await teamIntelligenceTeamSummaryService.generate({
         batchId,
         teamSummaryId,
@@ -578,6 +578,7 @@ class TeamIntelligenceWorker {
         teamName: teamSummary.teamName,
         source: teamSummary.source,
         members,
+        teamGoals,
         previousContinuityState,
         processingCoverage: {
           expectedMembers: teamUsers.length,
@@ -699,28 +700,44 @@ class TeamIntelligenceWorker {
 
       const workspaceId =
         orgSummary.workspaceId?.trim() || appConfig.defaultWorkspaceId?.trim();
-      if (!workspaceId) {
-        throw new Error(
-          `No workspaceId available for organization summary batchId=${batchId}`
-        );
-      }
 
-      const workspace = await db.workspace.findUnique({
-        where: { id: workspaceId },
-        select: {
-          id: true,
-          orgId: true,
-          organization: {
-            select: {
-              name: true,
+      // Resolve the organization identity for the summary. workspaceId is only
+      // used as a bridge to the org record — it is not part of the ingestion
+      // data itself. When it is unavailable (no DEFAULT_WORKSPACE_ID, or the
+      // org summary record was created without one), fall back to a generic
+      // org identity instead of failing the job. This mirrors the team/user
+      // summary workers, which do not hard-fail on a missing workspaceId.
+      let organization: { id: string; name: string };
+      if (workspaceId) {
+        const workspace = await db.workspace.findUnique({
+          where: { id: workspaceId },
+          select: {
+            id: true,
+            orgId: true,
+            organization: {
+              select: {
+                name: true,
+              },
             },
           },
-        },
-      });
-      if (!workspace) {
-        throw new Error(
-          `Workspace ${workspaceId} not found for organization summary batchId=${batchId}`
+        });
+        if (!workspace) {
+          throw new Error(
+            `Workspace ${workspaceId} not found for organization summary batchId=${batchId}`
+          );
+        }
+        organization = {
+          id: workspace.orgId,
+          name: workspace.organization.name,
+        };
+      } else {
+        logger.warn(
+          `[TEAM-INTEL-WORKER] No workspaceId for org summary ${orgSummaryId}; falling back to generic org identity`
         );
+        organization = {
+          id: appConfig.superposition.orgId || 'unknown',
+          name: 'Organization',
+        };
       }
 
       const teamPayloads = await Promise.all(
@@ -749,11 +766,12 @@ class TeamIntelligenceWorker {
       );
 
       let previousContinuityState: TeamIntelligenceOrgContinuityState | null = null;
-      const previousOrgSummary =
-        await teamIntelligenceRepository.findPreviousCompletedOrgSummary(
-          workspaceId,
-          orgSummary.reportDate
-        );
+      const previousOrgSummary = workspaceId
+        ? await teamIntelligenceRepository.findPreviousCompletedOrgSummary(
+            workspaceId,
+            orgSummary.reportDate
+          )
+        : null;
       if (previousOrgSummary?.contentUrl) {
         const ageInDays = Math.floor(
           (orgSummary.reportDate.getTime() - previousOrgSummary.reportDate.getTime()) /
@@ -796,10 +814,7 @@ class TeamIntelligenceWorker {
         batchId,
         reportDate: orgSummary.reportDate.toISOString().slice(0, 10),
         source: orgSummary.source,
-        organization: {
-          id: workspace.orgId,
-          name: workspace.organization.name,
-        },
+        organization,
         teams: teamPayloads,
         previousContinuityState,
         processingCoverage: {

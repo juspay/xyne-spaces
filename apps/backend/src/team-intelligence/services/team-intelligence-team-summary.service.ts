@@ -9,6 +9,7 @@ import type {
   TeamIntelligenceTeamSummaryProvenance,
 } from '../types';
 import type { TeamIntelligenceTeamAggregationPayload } from '../user-summary.schema';
+import type { MettleTeamGoal } from '../../services/mettleTeamGoalsService';
 import {
   TeamIntelligenceTeamLeadershipSummarySchema,
   type TeamIntelligenceContinuityState,
@@ -35,6 +36,7 @@ export interface TeamIntelligenceTeamLeadershipInput {
   teamName: string;
   source: string;
   members: TeamIntelligenceTeamAggregationPayload[];
+  teamGoals: MettleTeamGoal[];
   previousContinuityState: TeamIntelligenceContinuityState | null;
   processingCoverage: TeamIntelligenceTeamProcessingCoverage;
 }
@@ -80,6 +82,7 @@ interface TeamGeneratedSections {
   bottlenecks: TeamLeadershipSnapshot['bottlenecks'];
   leadershipLeverage: TeamLeadershipSnapshot['leadershipLeverage'];
   nextLeap: TeamLeadershipSnapshot['nextLeap'];
+  team10xGoal: TeamIntelligenceTeamLeadershipSummary['team10xGoal'];
   recommendedActions: TeamIntelligenceTeamLeadershipSummary['recommendedActions'];
   dataGaps: TeamIntelligenceTeamLeadershipSummary['dataGaps'];
   continuityState: TeamIntelligenceTeamLeadershipSummary['continuityState'];
@@ -103,7 +106,7 @@ async function llmGenerate(
       { scope: 'team', purpose: options.purpose, promptChars: prompt.length },
       async () => {
     const response = await llmClient.generateStream({
-      model: appConfig.workflow.defaultModelName,
+      model: appConfig.teamIntelligence.model,
       messages: [createUserMessage(prompt)],
     });
     const finalMessagePromise = response.finalMessage.catch((error) => {
@@ -199,10 +202,11 @@ function buildSectionPrompt(
     'This is a stateless request scoped only to INPUT.batchId and INPUT.team.',
     'Do not use memory, prior chat/session context, or data from another team, organization, or batch.',
     'Your input contains a small team member directory, section-filtered already-summarized member signals for today, and compact previous continuity state when relevant.',
+    'Some sections may also receive active team goals; use them only to assess whether supplied member signals indicate progress toward those goals.',
     'Do not ask for, infer from, or fabricate channel-to-team mappings. Team membership is authoritative only through the supplied teamId.',
     '',
     'Evidence rules:',
-    '- Use only memberDirectory, currentMemberSignals, and previousContinuityState supplied in INPUT.',
+    '- Use only memberDirectory, currentMemberSignals, previousContinuityState, and externalTeamGoals supplied in INPUT.',
     '- currentMemberSignals is intentionally filtered to this section. Members with no relevant signals for this section may be omitted.',
     '- Prefer simple qualitative content: title/text/description/priority/status. memberSignalRefs are optional; when provided, they must use exact userIngestionId + signalId pairs from currentMemberSignals.',
     '- A provided memberSignalRef.signalId must be an exact id found inside that member payload.',
@@ -250,6 +254,17 @@ function buildSectionPrompt(
       memberDirectory: buildTeamMemberDirectory(input.members),
       processingCoverage: input.processingCoverage,
       currentMemberSignals: sectionSource.currentMemberSignals,
+      externalTeamGoals: input.teamGoals.map((goal) => ({
+        id: goal.id,
+        teamId: goal.team_id ?? goal.teamId ?? input.teamId,
+        subteamId: goal.subteam_id ?? goal.subteamId ?? null,
+        title: goal.title,
+        description: goal.description ?? null,
+        status: goal.status ?? null,
+        track: goal.track ?? null,
+        visibility: goal.visibility ?? null,
+        createdAt: goal.created_at ?? goal.createdAt ?? null,
+      })),
       previousContinuityState: sectionSource.previousContinuityState,
       sourceSelection: sectionSource.sourceSelection,
     }),
@@ -361,6 +376,8 @@ type TeamPersonAssessment =
   TeamOperationalSnapshot['peopleLoadFocusAndGaps']['overloadedMembers'][number];
 type TeamLeadershipItem = TeamLeadershipSnapshot['bottlenecks']['peopleOrOwnership'][number];
 type TeamRisk = TeamOperationalSnapshot['upcomingAndAtRisk'][number];
+type TeamGoalAlignment = TeamIntelligenceTeamLeadershipSummary['team10xGoal'][number];
+type TeamEvidenceSourceType = TeamGoalAlignment['evidenceSourceTypes'][number];
 
 function buildTeamSectionFallbackRefs(
   source: TeamSectionSource | undefined,
@@ -417,6 +434,21 @@ const TEAM_ALIGNMENT = [
 ] as const;
 const TEAM_REVERSIBILITY = ['REVERSIBLE', 'IRREVERSIBLE', 'UNCLEAR'] as const;
 const TEAM_TOUCH = ['HIGH_TOUCH', 'MEDIUM_TOUCH', 'LOW_TOUCH', 'INSUFFICIENT_EVIDENCE'] as const;
+const TEAM_GOAL_TRACKS = ['2X', '5X', '10X', 'UNKNOWN'] as const;
+const TEAM_GOAL_MATCH_STRENGTH = ['STRONG', 'PARTIAL', 'WEAK'] as const;
+const TEAM_EVIDENCE_SOURCE_TYPES = [
+  'PULL_REQUEST',
+  'COMMIT',
+  'AI_USAGE',
+  'TICKET',
+  'TICKET_ACTIVITY',
+  'CONVERSATION',
+  'MESSAGE',
+  'CALL',
+  'CANVAS',
+  'CANVAS_VERSION',
+  'UNKNOWN',
+] as const;
 const TEAM_BULLET_CATEGORIES = [
   'shipped',
   'achievement',
@@ -427,6 +459,9 @@ const TEAM_BULLET_CATEGORIES = [
   'helped',
   'milestone',
 ] as const;
+/** Maximum team-brief bullets kept after generation. Prevents a per-member
+ * firehose — only the most important team-wide takeaways should survive. */
+const MAX_TEAM_SUMMARY_BULLETS = 8;
 const TEAM_TIME_HORIZON = ['IMMEDIATE', 'THIS_WEEK', 'NEXT_TWO_WEEKS', 'LONGER_TERM'] as const;
 function cleanString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -454,6 +489,22 @@ function enumValue<T extends readonly string[]>(
   fallback: T[number]
 ): T[number] {
   const normalized = cleanString(value).toUpperCase();
+  return allowed.includes(normalized) ? normalized : fallback;
+}
+
+/**
+ * Case-insensitive category lookup that preserves the canonical (lowercase)
+ * form stored in the schema. Bullet categories are lowercase, so a plain
+ * `enumValue` (which uppercases the input) never matches and silently falls
+ * back — making every bullet read "achievement". This normalizes both sides
+ * to lowercase so the LLM-chosen category survives.
+ */
+function bulletCategoryValue<T extends readonly string[]>(
+  value: unknown,
+  allowed: T,
+  fallback: T[number]
+): T[number] {
+  const normalized = cleanString(value).toLowerCase();
   return allowed.includes(normalized) ? normalized : fallback;
 }
 
@@ -1145,6 +1196,48 @@ async function generateTeamSummarySectionsFromSimpleFacts(
         memberSignalRefs: itemShape.memberSignalRefs,
       },
     },
+    goals: {
+      name: 'team-10x-goal-alignment',
+      source: buildTeamSectionSource(
+        input,
+        [
+          'summary',
+          'activeWork',
+          'criticalWork',
+          'blockers',
+          'momentumAndDirection',
+          'decisionsAndAlignment',
+          'directionalSignals',
+          'dependencies',
+          'upcomingCommitments',
+          'managerAttention',
+        ],
+        ['workstreams', 'directionalSignals', 'blockers', 'decisions']
+      ),
+      instructions: [
+        '- Return items only for externalTeamGoals that have a concrete match in currentMemberSignals.',
+        '- If externalTeamGoals is empty, or if no supplied member signal shows progress/discussion/risk toward a goal, return {"items":[]}.',
+        '- Treat 10X, 5X, and 2X tracks as valid; this section is named team10xGoal for product compatibility but should include matched goals from any supplied track.',
+        '- Explain whether the team appears to be working toward the goal, what they are discussing/building/unblocking, and how the evidence matches the goal.',
+        '- Prefer explicit directionalSignals and critical/active work; tickets, calls, conversations, and PRs may be inferred only from evidenceRefs.sourceType inside the supplied member signals.',
+        '- Do not invent goals, owners, source types, dates, or progress. Use exact goalId values from externalTeamGoals and exact memberSignalRefs from currentMemberSignals.',
+      ],
+      outputShape: {
+        items: [
+          {
+            goalId: 'exact externalTeamGoals id',
+            matchStrength: 'STRONG|PARTIAL|WEAK',
+            isTeamWorkingTowardsGoal: true,
+            summary: 'concise explanation of what the team is doing or discussing and how it maps to the goal',
+            matchedSignals: ['short evidence-backed signal text'],
+            evidenceSourceTypes: [
+              'PULL_REQUEST|COMMIT|AI_USAGE|TICKET|TICKET_ACTIVITY|CONVERSATION|MESSAGE|CALL|CANVAS|CANVAS_VERSION|UNKNOWN',
+            ],
+            memberSignalRefs: itemShape.memberSignalRefs,
+          },
+        ],
+      },
+    },
     actions: {
       name: 'recommended-actions',
       source: buildTeamSectionSource(
@@ -1617,6 +1710,57 @@ async function generateTeamSummarySectionsFromSimpleFacts(
     memberSignalRefs: refsFromFact(nextLeapRecord, 'Evidence for next leap', 'next-leap'),
   };
 
+  const goalsById = new Map(input.teamGoals.map((goal) => [goal.id, goal]));
+  const goalsRaw = extractionRaw.goals;
+  const team10xGoal = simpleRecords(goalsRaw)
+    .map((fact): TeamGoalAlignment | null => {
+      const goalId = cleanString(fact.goalId ?? fact.id);
+      const goal = goalsById.get(goalId);
+      if (!goal) return null;
+
+      const refs = refsFromFact(
+        fact,
+        'Evidence for team goal alignment',
+        'team-10x-goal-alignment'
+      );
+      if (refs.length === 0) return null;
+
+      const evidenceSourceTypes: TeamEvidenceSourceType[] = cleanStringArray(
+        fact.evidenceSourceTypes
+      ).map((sourceType) => enumValue(sourceType, TEAM_EVIDENCE_SOURCE_TYPES, 'UNKNOWN'));
+      const matchedSignals = allStrings(
+        cleanStringArray(fact.matchedSignals ?? fact.signals ?? fact.evidence)
+      );
+      const normalizedEvidenceSourceTypes: TeamEvidenceSourceType[] = [
+        ...new Set<TeamEvidenceSourceType>(
+          evidenceSourceTypes.length > 0 ? evidenceSourceTypes : ['UNKNOWN']
+        ),
+      ];
+      const summary = cleanString(
+        fact.summary ?? fact.description,
+        `Team activity has evidence that maps to ${goal.title}.`
+      );
+
+      return {
+        goalId,
+        title: goal.title,
+        description: goal.description ?? null,
+        track: enumValue(goal.track, TEAM_GOAL_TRACKS, 'UNKNOWN'),
+        status: typeof goal.status === 'string' && goal.status.trim() ? goal.status.trim() : null,
+        visibility:
+          typeof goal.visibility === 'string' && goal.visibility.trim()
+            ? goal.visibility.trim()
+            : null,
+        matchStrength: enumValue(fact.matchStrength, TEAM_GOAL_MATCH_STRENGTH, 'PARTIAL'),
+        isTeamWorkingTowardsGoal: Boolean(fact.isTeamWorkingTowardsGoal ?? true),
+        summary,
+        matchedSignals,
+        evidenceSourceTypes: normalizedEvidenceSourceTypes,
+        memberSignalRefs: refs,
+      };
+    })
+    .filter((item): item is TeamGoalAlignment => item !== null);
+
   const actionsRaw = extractionRaw.actions;
   const recommendedActions = simpleRecords(actionsRaw).map((fact, index) => ({
     id: `action_${index + 1}`,
@@ -1653,7 +1797,7 @@ async function generateTeamSummarySectionsFromSimpleFacts(
       '- Base overallConfidence on evidence breadth, member coverage, consistency, and data gaps.',
       '- Synthesize the generated sections and supplied compact member source without adding unsupported facts.',
       '- executiveSummary must be concise, qualitative, and manager-ready.',
-      '- managerSummaryBullets must contain concise, qualitative, evidence-backed leadership bullets for every important supported point. Do not add routine filler.',
+      '- managerSummaryBullets must contain ONLY the 7 to 8 most important, evidence-backed leadership takeaways for this team — the things a manager absolutely must see today. Select only critical blockers, major risks, shipped milestones, and high-leverage actions. Do NOT emit one bullet per member or per routine update; merge related points and drop low-signal filler entirely. Cap at 8 bullets total.',
     ],
     outputShape: {
       overallConfidence: 'HIGH|MEDIUM|LOW',
@@ -1674,7 +1818,7 @@ async function generateTeamSummarySectionsFromSimpleFacts(
           contributorUserIds: ['exact member user id'],
           memberSignalRefs: itemShape.memberSignalRefs,
         },
-      ],
+      ], // max 8 bullets — only the most important manager-level takeaways
     },
     priorSections: compactForPriorSections({
       whoIsDoingWhat: rankedWhoIsDoingWhat,
@@ -1690,6 +1834,7 @@ async function generateTeamSummarySectionsFromSimpleFacts(
       bottlenecks,
       leadershipLeverage,
       nextLeap,
+      team10xGoal,
       recommendedActions: rankedRecommendedActions,
       dataGaps,
     }) as Record<string, unknown>,
@@ -1769,7 +1914,7 @@ async function generateTeamSummarySectionsFromSimpleFacts(
         id: `bullet_${index + 1}`,
         title: cleanString(fact.title, text.split(/\s+/).slice(0, 6).join(' ')),
         text,
-        category: enumValue(fact.category, TEAM_BULLET_CATEGORIES, 'achievement'),
+        category: bulletCategoryValue(fact.category, TEAM_BULLET_CATEGORIES, 'achievement'),
         contributorUserIds: contributors,
         memberSignalRefs,
       };
@@ -1778,6 +1923,9 @@ async function generateTeamSummarySectionsFromSimpleFacts(
       (item): item is TeamIntelligenceTeamLeadershipSummary['managerSummaryBullets'][number] =>
         item !== null
     );
+  // Hard cap: a team brief must surface only the most important takeaways,
+  // never one-per-member routine updates. Keep at most MAX_TEAM_SUMMARY_BULLETS.
+  managerSummaryBullets = managerSummaryBullets.slice(0, MAX_TEAM_SUMMARY_BULLETS);
 
   const continuityState: TeamIntelligenceContinuityState = {
     window: { from: input.reportDate, to: input.reportDate, daysRepresented: 1 },
@@ -1868,6 +2016,7 @@ async function generateTeamSummarySectionsFromSimpleFacts(
     bottlenecks,
     leadershipLeverage,
     nextLeap,
+    team10xGoal,
     recommendedActions: rankedRecommendedActions,
     dataGaps,
     continuityState,
@@ -2133,6 +2282,7 @@ class TeamIntelligenceTeamSummaryService {
         leadershipLeverage: sections.leadershipLeverage,
         nextLeap: sections.nextLeap,
       },
+      team10xGoal: sections.team10xGoal,
       recommendedActions: sections.recommendedActions,
       processingCoverage: input.processingCoverage,
       dataGaps: sections.dataGaps,
@@ -2184,6 +2334,7 @@ class TeamIntelligenceTeamSummaryService {
         blockerCount: validation.data.operationalSnapshot.needsUnblocking.length,
         criticalItemCount: validation.data.operationalSnapshot.criticalAndMoving.length,
         recommendedActionCount: validation.data.recommendedActions.length,
+        teamGoalAlignmentCount: validation.data.team10xGoal.length,
       },
       previousContinuityAvailable: input.previousContinuityState !== null,
       llmPipeline: {
@@ -2204,6 +2355,7 @@ class TeamIntelligenceTeamSummaryService {
           'bottlenecks',
           'leadership-leverage',
           'next-leap',
+          'team-10x-goal-alignment',
           'recommended-actions',
           'data-gaps',
           'final-dependent-summary',
@@ -2240,6 +2392,7 @@ class TeamIntelligenceTeamSummaryService {
       bottlenecks: validation.data.leadershipSnapshot.bottlenecks,
       leadershipLeverage: validation.data.leadershipSnapshot.leadershipLeverage,
       nextLeap: validation.data.leadershipSnapshot.nextLeap,
+      team10xGoal: validation.data.team10xGoal,
       leadershipAsks: validation.data.recommendedActions,
       dataGaps: validation.data.dataGaps,
       confidence: validation.data.overallConfidence,

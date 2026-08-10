@@ -1,16 +1,22 @@
 import {
   getMemberDetails,
+  getLeadershipSection,
   getOrgLeadershipSnapshots,
   getTeamLeadershipSnapshots,
+  getTeamGoalGroups,
   getTeamMembers,
   getTeams,
   getUserLeadershipSnapshots,
   OrgLeadershipSnapshotsResponse,
   TeamLeadershipSnapshotsResponse,
+  TeamGoalGroupsResponse,
   TeamMember,
   TeamMembersResponse,
   TeamsResponse,
   UserLeadershipSnapshotsResponse,
+  LeadershipItem,
+  LeadershipSectionParams,
+  LeadershipSectionResponse,
 } from '@/services/TeamIntelligence/teamIntelligenceService';
 import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -44,6 +50,14 @@ export function useTeams(): UseQueryResult<TeamsResponse> {
   });
 }
 
+export function useTeamGoalGroups(): UseQueryResult<TeamGoalGroupsResponse> {
+  return useQuery<TeamGoalGroupsResponse>({
+    queryKey: ['team-intelligence', 'team-goal-groups', 'previous-month', 'v2'],
+    queryFn: getTeamGoalGroups,
+    ...teamIntelligenceQueryOptions,
+  });
+}
+
 export function useTeamLeadershipSnapshots(
   teamId: string,
   params: { from: string; to: string },
@@ -56,11 +70,27 @@ export function useTeamLeadershipSnapshots(
   });
 }
 
-export function useTeamMembers(teamId: string): UseQueryResult<TeamMembersResponse> {
+export function useTeamMembers(teamId: string, page = 1): UseQueryResult<TeamMembersResponse> {
   return useQuery<TeamMembersResponse>({
-    queryKey: ['team-intelligence', 'mettle-team-members', teamId],
-    queryFn: () => getTeamMembers(teamId),
+    queryKey: ['team-intelligence', 'mettle-team-members', teamId, page],
+    queryFn: () => getTeamMembers(teamId, page),
     enabled: !!teamId,
+    ...teamIntelligenceQueryOptions,
+  });
+}
+
+export function useLeadershipSection<T = LeadershipItem>(
+  params: LeadershipSectionParams,
+): UseQueryResult<LeadershipSectionResponse<T>> {
+  return useQuery<LeadershipSectionResponse<T>>({
+    queryKey: ['team-intelligence', 'leadership-section', params],
+    queryFn: () => getLeadershipSection<T>(params),
+    enabled:
+      !!params.section &&
+      (params.scope === 'org' ||
+        (params.scope === 'team' && !!params.teamId) ||
+        (params.scope === 'user' && !!params.userEmail)),
+    placeholderData: previous => previous,
     ...teamIntelligenceQueryOptions,
   });
 }

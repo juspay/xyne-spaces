@@ -20,7 +20,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { ReactElement, ReactNode, useState } from 'react';
+import { ReactElement, ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   LeadershipBullet,
@@ -29,9 +29,10 @@ import {
   OrgLeadershipSummary,
   TeamLeadershipSummary,
   TeamMember,
-  TeamMembersResponse,
   UserLeadershipSummary,
+  LeadershipScope,
 } from '@/services/TeamIntelligence/teamIntelligenceService';
+import { useLeadershipSection, useTeamMembers } from '@/hooks/useTeamIntelligence';
 import { cn } from '@/utils/classNames';
 import { formatReportDate } from '@/utils/teamIntelligenceUtils';
 
@@ -43,19 +44,20 @@ interface SnapshotShellProps {
   title: string;
   eyebrow: string;
   reportDate?: string;
-  completedAt?: string | null;
   confidence?: LeadershipConfidence;
   momentum?: string;
   narrative: string;
-  bullets: LeadershipBullet[];
+  sectionRequest: SectionRequest;
   children: ReactNode;
 }
 
 interface SectionProps {
+  id?: string;
   icon: LucideIcon;
   title: string;
   eyebrow?: string;
   tone?: Tone;
+  question?: string;
   children: ReactNode;
 }
 
@@ -65,6 +67,7 @@ interface Signal {
   description: string;
   tone: Tone;
   icon: LucideIcon;
+  targetId?: string;
 }
 
 interface TextHeadline {
@@ -72,7 +75,24 @@ interface TextHeadline {
   text: string;
 }
 
+interface SectionRequest {
+  scope: LeadershipScope;
+  from: string;
+  to: string;
+  teamId?: string;
+  userEmail?: string;
+}
+
 const SECTION_PAGE_SIZE = 12;
+
+interface PaginationState<T> {
+  pageIndex: number;
+  pageCount: number;
+  rangeStart: number;
+  rangeEnd: number;
+  total: number;
+  visibleItems: T[];
+}
 
 const toneClassName: Record<Tone, string> = {
   neutral: 'border-border/70 bg-muted/30 text-muted-foreground',
@@ -177,19 +197,6 @@ const executiveNarrative = (summary: {
   );
 };
 
-const leadershipBullets = (bullets: LeadershipBullet[], narrative: string): LeadershipBullet[] => {
-  const narrativeText = cleanText(narrative);
-  return bullets.filter(bullet => {
-    const title = cleanText(bullet.title).toLowerCase();
-    const text = cleanText(bullet.text);
-    const isSyntheticUpdate = title === 'organization update' || title === 'team update';
-    if (!isSyntheticUpdate) {
-      return true;
-    }
-    return text && text !== narrativeText && !isSystemFallbackNarrative(text);
-  });
-};
-
 const confidenceTone = (confidence?: LeadershipConfidence): Tone => {
   if (confidence === 'HIGH') return 'good';
   if (confidence === 'MEDIUM') return 'warn';
@@ -287,13 +294,25 @@ const itemDescription = (item: LeadershipItem): string =>
   cleanText(item.impact) ||
   cleanText(item.progressDescription) ||
   cleanText(item.whyCritical) ||
+  cleanText(item.summary) ||
   cleanText(item.reason);
 
 const itemDetailNotes = (item: LeadershipItem): string[] =>
   [
+    cleanText(item.track ? `Track: ${formatLabel(item.track)}` : ''),
+    cleanText(item.matchStrength ? `Match: ${formatLabel(item.matchStrength)}` : ''),
+    item.isTeamWorkingTowardsGoal === undefined
+      ? ''
+      : item.isTeamWorkingTowardsGoal
+        ? 'Working toward goal: Yes'
+        : 'Working toward goal: No',
     cleanText(item.recommendedAction),
     cleanText(item.expectedOutcome),
     cleanText(item.suggestedOwner ? `Owner: ${item.suggestedOwner}` : ''),
+    ...(item.matchedSignals ?? []).map(signal => cleanText(`Signal: ${signal}`)),
+    ...(item.evidenceSourceTypes ?? []).map(sourceType =>
+      cleanText(`Source: ${formatLabel(sourceType)}`),
+    ),
     ...(item.requiredNextSteps ?? []).map(step => cleanText(`Next: ${step}`)),
     ...(item.dependencies ?? []).map(dependency => cleanText(`Dependency: ${dependency}`)),
   ].filter(Boolean);
@@ -310,36 +329,24 @@ const itemBadges = (item: LeadershipItem): Array<{ label: string; tone: Tone }> 
     });
   const movement = item.movement ?? item.currentMovement ?? item.momentum;
   if (movement) badges.push({ label: formatLabel(movement), tone: momentumTone(movement) });
+  if (item.track) badges.push({ label: formatLabel(item.track), tone: 'accent' });
+  if (item.matchStrength) {
+    badges.push({
+      label: formatLabel(item.matchStrength),
+      tone:
+        item.matchStrength === 'STRONG'
+          ? 'good'
+          : item.matchStrength === 'PARTIAL'
+            ? 'info'
+            : 'neutral',
+    });
+  }
   if (item.timeHorizon) badges.push({ label: formatLabel(item.timeHorizon), tone: 'info' });
   return badges.slice(0, 3);
 };
 
 const firstNonEmpty = (...values: Array<string | undefined | null>): string =>
   values.map(cleanText).find(Boolean) ?? '';
-
-const flattenRecordItems = (
-  record: Record<string, LeadershipItem[] | undefined> | undefined,
-  keys: string[],
-): LeadershipItem[] => keys.flatMap(key => record?.[key] ?? []);
-
-const buildNextLeapItems = (
-  nextLeap:
-    | {
-        whatNext?: string;
-        whatIsWrong?: string;
-        theLeap?: string;
-        successSignals?: string[];
-      }
-    | undefined,
-): TextHeadline[] => [
-  { title: 'What next', text: nextLeap?.whatNext ?? '' },
-  { title: 'What is wrong', text: nextLeap?.whatIsWrong ?? '' },
-  { title: 'The leap', text: nextLeap?.theLeap ?? '' },
-  ...(nextLeap?.successSignals ?? []).map((signal, index) => ({
-    title: `Success signal ${index + 1}`,
-    text: signal,
-  })),
-];
 
 const EmptyState = ({ title, text }: { title: string; text: string }): ReactElement => (
   <div className='rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-5'>
@@ -377,7 +384,7 @@ const Pill = ({
 }): ReactElement => (
   <span
     className={cn(
-      'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium',
+      'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium',
       toneClassName[tone],
     )}
   >
@@ -385,150 +392,227 @@ const Pill = ({
   </span>
 );
 
-const Section = ({
-  icon: Icon,
-  title,
-  eyebrow,
-  tone = 'neutral',
-  children,
-}: SectionProps): ReactElement => {
-  const style = sectionToneClassName[tone];
+const PaginationControls = ({
+  pagination,
+  setPage,
+  trackName,
+  className,
+}: {
+  pagination: Pick<
+    PaginationState<unknown>,
+    'pageIndex' | 'pageCount' | 'rangeStart' | 'rangeEnd' | 'total'
+  >;
+  setPage: (page: number) => void;
+  trackName: string;
+  className?: string;
+}): ReactElement | null => {
+  if (pagination.pageCount <= 1) return null;
+
+  const { pageIndex, pageCount, rangeStart, rangeEnd, total } = pagination;
 
   return (
-    <section className={cn('space-y-3 border-t pt-5', style.divider)}>
-      <div className='flex items-stretch gap-3'>
-        <span className={cn('w-1 rounded-full', style.rail)} />
-        <div
-          className={cn(
-            'flex size-8 shrink-0 items-center justify-center rounded-lg border',
-            style.icon,
-          )}
+    <div
+      className={cn(
+        'flex flex-col gap-3 border-t border-border/70 bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between',
+        className,
+      )}
+    >
+      <p className='text-xs text-muted-foreground'>
+        Showing {rangeStart}-{rangeEnd} of {total}
+      </p>
+      <div className='flex items-center gap-2'>
+        <button
+          type='button'
+          onClick={() => setPage(Math.max(0, pageIndex - 1))}
+          disabled={pageIndex === 0}
+          data-track-category='team-intelligence'
+          data-track-name={`previous-${trackName}-page`}
+          data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
+          className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
         >
-          <Icon className='size-4' />
-        </div>
-        <div className='min-w-0'>
-          {eyebrow ? (
-            <p className={cn('text-xs font-medium uppercase tracking-wide', style.eyebrow)}>
-              {eyebrow}
-            </p>
+          Previous
+        </button>
+        <span className='text-xs text-muted-foreground'>
+          {pageIndex + 1}/{pageCount}
+        </span>
+        <button
+          type='button'
+          onClick={() => setPage(Math.min(pageCount - 1, pageIndex + 1))}
+          disabled={pageIndex >= pageCount - 1}
+          data-track-category='team-intelligence'
+          data-track-name={`next-${trackName}-page`}
+          data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
+          className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ── Zone: Section heading (shared header for every zone below) ── */
+const SectionHeading = ({
+  icon: Icon,
+  title,
+  question,
+  tone = 'neutral',
+  count,
+}: {
+  icon: LucideIcon;
+  title: string;
+  question?: string;
+  tone?: Tone;
+  count?: number;
+}): ReactElement => {
+  const style = sectionToneClassName[tone];
+  return (
+    <div className='flex items-center gap-3'>
+      <span
+        className={cn(
+          'flex size-9 shrink-0 items-center justify-center rounded-xl border',
+          style.icon,
+        )}
+      >
+        <Icon className='size-4' />
+      </span>
+      <div className='min-w-0 flex-1'>
+        {question ? (
+          <p className={cn('text-[13px] font-semibold leading-snug', style.eyebrow)}>{question}</p>
+        ) : null}
+        <div className='mt-0.5 flex items-baseline gap-2'>
+          <h3 className='text-base font-semibold tracking-tight text-foreground/90 sm:text-lg'>
+            {title}
+          </h3>
+          {count !== undefined ? (
+            <span className='text-xs font-medium text-muted-foreground'>({count})</span>
           ) : null}
-          <h3 className='text-base font-medium text-foreground/90'>{title}</h3>
         </div>
       </div>
+    </div>
+  );
+};
+
+/* ── Zone wrapper: consistent spacing + divider for each zone ── */
+const Zone = ({
+  id,
+  children,
+  tone = 'neutral',
+  className,
+}: {
+  id?: string;
+  children: ReactNode;
+  tone?: Tone;
+  className?: string;
+}): ReactElement => {
+  const style = sectionToneClassName[tone];
+  return (
+    <section
+      id={id}
+      className={cn('scroll-mt-6 space-y-4 border-t pt-6', style.divider, className)}
+    >
       {children}
     </section>
   );
 };
 
-const SignalStrip = ({ signals }: { signals: Signal[] }): ReactElement => (
-  <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
-    {signals.map(signal => {
-      const Icon = signal.icon;
-      return (
-        <div
-          key={signal.label}
-          className='rounded-lg border border-border/70 bg-card px-3.5 py-3 shadow-sm'
-        >
-          <div className='flex items-center justify-between gap-3'>
-            <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-              {signal.label}
-            </p>
-            <span
-              className={cn(
-                'flex size-7 items-center justify-center rounded-md border',
-                toneClassName[signal.tone],
-              )}
-            >
-              <Icon className='size-3.5' />
-            </span>
-          </div>
-          <p className='mt-2 text-base font-semibold text-foreground'>{signal.value}</p>
-          <p className='mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground'>
-            {signal.description}
-          </p>
-        </div>
-      );
-    })}
-  </div>
-);
-
-const HeadlineItem = ({
-  item,
-  itemKey,
-  isExpanded,
-  onToggle,
-}: {
-  item: LeadershipItem;
-  itemKey: string;
-  isExpanded: boolean;
-  onToggle: () => void;
-}): ReactElement => {
-  const title = itemTitle(item);
-  const badges = itemBadges(item);
-  const description = itemDescription(item);
-  const notes = itemDetailNotes(item).filter(note => note !== description);
-
+/* ── Zone: Stat tiles (full-width stack, click Read more to expand one card) ── */
+const SignalCard = ({ signal }: { signal: Signal }): ReactElement => {
+  const [open, setOpen] = useState(false);
+  const Icon = signal.icon;
+  const style = sectionToneClassName[signal.tone];
+  const description = cleanText(signal.description);
+  const scrollToSection = (): void => {
+    if (!signal.targetId) return;
+    document
+      .getElementById(signal.targetId)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   return (
-    <article className='border-b border-border/60 last:border-b-0'>
-      <button
-        type='button'
-        onClick={onToggle}
-        aria-expanded={isExpanded}
-        aria-controls={`${itemKey}-details`}
-        data-track-category='team-intelligence'
-        data-track-name='toggle-leadership-headline'
-        data-track-metadata={JSON.stringify({ title, isExpanded: !isExpanded })}
-        className='group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30'
-      >
-        <ChevronDownIcon
-          className={cn(
-            'mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform',
-            isExpanded ? 'rotate-180 text-action-accent' : 'rotate-0',
-          )}
-        />
-        <div className='min-w-0 flex-1'>
-          <h4 className='text-[15px] font-medium leading-snug text-foreground/90 sm:text-base'>
-            {title}
-          </h4>
-          {badges.length > 0 ? (
-            <div className='mt-2 flex flex-wrap gap-1.5'>
-              {badges.map(badge => (
-                <Pill key={`${title}-${badge.label}`} tone={badge.tone}>
-                  {badge.label}
-                </Pill>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </button>
-
-      {isExpanded ? (
-        <div id={`${itemKey}-details`} className='px-11 pb-4'>
-          {description ? (
-            <p className='max-w-3xl text-sm leading-6 text-muted-foreground'>{description}</p>
-          ) : (
-            <p className='text-sm text-muted-foreground'>No additional detail was generated.</p>
-          )}
-          {notes.length > 0 ? (
-            <div className='mt-3 grid gap-2'>
-              {notes.map((note, index) => (
-                <div
-                  key={`${itemKey}-note-${index}`}
-                  className='flex items-start gap-2 text-xs leading-5 text-foreground'
-                >
-                  <ArrowUpRightIcon className='mt-0.5 size-3.5 shrink-0 text-action-accent' />
-                  <span>{note}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
+    <div
+      role={signal.targetId ? 'button' : undefined}
+      tabIndex={signal.targetId ? 0 : undefined}
+      aria-label={signal.targetId ? `Go to ${signal.label} section` : undefined}
+      onClick={scrollToSection}
+      onKeyDown={event => {
+        if (signal.targetId && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          scrollToSection();
+        }
+      }}
+      data-track-category='team-intelligence'
+      data-track-name={signal.targetId ? 'navigate-signal-card' : undefined}
+      data-track-metadata={
+        signal.targetId
+          ? JSON.stringify({ label: signal.label, targetId: signal.targetId })
+          : undefined
+      }
+      className={cn(
+        'rounded-xl border bg-card p-4 shadow-sm transition-all',
+        style.divider,
+        signal.targetId &&
+          'cursor-pointer hover:-translate-y-0.5 hover:border-action-accent/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action-accent focus-visible:ring-offset-2',
+      )}
+    >
+      <div className='flex items-center justify-between gap-2'>
+        <p className='text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground'>
+          {signal.label}
+        </p>
+        <span
+          className={cn('flex size-7 items-center justify-center rounded-lg border', style.icon)}
+        >
+          <Icon className='size-3.5' />
+        </span>
+      </div>
+      <p className='mt-2 text-xl font-bold tracking-tight text-foreground'>{signal.value}</p>
+      {description ? (
+        <>
+          <p
+            className={cn(
+              'mt-1 text-xs leading-relaxed text-muted-foreground',
+              !open && 'line-clamp-2',
+            )}
+          >
+            {description}
+          </p>
+          <button
+            type='button'
+            onClick={event => {
+              event.stopPropagation();
+              setOpen(prev => !prev);
+            }}
+            onKeyDown={event => event.stopPropagation()}
+            aria-expanded={open}
+            data-track-category='team-intelligence'
+            data-track-name='toggle-signal-card'
+            data-track-metadata={JSON.stringify({ label: signal.label, isExpanded: !open })}
+            className='mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-action-accent transition-colors hover:text-action-accent/80'
+          >
+            {open ? 'Read less' : 'Read more'}
+            <ChevronDownIcon
+              className={cn('size-3 transition-transform', open ? 'rotate-180' : 'rotate-0')}
+            />
+          </button>
+        </>
       ) : null}
-    </article>
+    </div>
   );
 };
 
-const ItemGrid = ({
+const SignalStrip = ({ signals }: { signals: Signal[] }): ReactElement => {
+  return (
+    <div className='overflow-hidden rounded-xl'>
+      <div className='grid gap-2.5'>
+        {signals.map(signal => (
+          <SignalCard key={signal.label} signal={signal} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ── Zone: Expandable list (click-to-expand, stable) ── */
+const ExpandableList = ({
   items,
   emptyTitle,
   emptyText,
@@ -538,88 +622,93 @@ const ItemGrid = ({
   emptyText: string;
 }): ReactElement => {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
-  const [page, setPage] = useState(0);
-
-  if (items.length === 0) {
-    return <EmptyState title={emptyTitle} text={emptyText} />;
-  }
-
+  if (items.length === 0) return <EmptyState title={emptyTitle} text={emptyText} />;
   const orderedItems = [...items].sort(compareLeadershipItems);
-  const pageCount = Math.max(1, Math.ceil(orderedItems.length / SECTION_PAGE_SIZE));
-  const pageIndex = Math.min(page, pageCount - 1);
-  const visibleItems = orderedItems.slice(
-    pageIndex * SECTION_PAGE_SIZE,
-    pageIndex * SECTION_PAGE_SIZE + SECTION_PAGE_SIZE,
-  );
-  const rangeStart = pageIndex * SECTION_PAGE_SIZE + 1;
-  const rangeEnd = pageIndex * SECTION_PAGE_SIZE + visibleItems.length;
-
   const toggleItem = (key: string): void => {
     setExpandedKeys(prev => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
-
   return (
-    <div className='overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm'>
-      {visibleItems.map((item, index) => {
-        const itemIndex = pageIndex * SECTION_PAGE_SIZE + index;
+    <div className='overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm'>
+      {orderedItems.map((item, index) => {
+        const itemIndex = index;
         const key = item.id ?? `${itemTitle(item)}-${itemIndex}`;
+        const isExpanded = expandedKeys.has(key);
+        const title = itemTitle(item);
+        const badges = itemBadges(item);
+        const description = itemDescription(item);
+        const notes = itemDetailNotes(item).filter(note => note !== description);
         return (
-          <HeadlineItem
-            key={key}
-            item={item}
-            itemKey={key}
-            isExpanded={expandedKeys.has(key)}
-            onToggle={() => toggleItem(key)}
-          />
+          <article key={key} className='border-b border-border/60 last:border-b-0'>
+            <button
+              type='button'
+              onClick={() => toggleItem(key)}
+              aria-expanded={isExpanded}
+              data-track-category='team-intelligence'
+              data-track-name='toggle-leadership-headline'
+              data-track-metadata={JSON.stringify({ title, isExpanded: !isExpanded })}
+              className='flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30'
+            >
+              <ChevronDownIcon
+                className={cn(
+                  'mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform',
+                  isExpanded ? 'rotate-180 text-action-accent' : 'rotate-0',
+                )}
+              />
+              <div className='min-w-0 flex-1'>
+                <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5'>
+                  <h4 className='text-[15px] font-medium leading-snug text-foreground/90 sm:text-base'>
+                    {title}
+                  </h4>
+                  {badges.length > 0 ? (
+                    <div className='flex flex-wrap items-center gap-1'>
+                      {badges.map(badge => (
+                        <Pill key={`${title}-${badge.label}`} tone={badge.tone}>
+                          {badge.label}
+                        </Pill>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </button>
+            {isExpanded ? (
+              <div className='px-11 pb-4'>
+                {description ? (
+                  <p className='max-w-3xl text-sm leading-6 text-muted-foreground'>{description}</p>
+                ) : (
+                  <p className='text-sm text-muted-foreground'>
+                    No additional detail was generated.
+                  </p>
+                )}
+                {notes.length > 0 ? (
+                  <div className='mt-3 grid gap-2'>
+                    {notes.map((note, noteIndex) => (
+                      <div
+                        key={`${key}-note-${noteIndex}`}
+                        className='flex items-start gap-2 text-xs leading-5 text-foreground'
+                      >
+                        <ArrowUpRightIcon className='mt-0.5 size-3.5 shrink-0 text-action-accent' />
+                        <span>{note}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </article>
         );
       })}
-      {pageCount > 1 ? (
-        <div className='flex items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-4 py-3'>
-          <p className='text-xs text-muted-foreground'>
-            Showing {rangeStart}-{rangeEnd} of {orderedItems.length}
-          </p>
-          <div className='flex items-center gap-2'>
-            <button
-              type='button'
-              onClick={() => setPage(current => Math.max(0, current - 1))}
-              disabled={pageIndex === 0}
-              data-track-category='team-intelligence'
-              data-track-name='previous-leadership-headlines-page'
-              data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-              className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-            >
-              Previous
-            </button>
-            <span className='text-xs text-muted-foreground'>
-              {pageIndex + 1}/{pageCount}
-            </span>
-            <button
-              type='button'
-              onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}
-              disabled={pageIndex >= pageCount - 1}
-              data-track-category='team-intelligence'
-              data-track-name='next-leadership-headlines-page'
-              data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-              className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 };
 
-const TextHeadlineList = ({
+/* ── Zone: Callout quote (narrative sections, no expand) ── */
+const CalloutQuote = ({
   items,
   emptyTitle,
   emptyText,
@@ -628,112 +717,32 @@ const TextHeadlineList = ({
   emptyTitle: string;
   emptyText: string;
 }): ReactElement => {
-  const [expandedKeys, setExpandedKeys] = useState<Set<number>>(() => new Set());
-  const [page, setPage] = useState(0);
   const cleaned = items
     .map(item => ({ title: cleanText(item.title), text: cleanText(item.text) }))
     .filter(item => item.title && item.text);
-
-  if (cleaned.length === 0) {
-    return <EmptyState title={emptyTitle} text={emptyText} />;
-  }
-
-  const toggleItem = (index: number): void => {
-    setExpandedKeys(prev => {
-      const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
-      } else {
-        next.add(index);
-      }
-      return next;
-    });
-  };
-  const pageCount = Math.max(1, Math.ceil(cleaned.length / SECTION_PAGE_SIZE));
-  const pageIndex = Math.min(page, pageCount - 1);
-  const visibleItems = cleaned.slice(
-    pageIndex * SECTION_PAGE_SIZE,
-    pageIndex * SECTION_PAGE_SIZE + SECTION_PAGE_SIZE,
-  );
-  const rangeStart = pageIndex * SECTION_PAGE_SIZE + 1;
-  const rangeEnd = pageIndex * SECTION_PAGE_SIZE + visibleItems.length;
-
+  if (cleaned.length === 0) return <EmptyState title={emptyTitle} text={emptyText} />;
   return (
-    <div className='overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm'>
-      {visibleItems.map((item, index) => {
-        const itemIndex = pageIndex * SECTION_PAGE_SIZE + index;
-        return (
-          <article
-            key={`${item.title}-${itemIndex}`}
-            className='border-b border-border/60 last:border-b-0'
+    <div className='overflow-hidden rounded-xl border border-action-accent/25 bg-action-accent/5'>
+      <div className='space-y-4 px-5 py-4 sm:px-6'>
+        {cleaned.map((item, index) => (
+          <div
+            key={`${item.title}-${index}`}
+            className={index > 0 ? 'border-t border-action-accent/15 pt-4' : ''}
           >
-            <button
-              type='button'
-              onClick={() => toggleItem(itemIndex)}
-              aria-expanded={expandedKeys.has(itemIndex)}
-              data-track-category='team-intelligence'
-              data-track-name='toggle-leadership-text-headline'
-              data-track-metadata={JSON.stringify({
-                index: itemIndex,
-                isExpanded: !expandedKeys.has(itemIndex),
-              })}
-              className='group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30'
-            >
-              <ChevronDownIcon
-                className={cn(
-                  'mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform',
-                  expandedKeys.has(itemIndex) ? 'rotate-180 text-action-accent' : 'rotate-0',
-                )}
-              />
-              <h4 className='min-w-0 text-[15px] font-medium leading-snug text-foreground/90 sm:text-base'>
-                {item.title}
-              </h4>
-            </button>
-            {expandedKeys.has(itemIndex) ? (
-              <div className='px-11 pb-4'>
-                <p className='max-w-3xl text-sm leading-6 text-muted-foreground'>{item.text}</p>
-              </div>
-            ) : null}
-          </article>
-        );
-      })}
-      {pageCount > 1 ? (
-        <div className='flex items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-4 py-3'>
-          <p className='text-xs text-muted-foreground'>
-            Showing {rangeStart}-{rangeEnd} of {cleaned.length}
-          </p>
-          <div className='flex items-center gap-2'>
-            <button
-              type='button'
-              onClick={() => setPage(current => Math.max(0, current - 1))}
-              disabled={pageIndex === 0}
-              data-track-category='team-intelligence'
-              data-track-name='previous-leadership-text-page'
-              data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-              className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-            >
-              Previous
-            </button>
-            <span className='text-xs text-muted-foreground'>
-              {pageIndex + 1}/{pageCount}
-            </span>
-            <button
-              type='button'
-              onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}
-              disabled={pageIndex >= pageCount - 1}
-              data-track-category='team-intelligence'
-              data-track-name='next-leadership-text-page'
-              data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-              className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-            >
-              Next
-            </button>
+            <p className='text-[11px] font-semibold uppercase tracking-[0.14em] text-action-accent'>
+              {item.title}
+            </p>
+            <p className='mt-1.5 max-w-3xl text-sm leading-7 text-foreground/80 sm:text-[15px] sm:leading-8'>
+              {item.text}
+            </p>
           </div>
-        </div>
-      ) : null}
+        ))}
+      </div>
     </div>
   );
 };
+
+const ItemGrid = ExpandableList;
 
 const StringList = ({
   items,
@@ -744,48 +753,156 @@ const StringList = ({
   emptyTitle: string;
   emptyText: string;
 }): ReactElement => {
-  const cleaned = items
-    .map((item, index): TextHeadline => {
-      if (typeof item === 'string') {
-        const text = cleanText(item);
-        return { title: text || `Point ${index + 1}`, text };
-      }
-      return {
-        title: cleanText(item.title),
-        text: cleanText(item.text),
-      };
-    })
-    .filter(item => item.title && item.text);
-  if (cleaned.length === 0) {
-    return <EmptyState title={emptyTitle} text={emptyText} />;
-  }
-  return <TextHeadlineList items={cleaned} emptyTitle={emptyTitle} emptyText={emptyText} />;
+  const normalized = items.map((item, index): TextHeadline => {
+    if (typeof item === 'string') {
+      const text = cleanText(item);
+      return { title: text || `Point ${index + 1}`, text };
+    }
+    return {
+      title: cleanText(item.title),
+      text: cleanText(item.text),
+    };
+  });
+
+  return <CalloutQuote items={normalized} emptyTitle={emptyTitle} emptyText={emptyText} />;
 };
 
-const TeamMembersPanel = ({
-  teamMembers,
-  isLoading = false,
-  isError = false,
+const responsePagination = (response: {
+  page: number;
+  totalPages: number;
+  total: number;
+  limit: number;
+  items: unknown[];
+}): PaginationState<unknown> => ({
+  pageIndex: response.page - 1,
+  pageCount: Math.max(1, response.totalPages),
+  rangeStart: response.total === 0 ? 0 : (response.page - 1) * response.limit + 1,
+  rangeEnd: (response.page - 1) * response.limit + response.items.length,
+  total: response.total,
+  visibleItems: response.items,
+});
+
+const PaginatedItemSection = ({
+  request,
+  section,
+  emptyTitle,
+  emptyText,
 }: {
-  teamMembers?: TeamMembersResponse | undefined;
-  isLoading?: boolean;
-  isError?: boolean;
+  request: SectionRequest;
+  section: string;
+  emptyTitle: string;
+  emptyText: string;
 }): ReactElement => {
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
+  useEffect(
+    () => setPage(1),
+    [request.from, request.to, request.teamId, request.userEmail, section],
+  );
+  const { data, isLoading, isError } = useLeadershipSection<LeadershipItem>({
+    ...request,
+    section,
+    page,
+    limit: SECTION_PAGE_SIZE,
+  });
+  if (isLoading && !data) return <LoadingState label='Loading section...' />;
+  if (isError || !data) return <ErrorState label='Could not load this section.' />;
+  const pagination = responsePagination(data);
+  return (
+    <>
+      <ItemGrid items={data.items} emptyTitle={emptyTitle} emptyText={emptyText} />
+      <PaginationControls
+        pagination={pagination}
+        setPage={nextPage => setPage(nextPage + 1)}
+        trackName={section}
+        className='mt-3 rounded-xl border border-border/70'
+      />
+    </>
+  );
+};
+
+const PaginatedTextSection = ({
+  request,
+  section,
+  emptyTitle,
+  emptyText,
+}: {
+  request: SectionRequest;
+  section: string;
+  emptyTitle: string;
+  emptyText: string;
+}): ReactElement => {
+  const [page, setPage] = useState(1);
+  useEffect(
+    () => setPage(1),
+    [request.from, request.to, request.teamId, request.userEmail, section],
+  );
+  const { data, isLoading, isError } = useLeadershipSection<string | TextHeadline>({
+    ...request,
+    section,
+    page,
+    limit: SECTION_PAGE_SIZE,
+  });
+  if (isLoading && !data) return <LoadingState label='Loading section...' />;
+  if (isError || !data) return <ErrorState label='Could not load this section.' />;
+  const pagination = responsePagination(data);
+  return (
+    <>
+      <StringList items={data.items} emptyTitle={emptyTitle} emptyText={emptyText} />
+      <PaginationControls
+        pagination={pagination}
+        setPage={nextPage => setPage(nextPage + 1)}
+        trackName={section}
+        className='mt-3 rounded-xl border border-border/70'
+      />
+    </>
+  );
+};
+
+const Section = ({
+  id,
+  icon,
+  title,
+  eyebrow,
+  tone = 'neutral',
+  question,
+  children,
+}: SectionProps): ReactElement => (
+  <Zone tone={tone} {...(id ? { id } : {})}>
+    <SectionHeading
+      icon={icon}
+      title={title}
+      tone={tone}
+      {...((question ?? eyebrow) ? { question: question ?? eyebrow } : {})}
+    />
+    {children}
+  </Zone>
+);
+
+/* ── Zone: Team members grid ── */
+const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement => {
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [teamId]);
+  const { data: teamMembers, isLoading, isError } = useTeamMembers(teamId, page);
   const members = (teamMembers?.employee_list ?? [])
     .filter(member => cleanText(member.email) || cleanText(member.name))
     .sort((a, b) => firstNonEmpty(a.name, a.email).localeCompare(firstNonEmpty(b.name, b.email)));
-  const pageCount = Math.max(1, Math.ceil(members.length / SECTION_PAGE_SIZE));
-  const pageIndex = Math.min(page, pageCount - 1);
-  const visibleMembers = members.slice(
-    pageIndex * SECTION_PAGE_SIZE,
-    pageIndex * SECTION_PAGE_SIZE + SECTION_PAGE_SIZE,
-  );
-  const rangeStart = members.length === 0 ? 0 : pageIndex * SECTION_PAGE_SIZE + 1;
-  const rangeEnd = pageIndex * SECTION_PAGE_SIZE + visibleMembers.length;
+  const memberPage = teamMembers?.pagination;
+  const pagination = responsePagination({
+    page: memberPage?.page ?? page,
+    totalPages: memberPage?.totalPages ?? 0,
+    total: memberPage?.total ?? 0,
+    limit: memberPage?.limit ?? SECTION_PAGE_SIZE,
+    items: members,
+  });
 
   return (
-    <Section icon={UsersIcon} title='Know your team' eyebrow='Who is doing what' tone='info'>
+    <Zone tone='info'>
+      <SectionHeading
+        icon={UsersIcon}
+        title='Know your team'
+        question='Who is doing what?'
+        tone='info'
+      />
       {isLoading ? (
         <div className='flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm'>
           <Loader2Icon className='size-4 animate-spin' />
@@ -802,9 +919,9 @@ const TeamMembersPanel = ({
           text='Mettle did not return employees for this team.'
         />
       ) : (
-        <div className='overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm'>
+        <div className='overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm'>
           <div className='grid gap-px bg-border/60 sm:grid-cols-2 xl:grid-cols-3'>
-            {visibleMembers.map((member, index) => {
+            {members.map((member, index) => {
               const name = firstNonEmpty(member.name, member.email, 'Unknown member');
               const email = cleanText(member.email);
               const role = firstNonEmpty(
@@ -818,15 +935,19 @@ const TeamMembersPanel = ({
                 email,
                 member.id,
                 member.assigned_emp_id,
-                `${name}-${index}`,
+                `${name}-${(page - 1) * SECTION_PAGE_SIZE + index}`,
               );
               const content = (
-                <div className='min-h-[116px] bg-card px-4 py-3 transition-colors hover:bg-muted/20'>
+                <div className='group/member min-h-[116px] bg-card px-4 py-3 transition-colors hover:bg-muted/20'>
                   <div className='flex items-start justify-between gap-3'>
                     <div className='min-w-0'>
-                      <p className='truncate text-sm font-medium text-foreground/90'>{name}</p>
+                      <p className='truncate text-sm font-medium text-foreground/90 group-hover/member:whitespace-normal group-hover/member:break-words'>
+                        {name}
+                      </p>
                       {email ? (
-                        <p className='mt-1 truncate text-xs text-muted-foreground'>{email}</p>
+                        <p className='mt-1 truncate text-xs text-muted-foreground group-hover/member:whitespace-normal group-hover/member:break-all'>
+                          {email}
+                        </p>
                       ) : null}
                     </div>
                     {email ? (
@@ -843,7 +964,6 @@ const TeamMembersPanel = ({
                   </div>
                 </div>
               );
-
               return email ? (
                 <Link
                   key={key}
@@ -860,74 +980,53 @@ const TeamMembersPanel = ({
               );
             })}
           </div>
-          {pageCount > 1 ? (
-            <div className='flex items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-4 py-3'>
-              <p className='text-xs text-muted-foreground'>
-                Showing {rangeStart}-{rangeEnd} of {members.length}
-              </p>
-              <div className='flex items-center gap-2'>
-                <button
-                  type='button'
-                  onClick={() => setPage(current => Math.max(0, current - 1))}
-                  disabled={pageIndex === 0}
-                  data-track-category='team-intelligence'
-                  data-track-name='previous-mettle-team-member-page'
-                  data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-                  className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-                >
-                  Previous
-                </button>
-                <span className='text-xs text-muted-foreground'>
-                  {pageIndex + 1}/{pageCount}
-                </span>
-                <button
-                  type='button'
-                  onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}
-                  disabled={pageIndex >= pageCount - 1}
-                  data-track-category='team-intelligence'
-                  data-track-name='next-mettle-team-member-page'
-                  data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-                  className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          ) : null}
+          <PaginationControls
+            pagination={pagination}
+            setPage={nextPage => setPage(nextPage + 1)}
+            trackName='mettle-team-member'
+          />
         </div>
       )}
-    </Section>
+    </Zone>
   );
 };
 
-const BulletBrief = ({ bullets }: { bullets: LeadershipBullet[] }): ReactElement => {
+/* ── Zone: Bullet brief (key takeaways, click-to-expand) ── */
+const BulletBrief = ({ request }: { request: SectionRequest }): ReactElement | null => {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
-  const [page, setPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(bullets.length / SECTION_PAGE_SIZE));
-  const pageIndex = Math.min(page, pageCount - 1);
-  const visibleBullets = bullets.slice(
-    pageIndex * SECTION_PAGE_SIZE,
-    pageIndex * SECTION_PAGE_SIZE + SECTION_PAGE_SIZE,
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [request.from, request.to, request.teamId, request.userEmail]);
+  const { data, isLoading, isError } = useLeadershipSection<LeadershipBullet | string>({
+    ...request,
+    section: 'bullets',
+    page,
+    limit: SECTION_PAGE_SIZE,
+  });
+  if (isLoading && !data) return <LoadingState label='Loading summary bullets...' />;
+  if (isError || !data) return null;
+  const bullets = data.items.map(
+    (bullet, index): LeadershipBullet =>
+      typeof bullet === 'string'
+        ? {
+            id: `${data.snapshotId}-bullet-${(data.page - 1) * data.limit + index}`,
+            title: `Manager note ${(data.page - 1) * data.limit + index + 1}`,
+            text: bullet,
+          }
+        : bullet,
   );
-  const rangeStart = pageIndex * SECTION_PAGE_SIZE + 1;
-  const rangeEnd = pageIndex * SECTION_PAGE_SIZE + visibleBullets.length;
-
+  const pagination = responsePagination(data);
   const toggleBullet = (id: string): void => {
     setExpandedKeys(prev => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
-
   return (
     <div className='border-t border-border/70'>
       <div className='divide-y divide-border/60'>
-        {visibleBullets.map(bullet => {
+        {bullets.map(bullet => {
           const isExpanded = expandedKeys.has(bullet.id);
           return (
             <article key={bullet.id}>
@@ -954,7 +1053,9 @@ const BulletBrief = ({ bullets }: { bullets: LeadershipBullet[] }): ReactElement
                     <h4 className='text-sm font-medium leading-snug text-foreground/90 sm:text-[15px]'>
                       {bullet.title}
                     </h4>
-                    <Pill tone='accent'>{formatLabel(bullet.category)}</Pill>
+                    {bullet.category ? (
+                      <Pill tone='accent'>{formatLabel(bullet.category)}</Pill>
+                    ) : null}
                   </div>
                   {isExpanded ? (
                     <p className='mt-2 max-w-3xl text-sm leading-6 text-muted-foreground'>
@@ -967,63 +1068,35 @@ const BulletBrief = ({ bullets }: { bullets: LeadershipBullet[] }): ReactElement
           );
         })}
       </div>
-      {pageCount > 1 ? (
-        <div className='flex items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-5 py-3 sm:px-6'>
-          <p className='text-xs text-muted-foreground'>
-            Showing {rangeStart}-{rangeEnd} of {bullets.length}
-          </p>
-          <div className='flex items-center gap-2'>
-            <button
-              type='button'
-              onClick={() => setPage(current => Math.max(0, current - 1))}
-              disabled={pageIndex === 0}
-              data-track-category='team-intelligence'
-              data-track-name='previous-leadership-bullet-page'
-              data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-              className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-            >
-              Previous
-            </button>
-            <span className='text-xs text-muted-foreground'>
-              {pageIndex + 1}/{pageCount}
-            </span>
-            <button
-              type='button'
-              onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}
-              disabled={pageIndex >= pageCount - 1}
-              data-track-category='team-intelligence'
-              data-track-name='next-leadership-bullet-page'
-              data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
-              className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <PaginationControls
+        pagination={pagination}
+        setPage={nextPage => setPage(nextPage + 1)}
+        trackName='leadership-bullet'
+        className='px-5 sm:px-6'
+      />
     </div>
   );
 };
 
+/* ── Hero shell (title + pills + narrative + bullets) ── */
 const SnapshotShell = ({
   scope,
   title,
   eyebrow,
   reportDate,
-  completedAt,
   confidence,
   momentum,
   narrative,
-  bullets,
+  sectionRequest,
   children,
 }: SnapshotShellProps): ReactElement => {
   const scopeLabel =
     scope === 'org' ? 'Founder Brief' : scope === 'team' ? 'Manager Brief' : 'Member Brief';
   const displayNarrative = cleanText(narrative);
   return (
-    <div className='flex-1 w-full max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8 space-y-6'>
-      <section className='overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm'>
-        <div className='bg-muted/20 px-5 py-5 sm:px-6'>
+    <div className='flex-1 w-full max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8 space-y-7'>
+      <section className='overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm'>
+        <div className='bg-muted/20 px-5 py-6 sm:px-7'>
           <div className='flex flex-wrap items-center gap-2'>
             <Pill tone='accent'>{scopeLabel}</Pill>
             {reportDate ? <Pill tone='info'>{formatReportDate(reportDate)}</Pill> : null}
@@ -1036,22 +1109,17 @@ const SnapshotShell = ({
             <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
               {eyebrow}
             </p>
-            <h2 className='mt-2 text-2xl font-medium leading-tight tracking-normal text-foreground/90 sm:text-3xl'>
+            <h1 className='mt-2 text-3xl font-bold leading-[1.12] tracking-tight text-foreground sm:text-4xl'>
               {title}
-            </h2>
+            </h1>
             {displayNarrative ? (
-              <p className='mt-3 w-full text-sm leading-6 text-muted-foreground sm:text-[15px] sm:leading-7'>
+              <p className='mt-4 w-full text-[15px] leading-7 text-muted-foreground sm:text-base sm:leading-8'>
                 {displayNarrative}
-              </p>
-            ) : null}
-            {completedAt ? (
-              <p className='mt-4 text-xs text-muted-foreground'>
-                Generated {formatReportDate(completedAt.slice(0, 10))}
               </p>
             ) : null}
           </div>
         </div>
-        {bullets.length > 0 ? <BulletBrief bullets={bullets} /> : null}
+        <BulletBrief request={sectionRequest} />
       </section>
       {children}
     </div>
@@ -1062,10 +1130,12 @@ export const OrgLeadershipDashboard = ({
   snapshot,
   isLoading,
   isError,
+  sectionRequest,
 }: {
   snapshot: { summary: OrgLeadershipSummary; completedAt: string | null } | null;
   isLoading: boolean;
   isError: boolean;
+  sectionRequest: SectionRequest;
 }): ReactElement => {
   if (isLoading) return <LoadingState label='Loading founder brief...' />;
   if (isError) return <ErrorState label='Could not load the organization brief.' />;
@@ -1080,19 +1150,7 @@ export const OrgLeadershipDashboard = ({
 
   const { summary } = snapshot;
   const operational = summary.operationalSnapshot;
-  const founder = summary.founderSnapshot;
-  const nextLeap = founder.organizationNextLeap;
-  const leverage = flattenRecordItems(founder.leadershipLeverage, [
-    'budgetsAndApprovals',
-    'momentumCorrections',
-    'connectionsNeeded',
-    'problemShapingNeeds',
-    'tradeoffs',
-    'alignmentCorrections',
-    'peopleOrTeamMoves',
-  ]);
   const narrative = executiveNarrative(summary.executiveSummary);
-  const bullets = leadershipBullets(summary.managerSummaryBullets, narrative);
 
   return (
     <SnapshotShell
@@ -1100,11 +1158,10 @@ export const OrgLeadershipDashboard = ({
       title='Juspay Leadership Brief'
       eyebrow={`${summary.organization.teamCount} teams · ${summary.organization.memberCount} members represented`}
       reportDate={summary.reportDate}
-      completedAt={snapshot.completedAt}
       confidence={summary.overallConfidence}
       momentum={summary.executiveSummary.momentum}
       narrative={narrative}
-      bullets={bullets}
+      sectionRequest={sectionRequest}
     >
       <SignalStrip
         signals={[
@@ -1114,6 +1171,7 @@ export const OrgLeadershipDashboard = ({
             description: operational.momentumAndDirection.assessment,
             tone: momentumTone(operational.momentumAndDirection.momentum),
             icon: ActivityIcon,
+            targetId: 'org-portfolio-of-bets',
           },
           {
             label: 'Critical Work',
@@ -1121,6 +1179,7 @@ export const OrgLeadershipDashboard = ({
             description: 'Initiatives the organization cannot afford to let drift.',
             tone: operational.criticalAndMoving.length > 0 ? 'accent' : 'neutral',
             icon: FlameIcon,
+            targetId: 'org-founder-agenda',
           },
           {
             label: 'Open Blockers',
@@ -1128,6 +1187,7 @@ export const OrgLeadershipDashboard = ({
             description: 'Cross-team or leadership-level blockers surfaced by the model.',
             tone: operational.needsUnblocking.length > 0 ? 'warn' : 'good',
             icon: ShieldAlertIcon,
+            targetId: 'org-cannot-deadlock',
           },
           {
             label: 'Coverage',
@@ -1135,64 +1195,75 @@ export const OrgLeadershipDashboard = ({
             description: 'Completed team summaries included in this brief.',
             tone: summary.processingCoverage.failedTeamSummaries > 0 ? 'warn' : 'good',
             icon: UsersIcon,
+            targetId: 'org-leadership-leverage',
           },
         ]}
       />
 
-      <Section icon={TargetIcon} title='Founder Agenda' eyebrow='Immediate leverage' tone='accent'>
-        <ItemGrid
-          items={summary.recommendedActions}
+      <Section
+        id='org-founder-agenda'
+        icon={TargetIcon}
+        title='Founder Agenda'
+        eyebrow='Immediate leverage'
+        tone='accent'
+      >
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='founder-agenda'
           emptyTitle='No direct founder asks'
           emptyText='The snapshot did not surface immediate leadership actions.'
         />
       </Section>
 
       <Section
+        id='org-portfolio-of-bets'
         icon={SparklesIcon}
         title='Portfolio Of Bets'
         eyebrow='Where the company is moving'
         tone='info'
       >
-        <ItemGrid
-          items={founder.portfolioOfBets ?? []}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='portfolio-of-bets'
           emptyTitle='No portfolio bets found'
           emptyText='The snapshot did not identify explicit organization-level bets.'
         />
       </Section>
 
       <Section
+        id='org-cannot-deadlock'
         icon={AlertTriangleIcon}
         title='Cannot Deadlock'
         eyebrow='Critical intervention points'
         tone='danger'
       >
-        <ItemGrid
-          items={[
-            ...(founder.cannotDeadlock ?? []),
-            ...operational.needsUnblocking,
-            ...operational.upcomingAndAtRisk,
-          ]}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='cannot-deadlock'
           emptyTitle='No deadlock risks surfaced'
           emptyText='No critical blockers or upcoming risks were present in the current snapshot.'
         />
       </Section>
 
       <Section
+        id='org-leadership-leverage'
         icon={NetworkIcon}
         title='Leadership Leverage'
         eyebrow='Where one move can unlock many'
         tone='warn'
       >
-        <ItemGrid
-          items={leverage}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='leadership-leverage'
           emptyTitle='No leverage items'
           emptyText='The snapshot did not find leverage moves for this range.'
         />
       </Section>
 
       <Section icon={ZapIcon} title='Next Leap' eyebrow='Operating model shift' tone='good'>
-        <StringList
-          items={buildNextLeapItems(nextLeap)}
+        <PaginatedTextSection
+          request={sectionRequest}
+          section='next-leap'
           emptyTitle='No next leap drafted'
           emptyText='The snapshot did not produce a next-leap narrative.'
         />
@@ -1205,16 +1276,14 @@ export const TeamLeadershipDashboard = ({
   snapshot,
   isLoading,
   isError,
-  teamMembers,
-  isMembersLoading = false,
-  isMembersError = false,
+  sectionRequest,
+  teamId,
 }: {
   snapshot: { summary: TeamLeadershipSummary | null; completedAt?: string | null } | null;
   isLoading: boolean;
   isError: boolean;
-  teamMembers?: TeamMembersResponse | undefined;
-  isMembersLoading?: boolean;
-  isMembersError?: boolean;
+  sectionRequest: SectionRequest;
+  teamId: string;
 }): ReactElement => {
   if (isLoading) return <LoadingState label='Loading manager brief...' />;
   if (isError) return <ErrorState label='Could not load the team brief.' />;
@@ -1225,11 +1294,7 @@ export const TeamLeadershipDashboard = ({
           title='No team brief yet'
           text='No completed team leadership snapshot exists for this range.'
         />
-        <TeamMembersPanel
-          teamMembers={teamMembers}
-          isLoading={isMembersLoading}
-          isError={isMembersError}
-        />
+        <TeamMembersPanel teamId={teamId} />
       </div>
     );
   }
@@ -1237,18 +1302,7 @@ export const TeamLeadershipDashboard = ({
   const summary = snapshot.summary;
   const operational = summary.operationalSnapshot;
   const leadership = summary.leadershipSnapshot;
-  const nextLeap = leadership.nextLeap;
-  const leverage = flattenRecordItems(leadership.leadershipLeverage, [
-    'irreversibleDecisions',
-    'budgetOrApprovalNeeds',
-    'momentumCorrections',
-    'connectionsNeeded',
-    'problemShapingNeeds',
-    'tradeoffs',
-    'alignmentCorrections',
-  ]);
   const narrative = executiveNarrative(summary.executiveSummary);
-  const bullets = leadershipBullets(summary.managerSummaryBullets, narrative);
 
   return (
     <SnapshotShell
@@ -1256,11 +1310,10 @@ export const TeamLeadershipDashboard = ({
       title={`${summary.team.name} Manager Brief`}
       eyebrow={`${summary.processingCoverage.completedUserSummaries} completed member summaries`}
       reportDate={summary.reportDate}
-      completedAt={snapshot.completedAt ?? null}
       confidence={summary.overallConfidence}
       momentum={summary.executiveSummary.momentum}
       narrative={narrative}
-      bullets={bullets}
+      sectionRequest={sectionRequest}
     >
       <SignalStrip
         signals={[
@@ -1270,6 +1323,7 @@ export const TeamLeadershipDashboard = ({
             description: operational.momentumAndDirection.assessment,
             tone: momentumTone(operational.momentumAndDirection.momentum),
             icon: ActivityIcon,
+            targetId: 'team-goal',
           },
           {
             label: 'Leadership Mode',
@@ -1280,6 +1334,7 @@ export const TeamLeadershipDashboard = ({
               (leadership.leadershipTouch?.reasons ?? [])[0] ?? 'Recommended manager touch level.',
             tone: leadership.leadershipTouch?.recommendedMode === 'HIGH_TOUCH' ? 'warn' : 'info',
             icon: GaugeIcon,
+            targetId: 'team-capability-and-leverage',
           },
           {
             label: 'Critical Work',
@@ -1287,6 +1342,7 @@ export const TeamLeadershipDashboard = ({
             description: 'Work that deserves close managerial attention.',
             tone: operational.criticalAndMoving.length > 0 ? 'accent' : 'neutral',
             icon: FlameIcon,
+            targetId: 'team-actual-work',
           },
           {
             label: 'Blockers',
@@ -1294,73 +1350,80 @@ export const TeamLeadershipDashboard = ({
             description: 'Items that need a decision, person, or dependency cleared.',
             tone: operational.needsUnblocking.length > 0 ? 'warn' : 'good',
             icon: ShieldAlertIcon,
+            targetId: 'team-bottlenecks-and-load',
           },
         ]}
       />
 
-      <TeamMembersPanel
-        teamMembers={teamMembers}
-        isLoading={isMembersLoading}
-        isError={isMembersError}
-      />
+      <TeamMembersPanel teamId={teamId} />
 
       <Section icon={ListChecksIcon} title='Manager Actions' eyebrow='Do next' tone='accent'>
-        <ItemGrid
-          items={summary.recommendedActions}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='manager-actions'
           emptyTitle='No direct manager actions'
           emptyText='The snapshot did not surface manager-level actions.'
         />
       </Section>
 
+      <Section id='team-goal' icon={TargetIcon} title='Goal' eyebrow='Progress' tone='accent'>
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='goal'
+          emptyTitle='No goal alignment found'
+          emptyText='No active goal matched the team activity evidence for this summary.'
+        />
+      </Section>
+
       <Section
+        id='team-actual-work'
         icon={CompassIcon}
         title='What The Team Is Actually Doing'
         eyebrow='Visible work'
         tone='info'
       >
-        <ItemGrid
-          items={[...operational.criticalAndMoving, ...operational.whoIsDoingWhat]}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='actual-work'
           emptyTitle='No workstreams found'
           emptyText='The selected range did not produce visible workstream signals.'
         />
       </Section>
 
       <Section
+        id='team-bottlenecks-and-load'
         icon={BlocksIcon}
         title='Bottlenecks And Load'
         eyebrow='Where management can help'
         tone='danger'
       >
-        <ItemGrid
-          items={[
-            ...operational.needsUnblocking,
-            ...(operational.peopleLoadFocusAndGaps.ownershipGaps ?? []),
-            ...(operational.peopleLoadFocusAndGaps.supportGaps ?? []),
-            ...(leadership.bottlenecks?.peopleOrOwnership ?? []),
-            ...(leadership.bottlenecks?.process ?? []),
-            ...(leadership.bottlenecks?.platform ?? []),
-          ]}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='bottlenecks-and-load'
           emptyTitle='No bottlenecks surfaced'
           emptyText='The snapshot did not detect active bottlenecks for this team.'
         />
       </Section>
 
-      <Section icon={BrainIcon} title='Capability And Leverage' eyebrow='Team shape' tone='good'>
-        <ItemGrid
-          items={[
-            ...(leadership.capabilityMix?.observedStrengths ?? []),
-            ...(leadership.capabilityMix?.developingCapabilities ?? []),
-            ...(leadership.capabilityMix?.missingCapabilities ?? []),
-            ...leverage,
-          ]}
+      <Section
+        id='team-capability-and-leverage'
+        icon={BrainIcon}
+        title='Capability And Leverage'
+        eyebrow='Team shape'
+        tone='good'
+      >
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='capability-and-leverage'
           emptyTitle='No capability signals'
           emptyText='The snapshot did not produce capability or leverage signals.'
         />
       </Section>
 
       <Section icon={ZapIcon} title='Next Leap' eyebrow='Manager framing' tone='warn'>
-        <StringList
-          items={buildNextLeapItems(nextLeap)}
+        <PaginatedTextSection
+          request={sectionRequest}
+          section='next-leap'
           emptyTitle='No next leap drafted'
           emptyText='The snapshot did not produce a next-leap narrative for this team.'
         />
@@ -1374,11 +1437,13 @@ export const MemberLeadershipDashboard = ({
   member,
   isLoading,
   isError,
+  sectionRequest,
 }: {
   snapshot: { summary: UserLeadershipSummary; completedAt: string | null } | null;
   member?: TeamMember | undefined;
   isLoading: boolean;
   isError: boolean;
+  sectionRequest: SectionRequest;
 }): ReactElement => {
   if (isLoading) return <LoadingState label='Loading member brief...' />;
   if (isError) return <ErrorState label='Could not load the member brief.' />;
@@ -1403,16 +1468,10 @@ export const MemberLeadershipDashboard = ({
       title={`${displayName} Daily Brief`}
       eyebrow={summary.user.teamName ?? member?.team?.name ?? 'Individual contributor signal'}
       reportDate={summary.reportDate}
-      completedAt={snapshot.completedAt}
       confidence={summary.overallConfidence}
       momentum={summary.momentumAndDirection.momentum}
       narrative={summary.executiveSummary}
-      bullets={summary.managerSummaryBullets.map((text, index) => ({
-        id: `${summary.userIngestionId}-bullet-${index}`,
-        title: `Manager note ${index + 1}`,
-        text,
-        category: 'achievement',
-      }))}
+      sectionRequest={sectionRequest}
     >
       {teamPath ? (
         <div className='flex justify-end'>
@@ -1468,16 +1527,18 @@ export const MemberLeadershipDashboard = ({
         eyebrow='Person-specific asks'
         tone='accent'
       >
-        <ItemGrid
-          items={summary.managerAttention}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='manager-attention'
           emptyTitle='No manager attention needed'
           emptyText='No person-specific manager actions were surfaced in this range.'
         />
       </Section>
 
       <Section icon={CompassIcon} title='Work And Movement' eyebrow='Current state' tone='info'>
-        <ItemGrid
-          items={[...summary.criticalAndMoving, ...summary.whoIsDoingWhat]}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='work-and-movement'
           emptyTitle='No visible workstreams'
           emptyText='The selected range did not produce workstream signals for this person.'
         />
@@ -1489,28 +1550,18 @@ export const MemberLeadershipDashboard = ({
         eyebrow='Needs clearing'
         tone='danger'
       >
-        <ItemGrid
-          items={[
-            ...summary.needsUnblocking,
-            ...summary.upcomingAndAtRisk,
-            ...summary.peopleLoadFocusAndGaps.gaps,
-          ]}
+        <PaginatedItemSection
+          request={sectionRequest}
+          section='blockers-and-risks'
           emptyTitle='No blockers or risks'
           emptyText='No blockers, gaps, or at-risk commitments were detected.'
         />
       </Section>
 
       <Section icon={LightbulbIcon} title='Decisions And Signals' eyebrow='Direction' tone='warn'>
-        <StringList
-          items={[
-            ...(summary.decisionsAndAlignment.decisions ?? []).map(item =>
-              firstNonEmpty(item.decision, item.title, item.description),
-            ),
-            ...(summary.decisionsAndAlignment.openQuestions ?? []),
-            ...summary.teamSignals.directionalSignals.map(item =>
-              firstNonEmpty(item.signal, item.title, item.description),
-            ),
-          ]}
+        <PaginatedTextSection
+          request={sectionRequest}
+          section='decisions-and-signals'
           emptyTitle='No decisions or directional signals'
           emptyText='The snapshot did not surface decisions, open questions, or team direction signals.'
         />

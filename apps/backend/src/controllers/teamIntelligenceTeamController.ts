@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { teamIntelligenceTeamDashboardService } from '@/services/teamIntelligenceTeamDashboardService';
+import {
+  leadershipSectionNames,
+  paginateLeadershipSection,
+} from '@/utils/teamIntelligenceLeadershipSections';
 
 export class TeamIntelligenceTeamController {
   private parseTeamId(req: Request): { teamId?: string; error?: string } {
@@ -13,6 +17,70 @@ export class TeamIntelligenceTeamController {
     return { error: '"teamId" query parameter is required' };
   }
 
+  /** Returns one independently paginated section from the newest team snapshot. */
+  getTeamLeadershipSection = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
+        from?: string;
+        to?: string;
+        page?: string;
+        limit?: string;
+      };
+      const teamQuery = this.parseTeamId(req);
+      const section = req.params.section;
+      if (!from || !to || !teamQuery.teamId) {
+        res.status(400).json({ error: '"from", "to", and "teamId" are required' });
+        return;
+      }
+      if (!section || !leadershipSectionNames('team').includes(section)) {
+        res.status(400).json({
+          error: 'Unknown team leadership section',
+          sections: leadershipSectionNames('team'),
+        });
+        return;
+      }
+
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime()) || fromDate > toDate) {
+        res.status(400).json({ error: 'A valid date range is required' });
+        return;
+      }
+
+      const page = Math.max(1, Number.parseInt(pageRaw ?? '1', 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(limitRaw ?? '12', 10) || 12));
+      const result = await teamIntelligenceTeamDashboardService.getTeamLeadershipSnapshots({
+        from: fromDate,
+        to: toDate,
+        teamId: teamQuery.teamId,
+      });
+      const snapshot = result.snapshots[0];
+      if (!snapshot?.summary) {
+        res.status(404).json({ error: 'No team leadership snapshot found' });
+        return;
+      }
+
+      res.status(200).json({
+        snapshotId: snapshot.id,
+        ...paginateLeadershipSection({
+          scope: 'team',
+          section,
+          summary: snapshot.summary,
+          page,
+          limit,
+        }),
+      });
+    } catch (err) {
+      logger.error('[TeamIntelligenceTeam] getTeamLeadershipSection error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   /**
    * GET /api/team-intelligence-dashboard/team/bullets?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=20
    *
@@ -22,7 +90,12 @@ export class TeamIntelligenceTeamController {
    */
   getTeamBullets = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
         from?: string;
         to?: string;
         page?: string;
@@ -119,7 +192,11 @@ export class TeamIntelligenceTeamController {
    */
   getPrByDate = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, prId: prIdRaw } = req.query as {
+      const {
+        from,
+        to,
+        prId: prIdRaw,
+      } = req.query as {
         from?: string;
         to?: string;
         prId?: string;
@@ -163,7 +240,7 @@ export class TeamIntelligenceTeamController {
   };
 
   /**
-  * GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
+   * GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
    *
    * Response:
    *   from, to, teamId, teamName, totalPrCount, totalCommitCount, aiUsages
@@ -218,7 +295,12 @@ export class TeamIntelligenceTeamController {
    */
   getTeamChannelRecaps = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
         from?: string;
         to?: string;
         page?: string;
@@ -273,7 +355,12 @@ export class TeamIntelligenceTeamController {
    */
   getTeamChannelTickets = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
         from?: string;
         to?: string;
         page?: string;

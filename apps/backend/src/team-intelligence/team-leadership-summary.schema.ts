@@ -112,6 +112,37 @@ const leadershipItemSchema = z
   })
   .strict();
 
+const teamGoalAlignmentSchema = z
+  .object({
+    goalId: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().nullable(),
+    track: z.enum(['2X', '5X', '10X', 'UNKNOWN']),
+    status: z.string().nullable(),
+    visibility: z.string().nullable(),
+    matchStrength: z.enum(['STRONG', 'PARTIAL', 'WEAK']),
+    isTeamWorkingTowardsGoal: z.boolean(),
+    summary: z.string().min(1),
+    matchedSignals: z.array(z.string().min(1)),
+    evidenceSourceTypes: z.array(
+      z.enum([
+        'PULL_REQUEST',
+        'COMMIT',
+        'AI_USAGE',
+        'TICKET',
+        'TICKET_ACTIVITY',
+        'CONVERSATION',
+        'MESSAGE',
+        'CALL',
+        'CANVAS',
+        'CANVAS_VERSION',
+        'UNKNOWN',
+      ])
+    ),
+    memberSignalRefs: z.array(memberSignalRefSchema).min(1),
+  })
+  .strict();
+
 const continuityWorkstreamSchema = z
   .object({
     id: z.string().min(1),
@@ -407,6 +438,7 @@ export const TeamIntelligenceTeamLeadershipSummarySchema = z
           .strict(),
       })
       .strict(),
+    team10xGoal: z.array(teamGoalAlignmentSchema),
     recommendedActions: z.array(
       z
         .object({
@@ -470,6 +502,7 @@ export type TeamIntelligenceOrgAggregationPayload = {
   bottlenecks: TeamIntelligenceTeamLeadershipSummary['leadershipSnapshot']['bottlenecks'];
   leadershipLeverage: TeamIntelligenceTeamLeadershipSummary['leadershipSnapshot']['leadershipLeverage'];
   nextLeap: TeamIntelligenceTeamLeadershipSummary['leadershipSnapshot']['nextLeap'];
+  team10xGoal: TeamIntelligenceTeamLeadershipSummary['team10xGoal'];
   leadershipAsks: TeamIntelligenceTeamLeadershipSummary['recommendedActions'];
   dataGaps: TeamIntelligenceTeamLeadershipSummary['dataGaps'];
   confidence: TeamIntelligenceTeamLeadershipSummary['overallConfidence'];

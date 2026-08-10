@@ -1,8 +1,99 @@
 import { Request, Response } from 'express';
 import { teamIntelligenceOrgRepository } from '@/database/repositories/teamIntelligenceOrgRepository';
 import { logger } from '@/utils/logger';
+import {
+  leadershipSectionNames,
+  paginateLeadershipSection,
+} from '@/utils/teamIntelligenceLeadershipSections';
+import { teamIntelligenceGoalGroupingService } from '@/services/teamIntelligenceGoalGroupingService';
 
 export class TeamIntelligenceOrgController {
+  /** Groups teams by their highest active goal track and the previous month's evidence. */
+  getTeamGoalGroups = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
+      const result = await teamIntelligenceGoalGroupingService.getTeamGoalGroups(workspaceId);
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceOrg] getTeamGoalGroups error', { err });
+      res.status(500).json({ error: 'Failed to group teams by goals' });
+    }
+  };
+
+  /** Returns one independently paginated section from the newest snapshot in the range. */
+  getOrgLeadershipSection = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(403).json({ error: 'Workspace context is required' });
+        return;
+      }
+
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
+        from?: string;
+        to?: string;
+        page?: string;
+        limit?: string;
+      };
+      const section = req.params.section;
+      if (!from || !to) {
+        res.status(400).json({ error: 'Both "from" and "to" query parameters are required' });
+        return;
+      }
+      if (!section || !leadershipSectionNames('org').includes(section)) {
+        res.status(400).json({
+          error: 'Unknown organization leadership section',
+          sections: leadershipSectionNames('org'),
+        });
+        return;
+      }
+
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime()) || fromDate > toDate) {
+        res.status(400).json({ error: 'A valid date range is required' });
+        return;
+      }
+
+      const page = Math.max(1, Number.parseInt(pageRaw ?? '1', 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(limitRaw ?? '12', 10) || 12));
+      const result = await teamIntelligenceOrgRepository.getOrgLeadershipSnapshotsByDate({
+        workspaceId,
+        from: fromDate,
+        to: toDate,
+      });
+      const snapshot = result.snapshots[0];
+      if (!snapshot) {
+        res.status(404).json({ error: 'No organization leadership snapshot found' });
+        return;
+      }
+
+      res.status(200).json({
+        snapshotId: snapshot.id,
+        ...paginateLeadershipSection({
+          scope: 'org',
+          section,
+          summary: snapshot.summary,
+          page,
+          limit,
+        }),
+      });
+    } catch (err) {
+      logger.error('[TeamIntelligenceOrg] getOrgLeadershipSection error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   /**
    * GET /api/team-intelligence-dashboard/org/leadership-snapshots
    *
@@ -35,12 +126,11 @@ export class TeamIntelligenceOrgController {
         return;
       }
 
-      const result =
-        await teamIntelligenceOrgRepository.getOrgLeadershipSnapshotsByDate({
-          workspaceId,
-          from: fromDate,
-          to: toDate,
-        });
+      const result = await teamIntelligenceOrgRepository.getOrgLeadershipSnapshotsByDate({
+        workspaceId,
+        from: fromDate,
+        to: toDate,
+      });
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceOrg] getOrgLeadershipSnapshots error', { err });
@@ -55,10 +145,10 @@ export class TeamIntelligenceOrgController {
    *   from  - ISO date string (required)  e.g. 2026-05-01
    *   to    - ISO date string (required)  e.g. 2026-05-20
    *
-  * Response:
-  *   orgSummary - flattened list of org summary text lines (string[])
-  *   prTotal    - list of PR summaries/titles in the selected range (string[])
-  *   aiUsages   - summed token/spend fields across all users in that range
+   * Response:
+   *   orgSummary - flattened list of org summary text lines (string[])
+   *   prTotal    - list of PR summaries/titles in the selected range (string[])
+   *   aiUsages   - summed token/spend fields across all users in that range
    */
   getOrgSummary = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -104,12 +194,17 @@ export class TeamIntelligenceOrgController {
    *   limit - page size (optional, default 20, max 200)
    *
    * Response:
-  *   from, to, page, limit, total, totalPages,
-  *   bullets[] where each bullet includes bulletTitle, bulletText, bulletCat and provenance fields
+   *   from, to, page, limit, total, totalPages,
+   *   bullets[] where each bullet includes bulletTitle, bulletText, bulletCat and provenance fields
    */
   getOrgBullets = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
         from?: string;
         to?: string;
         page?: string;
@@ -204,7 +299,12 @@ export class TeamIntelligenceOrgController {
    */
   getOrgChannelRecaps = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+      const {
+        from,
+        to,
+        page: pageRaw,
+        limit: limitRaw,
+      } = req.query as {
         from?: string;
         to?: string;
         page?: string;

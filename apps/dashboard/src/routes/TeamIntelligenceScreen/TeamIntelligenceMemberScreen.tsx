@@ -8,7 +8,11 @@ const TeamIntelligenceMemberScreen = (): ReactElement => {
   const { memberEmail } = useParams<{ memberEmail: string }>();
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
 
-  const { data: memberData, isLoading: isLoadingMemberData, isError: isMemberError } = useMemberDetails(memberEmail ?? '');
+  const {
+    data: memberData,
+    isLoading: isLoadingMemberData,
+    isError: isMemberError,
+  } = useMemberDetails(memberEmail ?? '');
   const {
     data: snapshotsData,
     isLoading: isLoadingSnapshots,
@@ -30,6 +34,7 @@ const TeamIntelligenceMemberScreen = (): ReactElement => {
       member={memberData}
       isLoading={isLoadingMemberData || isLoadingSnapshots}
       isError={isMemberError || isSnapshotError}
+      sectionRequest={{ scope: 'user', userEmail: memberEmail, ...dateRange }}
     />
   );
 };

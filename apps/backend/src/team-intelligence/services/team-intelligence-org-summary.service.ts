@@ -103,7 +103,7 @@ async function llmGenerate(
       { scope: 'org', purpose: options.purpose, promptChars: prompt.length },
       async () => {
     const response = await llmClient.generateStream({
-      model: appConfig.workflow.defaultModelName,
+      model: appConfig.teamIntelligence.model,
       messages: [createUserMessage(prompt)],
     });
     const finalMessagePromise = response.finalMessage.catch((error) => {
@@ -462,6 +462,9 @@ const ORG_BULLET_CATEGORIES = [
   'helped',
   'milestone',
 ] as const;
+/** Maximum founder-brief bullets kept after generation. Prevents a per-team
+ * firehose — only the most important org-wide takeaways should survive. */
+const MAX_ORG_SUMMARY_BULLETS = 8;
 function cleanString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -488,6 +491,22 @@ function enumValue<T extends readonly string[]>(
   fallback: T[number]
 ): T[number] {
   const normalized = cleanString(value).toUpperCase();
+  return allowed.includes(normalized) ? normalized : fallback;
+}
+
+/**
+ * Case-insensitive category lookup that preserves the canonical (lowercase)
+ * form stored in the schema. Unlike `enumValue` (which uppercases the input
+ * and is intended for UPPER_SNAKE enums), bullet categories are lowercase, so
+ * a plain `enumValue` call never matches and silently falls back — making
+ * every bullet read "achievement". This normalizes both sides to lowercase.
+ */
+function bulletCategoryValue<T extends readonly string[]>(
+  value: unknown,
+  allowed: T,
+  fallback: T[number]
+): T[number] {
+  const normalized = cleanString(value).toLowerCase();
   return allowed.includes(normalized) ? normalized : fallback;
 }
 
@@ -2043,7 +2062,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       '- executiveSummary must be concise, qualitative, and founder-ready. It must not be empty/default when priorSections contains critical work, blockers, risks, or actions.',
       '- Every executiveSummary list item and every managerSummaryBullets.text sentence must name the relevant team(s), and must name the relevant individual(s) when currentTeamSignals includes member/owner names.',
       '- Write team/person context inside the sentence itself, not only in contributorTeamIds or teamSignalRefs.',
-      '- managerSummaryBullets must contain concise, qualitative, evidence-backed founder/leadership bullets for every important supported point that says which team achieved, is blocked, is at risk, or needs leadership action. Do not add routine filler.',
+      '- managerSummaryBullets must contain ONLY the 7 to 8 most important, evidence-backed founder/leadership takeaways across the entire organization — the things a founder absolutely must see today. Select only critical blockers, major risks, shipped milestones, and high-leverage actions. Do NOT emit one bullet per team or per routine update; merge related points and drop low-signal filler entirely. Cap at 8 bullets total.',
     ],
     outputShape: {
       overallConfidence: 'HIGH|MEDIUM|LOW',
@@ -2065,7 +2084,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
           contributorTeamIds: ['exact team id'],
           teamSignalRefs: refShape,
         },
-      ],
+      ], // max 8 bullets — only the most important founder-level takeaways
     },
     priorSections: compactForPriorSections({
       whoIsDoingWhat: rankedWhoIsDoingWhat,
@@ -2169,7 +2188,7 @@ async function generateOrgSummarySectionsFromSimpleFacts(
         id: `bullet_${index + 1}`,
         title: cleanString(fact.title, text.split(/\s+/).slice(0, 6).join(' ')),
         text,
-        category: enumValue(fact.category, ORG_BULLET_CATEGORIES, 'achievement'),
+        category: bulletCategoryValue(fact.category, ORG_BULLET_CATEGORIES, 'achievement'),
         contributorTeamIds,
         teamSignalRefs,
       };
@@ -2178,6 +2197,9 @@ async function generateOrgSummarySectionsFromSimpleFacts(
       (item): item is TeamIntelligenceOrgLeadershipSummary['managerSummaryBullets'][number] =>
         item !== null
     );
+  // Hard cap: a founder brief must surface only the most important takeaways,
+  // never one-per-team routine updates. Keep at most MAX_ORG_SUMMARY_BULLETS.
+  managerSummaryBullets = managerSummaryBullets.slice(0, MAX_ORG_SUMMARY_BULLETS);
 
   const continuityState: TeamIntelligenceOrgContinuityState = {
     window: { from: input.reportDate, to: input.reportDate, daysRepresented: 1 },

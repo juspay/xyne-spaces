@@ -1,0 +1,180 @@
+import { db } from '@/database/client';
+import { MettleTeamGoal, mettleTeamGoalsService } from '@/services/mettleTeamGoalsService';
+import { MettleTeam, mettleTeamSyncService } from '@/services/mettleTeamSyncService';
+import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import { logger } from '@/utils/logger';
+
+export type TeamGoalGroupKey = '10X' | '5X' | '2X' | 'READY_TO_ACCELERATE' | 'NO_GOAL_DATA';
+
+export interface TeamGoalGroupTeam extends MettleTeam {
+  highestTrack: '10X' | '5X' | '2X' | null;
+  activeGoalCount: number;
+  matchedGoalCount: number;
+}
+
+export interface TeamGoalGroupsResponse {
+  from: string;
+  to: string;
+  totalTeams: number;
+  groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
+}
+
+export interface StoredGoalAlignment {
+  goalId?: unknown;
+  track?: unknown;
+  isTeamWorkingTowardsGoal?: unknown;
+}
+
+const GROUP_ORDER: Array<'10X' | '5X' | '2X'> = ['10X', '5X', '2X'];
+
+const normalizeTrack = (track: unknown): '10X' | '5X' | '2X' | null => {
+  if (typeof track !== 'string') return null;
+  const normalized = track.trim().toUpperCase();
+  return normalized === '10X' || normalized === '5X' || normalized === '2X' ? normalized : null;
+};
+
+const highestTrack = (goals: MettleTeamGoal[]): '10X' | '5X' | '2X' | null => {
+  const tracks = new Set(goals.map((goal) => normalizeTrack(goal.track)).filter(Boolean));
+  return GROUP_ORDER.find((track) => tracks.has(track)) ?? null;
+};
+
+export const previousMonthRange = (now: Date): { from: Date; to: Date } => {
+  const to = new Date(now);
+  const from = new Date(now);
+  from.setUTCMonth(from.getUTCMonth() - 1);
+  from.setUTCHours(0, 0, 0, 0);
+  return { from, to };
+};
+
+export const classifyTeamGoalGroup = (
+  activeGoals: MettleTeamGoal[],
+  alignments: StoredGoalAlignment[]
+): {
+  group: TeamGoalGroupKey;
+  highestTrack: '10X' | '5X' | '2X' | null;
+  matchedGoalCount: number;
+} => {
+  const track = highestTrack(activeGoals);
+  if (activeGoals.length === 0 || !track) {
+    return { group: 'NO_GOAL_DATA', highestTrack: track, matchedGoalCount: 0 };
+  }
+
+  const activeGoalIds = new Set(activeGoals.map((goal) => goal.id));
+  const matchedGoalIds = new Set(
+    alignments
+      .filter(
+        (alignment) =>
+          alignment.isTeamWorkingTowardsGoal === true &&
+          typeof alignment.goalId === 'string' &&
+          activeGoalIds.has(alignment.goalId)
+      )
+      .map((alignment) => alignment.goalId as string)
+  );
+
+  return {
+    group: matchedGoalIds.size > 0 ? track : 'READY_TO_ACCELERATE',
+    highestTrack: track,
+    matchedGoalCount: matchedGoalIds.size,
+  };
+};
+
+const mapWithConcurrency = async <T, U>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>
+): Promise<U[]> => {
+  const results = new Array<U>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+};
+
+class TeamIntelligenceGoalGroupingService {
+  async getTeamGoalGroups(workspaceId: string, now = new Date()): Promise<TeamGoalGroupsResponse> {
+    const { from, to } = previousMonthRange(now);
+    const { teams } = await mettleTeamSyncService.fetchTeamsFromMettle();
+    const sortedTeams = [...(teams ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    const teamIds = sortedTeams.map((team) => team.id);
+
+    const [goalsByTeamEntries, summaryRows] = await Promise.all([
+      mapWithConcurrency(sortedTeams, 5, async (team) => {
+        const goals = await mettleTeamGoalsService.fetchActiveTeamGoals(team.id, {
+          throwOnError: true,
+        });
+        return [team.id, goals] as const;
+      }),
+      teamIds.length === 0
+        ? Promise.resolve([])
+        : db.teamIntelligenceTeamSummaryV2.findMany({
+            where: {
+              workspaceId,
+              teamId: { in: teamIds },
+              reportDate: { gte: from, lte: to },
+              status: 'COMPLETED',
+              contentUrl: { not: null },
+            },
+            select: { teamId: true, contentUrl: true },
+          }),
+    ]);
+    const goalsByTeam = new Map(goalsByTeamEntries);
+
+    const alignmentEntries = await mapWithConcurrency(summaryRows, 8, async (row) => {
+      try {
+        const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          teamSummary?: { team10xGoal?: StoredGoalAlignment[] };
+        }>(null, row.contentUrl);
+        return [row.teamId, content?.teamSummary?.team10xGoal ?? []] as const;
+      } catch (error) {
+        logger.warn('[TeamIntelligenceGoalGrouping] Could not hydrate team summary', {
+          teamId: row.teamId,
+          error,
+        });
+        return [row.teamId, []] as const;
+      }
+    });
+
+    const alignmentsByTeam = new Map<string, StoredGoalAlignment[]>();
+    for (const [teamId, alignments] of alignmentEntries) {
+      if (!teamId) continue;
+      alignmentsByTeam.set(teamId, [...(alignmentsByTeam.get(teamId) ?? []), ...alignments]);
+    }
+
+    const groups: TeamGoalGroupsResponse['groups'] = {
+      '10X': [],
+      '5X': [],
+      '2X': [],
+      READY_TO_ACCELERATE: [],
+      NO_GOAL_DATA: [],
+    };
+
+    for (const team of sortedTeams) {
+      const activeGoals = goalsByTeam.get(team.id) ?? [];
+      const classification = classifyTeamGoalGroup(
+        activeGoals,
+        alignmentsByTeam.get(team.id) ?? []
+      );
+      const classifiedTeam: TeamGoalGroupTeam = {
+        ...team,
+        highestTrack: classification.highestTrack,
+        activeGoalCount: activeGoals.length,
+        matchedGoalCount: classification.matchedGoalCount,
+      };
+      groups[classification.group].push(classifiedTeam);
+    }
+
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      totalTeams: sortedTeams.length,
+      groups,
+    };
+  }
+}
+
+export const teamIntelligenceGoalGroupingService = new TeamIntelligenceGoalGroupingService();

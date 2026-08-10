@@ -16,6 +16,7 @@ const TeamIntelligenceOrgScreen = (): ReactElement => {
       snapshot={snapshot}
       isLoading={isLoading}
       isError={isError}
+      sectionRequest={{ scope: 'org', ...dateRange }}
     />
   );
 };

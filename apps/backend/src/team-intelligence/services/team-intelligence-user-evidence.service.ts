@@ -188,6 +188,9 @@ class TeamIntelligenceUserEvidenceService {
         where: {
           workspaceId,
           lastActivityAt: { gte: start, lt: end },
+          // Confidentiality: never send personal (DM / group-DM) conversations
+          // to the LLM. Only channel conversations are eligible as evidence.
+          channel: { scopeType: { notIn: ['DM', 'GROUP_DM'] } },
           OR: [
             { createdBy: userId },
             { participants: { some: { userId } } },
@@ -249,6 +252,12 @@ class TeamIntelligenceUserEvidenceService {
       db.call.findMany({
         where: {
           workspaceId,
+          // Confidentiality: Team Intelligence may use calls started from a
+          // regular channel only. Exclude personal/thread calls, DM and
+          // group-DM calls, calendar calls, and calls without a channel.
+          callOrigin: 'CHANNEL',
+          channelId: { not: null },
+          channel: { is: { scopeType: 'DEFAULT' } },
           OR: [
             { createdByUserId: userId },
             { organizerId: userId },

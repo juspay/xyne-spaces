@@ -205,7 +205,7 @@ async function llmGenerate(
       { scope: 'user', purpose: options.purpose, promptChars: prompt.length },
       async () => {
     const response = await llmClient.generateStream({
-      model: appConfig.workflow.defaultModelName,
+      model: appConfig.teamIntelligence.model,
       messages: [createUserMessage(prompt)],
     });
     const finalMessagePromise = response.finalMessage.catch((error) => {
@@ -1607,6 +1607,10 @@ function userWorkRefsFromFact(fact: Record<string, unknown>, workItems: UserWork
   );
 }
 
+/** Maximum member-brief bullets kept after generation. Prevents a per-activity
+ * firehose — only the most important person-specific takeaways should survive. */
+const MAX_USER_SUMMARY_BULLETS = 7;
+
 function compactBullets(value: unknown, fallback: string): string[] {
   const record = asRecord(value);
   const rawItems = record.managerSummaryBullets ?? record.bullets ?? record.items;
@@ -1620,7 +1624,8 @@ function compactBullets(value: unknown, fallback: string): string[] {
       : cleanStringArray(rawItems)
   )
     .map((bullet) => bullet.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, MAX_USER_SUMMARY_BULLETS);
   return bullets.length > 0 ? bullets : [fallback];
 }
 
@@ -2235,12 +2240,12 @@ async function generateUserSummarySections(input: {
       '- Base overallConfidence on evidence breadth, recency, specificity, and consistency across the generated sections.',
       '- Synthesize the generated sections and the full input without adding unsupported facts.',
       '- executiveSummary must be one concise, concrete, neutral, manager-ready string.',
-      '- managerSummaryBullets must contain concise, non-overlapping, manager-ready sentences for every important supported point. Do not add routine filler.',
+      '- managerSummaryBullets must contain ONLY the 5 to 7 most important, non-overlapping, manager-ready takeaways for this person — the things their manager absolutely must see today. Drop low-signal routine updates and merge related points. Cap at 7 bullets total.',
     ],
     outputShape: {
       overallConfidence: 'HIGH|MEDIUM|LOW',
       executiveSummary: 'string',
-      managerSummaryBullets: ['string'],
+      managerSummaryBullets: ['string'], // max 7 — only the most important person-specific takeaways
     },
     priorSections: compactForPriorSections({
       whoIsDoingWhat,
@@ -2424,7 +2429,7 @@ class TeamIntelligenceSummaryService {
     const summaryMetadata: Prisma.InputJsonValue = {
       generator: 'team-intelligence-user-evidence-llm-v1',
       generatedAt: new Date().toISOString(),
-      model: appConfig.workflow.defaultModelName,
+      model: appConfig.teamIntelligence.model,
       sourceCounts: {
         pullRequests: codeEvidence.pullRequests.length,
         soloCommits: codeEvidence.soloCommits.length,
