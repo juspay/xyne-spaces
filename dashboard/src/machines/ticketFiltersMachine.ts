@@ -149,6 +149,9 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const hasAiDraft = params.get('hasAiDraft');
   if (hasAiDraft === '1') filters.hasAiDraft = true;
 
+  const conversationLabelId = params.get('conversationLabelId');
+  if (conversationLabelId) filters.conversationLabelId = conversationLabelId;
+
   const dueDateStart = params.get('dueDateStart');
   if (dueDateStart) filters.dueDateStart = Number(dueDateStart);
 
@@ -223,6 +226,7 @@ const FILTER_PARAM_KEYS = [
   'aiCategory',
   'generatedTags',
   'hasAiDraft',
+  'conversationLabelId',
   'dueDateStart',
   'dueDateEnd',
   'createdDateStart',
@@ -268,6 +272,10 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
 
   if (filters.hasAiDraft) {
     params.set('hasAiDraft', '1');
+  }
+
+  if (filters.conversationLabelId) {
+    params.set('conversationLabelId', filters.conversationLabelId);
   }
 
   if (filters.dueDateStart !== undefined) {
