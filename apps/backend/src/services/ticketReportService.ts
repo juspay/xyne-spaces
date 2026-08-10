@@ -34,8 +34,8 @@ function formatFileStamp(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-const MAX_EXPORT_ROWS = 1_000;
-const MAX_ACTIVITY_ROWS = 100_000;
+const MAX_EXPORT_ROWS = 1000;
+const MAX_ACTIVITY_ROWS = 5000;
 const TICKET_REPORT_RESOURCE_NAME = 'TICKET-REPORTS';
 const ESTIMATED_CORE_COLUMNS = 19;
 const ESTIMATED_BYTES_PER_CELL = 32;
