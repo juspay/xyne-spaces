@@ -316,7 +316,6 @@ const envSchema = Joi.object({
   THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
   THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
   THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
-  DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
@@ -361,6 +360,7 @@ const envSchema = Joi.object({
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
+  GMAIL_WEBHOOK_MAX_BATCH: Joi.number().integer().min(1).default(50),
   EMAIL_MERGE_MODE_DEFAULT: Joi.string().valid('DISABLED', 'ENABLED').default('ENABLED'),
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
@@ -836,12 +836,6 @@ export const config = {
     maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
     transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
-  desk: {
-    betaChannels: (envVars.DESK_BETA_CHANNELS as string)
-      .split(',')
-      .map((s: string) => s.trim())
-      .filter(Boolean),
-  },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
     eulerBotEmail: envVars.JIRA_EULER_BOT_EMAIL as string,
@@ -894,6 +888,7 @@ export const config = {
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
+    gmailWebhookMaxBatch: envVars.GMAIL_WEBHOOK_MAX_BATCH as number,
   },
   emailMergeModeDefault: envVars.EMAIL_MERGE_MODE_DEFAULT as 'DISABLED' | 'ENABLED',
   docling: {
