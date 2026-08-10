@@ -122,6 +122,7 @@ export interface Agent {
   readonly scope: string;
   readonly ownerUserId: string | null;
   readonly enabled: boolean;
+  readonly isDefault?: boolean;
   readonly color: string;
   readonly modelId?: string;
   readonly config: Record<string, unknown>;

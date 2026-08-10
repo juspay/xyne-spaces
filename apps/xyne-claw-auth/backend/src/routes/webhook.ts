@@ -24,6 +24,7 @@ import {
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -1506,9 +1507,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? await userAgentConfigRepository.findByUserAndAgent(targetUserId, agent.orgId, agent.slug).catch(() => null)
       : null;
     const rawPersonalProvider = userAgentConfig?.provider;
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider)
+      ? undefined
+      : selectedPersonalProvider;
 
     // Agent-level fallback: shared keys the agent's owner/admin configured.
     // Anurag's framing: "If someone configures codex at xyne doctor level then
@@ -2168,21 +2172,65 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       body: JSON.stringify(dispatchPayload),
     });
 
-    let runRes: Awaited<ReturnType<typeof fetchRun>>;
-    try {
-      runRes = await fetchRun();
-    } catch (err) {
-      // Dispatch never happened — free the global twin slot, and drain/free the
-      // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
-      // that never started.
-      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-      if (twinConvSlotToken !== null && payload.conversationId) {
-        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-      }
-      throw err;
-    }
+    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
+    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const localTarget = localHarnessEligible
+      ? await resolveLocalHarnessTarget({
+          userId: targetUserId,
+          providerOrder: Array.isArray(rawAgentOrder)
+            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
+            : [],
+          personalProvider: selectedPersonalProvider,
+        }).catch((err: unknown) => {
+          log.warn("Local-harness resolution failed — using server run", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string };
+    let body: { success: boolean; sessionId?: string };
+    if (localTarget) {
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = { success: true, sessionId: dispatched.sessionId };
+    } else {
+      let runRes: Awaited<ReturnType<typeof fetchRun>>;
+      try {
+        runRes = await fetchRun();
+      } catch (err) {
+        // Dispatch never happened — free the global twin slot, and drain/free the
+        // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
+        // that never started.
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = (await runRes.json()) as { success: boolean; sessionId?: string };
+    }
 
     // Re-key the GLOBAL twin slot to the real sessionId (released by
     // /webhook/result); free it immediately if the dispatch didn't produce a run.
@@ -2237,15 +2285,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
       // dispatched above (built once before the per-user gate) — byte-identical
-      // replay, no mention-note drift.
-      await registerRunRecovery({
-        rootSessionId: body.sessionId,
-        maxRetries: CONFIG.runRecoveryMaxRetries,
-        timeoutMs: CONFIG.runRecoveryTimeoutMs,
-        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-        dispatchPayload,
-        sessionContext,
-      });
+      // replay, no mention-note drift. Skipped on the local-harness path: the
+      // run lives in the user's Electron app, so a server-side retry can't
+      // recover it.
+      if (!localTarget) {
+        await registerRunRecovery({
+          rootSessionId: body.sessionId,
+          maxRetries: CONFIG.runRecoveryMaxRetries,
+          timeoutMs: CONFIG.runRecoveryTimeoutMs,
+          retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+          dispatchPayload,
+          sessionContext,
+        });
+      }
 
       // /goal turn-0 persistence: same dispatchPayload is replayed by the
       // relooper for each subsequent turn (task is overwritten with the
