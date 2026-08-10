@@ -35,6 +35,9 @@ const ElectronEvent = {
     UI_UPDATE_DOWNLOAD_FAILED: 'ui_update_download_failed',
     UI_UPDATE_DOWNLOAD_COMPLETE: 'ui_update_download_complete',
 
+    // Perf metrics
+    ELECTRON_CPU_USAGE_SNAPSHOT: 'electron_cpu_usage_snapshot',
+
     SET_PENDING_INVITATION_COOKIE: 'set_pending_invitation_cookie',
     // Cookie events
     COOKIES_CLEARED: 'cookies_cleared',
