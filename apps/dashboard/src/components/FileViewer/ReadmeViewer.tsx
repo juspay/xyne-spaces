@@ -2,22 +2,14 @@ import React, { useEffect, useState, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import rehypeSanitize from 'rehype-sanitize';
 import type { Components } from 'react-markdown';
 import { BaseViewerProps } from './utils';
-
-// Sanitize schema for file-provided markdown. Starts from rehype-sanitize's
-// safe defaults (scripts / event handlers stripped; img `src` and anchor
-// `href` restricted to http(s)/mailto) and additionally preserves the
-// `checked` attribute so GFM task-list checkboxes still render their state.
-const markdownSanitizeSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    input: [...(defaultSchema.attributes?.['input'] ?? []), 'checked'],
-  },
-};
+import {
+  obsidianRemarkPlugins,
+  obsidianSanitizeSchema,
+  obsidianComponents,
+} from './obsidian';
 
 // Loading spinner
 const LoadingSpinner: React.FC = () => (
@@ -213,9 +205,12 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
         <div className='min-h-screen px-10 py-10 md:px-15 lg:px-20'>
           <div className='max-w-4xl mx-auto'>
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeHighlight]}
-              components={markdownComponents}
+              remarkPlugins={[remarkGfm, ...obsidianRemarkPlugins]}
+              // SECURITY: rehype-raw is intentionally NOT used here. Attachment
+              // files are untrusted, so raw HTML in a .md is never parsed to DOM;
+              // obsidianSanitizeSchema is then the single allow-list gate.
+              rehypePlugins={[[rehypeSanitize, obsidianSanitizeSchema], rehypeHighlight]}
+              components={{ ...markdownComponents, ...obsidianComponents }}
             >
               {markdownContent}
             </ReactMarkdown>
