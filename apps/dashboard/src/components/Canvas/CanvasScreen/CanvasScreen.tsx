@@ -1183,7 +1183,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 }
                                 size='sm'
                                 count={3}
-                                shape='square'
                               />
                             </button>
                           }
