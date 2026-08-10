@@ -67,7 +67,7 @@ describe("buildUserQuestionFlow", () => {
         conversationId: "conversation",
         userId: "user",
       },
-      { phase: "answered", answers: { scope: "All" }, notes: "Please include patch notes" },
+      { phase: "answered", answers: { scope: "All" }, notes: { scope: "Please include patch notes" } },
     );
     expect(flow.screenId).toBe("user-question-set-2");
     expect(flow.components[0]?.props).toMatchObject({ phase: "answered", answers: { scope: "All" } });

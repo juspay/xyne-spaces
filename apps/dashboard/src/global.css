@@ -110,6 +110,9 @@
     --pr-badge-danger-bg: #faebeb;
     --pr-badge-danger-fg: #ff0f0f;
 
+    --diff-stat-add-fg: #16a34a;
+    --diff-stat-del-fg: #dc2626;
+
     /* Workflow status colors - accessible on light bg */
     --status-new: #6b7280;
     --status-pending: #d97706;
@@ -241,6 +244,8 @@
     --pr-badge-merged-fg: #3716a3;
     --pr-badge-danger-bg: #faebeb;
     --pr-badge-danger-fg: #ff0f0f;
+    --diff-stat-add-fg: #16a34a;
+    --diff-stat-del-fg: #dc2626;
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
@@ -373,6 +378,9 @@
     --pr-badge-merged-fg: #a78bfa;
     --pr-badge-danger-bg: #2a1414;
     --pr-badge-danger-fg: #f87171;
+
+    --diff-stat-add-fg: #4ade80;
+    --diff-stat-del-fg: #f87171;
 
     /* Workflow status colors - accessible on dark bg */
     --status-new: #b0b4ba;
@@ -1666,6 +1674,15 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: normal;
+}
+
+.jp-message-html:has(.flow-artifact-wide) {
+  display: block;
+  width: 100%;
+}
+
+.flow-ui-container:has(.flow-artifact-wide) {
+  max-width: none;
 }
 
 /* Make inline emojis larger than surrounding text */

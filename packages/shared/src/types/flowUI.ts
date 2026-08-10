@@ -27,7 +27,11 @@ export type FlowComponentType =
   | 'pr'
   | 'pr_approval'
   | 'call_schedule'
-  | 'user_question';
+  | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart';
 
 export interface FlowComponent {
   id: string;

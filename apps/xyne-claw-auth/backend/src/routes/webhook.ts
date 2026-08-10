@@ -95,7 +95,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildCodeFlow, buildDiffFlow, buildChartFlow, isTwinDelivery } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
@@ -6384,6 +6384,74 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
       clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
     );
+    return;
+  }
+
+  const artifactKind = (req.body as { kind?: string }).kind;
+  if (artifactKind === "code" || artifactKind === "diff" || artifactKind === "chart") {
+    void touchRunRecovery(sessionId).catch(() => {});
+    void (async () => {
+      const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch(() => null);
+      if (!ctx || ctx.responseMode !== "conversation") return;
+      const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
+      const body = req.body as {
+        code?: string;
+        language?: string;
+        path?: string;
+        patch?: string;
+        type?: string;
+        points?: Array<{ label?: unknown; value?: unknown }>;
+        series?: Array<{ x?: unknown; y?: unknown; series?: unknown }>;
+        caption?: string;
+      };
+      let flow;
+      if (artifactKind === "code") {
+        if (!body.code?.trim()) return;
+        flow = buildCodeFlow(body.code, body.language);
+      } else if (artifactKind === "diff") {
+        if (!body.path?.trim() || !body.patch?.trim()) return;
+        flow = buildDiffFlow(body.path.trim(), body.patch);
+      } else {
+        const caption = body.caption?.trim() || undefined;
+        if (body.type === "line" || body.type === "area") {
+          const series = Array.isArray(body.series)
+            ? body.series
+                .map((point) => ({
+                  x: String(point?.x ?? "").trim(),
+                  y: Number(point?.y),
+                  ...(typeof point?.series === "string" && point.series.trim()
+                    ? { series: point.series.trim() }
+                    : {}),
+                }))
+                .filter((point) => point.x !== "" && Number.isFinite(point.y))
+            : [];
+          if (series.length === 0) return;
+          flow = buildChartFlow({ type: body.type, series, ...(caption ? { caption } : {}) });
+        } else if (body.type === "bar" || body.type === "pie" || body.type === "donut") {
+          const points = Array.isArray(body.points)
+            ? body.points
+                .map((point) => ({ label: String(point?.label ?? "").trim(), value: Number(point?.value) }))
+                .filter((point) => point.label !== "" && Number.isFinite(point.value))
+            : [];
+          if (points.length === 0) return;
+          flow = buildChartFlow({ type: body.type, points, ...(caption ? { caption } : {}) });
+        } else {
+          log.warn(`Skipped chart card: unknown type ${String(body.type)}`);
+          return;
+        }
+      }
+      try {
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow: withSpacesAppId(flow, ctx.spacesAppId),
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        log.info(`Posted ${artifactKind} card in thread ${ctx.conversationId}`);
+      } catch (err) {
+        log.warn(`Failed to post ${artifactKind} card`, { error: err instanceof Error ? err.message : String(err) });
+      }
+    })();
     return;
   }
 

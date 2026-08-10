@@ -29,7 +29,11 @@ type FlowComponentType =
   | 'image'
   | 'link'
   | 'plan'
-  | 'user_question';
+  | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart';
 
 interface FlowComponentStyle {
   padding?: string;
@@ -795,9 +799,10 @@ export function buildCloneApprovalFlow(
  * is included solely for the fail-closed caller check; flow-action re-reads the
  * real approver from the DB.
  */
-/** Rendering caps for the git-style diff card. FlowJSON has no native diff
- *  component, so each line is its own styled text node — cap the totals so a
- *  full-file rewrite can't emit thousands of components. */
+/** Rendering caps for the skill-update diff card, which predates the native
+ *  `diff` component and still renders each line as its own styled text node —
+ *  cap the totals so a full-file rewrite can't emit thousands of components.
+ *  New callers should emit a `diff` component (buildDiffFlow) instead. */
 const DIFF_CARD_MAX_HUNKS = 6;
 const DIFF_CARD_MAX_LINES = 60;
 const DIFF_LINE_MAX_CHARS = 160;
@@ -928,4 +933,105 @@ export function buildSkillUpdateApprovalFlow(
       ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
     });
   return b.build();
+}
+
+const CODE_ARTIFACT_MAX_CHARS = 20_000;
+
+function clipArtifact(body: string, marker: string): string {
+  return body.length > CODE_ARTIFACT_MAX_CHARS
+    ? `${body.slice(0, CODE_ARTIFACT_MAX_CHARS)}\n${marker}`
+    : body;
+}
+
+export function buildCodeFlow(code: string, language?: string): FlowDefinition {
+  return new FlowBuilder(`code-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'code',
+      type: 'code',
+      props: {
+        code: clipArtifact(code, '… truncated'),
+        ...(language ? { language } : {}),
+      },
+    })
+    .build();
+}
+
+export function buildDiffFlow(path: string, patch: string): FlowDefinition {
+  const firstMeaningfulLine = patch.split('\n').find((line) => line.trim() !== '') ?? '';
+  const headed =
+    firstMeaningfulLine.startsWith('diff --git ') || firstMeaningfulLine.startsWith('--- ');
+  const headedPatch = headed ? patch : `--- a/${path}\n+++ b/${path}\n${patch}`;
+  return new FlowBuilder(`diff-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'diff',
+      type: 'diff',
+      props: {
+        path,
+        patch: clipArtifact(headedPatch, ' … diff truncated'),
+      },
+    })
+    .build();
+}
+
+export interface TicketArtifact {
+  xyneId: string;
+  title: string;
+  status: 'TODO' | 'STARTED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  eta?: string;
+  url: string;
+}
+
+export function buildTicketFlow(ticket: TicketArtifact): FlowDefinition {
+  return new FlowBuilder(`ticket-${ticket.xyneId}`)
+    .addComponent({
+      id: 'ticket',
+      type: 'ticket',
+      props: {
+        xyneId: ticket.xyneId,
+        title: ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        ...(ticket.eta ? { eta: ticket.eta } : {}),
+        url: ticket.url,
+      },
+    })
+    .build();
+}
+
+export interface ChartPoint {
+  label: string;
+  value: number;
+}
+
+export interface ChartSeriesPoint {
+  x: string;
+  y: number;
+  series?: string;
+}
+
+export type ChartArtifact =
+  | { type: 'bar'; points: ChartPoint[]; caption?: string }
+  | { type: 'pie'; points: ChartPoint[]; caption?: string }
+  | { type: 'donut'; points: ChartPoint[]; caption?: string }
+  | { type: 'line'; series: ChartSeriesPoint[]; caption?: string }
+  | { type: 'area'; series: ChartSeriesPoint[]; caption?: string };
+
+const CHART_MAX_CATEGORY_POINTS = 24;
+const CHART_MAX_SERIES_POINTS = 200;
+
+export function buildChartFlow(chart: ChartArtifact): FlowDefinition {
+  let props: Record<string, unknown>;
+  if (chart.type === 'line' || chart.type === 'area') {
+    props = { type: chart.type, series: chart.series.slice(0, CHART_MAX_SERIES_POINTS) };
+  } else {
+    props = { type: chart.type, points: chart.points.slice(0, CHART_MAX_CATEGORY_POINTS) };
+  }
+  return new FlowBuilder(`chart-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'chart',
+      type: 'chart',
+      props: { ...props, ...(chart.caption ? { caption: chart.caption } : {}) },
+    })
+    .build();
 }
