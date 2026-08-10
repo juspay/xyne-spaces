@@ -23,6 +23,7 @@ import {
   ChannelType,
   EmailType,
   ActivityClassification, LinkVisibility,
+  MessageType,
   NudgeState,
   SavedConfigContextType,
   Status,
@@ -3610,7 +3611,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
       direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ args: { limit, start, direction } }) => {
+    ({ ctx, args: { limit, start, direction } }) => {
       const isBackward = direction === 'backward';
 
       // For backward: order ASC to get items before cursor, then reverse
@@ -3640,7 +3641,15 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         channelQuery.related('conversations', conversationQuery =>
           conversationQuery
             .whereExists('initialMessage', messageQuery =>
-              messageQuery.where('visibleTo', 'IS', null),
+              messageQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('visibleTo', 'IS', null),
+                  helpers.and(
+                    helpers.cmp('visibleTo', '=', ctx.userID),
+                    helpers.cmp('msgType', '!=', MessageType.SYSTEM),
+                  ),
+                ),
+              ),
             )
             .orderBy('createdAt', 'desc')
             .limit(1),
