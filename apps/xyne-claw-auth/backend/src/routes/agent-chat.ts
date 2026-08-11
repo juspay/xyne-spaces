@@ -1961,6 +1961,87 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   }
 });
 
+// POST /agents/:slug/chat/:convId/fork — copy a finished conversation into a
+// NEW conversation owned by the requesting user.
+router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    const { targetConversationId } = (req.body ?? {}) as { targetConversationId?: string };
+    if (!targetConversationId || typeof targetConversationId !== "string") {
+      res.status(400).json({ success: false, error: "targetConversationId is required" });
+      return;
+    }
+
+    const sourceMessages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    if (sourceMessages.length === 0) {
+      res.status(404).json({ success: false, error: "Source conversation is empty" });
+      return;
+    }
+
+    // Refuse to write into a conversation that already holds messages — a
+    // retried fork would otherwise duplicate the whole history.
+    const existingTarget = await chatMessageRepository.findByConversationAndAgent(targetConversationId, slug);
+    if (existingTarget.length > 0) {
+      res.status(409).json({ success: false, error: "Target conversation already has messages" });
+      return;
+    }
+
+    // Which PI session backs this conversation: the base id when the tree is
+    // linear, else the deepest non-first assistant's branch suffix.
+    const tree = sourceMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parentId: (m as { parentId?: string | null }).parentId ?? null,
+      createdAt: m.createdAt,
+    }));
+    const leafId = tree[tree.length - 1]?.id ?? null;
+    const sourcePiConversationId = resolvePiConversationIdForPath(tree, leafId, convId);
+
+    const cloned = await cloneBranchSession({
+      sourceConversationId: piSessionStoreKey(sourcePiConversationId, slug),
+      targetConversationId: piSessionStoreKey(targetConversationId, slug),
+      branchMode: "full",
+    });
+    if (!cloned.success) {
+      log.warn(`[agent-chat/fork] session clone failed ${convId} → ${targetConversationId}: ${cloned.error ?? "unknown"}`);
+      res.status(502).json({ success: false, error: cloned.error ?? "Failed to clone session" });
+      return;
+    }
+
+    // Copy the visible history, chained linearly so the tree stays on the
+    // first-child rail — otherwise resolvePiConversationIdForPath would read
+    // the fork as a branch and the follow-up would open a fresh PI session,
+    // discarding the context we just cloned.
+    let parentId: string | null = null;
+    let copied = 0;
+    for (const msg of sourceMessages) {
+      const created = await chatMessageRepository.create({
+        conversationId: targetConversationId,
+        agentSlug: slug,
+        userId,
+        role: msg.role,
+        content: msg.content ?? "",
+        ...(msg.reasoning ? { reasoning: msg.reasoning } : {}),
+        parentId,
+        orgId: (msg as { orgId: string }).orgId,
+      });
+      parentId = created.id;
+      copied += 1;
+    }
+
+    log.info(`[agent-chat/fork] ${convId} → ${targetConversationId} slug=${slug} owner=${userId} copied=${copied}`);
+    res.json({ success: true, conversationId: targetConversationId, copied });
+  } catch (err) {
+    log.error(`[agent-chat/fork] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to fork conversation" });
+  }
+});
+
 // GET /agents/:slug/chat/:convId/messages — get conversation history
 router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
