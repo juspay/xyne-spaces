@@ -25,11 +25,11 @@ router.get('/microsoft/login', microsoftAuthController.initiateLogin);
 
 router.get('/microsoft/callback', microsoftAuthController.handleCallback);
 
-router.post('/microsoft/exchange-mobile', microsoftAuthController.exchangeMobile);
-
 router.post('/exchange-electron', authV2Controller.exchangeElectronCode);
 
 router.post('/exchange-mobile', authV2Controller.exchangeMobileCode);
+
+router.post('/microsoft/exchange-mobile', microsoftAuthController.exchangeMobile);
 
 router.get('/refresh-session', authV2Controller.refreshSession);
 

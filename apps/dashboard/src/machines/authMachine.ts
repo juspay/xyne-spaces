@@ -814,6 +814,21 @@ export const authMachine = createMachine(
               }),
             },
             {
+              guard: 'hasAutoLoginWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
               guard: 'hasLastActiveWorkspace',
               target: 'loggingInToWorkspace',
               actions: assign(({ context, event }) => {
@@ -900,6 +915,21 @@ export const authMachine = createMachine(
               }),
             },
             {
+              guard: 'hasAutoLoginWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
               guard: 'hasLastActiveWorkspace',
               target: 'loggingInToWorkspace',
               actions: assign(({ context, event }) => {
@@ -978,6 +1008,21 @@ export const authMachine = createMachine(
                   workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasAutoLoginWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
                   error: null,
                 };
