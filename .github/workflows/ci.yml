@@ -24,7 +24,7 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: self-hosted
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -62,7 +62,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard lint + typecheck + build
-    runs-on: self-hosted
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -100,7 +100,7 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
-    runs-on: self-hosted
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -124,7 +124,7 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
-    runs-on: self-hosted
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -152,7 +152,7 @@ jobs:
   # ---------------------------------------------------------------------------
   gitleaks:
     name: Secret scan (gitleaks)
-    runs-on: self-hosted
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       GITLEAKS_VERSION: "8.30.1"
     steps:
@@ -196,7 +196,7 @@ jobs:
   # ---------------------------------------------------------------------------
   trivy:
     name: Vulnerability scan (Trivy)
-    runs-on: self-hosted
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       TRIVY_VERSION: "0.72.0"
       # secrets handled by gitleaks; scan deps (vuln) + IaC (misconfig) only.
