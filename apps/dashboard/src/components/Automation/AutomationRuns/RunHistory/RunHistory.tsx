@@ -12,7 +12,7 @@ import {
 import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
 import { fetchAutomationRuns } from '../../../../api/automationsApi';
-import type { AutomationRun, AutomationRunStatus } from '../../Automation.types';
+import type { AutomationRunStatus, AutomationRunSummary } from '../../Automation.types';
 import type { RunHistoryProps } from './RunHistory.types';
 
 const PAGE_SIZE = 50;
@@ -85,7 +85,7 @@ export function RunHistory({
       refetchOnWindowFocus: true,
     });
 
-  const filtered = useMemo<AutomationRun[]>(() => {
+  const filtered = useMemo<AutomationRunSummary[]>(() => {
     return data?.pages.flatMap(p => p.runs) ?? [];
   }, [data]);
 
@@ -213,7 +213,13 @@ export function RunHistory({
   );
 }
 
-function RunRow({ run, onClick }: { run: AutomationRun; onClick: () => void }): React.ReactElement {
+function RunRow({
+  run,
+  onClick,
+}: {
+  run: AutomationRunSummary;
+  onClick: () => void;
+}): React.ReactElement {
   const isComplete = run.status === 'COMPLETED' || run.status === 'FAILED';
   const duration =
     isComplete && run.completedAt

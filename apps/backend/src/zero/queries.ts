@@ -4,6 +4,7 @@ import {
   type AnyQueryRegistry,
 } from '@rocicorp/zero';
 import {
+  AccessType,
   BaseTicketType,
   BoardType,
   CallType,
@@ -14,7 +15,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
-  ShareableEntityType, UserResponsibility } from '@xyne/shared';
+  ShareableEntityType, SummaryTemplateVisibility, UserResponsibility } from '@xyne/shared';
 import { z } from 'zod';
 import {
   CanvasVisibility,
@@ -2095,6 +2096,7 @@ export const queries: AnyQueryRegistry = defineQueries({
             ChannelType.SLACK,
             ChannelType.APP,
             ChannelType.CALL,
+            ChannelType.SOCIAL_MEDIA,
           ])
           .related('channelStats'),
       );
@@ -2111,6 +2113,7 @@ export const queries: AnyQueryRegistry = defineQueries({
             ChannelType.SLACK,
             ChannelType.APP,
             ChannelType.CALL,
+            ChannelType.SOCIAL_MEDIA,
           ])
           .related('channelStats'),
       );
@@ -2577,8 +2580,56 @@ export const queries: AnyQueryRegistry = defineQueries({
     ({ ctx }) =>
       zql.summary_templates
         .where('workspaceId', ctx.workspaceId)
+        .where(({ or, and, cmp, exists }) =>
+          or(
+            cmp('createdBy', ctx.userID),
+            cmp('visibility', SummaryTemplateVisibility.PUBLIC),
+            and(
+              cmp('visibility', SummaryTemplateVisibility.WAITING_FOR_APPROVAL),
+              exists('workspaceResourceAccess', access =>
+                access
+                  .where('accessType', AccessType.ADMIN)
+                  .where(({ or: accessOr, cmp: accessCmp, exists: accessExists }) =>
+                    accessOr(
+                      accessCmp('userId', ctx.userID),
+                      accessExists('userGroup', group =>
+                        group.whereExists('userGroupMappings', membership =>
+                          membership.where('userId', ctx.userID),
+                        ),
+                      ),
+                    ),
+                  )
+                  .whereExists('resource', resource => resource.where('name', 'SCRIBE')),
+              ),
+            ),
+            exists('shares', share =>
+              share
+                .where('workspaceId', ctx.workspaceId)
+                .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
+                .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+                .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
+                  shareOr(
+                    shareCmp('userId', ctx.userID),
+                    shareExists('userGroupMemberships', membership =>
+                      membership.where('userId', ctx.userID),
+                    ),
+                    shareExists('channelMembers', member => member.where('userId', ctx.userID)),
+                  ),
+                ),
+            ),
+          ),
+        )
         .orderBy('name', 'asc')
         .orderBy('version', 'desc'),
+  ),
+
+  summaryTemplateById: defineQuery(
+    z.object({ templateId: z.string() }),
+    ({ ctx, args: { templateId } }) =>
+      zql.summary_templates
+        .where('workspaceId', ctx.workspaceId)
+        .where('id', templateId)
+        .one(),
   ),
 
   recurringSeriesById: defineQuery(
@@ -3544,6 +3595,11 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  /**
+   * @deprecated Use getConversationAttachementsV2. The flipped, visibility-only channel exists
+   * here materializes every public channel on hydration and can wedge a syncer worker (Aug 2026
+   * WAL-starvation incidents). Kept only for already-deployed clients; do not add call sites.
+   */
   getConversationAttachements: defineQuery(
     z.object({
       channelId: z.string(),
@@ -3573,6 +3629,37 @@ export const queries: AnyQueryRegistry = defineQueries({
             )
           )
         )
+      );
+
+      if (start) {
+        query = query.start(
+          { id: start.attachementId, createdAt: start.createdAt },
+          { inclusive: true }
+        );
+      }
+
+      query = query.orderBy('createdAt', direction === 'forward' ? 'desc' : 'asc');
+
+      if (limit) {
+        query = query.limit(limit);
+      }
+
+      return query;
+    }
+  ),
+
+  // V2: channel access (public-or-participant) is left to MessageAttachmentsACL. V1's inline
+  // flipped channel exists materialized every public channel on hydration (Aug 2026 WAL incidents).
+  getConversationAttachementsV2: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ attachementId: z.string(), createdAt: z.number() }).nullable(),
+      direction: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ args: { channelId, limit, start, direction } }) => {
+      let query = zql.message_attachments.whereExists('conversation', (conv) =>
+        conv.where('channelId', channelId)
       );
 
       if (start) {
@@ -3686,7 +3773,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
       direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ args: { limit, start, direction } }) => {
+    ({ ctx, args: { limit, start, direction } }) => {
       const isBackward = direction === 'backward';
 
       // For backward: order ASC to get items before cursor, then reverse
@@ -3714,7 +3801,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .limit(limit)
         .related('channel', channelQuery =>
         channelQuery.related('conversations', conversationQuery =>
-          conversationQuery.orderBy('createdAt', 'desc').limit(1),
+          conversationQuery
+            .whereExists('initialMessage', messageQuery =>
+              messageQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('visibleTo', 'IS', null),
+                  helpers.cmp('visibleTo', '=', ctx.userID),
+                ),
+              ),
+            )
+            .orderBy('createdAt', 'desc')
+            .limit(1),
         ),
       );
     },

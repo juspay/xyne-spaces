@@ -423,6 +423,10 @@ export class BitbucketWebhookService {
   ): Promise<void> {
     logger.info(`[Bitbucket-Webhook] PR merged: ${context.prId} - ${context.prUrl}`);
 
+    // Also post a fresh PR status card into the originating Spaces thread (if an
+    // agent opened this PR). Fully decoupled from the ticket sync below.
+    this.forwardPrCardStatus(context, 'merged');
+
     const result = await this.prMetricsRepository.markMergedPr({
       prId: context.prId,
       prUrl: context.prUrl,
@@ -523,6 +527,10 @@ export class BitbucketWebhookService {
   ): Promise<void> {
     logger.info(`[Bitbucket-Webhook] PR declined: ${context.prId} - ${context.prUrl}`);
 
+    // Also post a fresh PR status card into the originating Spaces thread (if an
+    // agent opened this PR). Fully decoupled from the ticket sync below.
+    this.forwardPrCardStatus(context, 'declined');
+
     const result = await this.prMetricsRepository.markDeclinedPr({
       prId: context.prId,
       prUrl: context.prUrl,
@@ -587,6 +595,10 @@ export class BitbucketWebhookService {
    */
   private async handlePRDeleted(context: PREventContext): Promise<void> {
     logger.info(`[Bitbucket-Webhook] PR deleted: ${context.prId} - ${context.prUrl}`);
+
+    // Also post a fresh PR status card into the originating Spaces thread (if an
+    // agent opened this PR). Fully decoupled from the ticket sync below.
+    this.forwardPrCardStatus(context, 'deleted');
 
     const trackedPr = await this.prMetricsRepository.findPrByIdAndUrl(
       context.prId,
@@ -654,6 +666,51 @@ export class BitbucketWebhookService {
     });
 
     logger.info(`[Bitbucket-Webhook] ✅ Marked PR as DELETED in database: ${context.prUrl}`);
+  }
+
+  /**
+   * Fire-and-forget forward of a PR status change to xyne-claw-auth, which posts
+   * a FRESH PR status card into the originating Spaces thread — but only if an
+   * agent originally opened a card for this PR (matched there via a durable
+   * AgentWidgetBinding keyed on the PR URL). Fully decoupled from the ticket
+   * sync: it must NEVER block or fail this webhook handler, so it swallows every
+   * error. A PR with no agent card ⇒ silent no-op on the claw-auth side.
+   */
+  private forwardPrCardStatus(
+    context: PREventContext,
+    status: 'merged' | 'declined' | 'deleted',
+  ): void {
+    const base = config.xyneClaw?.webhookUrl;
+    const s2sKey = config.xyneClaw?.s2sKey;
+    if (!base || !s2sKey) return; // not wired in this env → skip silently
+
+    const url = `${base.replace(/\/+$/, '')}/pr-event`;
+    const body = JSON.stringify({
+      provider: 'bitbucket',
+      status,
+      prUrl: context.prUrl,
+      number: context.prId,
+      repo: `${context.projectName}/${context.repoName}`,
+    });
+
+    void fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-s2s-key': s2sKey },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    })
+      .then((res) => {
+        if (!res.ok) {
+          logger.warn(
+            `[Bitbucket-Webhook] pr-card forward non-OK (HTTP ${res.status}) for PR ${context.prUrl}`,
+          );
+        }
+      })
+      .catch((err) => {
+        logger.warn(
+          `[Bitbucket-Webhook] pr-card forward failed for PR ${context.prUrl}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
   }
 }
 

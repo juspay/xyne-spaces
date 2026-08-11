@@ -22,6 +22,7 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface DmListItemProps {
   channel: Channel;
@@ -106,7 +107,7 @@ export const DmListItem = ({
     const senderFirstName = getSenderLabel(
       lastMessage.senderId === context.userID,
       isDM,
-      lastMessageSender?.name,
+      lastMessageSender ? getUserDisplayName(lastMessageSender) : undefined,
     );
 
     const prefix = senderFirstName ? `${senderFirstName}: ` : '';

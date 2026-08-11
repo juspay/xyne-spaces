@@ -56,7 +56,6 @@ import {
 import { toast } from 'sonner';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
-import { SelectionAskAI } from '../SelectionAskAI';
 import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
 import { useCanvasTableFilters } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -526,8 +525,13 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     }, [editor, content, extractHeadings]);
 
     const canvasFormattingToolbar = useMemo(
-      () => createCanvasFormattingToolbar(openCommentsForCurrentBlock),
-      [openCommentsForCurrentBlock],
+      () =>
+        createCanvasFormattingToolbar(openCommentsForCurrentBlock, {
+          ...(canvasId && { canvasId }),
+          ...(_canvasTitle && { canvasTitle: _canvasTitle }),
+          canComment: editable,
+        }),
+      [_canvasTitle, canvasId, editable, openCommentsForCurrentBlock],
     );
 
     const handleSave = useCallback((): void => {
@@ -641,13 +645,6 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             onClose={() => setIsSearchOpen(false)}
           />
         )}
-
-        {/* Selection Ask AI Button */}
-        <SelectionAskAI
-          {...(_canvasTitle && { canvasTitle: _canvasTitle })}
-          {...(canvasId && { canvasId })}
-          containerRef={containerRef}
-        />
 
         {/* Copy button overlay for code blocks */}
         <CanvasCodeCopyButton containerRef={containerRef} />

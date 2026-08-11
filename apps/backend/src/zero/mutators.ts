@@ -16,6 +16,7 @@ import {
   ChannelScopeType,
   ChannelAddUserPolicy,
   ChannelSortOrder,
+  ChannelFilterMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -2289,9 +2290,13 @@ export function createMutators(
           isCollapsed: z.boolean().optional(),
           position: z.string().optional(),
           sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
+        async ({
+          tx,
+          args: { id, name, emoji, isCollapsed, position, sortOrder, filterMode, timestamp },
+        }) => {
           const section = await tx.run(
             zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
           );
@@ -2318,6 +2323,7 @@ export function createMutators(
             ...(isCollapsed !== undefined && { isCollapsed }),
             ...(position !== undefined && { position }),
             ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             updatedAt: timestamp,
           });
         },
@@ -14386,6 +14392,54 @@ export function createMutators(
       ),
     },
     userPreference: {
+      setSidebarGroupPreference: defineMutator(
+        z.object({
+          id: z.string(),
+          group: z.enum(['starred', 'channels', 'dms']),
+          filterMode: z.nativeEnum(ChannelFilterMode).optional(),
+          sortOrder: z.nativeEnum(ChannelSortOrder).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, group, filterMode, sortOrder, timestamp } }) => {
+          const filterField = {
+            starred: 'starredFilterMode',
+            channels: 'channelFilterMode',
+            dms: 'dmFilterMode',
+          }[group];
+          const sortField = {
+            starred: 'starredSortOrder',
+            channels: 'channelSortOrder',
+            dms: 'dmSortOrder',
+          }[group];
+          const fields = {
+            ...(filterMode !== undefined && { [filterField]: filterMode }),
+            ...(sortOrder !== undefined && { [sortField]: sortOrder }),
+          };
+          const existing = await tx.run(zql.user_preferences.where('userId', authData.sub).one());
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              ...fields,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              showThreadTags: false,
+              ...fields,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
       setChannelSortOrder: defineMutator(
         z.object({
           id: z.string(),
@@ -16008,8 +16062,12 @@ export function createMutators(
         },
       ),
       disable: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { id, timestamp } }) => {
+        z.object({
+          id: z.string(),
+          timestamp: z.number(),
+          cancelQueued: z.boolean().optional(),
+        }),
+        async ({ tx, args: { id, timestamp, cancelQueued } }) => {
           logger.info(`[Mutator] automations.disable START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
@@ -16034,7 +16092,9 @@ export function createMutators(
               const { approvalService } = await import(
                 '../automations/services/approval.service'
               );
-              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED);
+              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED, {
+                cancelQueued: cancelQueued ?? true,
+              });
               logger.info(
                 `[Mutator] automations.disable asyncTask OK id=${id} elapsedMs=${Date.now() - t0}`,
               );

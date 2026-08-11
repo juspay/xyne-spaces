@@ -18,6 +18,7 @@ interface UseCanvasCommentHighlightsOptions {
   containerRef: RefObject<HTMLElement | null>;
   enabled?: boolean;
   refreshKey?: unknown;
+  activeThreadId?: string | null | undefined;
   onAnchorClick?: ((thread: CanvasCommentHighlightThread, rect?: DOMRect) => void) | undefined;
   onOpenCountChange?: ((count: number) => void) | undefined;
   onThreadsChange?: ((threads: CanvasCommentHighlightThread[]) => void) | undefined;
@@ -26,6 +27,7 @@ interface UseCanvasCommentHighlightsOptions {
 const COMMENT_THREAD_SELECTOR = '[data-canvas-comment-thread-id]';
 const COMMENT_THREAD_ID_ATTR = 'canvasCommentThreadId';
 const COMMENT_THREAD_OPEN_ATTR = 'canvasCommentOpen';
+const COMMENT_THREAD_ACTIVE_ATTR = 'canvasCommentActive';
 const COMMENT_THREAD_BADGE_SELECTOR = '[data-canvas-comment-thread-badge="true"]';
 
 const ensureHighlightStyles = (): void => {
@@ -38,7 +40,14 @@ const ensureHighlightStyles = (): void => {
     [data-canvas-comment-thread-id][data-canvas-comment-open="true"] {
       background-color: rgba(250, 204, 21, 0.42);
       border-radius: 2px;
+      box-shadow: inset 0 -2px 0 rgba(217, 119, 6, 0.65);
       cursor: pointer;
+    }
+    [data-canvas-comment-thread-id][data-canvas-comment-active="true"] {
+      background-color: rgba(245, 158, 11, 0.48);
+      box-shadow:
+        inset 0 -2px 0 rgba(180, 83, 9, 0.75),
+        0 0 0 2px rgba(245, 158, 11, 0.18);
     }
     [data-canvas-comment-thread-badge="true"] {
       position: absolute;
@@ -115,6 +124,7 @@ export const useCanvasCommentHighlights = ({
   containerRef,
   enabled = true,
   refreshKey,
+  activeThreadId,
   onAnchorClick,
   onOpenCountChange,
   onThreadsChange,
@@ -124,7 +134,7 @@ export const useCanvasCommentHighlights = ({
     {
       enabled: enabled && Boolean(canvasId),
     },
-  );
+  ) as unknown as [CanvasCommentHighlightThread[]];
   const openThreads = useMemo(
     () => threads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN),
     [threads],
@@ -165,6 +175,12 @@ export const useCanvasCommentHighlights = ({
         } else {
           delete element.dataset[COMMENT_THREAD_OPEN_ATTR];
         }
+
+        if (threadId && threadId === activeThreadId && openThreadIds.has(threadId)) {
+          element.dataset[COMMENT_THREAD_ACTIVE_ATTR] = 'true';
+        } else {
+          delete element.dataset[COMMENT_THREAD_ACTIVE_ATTR];
+        }
       });
     };
 
@@ -204,7 +220,7 @@ export const useCanvasCommentHighlights = ({
       retryTimeouts.forEach(timeout => window.clearTimeout(timeout));
       observer?.disconnect();
     };
-  }, [canvasId, containerRef, enabled, openThreadIds, refreshKey]);
+  }, [activeThreadId, canvasId, containerRef, enabled, openThreadIds, refreshKey]);
 
   useEffect(() => {
     if (!enabled || !canvasId || typeof window === 'undefined') return;

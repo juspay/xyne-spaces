@@ -36,12 +36,14 @@ import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
+import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 config()
 
 class WorkerService {
@@ -78,6 +80,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
@@ -159,6 +162,12 @@ class WorkerService {
         await callValidationWorker.start();
       }
 
+      if (socialMediaSyncEnabled) {
+        logger.info('Initializing email classification queue (producer)...');
+        await emailClassificationQueue.initialize();
+        logger.info('Starting social media review sync worker...');
+        socialMediaSyncWorker.start();
+      }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
       // off — so with it off nothing is produced either, and no backlog builds up.
@@ -276,8 +285,12 @@ class WorkerService {
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
 
-      logger.info('Starting entity extraction worker...');
-      await entityExtractionWorker.start();
+      if (appConfig.entityExtraction.enabled) {
+        logger.info('Starting entity extraction worker...');
+        await entityExtractionWorker.start();
+      } else {
+        logger.info('Entity extraction is disabled; skipping worker startup');
+      }
 
       if (appConfig.enableTagGenerationPipeline) {
         logger.info('Initializing tag generation pipeline...');
@@ -351,6 +364,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
@@ -399,6 +413,12 @@ class WorkerService {
         await callValidationWorker.stop();
       }
 
+      if (socialMediaSyncEnabled) {
+        socialMediaSyncWorker.stop();
+        if (!appConfig.enableEmailClassificationWorker) {
+          await emailClassificationQueue.close();
+        }
+      }
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
       }

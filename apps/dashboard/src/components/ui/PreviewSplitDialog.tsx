@@ -20,7 +20,7 @@ import { cn } from '../../utils/classNames';
  *
  * Callers supply their own content and open/close:
  *   - the attachment viewer passes the attachment as `left` (+ its thread as `right`),
- *   - PlanPreview passes the plan document as `left` (+ its thread as `right`).
+ *   - WidgetPreview passes FlowJSON widget details as `left` (+ its thread as `right`).
  *
  * When `right` is omitted the split collapses to a full-bleed `left` (mobile /
  * no-thread), mirroring the viewer's full-view branch.
@@ -179,7 +179,7 @@ type ThreadMessagesProps = NonNullable<React.ComponentProps<typeof ThreadMessage
 /**
  * PreviewThreadPanel — the right-hand "Thread" panel that lives inside a
  * PreviewSplitDialog. Shared by the attachment viewer (FileViewerModal) and the
- * plan preview (PlanPreview): same header, size, and message list in both places;
+ * widget preview (WidgetPreview): same header, size, and message list in both places;
  * only the left/main preview content differs. Kept in this file since the two are
  * always used together.
  */

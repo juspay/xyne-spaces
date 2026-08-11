@@ -9,10 +9,12 @@ import { activityService } from '@/services/activity/activityService';
 import {
   emailFetchQueue,
   type EmailFetchJobData,
+  type SocialMediaFetchJobData,
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { socialMediaService } from '@/integrations/social-media/socialMediaService';
 import { getHttpStatus } from '@/services/googleService';
 import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
@@ -29,8 +31,11 @@ class EmailFetchWorker {
 
     const queue = emailFetchQueue.getQueue();
 
-    queue.process('refetch', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
+    queue.process('refetch', 1, async (job) => {
       return this.processJob(job as Bull.Job<EmailFetchJobData>);
+    });
+    queue.process('social-media-refetch', 1, async (job) => {
+      return this.processSocialMediaJob(job as Bull.Job<SocialMediaFetchJobData>);
     });
 
     queue.process('cursor-catchup', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
@@ -38,12 +43,15 @@ class EmailFetchWorker {
     });
 
     queue.on('failed', (job, err) => {
+      const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
-        `[EMAIL-FETCH-WORKER] Job ${job.id} (${job.name}) failed — source ${job.data.sourceId}:`,
+        `[EMAIL-FETCH-WORKER] Job ${job.id} (${job.name}) failed — source ${source}:`,
         err,
       );
 
-      if (job.name === 'refetch') {
+      if ('sourceIds' in job.data) {
+        void this.notifySocialMediaFailure(job.data, err);
+      } else if (job.name === 'refetch') {
         void this.notifyFailure(job.data as EmailFetchJobData, err);
       }
     });
@@ -173,6 +181,35 @@ class EmailFetchWorker {
     }
   }
 
+  private async processSocialMediaJob(
+    job: Bull.Job<SocialMediaFetchJobData>,
+  ): Promise<void> {
+    const { sourceIds, channelId, workspaceId } = job.data;
+    logger.info(
+      `[EMAIL-FETCH-WORKER] Processing Google Play job ${job.id} — channel ${channelId}`,
+    );
+
+    const synced = await runAsServiceActor(
+      'social-media-fetch-worker',
+      workspaceId,
+      async () => {
+        let newInteractionCount = 0;
+        for (const sourceId of sourceIds) {
+          const result = await socialMediaService.syncSource(sourceId, {
+            ignoreSyncCursor: true,
+          });
+          newInteractionCount += result.synced;
+        }
+        return newInteractionCount;
+      },
+    );
+
+    logger.info(
+      `[EMAIL-FETCH-WORKER] Google Play job ${job.id} done — new=${synced}`,
+    );
+    await this.notifySocialMediaSuccess(job.data, synced);
+  }
+
   private isFinalAttempt(job: Bull.Job<EmailFetchJobData>): boolean {
     const maxAttempts = job.opts.attempts ?? 1;
     return job.attemptsMade + 1 >= maxAttempts;
@@ -284,6 +321,57 @@ class EmailFetchWorker {
       });
     } catch (activityErr) {
       logger.error('[EMAIL-FETCH-WORKER] Failed to write failure activity:', activityErr);
+    }
+  }
+
+  private async notifySocialMediaSuccess(
+    data: SocialMediaFetchJobData,
+    synced: number,
+  ): Promise<void> {
+    try {
+      await notificationService.sendNotification(
+        data.requesterUserId,
+        NotificationType.EMAIL_FETCH_COMPLETED,
+        synced > 0
+          ? `Fetched ${synced} new Google Play interaction${synced === 1 ? '' : 's'}`
+          : 'Google Play reviews are up to date',
+        synced > 0
+          ? `${synced} new review interaction${synced === 1 ? '' : 's'} added to the desk.`
+          : 'No new review interactions were found.',
+        {
+          channelId: data.channelId,
+          sourceCount: data.sourceIds.length,
+          synced,
+        },
+        `/${data.workspaceId}/support/${data.channelId}`,
+      );
+    } catch (error) {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play completion notification', {
+        error,
+      });
+    }
+  }
+
+  private async notifySocialMediaFailure(
+    data: SocialMediaFetchJobData,
+    error: Error,
+  ): Promise<void> {
+    try {
+      await notificationService.sendNotification(
+        data.requesterUserId,
+        NotificationType.EMAIL_FETCH_FAILED,
+        'Google Play review fetch failed',
+        error.message.substring(0, 200),
+        {
+          channelId: data.channelId,
+          sourceCount: data.sourceIds.length,
+        },
+        `/${data.workspaceId}/support/${data.channelId}`,
+      );
+    } catch (notificationError) {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play failure notification', {
+        error: notificationError,
+      });
     }
   }
 

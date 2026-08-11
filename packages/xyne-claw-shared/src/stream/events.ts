@@ -56,6 +56,7 @@ export type ClawStreamEvent =
   | { event: "attachment";      seq: number; sessionId: string; attachment: ClawAttachmentPayload }
   | { event: "sandbox-preview"; seq: number; sessionId: string; payload: ClawSandboxPreviewPayload }
   | { event: "plan";            seq: number; sessionId: string; todos: Todo[] }
+  | { event: "pr";              seq: number; sessionId: string; pr: Record<string, unknown> }
   | { event: "progress-label";  seq: number; sessionId: string; payload: ClawProgressLabelPayload }
   | { event: "debug";           seq: number; sessionId: string; debugEvent: unknown }
   | { event: "cancelled";       seq: number; sessionId: string; reason?: string | undefined }
