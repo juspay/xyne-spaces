@@ -41,6 +41,11 @@ type Verdict =
   | { kind: 'absorbed'; intentId: string; score: number }
   | { kind: 'below'; intentId: string; score: number; threshold: number };
 
+// Widened to `number` on purpose: INTENTS is `as const`, so TS knows its exact length
+// and flags `=== 1` as a comparison that can never hold. The pluralisation must keep
+// working as intents are added or removed.
+const intentCount: number = INTENTS.length;
+
 function verdictOf(result: ClassificationResult): Verdict {
   if (result.prefiltered) return { kind: 'prefiltered' };
   if (result.topIntent === UNCLASSIFIED) {
@@ -135,8 +140,8 @@ export default function IntentPlaygroundScreen(): React.ReactElement {
             telemetry is recorded.
           </p>
           <p className='font-mono text-xs text-muted-foreground'>
-            {MODEL_VERSION} · prototypes v{PROTOTYPES_VERSION} · {INTENTS.length} intent
-            {INTENTS.length === 1 ? '' : 's'}
+            {MODEL_VERSION} · prototypes v{PROTOTYPES_VERSION} · {intentCount} intent
+            {intentCount === 1 ? '' : 's'}
           </p>
         </header>
 
@@ -450,7 +455,12 @@ const CardPreview: React.FC<{ result: ClassificationResult }> = ({ result }) => 
       validateAllFields: () => true,
       executeAction: action => {
         // eslint-disable-next-line no-console
-        console.log('%c[intent:playground]%c flow action', 'color:#8b5cf6;font-weight:600', '', action);
+        console.log(
+          '%c[intent:playground]%c flow action',
+          'color:#8b5cf6;font-weight:600',
+          '',
+          action,
+        );
         return Promise.resolve();
       },
       onAppAction: () => undefined,

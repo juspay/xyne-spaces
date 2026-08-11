@@ -270,7 +270,10 @@ class IntentClassifier {
       safeRecordMetric(() => {
         intentClassificationTotal.add(1, { ...base, prefiltered: 'true' });
       });
-      trace('main', '6. telemetry — intent_classification_total{prefiltered=true}; no score recorded');
+      trace(
+        'main',
+        '6. telemetry — intent_classification_total{prefiltered=true}; no score recorded',
+      );
       return;
     }
 
@@ -278,8 +281,7 @@ class IntentClassifier {
     const clearsThreshold = intent !== undefined && result.topScore >= intent.threshold;
     // Absorber intents (platform-help) compete for the top slot but never call out.
     const actionable = intent?.actionable === true;
-    const triggered =
-      INTENT_TRIGGER_ENABLED && actionable && clearsThreshold && messageId !== null;
+    const triggered = INTENT_TRIGGER_ENABLED && actionable && clearsThreshold && messageId !== null;
 
     if (triggered) {
       // Fire-and-forget. The server re-checks every gate and may decline; nothing
@@ -309,9 +311,9 @@ class IntentClassifier {
     }
 
     trace('main', '6. telemetry recorded', {
-      'intent_score': Number(result.topScore.toFixed(4)),
-      'intent_embed_duration': skewed ? 'skipped (skewed)' : Number(result.embedMs.toFixed(1)),
-      'intent_classification_total': { intent: result.topIntent, triggered: String(triggered) },
+      intent_score: Number(result.topScore.toFixed(4)),
+      intent_embed_duration: skewed ? 'skipped (skewed)' : Number(result.embedMs.toFixed(1)),
+      intent_classification_total: { intent: result.topIntent, triggered: String(triggered) },
     });
 
     // Always say what happened AND why — a strong score followed by silence reads

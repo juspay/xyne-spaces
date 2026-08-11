@@ -5,6 +5,11 @@
 // ============================================================================
 // COMPONENT TYPE UNION
 // ============================================================================
+//
+// NOTE: this union is hand-maintained and is a SECOND source of truth alongside
+// the zod `flowComponentSchema` in ../validation/flowSchema.ts. Adding a component
+// to only one of them compiles locally and fails in `pnpm validate` — see the
+// `call_start` addition. Update both, in the same commit.
 
 export type FlowComponentType =
   | 'text'
@@ -26,7 +31,8 @@ export type FlowComponentType =
   | 'plan'
   | 'pr'
   | 'pr_approval'
-  | 'call_schedule';
+  | 'call_schedule'
+  | 'call_start';
 
 export interface FlowComponent {
   id: string;
