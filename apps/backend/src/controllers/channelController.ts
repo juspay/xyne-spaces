@@ -1581,6 +1581,8 @@ export class ChannelController {
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
           .join(', ') || 'No active Google Play apps';
+      } else if (source?.sourceType === ExternalSourcePlatform.INSTAGRAM) {
+        connectedLabel = source.displayName ?? null;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];

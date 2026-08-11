@@ -168,6 +168,8 @@ import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
+import SocialMediaComposer from '../../components/xyne-desk/SocialMediaComposer/SocialMediaComposer';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
@@ -302,8 +304,9 @@ interface PersistedComposeInstance {
   savedAt?: number;
 }
 
-/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
- *  desks can only reply into a thread that already exists externally. */
+/** Desk types with no "new message" concept: calls aren't composed, Slack/app
+ *  desks can only reply into an existing thread, and social media DMs originate
+ *  from the customer side only. */
 const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
   ChannelType.CALL,
   ChannelType.SLACK,
@@ -1508,6 +1511,41 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
+
+    const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaError = searchParams.get('socialMediaError');
+    if (socialMediaOAuth === 'success') {
+      toast.success('Instagram account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError) {
+      // mismatch error carries the expected handle: "instagram_account_mismatch:@xyne.spaces"
+      const [errorCode, errorPayload] = socialMediaError.split(':');
+      const mismatchMessage = errorPayload
+        ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`
+        : 'Instagram account mismatch — please make sure the correct account is active in your browser and try reconnecting.';
+      const socialMediaErrorMessages: Record<string, string> = {
+        instagram_account_mismatch: mismatchMessage,
+        instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
+        instagram_account_already_connected: 'This Instagram account is already connected to another channel.',
+        instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
+      };
+      toast.error(socialMediaErrorMessages[errorCode ?? ''] ?? 'Instagram connection error. Please try again.');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1994,6 +2032,7 @@ const SupportScreen = (): ReactElement => {
       slackChannelId?: string;
       installedAppId?: string;
       applications?: Array<{ displayName: string; packageName: string }>;
+      platform?: 'web' | 'electron';
     },
   ) => {
     const {
@@ -2004,6 +2043,7 @@ const SupportScreen = (): ReactElement => {
       slackChannelId,
       installedAppId,
       applications,
+      platform: formPlatform,
       channelType: _submittedChannelType,
       ...rest
     } = data;
@@ -2098,6 +2138,34 @@ const SupportScreen = (): ReactElement => {
         channelType: 'EMAIL',
         emailDeskOpts: { deskType: DeskType.DL, dlEmail },
       });
+      return;
+    }
+
+    if (deskType === 'SOCIAL_MEDIA') {
+      const isElectron = typeof window.electronAPI?.openExternal === 'function';
+      void (async () => {
+        try {
+          const res = await apiInstance.post<{ authUrl: string }>(
+            '/integrations/social-media/instagram/oauth/start',
+            {
+              name: rest.name,
+              projectId: rest.projectId,
+              visibility: rest.visibility,
+              ...(rest.boardId && { boardId: rest.boardId }),
+              ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+              platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
+            },
+          );
+          setShowCreateChannelModal(false);
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(res.data.authUrl);
+          } else {
+            window.location.href = res.data.authUrl;
+          }
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to start Instagram authorization');
+        }
+      })();
       return;
     }
 
@@ -2344,13 +2412,13 @@ const SupportScreen = (): ReactElement => {
             }
           : c.type === ChannelType.SOCIAL_MEDIA
             ? {
-                label: 'Social',
-                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                label: 'Instagram',
+                className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
               }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
-                  className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
+                  className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
                 }
               : {
                   label: 'Mailbox',
@@ -5027,42 +5095,6 @@ export const SupportTicketDetail = ({
                           Summarize thread
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          if (!channelId || !ticketIdParam) {
-                            toast.error('Cannot copy link');
-                            return;
-                          }
-                          const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
-                          void navigator.clipboard
-                            .writeText(url)
-                            .then(() => toast.success('Link copied'))
-                            .catch(() => toast.error('Failed to copy link'));
-                        }}
-                        data-track-category='Support'
-                        data-track-name='CopyTicketLink'
-                      >
-                        <LinkIcon size={14} className='shrink-0' />
-                        Copy link
-                      </DropdownMenuItem>
-                      {emails.length > 0 &&
-                        channel?.type !== ChannelType.SLACK &&
-                        channel?.type !== ChannelType.APP && (
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              if (!ticket?.id) return;
-                              void zero.mutate(
-                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                              );
-                              goBackToTicketList();
-                            }}
-                            data-track-category='Support'
-                            data-track-name='MarkTicketUnread'
-                          >
-                            <MailOpen size={14} className='shrink-0' />
-                            Mark as unread
-                          </DropdownMenuItem>
-                        )}
                       {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
                         <>
                           {(mailboxOverlay?.state ?? MailboxState.INBOX) ===
@@ -5112,27 +5144,78 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
-                      {channel && (
-                        <DropdownMenuItem
-                          onSelect={e => e.preventDefault()}
-                          className='p-0 focus:bg-transparent'
-                        >
-                          <CloudAgentDock buttonBehavior='floating' />
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => setShowArchiveConfirmDialog(true)}
-                        disabled={!ticket || !!ticket.isArchived}
-                        data-track-category='Support'
-                        data-track-name='ArchiveTicket'
-                        className='text-destructive focus:text-destructive'
-                      >
-                        <Archive size={14} className='shrink-0' />
-                        Archive ticket
-                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+
+                  <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (!channelId || !ticketIdParam) {
+                          toast.error('Cannot copy link');
+                          return;
+                        }
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
+                        void navigator.clipboard
+                          .writeText(url)
+                          .then(() => toast.success('Link copied'))
+                          .catch(() => toast.error('Failed to copy link'));
+                      }}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                      aria-label='Copy link to ticket'
+                      data-track-category='Support'
+                      data-track-name='CopyTicketLink'
+                    >
+                      <LinkIcon size={16} />
+                    </button>
+                  </Tooltip>
+                  <div className='w-px h-4 bg-border' />
+
+                  {channel && <CloudAgentDock buttonBehavior='floating' />}
+
+                  <Tooltip
+                    side='bottom'
+                    delayDuration={300}
+                    content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
+                  >
+                    <button
+                      type='button'
+                      onClick={() => setShowArchiveConfirmDialog(true)}
+                      disabled={!ticket || !!ticket.isArchived}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      aria-label='Archive ticket'
+                      data-track-category='Support'
+                      data-track-name='ArchiveTicket'
+                    >
+                      <Archive size={16} />
+                    </button>
+                  </Tooltip>
+                  {emails.length > 0 &&
+                    channel?.type !== ChannelType.SLACK &&
+                    channel?.type !== ChannelType.APP &&
+                    channel?.type !== ChannelType.SOCIAL_MEDIA && (
+                      <>
+                        <div className='w-px h-4 bg-border' />
+                        <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              if (!ticket?.id) return;
+                              void zero.mutate(
+                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                              );
+                              goBackToTicketList();
+                            }}
+                            className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                            aria-label='Mark as unread'
+                            data-track-category='Support'
+                            data-track-name='MarkTicketUnread'
+                          >
+                            <MailOpen size={16} />
+                          </button>
+                        </Tooltip>
+                      </>
+                    )}
                 </div>
               </div>
               <div className='flex flex-col gap-1 flex-shrink-0'>
@@ -5402,7 +5485,16 @@ export const SupportTicketDetail = ({
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                    <SlackThread emails={emails} ticketId={ticket?.id} />
+                    <SlackThread
+                      emails={emails}
+                      ticketId={ticket?.id}
+                      lastEmailAt={ticket?.lastEmailAt}
+                      emailReads={
+                        ticket?.emailReads as
+                          | Array<{ userId: string; lastReadEmailAt: number }>
+                          | undefined
+                      }
+                    />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (
@@ -5428,29 +5520,18 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {isAppSourcedTicket ? (
+              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                conversationId ? (
+                  <SocialMediaComposer conversationId={conversationId} />
+                ) : null
+              ) : isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     variant='app'
-                    // The ticket is app-sourced whatever the desk type, so the
-                    // channel preference alone decides whether the reply reaches
-                    // the app — matching appDeskService's outbound gate.
                     recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
-                  />
-                ) : null
-              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                conversationId ? (
-                  <SocialMediaReplyComposer
-                    conversationId={conversationId}
-                    channelId={channel?.id ?? null}
-                    drafts={ticketEmailDrafts}
-                    replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
-                    maxLength={350}
-                    trackingCategory='social-media-composer'
                   />
                 ) : null
               ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
@@ -5553,21 +5634,254 @@ export const SupportTicketDetail = ({
                 data-thread-citation-host
               >
                 {conversationId && channelId ? (
-                  <ThreadMessages
-                    channelId={channelId}
-                    conversationId={conversationId}
-                    ticketId={ticket?.id ?? null}
-                    matchedMessageId={targetMessageId}
-                    skipInputAutoFocus
-                    onClose={() => setIsRightPanelOpen(false)}
-                    onAskAI={() => {
-                      if (isAIPanelOpen) {
-                        xyneAIActor.send({ type: 'CLOSE' });
-                      } else {
-                        void openDraftAgentSession();
-                      }
-                    }}
-                  />
+
+                  <Tabs.Root
+                    value={activeTab}
+                    onValueChange={value => setActiveTab(value as TabType)}
+                    className='flex-1 flex flex-col h-full overflow-hidden'
+                  >
+                    {/* Tabs Header */}
+                    <div className='w-full p-4 pb-0 bg-background flex-shrink-0'>
+                      <div className='border-b border-border flex items-center justify-between'>
+                        <Tabs.List className='flex items-center justify-start'>
+                          <Tabs.Trigger asChild value='messages'>
+                            <button
+                              className={cn(
+                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                                activeTab === 'messages'
+                                  ? 'border-b-2 border-primary'
+                                  : 'border-b-2 border-transparent',
+                              )}
+                            >
+                              <span
+                                className={`${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
+                              >
+                                <MessageCircle size={12} />
+                              </span>
+                              <span
+                                className={`text-sm font-medium ${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
+                              >
+                                Messages
+                              </span>
+                            </button>
+                          </Tabs.Trigger>
+                          <Tabs.Trigger asChild value='details'>
+                            <button
+                              className={cn(
+                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                                activeTab === 'details'
+                                  ? 'border-b-2 border-primary'
+                                  : 'border-b-2 border-transparent',
+                              )}
+                            >
+                              <span
+                                className={`${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
+                              >
+                                <FileText size={12} />
+                              </span>
+                              <span
+                                className={`text-sm font-medium ${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
+                              >
+                                Details
+                              </span>
+                            </button>
+                          </Tabs.Trigger>
+                          {draftHasCitations && (
+                            <Tabs.Trigger asChild value='sources'>
+                              <button
+                                className={cn(
+                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                                  activeTab === 'sources'
+                                    ? 'border-b-2 border-primary'
+                                    : 'border-b-2 border-transparent',
+                                )}
+                                data-track-category='Support'
+                                data-track-name='OpenSourcesTab'
+                              >
+                                <span
+                                  className={`${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  <Sparkles size={12} />
+                                </span>
+                                <span
+                                  className={`text-sm font-medium ${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  Sources
+                                </span>
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold',
+                                    activeTab === 'sources'
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'bg-muted text-muted-foreground',
+                                  )}
+                                >
+                                  {sourcesHydrating && visibleAutoDraftCitations.length === 0 ? (
+                                    <Loader2 size={10} className='animate-spin' />
+                                  ) : (
+                                    visibleAutoDraftCitations.length
+                                  )}
+                                </span>
+                              </button>
+                            </Tabs.Trigger>
+                          )}
+                          {hasAutoDraftReasoning && (
+                            <Tabs.Trigger asChild value='reasoning'>
+                              <button
+                                className={cn(
+                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                                  activeTab === 'reasoning'
+                                    ? 'border-b-2 border-primary'
+                                    : 'border-b-2 border-transparent',
+                                )}
+                                data-track-category='Support'
+                                data-track-name='OpenReasoningTab'
+                              >
+                                <span
+                                  className={`${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  <Brain size={12} />
+                                </span>
+                                <span
+                                  className={`text-sm font-medium ${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  Reasoning
+                                </span>
+                              </button>
+                            </Tabs.Trigger>
+                          )}
+                        </Tabs.List>
+                        <div className='flex items-center gap-2 shrink-0'>
+                          {/* Initiate Call Button */}
+                          {conversationId && (
+                            <ThreadCallButton
+                              onStartCall={() => setShowParticipantsModal(true)}
+                              onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                              hasActiveCall={hasActiveCallForConversation}
+                              testId='support-initiate-call-button'
+                            />
+                          )}
+                          <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
+                            <button
+                              type='button'
+                              onClick={() => {
+                                if (isAIPanelOpen) {
+                                  xyneAIActor.send({ type: 'CLOSE' });
+                                } else {
+                                  void openDraftAgentSession();
+                                }
+                              }}
+                              className={cn(
+                                'h-8 w-8 flex items-center justify-center rounded-lg border border-border transition-colors',
+                                isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
+                              )}
+                              aria-label='Toggle Ask AI panel'
+                              aria-pressed={isAIPanelOpen}
+                              data-track-category='Support'
+                              data-track-name='ToggleAIPanel'
+                              data-track-metadata={JSON.stringify({ source: 'right-panel-header' })}
+                            >
+                              <span className='inline-flex animate-ai-pop'>
+                                <XyneAIStar size={14} />
+                              </span>
+                            </button>
+                          </Tooltip>
+                          <button
+                            onClick={() => setIsRightPanelOpen(false)}
+                            className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
+                            aria-label='Close panel'
+                            title='Close panel'
+                            data-track-category='Support'
+                            data-track-name='CloseRightPanel'
+                          >
+                            <X size={16} className='text-muted-foreground' />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Messages Tab Content */}
+                    <Tabs.Content
+                      value='messages'
+                      className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
+                    >
+                      <ThreadList
+                        channelId={channelId}
+                        conversationId={conversationId}
+                        threadMessages={messages}
+                        initialScrollOffset={0}
+                        isTicketThread={false}
+                        conversation={conversation}
+                        channelScopeType={channel?.scopeType}
+                      />
+                      {isUserMember ? (
+                        <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
+                          <ChatInput
+                            ref={inputRef}
+                            channelId={channelId}
+                            conversation={conversation ?? undefined}
+                            placeholder='Reply to this thread...'
+                            hasTicket={hasTicketInMessages}
+                          />
+                        </div>
+                      ) : (
+                        <JoinChannel
+                          channelId={channelId}
+                          {...(channel?.name && { channelTitle: channel.name })}
+                        />
+                      )}
+                    </Tabs.Content>
+
+                    {/* Details Tab Content */}
+                    <Tabs.Content
+                      value='details'
+                      className='flex-1 overflow-auto data-[state=inactive]:hidden'
+                    >
+                      {ticket?.id ? (
+                        <>
+                          <TicketDetails ticketId={ticket.id} />
+                          {channel?.type === ChannelType.SOCIAL_MEDIA && channelId && conversationId && (
+                            <InstagramCustomerHistory
+                              channelId={channelId}
+                              conversationId={conversationId}
+                              onTicketClick={xyneId => {
+                                void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                              }}
+                            />
+                          )}
+                        </>
+                      ) : (
+                        <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
+                          <FileText size={48} className='mb-2 text-muted-foreground' />
+                          <p>Ticket ID not found</p>
+                        </div>
+                      )}
+                    </Tabs.Content>
+
+                    <Tabs.Content
+                      value='sources'
+                      className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
+                    >
+                      <DraftSourcesPanel
+                        citations={visibleAutoDraftCitations}
+                        embedded
+                        showAutoDraftNote
+                        loading={sourcesHydrating}
+                      />
+                    </Tabs.Content>
+
+                    {hasAutoDraftReasoning && conversationId && channelId && (
+                      <Tabs.Content
+                        value='reasoning'
+                        className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
+                      >
+                        <AutoDraftReasoningPanel
+                          conversationId={conversationId}
+                          channelId={channelId}
+                        />
+                      </Tabs.Content>
+                    )}
+                  </Tabs.Root>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>

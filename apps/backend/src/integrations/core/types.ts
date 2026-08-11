@@ -22,11 +22,7 @@ export enum ExternalSourcePlatform {
   APP_DESK = 'app-desk',
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
-}
-
-export interface IngestionOptions {
-  /** Bypass the source's persisted cursor for an explicit full/manual fetch. */
-  ignoreSyncCursor?: boolean;
+  INSTAGRAM = 'instagram',
 }
 
 /**
@@ -93,11 +89,7 @@ export interface NormalizedData {
     replyTo?: string[];
     type?: EmailType;
     sentByUserId?: string;
-    rating?: number;
-    clientVersionName?: string;
-    clientVersionCode?: string;
-    updateExisting?: boolean;
-    syncTicketOnUpdate?: boolean;
+    skipBlockingCheck?: boolean;
   };
 
   ticketCustomFields?: Array<{
@@ -192,9 +184,6 @@ export interface ExternalSourceAdapter {
   /** Platform name (e.g., "zoho", "slack") */
   name: string;
 
-  /** True when the adapter is ingested by a scheduled provider poll. */
-  supportsPolling?: boolean;
-
   /** Authenticate incoming request (JWT, HMAC, etc.) and check if processing should be skipped */
   authenticate(
     rawBody: string,
@@ -204,11 +193,7 @@ export interface ExternalSourceAdapter {
   ): Promise<AuthResult>;
 
   /** Optional: Preprocess payload (fetch additional data via API) */
-  preprocess?(
-    rawPayload: unknown,
-    source?: ExternalSource,
-    options?: IngestionOptions,
-  ): Promise<unknown>;
+  preprocess?(rawPayload: unknown, source?: ExternalSource): Promise<unknown>;
 
   /** Optional: Dynamically determine source name for database lookup based on payload */
   getSourceNameFromDB?(payload: unknown): string | undefined;
@@ -249,7 +234,7 @@ export interface ExternalSourceAdapter {
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 
-  /** Optional: provider reply sender for non-email Desk interactions. */
+  /** Optional: provider reply sender for non-email Desk interactions (e.g. Instagram DMs). */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 

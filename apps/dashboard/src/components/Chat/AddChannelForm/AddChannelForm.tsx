@@ -18,6 +18,7 @@ import {
   Share2,
   Plus,
   Trash2,
+  Instagram,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -93,9 +94,9 @@ const DESK_SOURCES: ReadonlyArray<{
   },
   {
     value: DeskType.SOCIAL_MEDIA,
-    label: 'Social media',
-    description: 'Create support tickets from Google Play reviews',
-    icon: Share2,
+    label: 'Instagram',
+    description: 'Connect an Instagram Business account to receive and reply to DMs',
+    icon: Instagram,
   },
 ];
 
@@ -144,6 +145,7 @@ interface AddChannelFormProps {
       slackChannelId?: string;
       installedAppId?: string;
       applications?: GooglePlayApplicationInput[];
+      platform?: 'web' | 'electron';
     },
   ) => void;
   onCancel: () => void;
@@ -344,6 +346,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             deskType: DeskType.CALL,
             callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          const isElectron = typeof window.electronAPI?.openExternal === 'function';
+          onSubmit?.({
+            ...value,
+            connector: null,
+            deskType: DeskType.SOCIAL_MEDIA,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+            platform: isElectron ? 'electron' : 'web',
           });
         } else {
           onSubmit?.({

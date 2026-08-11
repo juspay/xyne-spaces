@@ -369,7 +369,7 @@ export class ExternalSourceCore {
         externalId: normalizedData.externalId,
         externalThreadId: normalizedData.externalThreadId,
         entityId: resolvedEntityId,
-        direction: MessageDirection.INCOMING,
+        direction: normalizedData.metadata.isReply ? MessageDirection.OUTGOING : MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
       });
     }
