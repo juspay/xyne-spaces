@@ -39,6 +39,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -840,7 +841,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
     <div className='flex items-center h-full'>
       {assignedUser ? (
         <div className='flex items-center gap-3'>
-          <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+          <Tooltip content={getUserDisplayName(assignedUser)}>
             <Avatar
               userId={assignedUser.id}
               className='rounded-full size-6 flex items-center justify-center'
@@ -848,7 +849,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
             />
           </Tooltip>
           <span className='text-muted-foreground truncate font-medium'>
-            {assignedUser.name || assignedUser.email}
+            {getUserDisplayName(assignedUser)}
           </span>
         </div>
       ) : assignedGroup ? (

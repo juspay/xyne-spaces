@@ -38,6 +38,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Channel, ChannelScopeType } from '@xyne/shared';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { FilterPills, type FilterPillOption } from '../../ui/FilterPills';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 // Simple component for DM search results (no message preview)
 const DmSearchResultItem = ({
@@ -78,7 +79,9 @@ const DmSearchResultItem = ({
 interface DmUserSearchResultItemProps {
   user: {
     id: string;
-    name: string;
+    name?: string | null;
+    email?: string | null;
+    displayName?: string | null;
   };
   isSelected: boolean;
   isCurrentUser?: boolean;
@@ -93,7 +96,7 @@ const DmUserSearchResultItem = ({
     <div className={`flex items-center gap-3 px-2 py-2 ${isSelected ? 'bg-accent' : ''}`}>
       <Avatar userId={user.id} size='md' showActiveStatus className='rounded-lg' />
       <span className='text-sm font-medium text-foreground truncate'>
-        {user.name}
+        {getUserDisplayName(user)}
         {isCurrentUser ? ' (you)' : ''}
       </span>
     </div>
@@ -179,7 +182,6 @@ const DmsPage = (): ReactElement => {
     userChannelStatuses,
     loadMore,
     firstItemIndex,
-    selectedChannelMovedVersion,
     jumpToChannel,
   } = useDmsPaginatedMessages({ selectedChannelId: channelId });
 
@@ -324,19 +326,6 @@ const DmsPage = (): ReactElement => {
     });
     return (): void => cancelAnimationFrame(raf);
   }, [directMessages]);
-
-  // Scroll to top when the selected channel receives a new message and moves to top.
-  // Only fires in live mode (the hook guards this internally).
-  useEffect(() => {
-    if (
-      activeTab === 'all' &&
-      !isMobile &&
-      selectedChannelMovedVersion > 0 &&
-      virtuosoRef.current
-    ) {
-      virtuosoRef.current.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
-    }
-  }, [activeTab, selectedChannelMovedVersion, isMobile]);
 
   const handleAddDirectMessage = (): void => {
     setShowAddDmForm(true);
