@@ -525,7 +525,7 @@
   Do not paste a JSON-escaped wrapper string. Paste the actual email body.
   ============================================================================
 -->
-        <template id="dpip-email-body"> </template>
+<template id="dpip-email-body">[]</template>
 
         <header>
             <div class="header-inner">
@@ -1240,7 +1240,7 @@
                         : entries;
                 }
 
-                function latestSnapshotRows(rows, from, to, partyMatcher) {
+                function latestSnapshotRows(rows, from, to, partyMatcher, bucket) {
                     let candidates = rows.filter((row) =>
                         inDateRange(row.last_updated_date, from, to),
                     );
@@ -1251,9 +1251,29 @@
                         .map((row) => row.last_updated_date)
                         .sort()
                         .at(-1);
-                    return candidates.filter(
+                    let latestRows = candidates.filter(
                         (row) => row.last_updated_date === latest,
                     );
+                    /* Same-day job re-runs can leave two rows for one bucket with
+                       slightly different values; keep the larger one — the
+                       registry only grows within a day. */
+                    if (bucket) {
+                        const best = new Map();
+                        for (const row of latestRows) {
+                            const key = bucket.key
+                                .map((field) => row[field])
+                                .join("|");
+                            const prev = best.get(key);
+                            if (
+                                prev === undefined ||
+                                Number(row[bucket.value]) >
+                                    Number(prev[bucket.value])
+                            )
+                                best.set(key, row);
+                        }
+                        latestRows = [...best.values()];
+                    }
+                    return latestRows;
                 }
 
                 function splitParties(value) {
@@ -1862,23 +1882,41 @@
                         tables.cluster_external_entities,
                         selectedFrom,
                         selectedTo,
+                        null,
+                        {
+                            key: ["num_external_entities"],
+                            value: "cluster_count",
+                        },
                     );
                     const externalIdentifiers = latestSnapshotRows(
                         tables.external_entity_identifiers,
                         selectedFrom,
                         selectedTo,
                         partyMatcher,
+                        {
+                            key: ["party_id", "num_identifiers"],
+                            value: "external_entity_count",
+                        },
                     );
                     const clusterIdentifiers = latestSnapshotRows(
                         tables.cluster_identifiers,
                         selectedFrom,
                         selectedTo,
+                        null,
+                        {
+                            key: ["num_identifiers"],
+                            value: "cluster_count",
+                        },
                     );
                     const partyIdentifiers = latestSnapshotRows(
                         tables.party_identifiers,
                         selectedFrom,
                         selectedTo,
                         partyIdsMatcher,
+                        {
+                            key: ["party_ids"],
+                            value: "num_identifiers",
+                        },
                     );
 
                     const totalReports = sum(aggregateReports, "reports_count");

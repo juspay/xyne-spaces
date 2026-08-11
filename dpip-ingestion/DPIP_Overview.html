@@ -139,7 +139,7 @@
     <p class="section-label">Screening by usecase</p>
     <div class="chart-card">
       <h3 class="has-tip" data-tip="Screening volume split by usecase, over the period shown.">Screening by usecase — <span id="usecaseScopeLabel">--</span></h3>
-      <p class="chart-desc">Unavailable in current DPIP payload: screening rows contain status totals, but no usecase dimension.</p>
+      <div class="chart-wrap"><canvas id="chartUsecase"></canvas></div>
     </div>
   </section>
 
@@ -323,11 +323,28 @@ const SCREENINGS = CUTOFF_ISO === null ? [] : SCREENINGS_RAW.filter(r => r.date 
 
 /* Snapshot tables: point-in-time registry state keyed by last_updated_date
    (same source the daily Registry Intelligence report uses for its KPI cards) */
-const EXTERNAL_ENTITY_SNAPSHOTS = rowsFor('external_entity_identifiers')
+/* Same-day job re-runs can leave two rows for one bucket with slightly different
+   counts; keep the larger one — the registry only grows within a day. */
+function dedupeByBucket(rows, keyOf, countOf){
+  const best = new Map();
+  for(const r of rows){
+    const k = keyOf(r);
+    const prev = best.get(k);
+    if(prev === undefined || countOf(r) > countOf(prev)) best.set(k, r);
+  }
+  return [...best.values()];
+}
+const EXTERNAL_ENTITY_SNAPSHOTS = dedupeByBucket(
+    rowsFor('external_entity_identifiers'),
+    r => r.last_updated_date + '|' + r.party_id + '|' + r.num_identifiers,
+    r => numOf(r.external_entity_count))
   .map(r => ({ date: String(r.last_updated_date), bank: String(r.party_id),
                entities: numOf(r.external_entity_count) }))
   .filter(r => CUTOFF_ISO !== null && r.date <= CUTOFF_ISO);
-const CLUSTER_SNAPSHOTS = rowsFor('cluster_external_entities')
+const CLUSTER_SNAPSHOTS = dedupeByBucket(
+    rowsFor('cluster_external_entities'),
+    r => r.last_updated_date + '|' + r.num_external_entities,
+    r => numOf(r.cluster_count))
   .map(r => ({ date: String(r.last_updated_date), clusters: numOf(r.cluster_count) }))
   .filter(r => CUTOFF_ISO !== null && r.date <= CUTOFF_ISO);
 
@@ -636,9 +653,27 @@ function renderAll(){
       plugins:{legend:{display:false}, tooltip:trendTooltip()} }
   });
 
-  /* ---- usecase split is unavailable in the current six-table payload ---- */
+  /* ---- screening by usecase: placeholder (all zeros) until the payload carries the usecase
+     split from the new DB — expected as a table of screening counts by event type ---- */
+  const USECASE_LABELS = ['Onboarding','P2P Transaction','P2M Transaction','Beneficiary Addition','Bulk Screening'];
+  upsertChart('chartUsecase', {
+    type:'bar',
+    data:{ labels:USECASE_LABELS, datasets:[{ data:USECASE_LABELS.map(() => 0),
+      backgroundColor:[COLORS.navy,COLORS.steel,COLORS.teal,COLORS.amber,'#7a8ba8'] }] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      scales:{ x:{grid:{display:false}}, y:{grid:{color:COLORS.grid}, beginAtZero:true, suggestedMax:10} },
+      plugins:{legend:{display:false}} }
+  });
+  /* ---- active parties per usecase: placeholder rows until the payload carries the usecase
+     split — then each row gets the distinct-party count and the party names for the period ---- */
   document.getElementById('usecasePartiesTableWrap').innerHTML =
-    '<p class="chart-desc">Unavailable in current DPIP payload: active parties cannot be grouped by usecase.</p>';
+    `<table class="leader"><thead><tr>
+      <th class="has-tip" data-tip="Screening usecase.">Usecase</th>
+      <th class="has-tip" data-tip="Distinct banks with screening activity on this usecase in the period shown.">Active Parties</th>
+      <th class="has-tip" data-tip="The banks active on this usecase in the period shown.">Parties</th>
+    </tr></thead><tbody>`
+    + USECASE_LABELS.map(u => `<tr><td><strong>${u}</strong></td><td class="num-cell">&mdash;</td><td class="num-cell">&mdash;</td></tr>`).join('')
+    + '</tbody></table>';
 
   /* ---- leaderboard: every bank, ranked by weighted growth (60% screenings, 40% reports) —
      month-on-month in month view, year-on-year (trailing 365 days vs the prior 365) in the
