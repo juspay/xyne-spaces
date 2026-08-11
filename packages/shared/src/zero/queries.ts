@@ -1124,6 +1124,7 @@ export const queries = defineQueries({
       isMember: z.boolean(),
       merchantMid: z.string().optional(),
       assignedTo: z.array(z.string()).optional(),
+      createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
@@ -1132,11 +1133,13 @@ export const queries = defineQueries({
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      createdAtStart: z.number().optional(),
+      createdAtEnd: z.number().optional(),
       conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1146,6 +1149,10 @@ export const queries = defineQueries({
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+      }
+
+      if (createdBy && createdBy.length > 0) {
+        query = query.where('createdBy', 'IN', createdBy);
       }
 
       if (priority && priority.length > 0) {
@@ -1185,6 +1192,14 @@ export const queries = defineQueries({
 
       if (lastEmailAtEnd !== undefined) {
         query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
+      }
+
+      if (createdAtStart !== undefined) {
+        query = query.where('createdAt', '>=', createdAtStart);
+      }
+
+      if (createdAtEnd !== undefined) {
+        query = query.where('createdAt', '<=', createdAtEnd);
       }
 
       query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
@@ -1300,6 +1315,7 @@ export const queries = defineQueries({
       channelId: z.string(),
       isMember: z.boolean(),
       assignedTo: z.array(z.string()).optional(),
+      createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
@@ -1309,18 +1325,24 @@ export const queries = defineQueries({
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      createdAtStart: z.number().optional(),
+      createdAtEnd: z.number().optional(),
       conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+      }
+
+      if (createdBy && createdBy.length > 0) {
+        query = query.where('createdBy', 'IN', createdBy);
       }
 
       if (priority && priority.length > 0) {
@@ -1403,6 +1425,14 @@ export const queries = defineQueries({
 
       if (lastEmailAtEnd !== undefined) {
         query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
+      }
+
+      if (createdAtStart !== undefined) {
+        query = query.where('createdAt', '>=', createdAtStart);
+      }
+
+      if (createdAtEnd !== undefined) {
+        query = query.where('createdAt', '<=', createdAtEnd);
       }
 
       query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
