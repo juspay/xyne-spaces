@@ -269,11 +269,43 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         conversationId: true,
         msgType: true,
         hasAttachment: true,
-        createdAt: true
+        createdAt: true,
+        isDeleted: true,
       },
     });
 
-    if (!message || message.msgType === "SYSTEM" ) {
+    if (!message) {
+      return;
+    }
+
+    if (message.msgType === MessageType.SYSTEM) {
+      const conversation = await db.conversation.findUnique({
+        where: { conversationId: message.conversationId },
+        select: { initialMessageId: true },
+      });
+      const isReply =
+        !message.isDeleted &&
+        conversation?.initialMessageId != null &&
+        conversation.initialMessageId !== message.messageId;
+      if (isReply) {
+        try {
+          await db.conversationParticipant.updateMany({
+            where: {
+              conversationId: message.conversationId,
+              OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: message.createdAt } }],
+            },
+            data: { lastReplyAt: message.createdAt },
+          });
+          logger.info('[MessagesSideEffect] Updated lastReplyAt for SYSTEM reply', {
+            conversationId: message.conversationId,
+          });
+        } catch (error) {
+          logger.error('[MessagesSideEffect] Failed to update lastReplyAt for SYSTEM reply:', {
+            conversationId: message.conversationId,
+            error,
+          });
+        }
+      }
       return;
     }
 
@@ -2067,7 +2099,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       activityService.deleteActivitiesBySource('message', messageId),
     ]);
 
-    if (!previousValue?.conversationId || previousValue.msgType === MessageType.SYSTEM) {
+    if (!previousValue?.conversationId) {
       return;
     }
 
@@ -2076,7 +2108,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       select: { initialMessageId: true, channelId: true },
     });
 
-    if (!conversation?.initialMessageId || !conversation.channelId) {
+    if (!conversation?.initialMessageId) {
       return;
     }
 
@@ -2112,6 +2144,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       logger.error('[MessagesSideEffectHandler] Failed to roll back lastReplyAt on delete', {
         error: error
       });
+    }
+
+    if (previousValue.msgType === MessageType.SYSTEM) {
+      return;
+    }
+
+    if (!conversation.channelId) {
+      return;
     }
 
     let repliers: string[] = [];
@@ -2259,9 +2299,20 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload,
     userIds: string[],
   ): Promise<void> {
+    // App event delivery happens asynchronously and therefore cannot rely on
+    // the sender's browser cookie. Stamp the trusted workspace from the Zero
+    // context; retain every legacy payload field unchanged.
+    const sender = await db.user.findUnique({
+      where: { id: payload.userId },
+      select: { orgMemberId: true },
+    });
     const event: BaseAppEvent = {
       eventType,
-      payload,
+      payload: {
+        ...payload,
+        workspaceId: payload.workspaceId ?? this.ctx.workspaceId,
+        ...(sender?.orgMemberId ? { orgMemberId: sender.orgMemberId } : {}),
+      },
       timestamp: new Date().toISOString(),
     };
 

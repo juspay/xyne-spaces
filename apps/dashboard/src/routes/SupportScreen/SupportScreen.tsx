@@ -1,6 +1,4 @@
 import {
-  MessageCircle,
-  FileText,
   ChevronDown,
   ChevronUp,
   ChevronLeft,
@@ -27,7 +25,6 @@ import {
   Plus,
   Wand2,
   Sparkles,
-  Brain,
   Loader2,
   Pencil,
   Archive,
@@ -83,14 +80,8 @@ import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
-import ThreadList from '../../components/Chat/ThreadList/ThreadList';
-import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
-import {
-  useChannel,
-  useGetChannelUserStatus,
-  useEmailChannels,
-  useUserChannelStatuses,
-} from '../../hooks/useChannels';
+import ThreadMessages from '../../components/Chat/ThreadPannel';
+import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
@@ -136,12 +127,8 @@ import {
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine, clearTicketFilterParams } from '../../machines/ticketFiltersMachine';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
-import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
-import { DragAndDropOverlay } from '../../components/Chat/DragAndDropOverlay';
 import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
-import * as Tabs from '@radix-ui/react-tabs';
-import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -152,7 +139,6 @@ import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
-import { getDraft } from '../../hooks/useDraft';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../../hooks/useUsers';
@@ -165,20 +151,12 @@ import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
 import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  DraftSourcesPanel,
-  isOpenableCitationUrl,
-  resolveCitedClawCitations,
-} from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
-import { AutoDraftReasoningPanel } from '../../components/xyne-desk/AutoDraftReasoningPanel/AutoDraftReasoningPanel';
-import type {
-  ClawCitation,
-  ToolInvocation,
-} from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
+import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
+import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -202,10 +180,6 @@ import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
 import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
-import {
-  extractInlineCitations,
-  type InlineCitation,
-} from '../../components/ui/TipTapExtensions/CitationMark';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
@@ -227,7 +201,6 @@ import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
-import { XyneAIStar } from '../../components/icons/xyne-ai';
 import {
   channelService,
   CreateChannelFormData,
@@ -236,7 +209,6 @@ import {
 import { summarizeEmailThread } from '../../services/summarizeService';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
-import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
@@ -312,6 +284,7 @@ const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new
   ChannelType.CALL,
   ChannelType.SLACK,
   ChannelType.APP,
+  ChannelType.SOCIAL_MEDIA,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -558,7 +531,6 @@ interface DemergeEmailResponse {
     conversationId: string;
   };
 }
-type TabType = 'messages' | 'details' | 'sources' | 'reasoning';
 
 type ViewMode = 'kanban' | 'list' | 'table';
 
@@ -585,9 +557,23 @@ const SupportScreen = (): ReactElement => {
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
 
-  const [channelBoardId, setChannelBoardId] = useState<string | null>(null);
+  const [resolvedChannelBoard, setResolvedChannelBoard] = useState<{
+    channelId: string;
+    boardId: string;
+  } | null>(null);
+  const channelBoardId =
+    resolvedChannelBoard?.channelId === selectedChannelId ? resolvedChannelBoard.boardId : null;
+  const handleChannelBoardIdResolved = useCallback(
+    (boardId: string): void => {
+      if (selectedChannelId) {
+        setResolvedChannelBoard({ channelId: selectedChannelId, boardId });
+      }
+    },
+    [selectedChannelId],
+  );
+  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
   useEffect(() => {
-    setChannelBoardId(null);
+    setKanbanTickets([]);
   }, [selectedChannelId]);
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -1391,23 +1377,28 @@ const SupportScreen = (): ReactElement => {
     markViewed();
     return markViewed;
   }, [selectedChannelId, isSelectedChannelJoined]);
-  const selectedChannelName =
-    sortedEmailChannels.find(c => c.id === selectedChannelId)?.name?.trim() || 'Xyne Desk';
+  const selectedChannelFull = useMemo(
+    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
+    [sortedEmailChannels, selectedChannelId],
+  );
+  const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
+  const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
 
-  // Manual fetch — shown when a specific email channel is selected.
-  // SupportScreen already filters to EMAIL channels; the hook owns its own
-  // toasts and the 400 / 403 / generic-error branches.
+  // Manual fetch for the selected desk. Social-media desks fetch every review
+  // currently available from Google; email desks open the range picker.
   const refetchChannelId =
     selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : undefined;
-  const { refetch: handleRefetch, isPending: isRefetching } =
-    useRefetchExternalSource(refetchChannelId);
+  const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
+    refetchChannelId,
+    isSocialMediaDesk,
+  );
   const canRefetch = !!refetchChannelId;
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
     if (channelPreference?.boardId) {
-      setChannelBoardId(channelPreference.boardId);
+      handleChannelBoardIdResolved(channelPreference.boardId);
     }
-  }, [selectedChannelId, channelPreference?.boardId]);
+  }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -1608,16 +1599,6 @@ const SupportScreen = (): ReactElement => {
     [selectedTickets, clearTicketSelection, navigate, supportBase],
   );
 
-  const selectedChannelFull = useMemo(
-    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
-    [sortedEmailChannels, selectedChannelId],
-  );
-
-  // Only the setter is read (onTicketsLoaded callbacks below); the loaded ticket
-  // array itself is not consumed here since the merge dialog is built from the
-  // selection map. See mergeDialogTickets for the rationale.
-  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
-
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
   const mergeDialogTickets = useMemo(() => {
@@ -1649,6 +1630,8 @@ const SupportScreen = (): ReactElement => {
     onSuccess: () => {
       setShowCreateChannelModal(false);
       toast.success('Channel created successfully');
+      void queryClient.invalidateQueries({ queryKey: ['app-desk-eligible-apps'] });
+      void queryClient.invalidateQueries({ queryKey: ['slack-desk-channels'] });
     },
     onError: (error: Error) => {
       toast.error('Failed to create channel', {
@@ -1660,18 +1643,58 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      applications?: Array<{ displayName: string; packageName: string }>;
     },
   ) => {
-    const { connector, deskType, callSource, dlEmail, slackChannelId, installedAppId, ...rest } =
-      data;
+    const {
+      connector,
+      deskType,
+      callSource,
+      dlEmail,
+      slackChannelId,
+      installedAppId,
+      applications,
+      channelType: _submittedChannelType,
+      ...rest
+    } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
+
+    if (deskType === 'SOCIAL_MEDIA') {
+      if (!applications?.length || !rest.boardId) {
+        toast.error('At least one Google Play application and a board are required');
+        return;
+      }
+      void startGooglePlayOAuth({
+        channelName: rest.name,
+        applications,
+        projectId: rest.projectId,
+        boardId: rest.boardId,
+        ...(rest.assigneeUserGroupId && {
+          assigneeUserGroupId: rest.assigneeUserGroupId,
+        }),
+        visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        platform: isElectron ? 'electron' : 'web',
+      })
+        .then(authorizationUrl => {
+          setShowCreateChannelModal(false);
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(authorizationUrl);
+          } else {
+            window.location.href = authorizationUrl;
+          }
+        })
+        .catch(error => {
+          toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
+        });
+      return;
+    }
 
     if (deskType === 'SLACK') {
       if (!slackChannelId) {
@@ -1816,6 +1839,34 @@ const SupportScreen = (): ReactElement => {
     createChannelMutation.mutate(rest);
   };
 
+  useEffect(() => {
+    const connected = searchParams.get('socialMediaOAuth') === 'success';
+    const error = searchParams.get('socialMediaError');
+    const failedPackage = searchParams.get('socialMediaPackage');
+    if (!connected && !error) return;
+    if (connected) {
+      toast.success('Google Play reviews connected successfully');
+      if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
+    }
+    if (error === 'google_play_package_validation_failed' && failedPackage) {
+      toast.error('Google Play app connection failed', {
+        description: `Could not access ${failedPackage}. Check its Play Console permissions.`,
+      });
+    } else if (error) {
+      toast.error(error.replaceAll('_', ' '));
+    }
+    setSearchParams(
+      previous => {
+        const next = new URLSearchParams(previous);
+        next.delete('socialMediaOAuth');
+        next.delete('socialMediaError');
+        next.delete('socialMediaPackage');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, selectedChannelId, setSearchParams]);
+
   const handleTicketClick = useCallback(
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
@@ -1938,15 +1989,20 @@ const SupportScreen = (): ReactElement => {
               className:
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
-          : c.type === ChannelType.CALL
+          : c.type === ChannelType.SOCIAL_MEDIA
             ? {
-                label: 'Call',
-                className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                label: 'Social',
+                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
               }
-            : {
-                label: 'Mailbox',
-                className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-              };
+            : c.type === ChannelType.CALL
+              ? {
+                  label: 'Call',
+                  className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
+                }
+              : {
+                  label: 'Mailbox',
+                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                };
     const isJoined = joinedChannelIds.has(c.id);
     const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
@@ -2380,11 +2436,19 @@ const SupportScreen = (): ReactElement => {
                           </DropdownMenu>
                         ) : (
                           <Tooltip
-                            content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
+                            content={
+                              isRefetching
+                                ? 'Fetching latest…'
+                                : isSocialMediaDesk
+                                  ? 'Fetch all available Google Play reviews'
+                                  : 'Fetch latest emails'
+                            }
                             side='bottom'
                           >
                             <button
-                              onClick={() => setShowRefetchDialog(true)}
+                              onClick={() =>
+                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
+                              }
                               disabled={isRefetching}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -3019,6 +3083,8 @@ const SupportScreen = (): ReactElement => {
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
                   availableDesks={metricsSelectableDesks}
+                  customFieldDefinitions={deskDynamicFields}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3099,7 +3165,7 @@ const SupportScreen = (): ReactElement => {
                       <SupportKanbanBoard
                         channelId={selectedChannelId}
                         boardId={channelBoardId}
-                        onBoardIdResolved={setChannelBoardId}
+                        onBoardIdResolved={handleChannelBoardIdResolved}
                         ticketFilter={ticketFilter}
                         dynamicFieldEntries={dynamicFieldEntries}
                         onTicketClick={handleTicketClick}
@@ -3113,7 +3179,7 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         visibleColumns={tableVisibleColumns}
                         dynamicFieldColumns={tableDynamicFieldColumns}
-                        onBoardIdResolved={setChannelBoardId}
+                        onBoardIdResolved={handleChannelBoardIdResolved}
                         onTicketsLoaded={setKanbanTickets}
                         selectedIds={selectedTicketIds}
                         onSelectionChange={handleTableSelectionChange}
@@ -3139,7 +3205,7 @@ const SupportScreen = (): ReactElement => {
                         activeTicketId={ticketId}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
-                        onBoardIdReady={setChannelBoardId}
+                        onBoardIdReady={handleChannelBoardIdResolved}
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={setKanbanTickets}
@@ -3259,7 +3325,7 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && (
+      {canRefetch && !isSocialMediaDesk && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
@@ -3440,7 +3506,7 @@ export const SupportTicketDetail = ({
   }>();
   const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
   const shareableOrigin = useShareableOrigin();
-  const { workspaceId, userID } = useAuthContextValues();
+  const { workspaceId } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
     xyneAIActor,
@@ -3459,22 +3525,9 @@ export const SupportTicketDetail = ({
   }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
-  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
+  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('replyAll');
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const [isArchivingTicket, setIsArchivingTicket] = useState(false);
-  // Auto-draft citations, fetched from the desk-owner's claw draft conversation
-  // via the autodraft-insight read-through endpoint (the auto-draft runs as the
-  // channel owner, so its citations aren't in the querying user's sidebar).
-  const [autoDraftCitations, setAutoDraftCitations] = useState<ClawCitation[]>([]);
-  // The querying user's own draft-agent session for this email thread (rerun /
-  // help-me-write run as the user). Used only to gate the "See sources" entry
-  // points — its citations live in the user's sidebar, not in this panel.
-  const [userDraftSession, setUserDraftSession] = useState<{
-    sessionId: string;
-    answered: boolean;
-  } | null>(null);
-  const [sourcesHydrating, setSourcesHydrating] = useState(false);
-  const [draftInlineCitations, setDraftInlineCitations] = useState<InlineCitation[]>([]);
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
     if (!cid) return;
     try {
@@ -3485,7 +3538,7 @@ export const SupportTicketDetail = ({
   }, []);
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const routerState = location.state as {
     conversationId?: string | null;
     ticketId?: string | null;
@@ -3519,37 +3572,6 @@ export const SupportTicketDetail = ({
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const ticketEmailDrafts = useEmailDrafts(detailConversationId);
-  const ticketEmailDraftCount = ticketEmailDrafts.length;
-  const draftBodyHtml = useMemo<string | null>(() => {
-    if (!ticketEmailDrafts || ticketEmailDrafts.length === 0) return null;
-
-    const ownedBody: string | null = userID
-      ? (ticketEmailDrafts.find(d => d.userId === userID)?.draftContent ?? null)
-      : null;
-    const fallbackBody: string | null =
-      ticketEmailDrafts.find(d => d.userId === null)?.draftContent ?? null;
-    return ownedBody ?? fallbackBody;
-  }, [ticketEmailDrafts, userID]);
-  const persistedInlineCitations = useMemo(
-    () => extractInlineCitations(draftBodyHtml ?? ''),
-    [draftBodyHtml],
-  );
-  const visibleInlineCitations = useMemo(
-    () =>
-      (draftInlineCitations.length > 0 ? draftInlineCitations : persistedInlineCitations).filter(
-        citation => isOpenableCitationUrl(citation.url),
-      ),
-    [draftInlineCitations, persistedInlineCitations],
-  );
-  const visibleAutoDraftCitations = useMemo<ClawCitation[]>(() => {
-    if (!(composerOpen || ticketEmailDraftCount > 0)) return [];
-    return autoDraftCitations;
-  }, [composerOpen, ticketEmailDraftCount, autoDraftCitations]);
-
-  const draftHasCitations =
-    (composerOpen || ticketEmailDraftCount > 0) &&
-    (visibleAutoDraftCitations.length > 0 || visibleInlineCitations.length > 0);
-  const hasUserDraftAgentSession = !!userDraftSession?.answered;
 
   // Start the primary email query from router state while ticket metadata loads,
   // then include any merged-ticket conversations once the detail query resolves.
@@ -3660,7 +3682,6 @@ export const SupportTicketDetail = ({
     }),
     { enabled: !!conversationId && !!channelId },
   );
-  const conversation = threadConversation ?? undefined;
   const messages = useMemo(
     () => [...(threadConversation?.messages ?? [])],
     [threadConversation?.messages],
@@ -3697,7 +3718,8 @@ export const SupportTicketDetail = ({
         contextType: 'chat',
         channelId,
         threadInfo,
-        ...(sessionId ? { focusSessionId: sessionId } : { startFreshChat: true }),
+        focusSessionId: sessionId ?? conversationId,
+        deskAutoDraft: { conversationId, channelId },
       });
     },
     [conversationId, channelId, draftAgentSlug, title, setSelectedAgentSlug],
@@ -3710,64 +3732,6 @@ export const SupportTicketDetail = ({
     }
     setComposerOpenState(composerOpenByConv.get(conversationId) ?? false);
   }, [conversationId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setAutoDraftCitations([]);
-    setUserDraftSession(null);
-    if (!conversationId) {
-      setSourcesHydrating(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-    setSourcesHydrating(true);
-
-    const withRetry = async <T,>(fn: () => Promise<T>): Promise<T> => {
-      let lastErr = new Error('request failed');
-      for (const delay of [0, 400, 1200]) {
-        if (delay > 0) await new Promise(r => setTimeout(r, delay));
-        if (cancelled) throw new Error('cancelled');
-        try {
-          return await fn();
-        } catch (err) {
-          lastErr = err instanceof Error ? err : new Error(String(err));
-        }
-      }
-      throw lastErr;
-    };
-
-    const hydrateAutodraft = async (): Promise<void> => {
-      if (!channelId) return;
-      try {
-        const res = await withRetry(() =>
-          apiInstance.get<{
-            available: boolean;
-            content: string | null;
-            toolInvocations: ToolInvocation[];
-          }>(`/email/${conversationId}/autodraft-insight`, { params: { channelId } }),
-        );
-        if (cancelled) return;
-        const citations = resolveCitedClawCitations(res.data.content, res.data.toolInvocations);
-        if (!cancelled) setAutoDraftCitations(citations);
-      } catch {
-        // No auto-draft insight yet for this conv — fine, leave empty.
-      }
-    };
-
-    // Ask AI v1 provided a desk-conversation → session lookup used to restore
-    // the querying user's prior draft-agent session (to gate "See sources").
-    // v2/claw has no equivalent by-conversation lookup on the frontend, so this
-    // restore is dropped — the autodraft insight (hydrateAutodraft) still runs.
-    void Promise.allSettled([hydrateAutodraft()]).finally(() => {
-      if (!cancelled) setSourcesHydrating(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, channelId]);
 
   const setComposerOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
     next => {
@@ -4132,68 +4096,12 @@ export const SupportTicketDetail = ({
     queries.conversationLabelMappingsByConversationId({ conversationId: conversationId || '' }),
     { enabled: !!conversationId },
   );
-  const channelParticipation = useGetChannelUserStatus(channelId);
-  const isUserMember = !!channelParticipation;
-
   // Subscribe to channel for real-time updates
   useChannelSubscription(channelId, conversationId ? [conversationId] : []);
 
-  // Drag and drop functionality
-  const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(conversationId || '');
-
-  // Mark thread activities as read when component unmounts
   const zero = useZero();
-  useEffect(() => {
-    return (): void => {
-      if (conversationId) {
-        const draft = getDraft(channelId, conversationId);
-        void zero.mutate(
-          mutators.activities.markThreadActivitiesAsReadV2({
-            conversationId,
-            timestamp: Date.now(),
-            draftMessage: draft || '',
-            draftMessageId: uuidv4(),
-            participantId: uuidv4(),
-          }),
-        );
-      }
-    };
-  }, [conversationId]);
-
-  // Check if any message has a ticketId in metadata
-  const hasTicketInMessages = useMemo(() => {
-    if (!messages || messages.length === 0) return false;
-    return messages.some(msg => {
-      const metadata = msg.metadata as { ticketId?: string } | null;
-      return metadata?.ticketId !== undefined;
-    });
-  }, [messages]);
-
-  const hasAutoDraftReasoning = ticketDraft?.autoDraftStatus === AutoDraftStatus.READY;
-  const activeTab: TabType = ((): TabType => {
-    const t = searchParams.get('selectedTab');
-    if (t === 'details') return 'details';
-    if (t === 'sources') return 'sources';
-    if (t === 'reasoning' && hasAutoDraftReasoning) return 'reasoning';
-    return 'messages';
-  })();
-  const setActiveTab = useCallback(
-    (next: TabType) => {
-      setSearchParams(
-        prev => {
-          const params = new URLSearchParams(prev);
-          params.set('selectedTab', next);
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
-  const hasActiveCallForConversation = !!conversation?.callId;
-
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -4730,7 +4638,9 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+                  {channel?.type === ChannelType.SLACK ||
+                  channel?.type === ChannelType.APP ||
+                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
@@ -4757,7 +4667,19 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                conversationId ? (
+                  <SocialMediaReplyComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    replyBasePath='/integrations/social-media'
+                    placeholder='Reply to this review…'
+                    maxLength={350}
+                    trackingCategory='social-media-composer'
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
@@ -4797,12 +4719,8 @@ export const SupportTicketDetail = ({
                         onOpenAskAISidebarFresh={() => {
                           xyneAIActor.send({ type: 'OPEN' });
                         }}
-                        onCitationClick={(): void => {
-                          setActiveTab('sources');
-                        }}
                         onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
-                        showSeeSources={hasUserDraftAgentSession}
-                        onDraftInlineCitationsChange={setDraftInlineCitations}
+                        hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}
                         channelId={channelId}
                         channelPreference={channelPreference}
                         channelPreferenceLoaded={channelPreferenceLoaded}
@@ -4855,247 +4773,24 @@ export const SupportTicketDetail = ({
             <Panel id='ticket-side-panel' defaultSize='35%' minSize='30%' maxSize='70%'>
               <div
                 className='h-full flex flex-col overflow-hidden relative'
-                ref={dragAndDropAreaRef}
                 data-thread-citation-host
               >
-                <DragAndDropOverlay isVisible={isDragging} />
                 {conversationId && channelId ? (
-                  <Tabs.Root
-                    value={activeTab}
-                    onValueChange={value => setActiveTab(value as TabType)}
-                    className='flex-1 flex flex-col h-full overflow-hidden'
-                  >
-                    {/* Tabs Header */}
-                    <div className='w-full p-4 pb-0 bg-background flex-shrink-0'>
-                      <div className='border-b border-border flex items-center justify-between'>
-                        <Tabs.List className='flex items-center justify-start'>
-                          <Tabs.Trigger asChild value='messages'>
-                            <button
-                              className={cn(
-                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                activeTab === 'messages'
-                                  ? 'border-b-2 border-primary'
-                                  : 'border-b-2 border-transparent',
-                              )}
-                            >
-                              <span
-                                className={`${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                <MessageCircle size={12} />
-                              </span>
-                              <span
-                                className={`text-sm font-medium ${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                Messages
-                              </span>
-                            </button>
-                          </Tabs.Trigger>
-                          <Tabs.Trigger asChild value='details'>
-                            <button
-                              className={cn(
-                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                activeTab === 'details'
-                                  ? 'border-b-2 border-primary'
-                                  : 'border-b-2 border-transparent',
-                              )}
-                            >
-                              <span
-                                className={`${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                <FileText size={12} />
-                              </span>
-                              <span
-                                className={`text-sm font-medium ${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                Details
-                              </span>
-                            </button>
-                          </Tabs.Trigger>
-                          {draftHasCitations && (
-                            <Tabs.Trigger asChild value='sources'>
-                              <button
-                                className={cn(
-                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                  activeTab === 'sources'
-                                    ? 'border-b-2 border-primary'
-                                    : 'border-b-2 border-transparent',
-                                )}
-                                data-track-category='Support'
-                                data-track-name='OpenSourcesTab'
-                              >
-                                <span
-                                  className={`${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  <Sparkles size={12} />
-                                </span>
-                                <span
-                                  className={`text-sm font-medium ${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  Sources
-                                </span>
-                                <span
-                                  className={cn(
-                                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold',
-                                    activeTab === 'sources'
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'bg-muted text-muted-foreground',
-                                  )}
-                                >
-                                  {sourcesHydrating && visibleAutoDraftCitations.length === 0 ? (
-                                    <Loader2 size={10} className='animate-spin' />
-                                  ) : (
-                                    visibleAutoDraftCitations.length
-                                  )}
-                                </span>
-                              </button>
-                            </Tabs.Trigger>
-                          )}
-                          {hasAutoDraftReasoning && (
-                            <Tabs.Trigger asChild value='reasoning'>
-                              <button
-                                className={cn(
-                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                  activeTab === 'reasoning'
-                                    ? 'border-b-2 border-primary'
-                                    : 'border-b-2 border-transparent',
-                                )}
-                                data-track-category='Support'
-                                data-track-name='OpenReasoningTab'
-                              >
-                                <span
-                                  className={`${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  <Brain size={12} />
-                                </span>
-                                <span
-                                  className={`text-sm font-medium ${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  Reasoning
-                                </span>
-                              </button>
-                            </Tabs.Trigger>
-                          )}
-                        </Tabs.List>
-                        <div className='flex items-center gap-2 shrink-0'>
-                          {/* Initiate Call Button */}
-                          {conversationId && (
-                            <ThreadCallButton
-                              onStartCall={() => setShowParticipantsModal(true)}
-                              onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                              hasActiveCall={hasActiveCallForConversation}
-                              testId='support-initiate-call-button'
-                            />
-                          )}
-                          <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
-                            <button
-                              type='button'
-                              onClick={() => {
-                                if (isAIPanelOpen) {
-                                  xyneAIActor.send({ type: 'CLOSE' });
-                                } else {
-                                  void openDraftAgentSession();
-                                }
-                              }}
-                              className={cn(
-                                'h-8 w-8 flex items-center justify-center rounded-lg border border-border transition-colors',
-                                isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
-                              )}
-                              aria-label='Toggle Ask AI panel'
-                              aria-pressed={isAIPanelOpen}
-                              data-track-category='Support'
-                              data-track-name='ToggleAIPanel'
-                              data-track-metadata={JSON.stringify({ source: 'right-panel-header' })}
-                            >
-                              <span className='inline-flex animate-ai-pop'>
-                                <XyneAIStar size={14} />
-                              </span>
-                            </button>
-                          </Tooltip>
-                          <button
-                            onClick={() => setIsRightPanelOpen(false)}
-                            className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
-                            aria-label='Close panel'
-                            title='Close panel'
-                            data-track-category='Support'
-                            data-track-name='CloseRightPanel'
-                          >
-                            <X size={16} className='text-muted-foreground' />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Messages Tab Content */}
-                    <Tabs.Content
-                      value='messages'
-                      className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
-                    >
-                      <ThreadList
-                        channelId={channelId}
-                        conversationId={conversationId}
-                        threadMessages={messages}
-                        initialScrollOffset={0}
-                        isTicketThread={false}
-                        conversation={conversation}
-                        channelScopeType={channel?.scopeType}
-                      />
-                      {isUserMember ? (
-                        <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
-                          <ChatInput
-                            ref={inputRef}
-                            channelId={channelId}
-                            conversation={conversation ?? undefined}
-                            placeholder='Reply to this thread...'
-                            hasTicket={hasTicketInMessages}
-                          />
-                        </div>
-                      ) : (
-                        <JoinChannel
-                          channelId={channelId}
-                          {...(channel?.name && { channelTitle: channel.name })}
-                        />
-                      )}
-                    </Tabs.Content>
-
-                    {/* Details Tab Content */}
-                    <Tabs.Content
-                      value='details'
-                      className='flex-1 overflow-auto data-[state=inactive]:hidden'
-                    >
-                      {ticket?.id ? (
-                        <TicketDetails ticketId={ticket.id} />
-                      ) : (
-                        <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
-                          <FileText size={48} className='mb-2 text-muted-foreground' />
-                          <p>Ticket ID not found</p>
-                        </div>
-                      )}
-                    </Tabs.Content>
-
-                    <Tabs.Content
-                      value='sources'
-                      className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
-                    >
-                      <DraftSourcesPanel
-                        citations={visibleAutoDraftCitations}
-                        embedded
-                        showAutoDraftNote
-                        loading={sourcesHydrating}
-                      />
-                    </Tabs.Content>
-
-                    {hasAutoDraftReasoning && conversationId && channelId && (
-                      <Tabs.Content
-                        value='reasoning'
-                        className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
-                      >
-                        <AutoDraftReasoningPanel
-                          conversationId={conversationId}
-                          channelId={channelId}
-                        />
-                      </Tabs.Content>
-                    )}
-                  </Tabs.Root>
+                  <ThreadMessages
+                    channelId={channelId}
+                    conversationId={conversationId}
+                    ticketId={ticket?.id ?? null}
+                    matchedMessageId={targetMessageId}
+                    skipInputAutoFocus
+                    onClose={() => setIsRightPanelOpen(false)}
+                    onAskAI={() => {
+                      if (isAIPanelOpen) {
+                        xyneAIActor.send({ type: 'CLOSE' });
+                      } else {
+                        void openDraftAgentSession();
+                      }
+                    }}
+                  />
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>

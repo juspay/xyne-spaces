@@ -175,6 +175,7 @@ export const ticketTable = table('tickets')
     eta: number().optional(),
     priority: enumeration<TicketPriority>(),
     metadata: json().optional(),
+    rootId: string().optional(),
     closedAt: number().optional(),
     closedBy: string().optional(),
     xyneId: string(),
@@ -278,6 +279,18 @@ export const projectTagTable = table('project_tags')
   })
   .primaryKey('id');
 
+export const ticketExportTable = table('ticket_exports') // TicketExport
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    requestedBy: string(),
+    status: string(),
+    filters: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const ticketTagMappingTable = table('ticket_tag_mappings')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -345,6 +358,7 @@ export const boardTable = table('boards')
     createdBy: string(),
     updatedBy: string().optional(),
     metadata: json().optional(),
+    flowPlan: string().optional(),
     vcsProvider: enumeration<VCSProviderType>().optional(),
     releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
     createdAt: number(),
@@ -510,6 +524,7 @@ export const userGroupTable = table('user_groups')
     autoRotationEnabled: boolean(),
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
+    reassignOnUnavailable: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -1302,6 +1317,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     blockId: string(),
     anchorText: string().optional(),
     initialCommentId: string().optional(),
+    commentCount: number(),
     status: enumeration<CanvasCommentThreadStatus>(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
@@ -1422,6 +1438,9 @@ export const emailTable = table('emails')
     externalMessageId: string(),
     sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
+    rating: number().optional(),
+    clientVersionName: string().optional(),
+    clientVersionCode: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2861,6 +2880,11 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
     destField: ['userGroupId'],
     destSchema: collectionPermissionTable,
   }),
+  ticketExports: many({
+    sourceField: ['id'],
+    destField: ['requestedBy'],
+    destSchema: ticketExportTable,
+  }),
 }));
 
 export const userTableRelationships = relationships(userTable, ({ one, many }) => ({
@@ -3915,6 +3939,24 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     destField: ['workspaceId'],
     destSchema: userGroupTable,
   }),
+  ticketExports: many({
+    sourceField: ['id'],
+    destField: ['workspaceId'],
+    destSchema: ticketExportTable,
+  }),
+}));
+
+export const ticketExportTableRelationships = relationships(ticketExportTable, ({ one }) => ({
+  workspace: one({
+    sourceField: ['workspaceId'],
+    destField: ['id'],
+    destSchema: workspaceTable,
+  }),
+  requestedByUser: one({
+    sourceField: ['requestedBy'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
 }));
 
 export const workspaceOrganizationTableRelationships = relationships(workspaceOrganizationTable, ({ one }) => ({
@@ -4477,6 +4519,7 @@ export const schema = createSchema({
     ticketEntityMappingTable,
     ticketTagTable,
     projectTagTable,
+    ticketExportTable,
     ticketTagMappingTable,
     ticketReferenceMappingTable,
     ticketStageEtaTable,
@@ -4609,6 +4652,7 @@ export const schema = createSchema({
     ticketEntityMappingTableRelationships,
     ticketTagTableRelationships,
     projectTagTableRelationships,
+    ticketExportTableRelationships,
     ticketTagMappingTableRelationships,
     ticketReferenceMappingTableRelationships,
     ticketStageEtaTableRelationships,
@@ -4739,6 +4783,7 @@ export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
 export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mappings>;
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
 export type ProjectTag = Row<typeof schema.tables.project_tags>;
+export type TicketExport = Row<typeof schema.tables.ticket_exports>;
 export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;

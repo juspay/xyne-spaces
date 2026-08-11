@@ -539,7 +539,7 @@ export const OrganisationsScreen = (): ReactElement => {
       }
       localStorage.setItem('user_id', response.data.user.id);
       toast.success('Community workspace created');
-      window.location.href = `/${newWorkspaceId}/chat/dir`;
+      window.location.href = `/${newWorkspaceId}`;
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const message = (error.response?.data as { message?: string } | undefined)?.message;

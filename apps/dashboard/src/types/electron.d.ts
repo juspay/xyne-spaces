@@ -97,6 +97,7 @@ export interface ElectronAPI {
     html: string,
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
+  onRecordingSystemSuspend: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
   getErrorReportNativeLogs?: () => Promise<ErrorReportNativeLog[]>;
   getErrorReportScreenSources?: () => Promise<{

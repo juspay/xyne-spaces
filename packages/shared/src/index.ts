@@ -30,6 +30,7 @@ export * from './utils/messageContent';
 export * from './utils/ticketMetadata';
 export * from './utils/fileTypes';
 export * from './utils/channel';
+export * from './utils/socialMedia';
 export * from './utils/csv';
 export * from './release/releaseReport';
 export * from './utils/notificationKeywords';

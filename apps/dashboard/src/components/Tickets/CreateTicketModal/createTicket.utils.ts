@@ -101,7 +101,6 @@ interface MissingMandatoryFieldInput {
   showAssignee: boolean;
   showTodo: boolean;
   showDueDate: boolean;
-  showWorkflows: boolean;
   showLabels: boolean;
   showMerchantId: boolean;
   showTicketType: boolean;
@@ -109,7 +108,6 @@ interface MissingMandatoryFieldInput {
   mandatoryAssignee: boolean;
   mandatoryTodo: boolean;
   mandatoryDueDate: boolean;
-  mandatoryWorkflows: boolean;
   mandatoryLabels: boolean;
   mandatoryMerchantId: boolean;
   mandatoryTicketType: boolean;
@@ -126,7 +124,6 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     showAssignee,
     showTodo,
     showDueDate,
-    showWorkflows,
     showLabels,
     showMerchantId,
     showTicketType,
@@ -134,7 +131,6 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     mandatoryAssignee,
     mandatoryTodo,
     mandatoryDueDate,
-    mandatoryWorkflows,
     mandatoryLabels,
     mandatoryMerchantId,
     mandatoryTicketType,
@@ -150,8 +146,6 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     return 'Assignee is required';
   if (showTodo && mandatoryTodo && !formValues?.status) return 'Status is required';
   if (showDueDate && mandatoryDueDate && !formValues?.eta) return 'Due Date is required';
-  if (showWorkflows && mandatoryWorkflows && !formValues?.workflowType)
-    return 'Workflow is required';
   if (showLabels && mandatoryLabels && (!formValues?.tags || formValues.tags.length === 0))
     return 'Labels are required';
   if (showMerchantId && mandatoryMerchantId && !formValues?.merchantId?.trim())

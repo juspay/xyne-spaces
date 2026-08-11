@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
@@ -34,6 +34,7 @@ import {
   GitCompare,
   History,
   Loader2,
+  MessageSquare,
   Plus,
   RotateCcw,
   Star,
@@ -50,8 +51,6 @@ import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
-import { CanvasExitTitleDialog } from '../CanvasExitTitleDialog';
-import { useCanvasExitTitleGuard } from '../../../hooks/useCanvasExitTitleGuard';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -64,6 +63,7 @@ import {
   useCanvasVersionRestore,
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface CanvasTabProps {
   channelId: string;
@@ -147,6 +147,10 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
+  const [openCommentCount, setOpenCommentCount] = useState(0);
+  useEffect(() => {
+    setOpenCommentCount(0);
+  }, [canvas?.id]);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
@@ -572,7 +576,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     }
   };
 
-  const performSelectCanvas = (_e: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
+  const handleSelectCanvas = (_e: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
     if (!navigator.onLine) {
       toast.info('Canvas Unavailable', {
         description: 'Canvases are available online only. Please check your connection.',
@@ -724,7 +728,9 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     },
   );
 
-  const navigateAwayFromEditor = useCallback((): void => {
+  const handleLeaveEditor = (): void => {
+    saveCanvasExitSnapshot();
+
     if (isMobile) {
       const state = location.state as { previousPath?: string };
       const backPath = state?.previousPath ? state.previousPath : '/chat';
@@ -732,54 +738,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     } else {
       setView('list');
     }
-  }, [isMobile, location.state, navigate]);
-
-  const exitTitleGuard = useCanvasExitTitleGuard({
-    getTitle: () => titleRef.current,
-    getContent: () => editorRef.current?.getBlocks() ?? latestContentRef.current,
-    canEdit,
-    canDelete: isCanvasOwner,
-    onExit: () => {
-      saveCanvasExitSnapshot();
-      navigateAwayFromEditor();
-    },
-    onSaveTitle: async nextTitle => {
-      if (!canvas?.id) throw new Error('Canvas is not ready to be titled');
-
-      const result = z.mutate(
-        mutators.canvas.update({
-          id: canvas.id,
-          title: nextTitle,
-          timestamp: Date.now(),
-        }),
-      );
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to save canvas title');
-      }
-
-      setCurrentTitle(nextTitle);
-      titleRef.current = nextTitle;
-    },
-    onDeleteAndExit: async () => {
-      if (!canvas?.id) throw new Error('Canvas is not ready to be deleted');
-
-      const result = z.mutate(mutators.canvas.delete({ id: canvas.id }));
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to delete canvas');
-      }
-    },
-  });
-
-  const handleLeaveEditor = exitTitleGuard.requestExit;
-  const handleSelectCanvas = (event: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
-    if (canvasRef.current?.id === selected.id) {
-      performSelectCanvas(event, selected);
-      return;
-    }
-
-    exitTitleGuard.requestExitWith(() => performSelectCanvas(event, selected));
   };
 
   if (view === 'list') {
@@ -1072,6 +1030,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 <span className='hidden lg:inline'>History</span>
               </Button>
               <Button
+                variant='secondary'
+                size='sm'
+                onClick={() => editorRef.current?.toggleComments()}
+                title='Comments'
+                aria-label='Open comment activity'
+                data-testid='canvas-comments-button'
+                data-track-category='CANVAS'
+                data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
+              >
+                <span className='relative inline-flex'>
+                  <MessageSquare size={16} />
+                  {openCommentCount > 0 && (
+                    <span className='absolute -right-2 -top-2 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground'>
+                      {openCommentCount > 99 ? '99+' : openCommentCount}
+                    </span>
+                  )}
+                </span>
+              </Button>
+              <Button
                 variant='default'
                 size='sm'
                 onClick={() => setShowShareModal(true)}
@@ -1141,6 +1119,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               placeholder='Start writing your canvas...'
               canvasId={canvas?.id}
               canvasTitle={currentTitle}
+              onOpenCommentCountChange={setOpenCommentCount}
               autoFocus={false}
             />
           ) : canvas?.id && canvas.isCollaborative ? (
@@ -1154,6 +1133,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               placeholder='Start writing your canvas...'
               onFileUpload={handleFileUpload}
               onChange={handleCollaborativeContentChange}
+              onOpenCommentCountChange={setOpenCommentCount}
               autoFocus={true}
             />
           ) : (
@@ -1168,6 +1148,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               placeholder='Start writing your canvas...'
               canvasId={canvas?.id}
               canvasTitle={currentTitle}
+              onOpenCommentCountChange={setOpenCommentCount}
               autoFocus={true}
             />
           )}
@@ -1205,7 +1186,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         onRename={handleRenameVersion}
         onMakeCopy={version => void handleMakeCopyVersion(version)}
       />
-      <CanvasExitTitleDialog {...exitTitleGuard.dialogProps} />
     </div>
   );
 };

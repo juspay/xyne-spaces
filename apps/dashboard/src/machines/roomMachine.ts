@@ -447,6 +447,10 @@ export const roomMachine = setup({
         syncHostControls(room.metadata);
         updateParticipants();
 
+        // Same for connection state: the Connected event fired before this listener
+        // existed, so seed from room.state instead of waiting for the next event.
+        sendBack({ type: 'CONNECTION_STATE_CHANGED', state: room.state });
+
         room.on(LiveKitRoomEvent.Reconnecting, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Reconnecting });
         });
@@ -1140,6 +1144,27 @@ export const roomMachine = setup({
       connectionState: ({ event }) =>
         event.type === 'CONNECTION_STATE_CHANGED' ? event.state : ConnectionState.Disconnected,
     }),
+
+    showDisconnectedToast: ({ event }) => {
+      if (event.type !== 'CONNECTION_STATE_CHANGED') return;
+      const reason = event.disconnectReason;
+
+      // We disconnected ourselves - the user already knows.
+      if (reason === DisconnectReason.CLIENT_INITIATED) return;
+
+      if (reason === DisconnectReason.ROOM_DELETED || reason === DisconnectReason.ROOM_CLOSED) {
+        toast.info('Call ended', {
+          description: 'This call has ended',
+          duration: 5000,
+        });
+        return;
+      }
+
+      toast.error('Disconnected from call', {
+        description: 'Your connection to the call was lost. Rejoin to continue.',
+        duration: 6000,
+      });
+    },
 
     setError: assign({
       error: ({ event }) => (event.type === 'ERROR' ? event.error : null),
@@ -2145,6 +2170,17 @@ export const roomMachine = setup({
             actions: ['updateConnectionState'],
           },
           {
+            // Any other disconnect (network outage, server shutdown, room deleted).
+            // LiveKit only emits Disconnected once its own retries are exhausted, so
+            // the call is really over - staying here left the UI showing a dead call.
+            guard: ({ event }): boolean =>
+              event.type === 'CONNECTION_STATE_CHANGED' &&
+              event.state === ConnectionState.Disconnected,
+            target: 'disconnecting',
+            actions: ['updateConnectionState', 'showDisconnectedToast'],
+          },
+          {
+            // Connecting/Reconnecting - LiveKit is still retrying, keep the call up.
             actions: ['updateConnectionState'],
           },
         ],

@@ -101,7 +101,7 @@ const getOptionalChannelScopeType = (value: unknown): ChannelScopeType | undefin
   return isChannelScopeType(scopeType) ? scopeType : undefined;
 };
 
-const InternalXyneLink = ({
+export const InternalXyneLink = ({
   href,
   children,
   className,

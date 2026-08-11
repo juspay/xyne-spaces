@@ -1,5 +1,5 @@
 import { type ReactElement } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
@@ -31,11 +31,18 @@ function formatUpdated(value: string | undefined): string | null {
 }
 
 const ClawAgentDetailV2 = (): ReactElement => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { workspaceId, slug } = useParams<{ workspaceId?: string; slug?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
+  const requestedReturnPath = (location.state as { returnTo?: unknown } | null)?.returnTo;
+  const navigationState: { returnTo: string } | null =
+    typeof requestedReturnPath === 'string' && requestedReturnPath.startsWith('/')
+      ? { returnTo: requestedReturnPath }
+      : null;
+  const returnPath = navigationState?.returnTo ?? `${libraryPath}?tab=agents`;
   const tab = resolveTab(searchParams.get('tab'));
 
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
@@ -44,7 +51,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
   const setTab = (next: AgentDetailTabId): void => {
     const params = new URLSearchParams(searchParams);
     params.set('tab', next);
-    setSearchParams(params, { replace: true });
+    setSearchParams(params, { replace: true, state: navigationState });
   };
 
   const updated = formatUpdated(agent?.updatedAt);
@@ -58,7 +65,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
             <AgentDetailHeaderV2
               agent={agent}
               actions={actions}
-              onBack={() => void navigate(`${libraryPath}?tab=agents`)}
+              onBack={() => void navigate(returnPath)}
               onEdit={() => void navigate(`${libraryPath}/agent/${agent.slug}/edit`)}
             />
           )}

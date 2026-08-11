@@ -164,8 +164,13 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-latest'),
+  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-private'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
+  // How long a thread's job sits delayed before it runs. This is the debounce
+  // window: every message on the thread inside it collapses into one job, so a
+  // busy thread costs one extraction per window, not one per message.
+  ENTITY_EXTRACTION_DEBOUNCE_MS: Joi.number().default(15 * 60 * 1000),
   // Org-level framing prepended to the mention-extraction prompt, so the model
   // knows whose data it is reading. Fixes identity-relative errors like listing
   // the org itself as an external ORGANISATION, and sharpens ORG vs MERCHANT.
@@ -316,7 +321,6 @@ const envSchema = Joi.object({
   THREAD_SUMMARY_MIN_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(4000),
   THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS: Joi.number().integer().min(1).default(20000),
   THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN: Joi.number().integer().min(1).default(10),
-  DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
@@ -361,6 +365,7 @@ const envSchema = Joi.object({
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
+  GMAIL_WEBHOOK_MAX_BATCH: Joi.number().integer().min(1).default(50),
   EMAIL_MERGE_MODE_DEFAULT: Joi.string().valid('DISABLED', 'ENABLED').default('ENABLED'),
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
@@ -670,10 +675,12 @@ export const config = {
     url: envVars.Y_SWEET_URL,
   },
   entityExtraction: {
+    enabled: envVars.ENABLE_ENTITY_EXTRACTION,
     model: envVars.ENTITY_EXTRACTION_MODEL,
     // A single extraction call takes 20-75s on this endpoint. Raising this
     // makes calls contend and time out rather than finish faster.
     concurrency: envVars.ENTITY_EXTRACTION_CONCURRENCY,
+    debounceMs: envVars.ENTITY_EXTRACTION_DEBOUNCE_MS,
     orgContext: envVars.ENTITY_EXTRACTION_ORG_CONTEXT,
   },
 
@@ -836,12 +843,6 @@ export const config = {
     maxSummaryMaxTokens: envVars.THREAD_SUMMARY_MAX_SUMMARY_MAX_TOKENS as number,
     transcriptCharsPerMaxToken: envVars.THREAD_SUMMARY_TRANSCRIPT_CHARS_PER_MAX_TOKEN as number,
   },
-  desk: {
-    betaChannels: (envVars.DESK_BETA_CHANNELS as string)
-      .split(',')
-      .map((s: string) => s.trim())
-      .filter(Boolean),
-  },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
     eulerBotEmail: envVars.JIRA_EULER_BOT_EMAIL as string,
@@ -894,6 +895,7 @@ export const config = {
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
+    gmailWebhookMaxBatch: envVars.GMAIL_WEBHOOK_MAX_BATCH as number,
   },
   emailMergeModeDefault: envVars.EMAIL_MERGE_MODE_DEFAULT as 'DISABLED' | 'ENABLED',
   docling: {

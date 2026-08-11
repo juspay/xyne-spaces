@@ -9,7 +9,51 @@ const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.CALL,
+  ChannelType.SOCIAL_MEDIA,
 ]);
+
+export interface TicketUrlParams {
+  frontendUrl: string;
+  ticketId: string;
+  workspaceId: string;
+  channelType: string | null | undefined;
+  channelId: string;
+  conversationId: string | null | undefined;
+  xyneId: string | null | undefined;
+}
+
+/** Build the same deep-link a dashboard ticket navigation uses. */
+export function buildTicketUrl(params: TicketUrlParams): string | null {
+  const {
+    frontendUrl,
+    ticketId,
+    workspaceId,
+    channelType,
+    channelId,
+    conversationId,
+    xyneId,
+  } = params;
+  const base = frontendUrl.trim().replace(/\/+$/, '');
+  if (!base || !ticketId || !workspaceId || !channelId) return null;
+
+  const workspacePath = encodeURIComponent(workspaceId);
+  const channelPath = encodeURIComponent(channelId);
+
+  // Desk tickets have a dedicated support route keyed by their human-readable
+  // id. This mirrors the navigation used by the dashboard and notifications.
+  if (channelType && DESK_CHANNEL_TYPES.has(channelType as ChannelType) || !conversationId) {
+    return xyneId
+      ? `${base}/${workspacePath}/support/${channelPath}/${encodeURIComponent(xyneId)}`
+      : `${base}/${workspacePath}/support/${channelPath}`;
+  }
+
+  const query = new URLSearchParams({
+    tab: 'tickets',
+    ticketId,
+    conversationId,
+  });
+  return `${base}/${workspacePath}/chat/dir/${channelPath}?${query.toString()}`;
+}
 
 const TicketSchema = z.object({
   id: z.string(),
@@ -147,31 +191,6 @@ export interface TicketLike {
   updatedAt?: Date | null;
 }
 
-/** Build an absolute support URL for a desk ticket using trusted configuration. */
-function buildTicketUrl(params: {
-  frontendUrl: string;
-  workspaceId: string;
-  channelType: string | null | undefined;
-  channelId: string;
-  xyneId: string | null | undefined;
-}): string | null {
-  const { frontendUrl, workspaceId, channelType, channelId, xyneId } = params;
-  const base = frontendUrl.trim().replace(/\/+$/, '');
-  if (
-    !base ||
-    !workspaceId ||
-    !DESK_CHANNEL_TYPES.has(channelType as ChannelType) ||
-    !channelId ||
-    !xyneId
-  ) {
-    return null;
-  }
-
-  return [base, workspaceId, 'support', channelId, xyneId]
-    .map((segment, index) => (index === 0 ? segment : encodeURIComponent(segment)))
-    .join('/');
-}
-
 export async function buildTicketContext(ticket: TicketLike): Promise<TicketContext> {
   const lastEmails = await loadLastEmails(ticket);
   const [board, project, channel, assignee, creator, group] = await Promise.all([
@@ -216,9 +235,11 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
 
   const ticketUrl = buildTicketUrl({
     frontendUrl: config.frontendUrl,
+    ticketId: ticket.id,
     workspaceId: ticket.workspaceId,
     channelType: channel?.type,
     channelId: ticket.channelId,
+    conversationId: ticket.conversationId,
     xyneId: ticket.xyneId,
   });
 

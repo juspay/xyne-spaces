@@ -188,6 +188,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
+      hideComposerTools = false,
+      hideVoiceInput = false,
+      compact = false,
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
@@ -1487,7 +1490,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               </div>
             )}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
-            {isMobile && (
+            {isMobile && !hideVoiceInput && (
               <VoiceInput
                 ref={voiceInputRef}
                 headless
@@ -1536,7 +1539,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 onEmojiSelect={handleEmojiSelect}
                 hideSendButton={hideSendButton}
                 showAttachButton={!!features.fileAttachments}
-                showVoiceInput={true}
+                showVoiceInput={!hideVoiceInput}
                 isVoiceRecording={isVoiceRecording}
                 isVoiceTranscribing={isVoiceTranscribing}
                 onVoiceToggle={() => voiceInputRef.current?.toggle()}
@@ -1565,7 +1568,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             ) : (
               <div
                 className={`
-                relative pt-1 pb-1 px-3
+                relative ${compact ? 'py-0.5 pl-3 pr-11' : 'px-3 pt-1 pb-1'}
                 ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
               `}
               >
@@ -1585,7 +1588,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   !editor?.isActive('orderedList') &&
                   !editor?.isActive('blockquote') &&
                   (isVoiceRecording ? (
-                    <div className='absolute inset-0 px-3 py-2 pointer-events-none select-none flex items-center gap-3 h-fit my-auto'>
+                    <div
+                      className={`absolute inset-0 pointer-events-none select-none flex items-center gap-3 h-fit my-auto ${
+                        compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
+                      }`}
+                    >
                       <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
                         {([0, 120, 60, 180, 90] as const).map((delay, i) => (
                           <div
@@ -1601,7 +1608,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <span className='text-[13px] text-muted-foreground'>Listening...</span>
                     </div>
                   ) : (
-                    <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
+                    <div
+                      className={`absolute inset-0 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto ${
+                        compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
+                      }`}
+                    >
                       {placeholder}
                     </div>
                   ))}
@@ -1682,13 +1693,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             {/* Desktop Footer Actions */}
             {!isMobile && (
-              <div className='flex items-center justify-between gap-2 px-2 pb-2 pt-1'>
+              <div
+                className={`flex items-center justify-between gap-2 ${
+                  compact ? 'absolute right-2 top-1/2 -translate-y-1/2 px-0 py-0' : 'px-2 pb-2 pt-1'
+                }`}
+              >
                 {/* min-w-0 lets this group shrink below its content width so the
                     "Send to channel" label ellipsizes instead of pushing the send
                     controls out of the row. The icon buttons keep their size via
                     min-width:auto (fixed-size svg children). */}
                 <div className='flex min-w-0 items-center gap-1'>
-                  {features.fileAttachments && (
+                  {!hideComposerTools && features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
                       <DropdownMenuTrigger asChild>
                         <button
@@ -1753,7 +1768,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   </Dialog>
 
-                  {features.emojiPicker && (
+                  {!hideComposerTools && features.emojiPicker && (
                     // Inside InputBox.tsx -> EmojiPickerButton component
                     <EmojiPickerButton
                       onEmojiSelect={handleEmojiSelect}
@@ -1761,7 +1776,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   )}
 
-                  {features.mentions && (
+                  {!hideComposerTools && features.mentions && (
                     <Tooltip
                       content='Mention user (@)'
                       side='top'
@@ -1783,26 +1798,28 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <Tooltip
-                    content='Mention channel (#)'
-                    side='top'
-                    delayDuration={1000}
-                    skipDelayDuration={1000}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => {
-                        editor?.chain().focus().insertContent('#').run();
-                      }}
-                      className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                      aria-label='Mention channel'
-                      disabled={disabled || isSending}
+                  {!hideComposerTools && (
+                    <Tooltip
+                      content='Mention channel (#)'
+                      side='top'
+                      delayDuration={1000}
+                      skipDelayDuration={1000}
                     >
-                      <Hashtag className='h-4 w-4 text-muted-foreground' />
-                    </button>
-                  </Tooltip>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          editor?.chain().focus().insertContent('#').run();
+                        }}
+                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        aria-label='Mention channel'
+                        disabled={disabled || isSending}
+                      >
+                        <Hashtag className='h-4 w-4 text-muted-foreground' />
+                      </button>
+                    </Tooltip>
+                  )}
 
-                  {features.richText && (
+                  {!hideComposerTools && features.richText && (
                     <Tooltip
                       content={showFormatToolbar ? 'Hide formatting' : 'Show formatting'}
                       side='top'
@@ -1840,7 +1857,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </div>
                   )}
 
-                  {bottomLeftSlot}
+                  {!hideComposerTools && bottomLeftSlot}
                 </div>
 
                 <div className='flex shrink-0 items-center gap-2'>
@@ -1862,15 +1879,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <VoiceInput
-                    ref={voiceInputRef}
-                    editor={editor}
-                    mentionItems={mentionItems}
-                    voiceMentionItems={voiceMentionItems}
-                    disabled={disabled}
-                    isSending={isSending}
-                    onStateChange={handleVoiceStateChange}
-                  />
+                  {!hideVoiceInput && (
+                    <VoiceInput
+                      ref={voiceInputRef}
+                      editor={editor}
+                      mentionItems={mentionItems}
+                      voiceMentionItems={voiceMentionItems}
+                      disabled={disabled}
+                      isSending={isSending}
+                      onStateChange={handleVoiceStateChange}
+                    />
+                  )}
 
                   {!hideSendButton && (
                     <div className='relative flex items-center'>
@@ -2037,7 +2056,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             type='button'
                             onClick={() => void handleSend()}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'

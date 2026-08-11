@@ -17,6 +17,7 @@ import {
   Eraser,
   Loader2,
   Minimize2,
+  ExternalLink,
   Paperclip,
   PencilLine,
   RefreshCw,
@@ -203,13 +204,9 @@ interface EmailComposerProps {
    */
   composeDraftId?: string;
   onDraftSourcesChange?: (sources: DraftSource[]) => void;
-  onDraftInlineCitationsChange?: (
-    citations: import('../../ui/TipTapExtensions/CitationMark').InlineCitation[],
-  ) => void;
-  onCitationClick?: (ref: string) => void;
   onCitationOrderChange?: (orderedRefs: string[]) => void;
   onSeeSources?: (sessionId?: string) => void;
-  showSeeSources?: boolean;
+  hasAutoDraft?: boolean;
   /** Pre-fill the To field when the composer mounts (draft restoration takes precedence). */
   initialTo?: string[];
   channelPreference: EmailChannelPreference | undefined;
@@ -238,11 +235,9 @@ export const EmailComposer = ({
   composeDraftId,
   ticketSubject,
   onDraftSourcesChange,
-  onDraftInlineCitationsChange,
-  onCitationClick,
   onCitationOrderChange,
   onSeeSources,
-  showSeeSources = false,
+  hasAutoDraft = false,
   initialTo,
   channelPreference,
   channelPreferenceLoaded,
@@ -306,7 +301,6 @@ export const EmailComposer = ({
   const draftScrollRef = useRef<HTMLDivElement | null>(null);
   // How the active AI draft was produced — picks the accept default:
   // 'write' (new writing) → Insert appends; 'rewrite' (quick changes) → Replace overwrites.
-  const [draftOrigin, setDraftOrigin] = useState<'write' | 'rewrite'>('write');
   const lastAskInstructionRef = useRef<string | null>(null);
 
   const isInlineAIPanelOpen = aiPanelMode !== null;
@@ -641,10 +635,6 @@ export const EmailComposer = ({
     }
   }, [aiDraft.isDraftActive, aiPanelMode]);
 
-  useEffect(() => {
-    onDraftInlineCitationsChange?.(aiDraft.draftInlineCitations);
-  }, [aiDraft.draftInlineCitations, onDraftInlineCitationsChange]);
-
   const [composeSources, setComposeSources] = useState<DraftSource[]>([]);
 
   const openSourcePreview = useCallback(
@@ -700,8 +690,6 @@ export const EmailComposer = ({
     [aiDraft.draftSources, composeSources, routeWorkspaceId, composerNavigate],
   );
 
-  const effectiveCitationClick = onCitationClick ?? openSourcePreview;
-
   const [isExpandedState, setIsExpanded] = useState<boolean>(true);
   // Compose mode is always expanded — there's no reply-thread to collapse to.
   const isExpanded = isComposeMode ? true : isExpandedState;
@@ -724,7 +712,6 @@ export const EmailComposer = ({
     (instruction: string): void => {
       lastAskInstructionRef.current = instruction;
       setAiPaneOpen(true);
-      setDraftOrigin('write');
       aiDraft.askAIRefine(instruction, stripHtml(emailContent));
     },
     [aiDraft, emailContent],
@@ -2673,15 +2660,12 @@ export const EmailComposer = ({
                 draftContent={aiDraft.draftContent}
                 toolInvocations={aiDraft.draftToolInvocations}
                 isStreaming={aiDraft.isStreaming}
-                defaultAcceptAction={draftOrigin === 'rewrite' ? 'replace' : 'insert'}
-                onAccept={action => {
+                onAccept={() => {
                   const content = aiDraft.acceptDraft();
                   void (async (): Promise<void> => {
                     const html = content ? await markdownToHtml(stripCitationMarks(content)) : '';
-                    const next =
-                      action === 'insert' && hasEmailBody ? `${emailContent}${html}` : html;
-                    setEmailContent(next);
-                    if (next) saveReplyDraft(next);
+                    setEmailContent(html);
+                    if (html) saveReplyDraft(html);
                   })();
                 }}
                 onCollapse={() => setAiPaneOpen(false)}
@@ -2780,7 +2764,7 @@ export const EmailComposer = ({
                     setIsCcExpanded(false);
                     setIsBccExpanded(false);
                   }}
-                  onCitationClick={effectiveCitationClick}
+                  onCitationClick={openSourcePreview}
                   {...(onCitationOrderChange && { onCitationOrderChange })}
                   disabled={isSending}
                   className='flex-1 min-h-0'
@@ -2982,7 +2966,6 @@ export const EmailComposer = ({
                     const source = aiDraft.isDraftActive
                       ? aiDraft.draftContent
                       : contentWithDraftCitations(emailContent);
-                    setDraftOrigin('rewrite');
                     void aiDraft.quickRewrite(action, source);
                   }}
                   onAskAI={() => {
@@ -2996,43 +2979,59 @@ export const EmailComposer = ({
                       runAskAIRefine(instruction);
                     } else {
                       setAiPaneOpen(true);
-                      setDraftOrigin('write');
                       aiDraft.triggerDraft();
                     }
                   }}
                   agentName={draftAgentName}
                   showQuickRewrite={hasEmailBody || aiDraft.isDraftActive}
                   disabled={aiDraft.isStreaming}
-                  {...(onSeeSources && {
-                    onSeeSources: () => onSeeSources(aiDraft.sessionId ?? undefined),
-                  })}
-                  showSeeSources={showSeeSources || !!aiDraft.sessionId}
                 />
               )}
             </div>
-            <button
-              className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
-              onClick={runSendEmail}
-              disabled={
-                (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
-                (isComposeMode
-                  ? !channelId || composeSubject.trim().length === 0
-                  : !conversationId) ||
-                isSending ||
-                toEmails.length === 0 ||
-                aiDraft.isDraftActive
-              }
-              aria-label='Send email'
-              title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send'}
-              data-track-category='Support'
-              data-track-name='SendEmailReply'
-              data-track-metadata={JSON.stringify({
-                conversationId,
-                attachmentCount: attachments.length,
-              })}
-            >
-              {isSending ? <RefreshCw size={16} className='animate-spin' /> : <ArrowUp size={16} />}
-            </button>
+            <div className='flex items-center gap-1'>
+              {onSeeSources && (!!aiDraft.sessionId || hasAutoDraft) && (
+                <Tooltip delayDuration={300} content='See how this draft was written'>
+                  <button
+                    type='button'
+                    className='h-7 flex items-center gap-1.5 px-2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                    onClick={() => onSeeSources(aiDraft.sessionId ?? undefined)}
+                    aria-label='See sources'
+                    data-track-category='Support'
+                    data-track-name='SeeDraftSources'
+                  >
+                    <ExternalLink size={14} />
+                    <span className='text-xs font-medium'>See sources</span>
+                  </button>
+                </Tooltip>
+              )}
+              <button
+                className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
+                onClick={runSendEmail}
+                disabled={
+                  (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
+                  (isComposeMode
+                    ? !channelId || composeSubject.trim().length === 0
+                    : !conversationId) ||
+                  isSending ||
+                  toEmails.length === 0 ||
+                  aiDraft.isDraftActive
+                }
+                aria-label='Send email'
+                title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send'}
+                data-track-category='Support'
+                data-track-name='SendEmailReply'
+                data-track-metadata={JSON.stringify({
+                  conversationId,
+                  attachmentCount: attachments.length,
+                })}
+              >
+                {isSending ? (
+                  <RefreshCw size={16} className='animate-spin' />
+                ) : (
+                  <ArrowUp size={16} />
+                )}
+              </button>
+            </div>
           </div>
         )}
       </div>
