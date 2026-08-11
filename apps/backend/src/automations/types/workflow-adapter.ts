@@ -36,6 +36,7 @@ export interface AutomationRunView extends AutomationRunSummaryView {
 interface AutomationMetadata {
   description: string | null;
   createdById: string;
+  drainInFlight?: boolean;
 }
 
 export function triggerTypeToEventType(triggerType: string): WorkflowEventType {
@@ -52,6 +53,7 @@ export function parseAutomationMetadata(raw: string | null): AutomationMetadata 
     return {
       description: parsed.description ?? null,
       createdById: parsed.createdById ?? '',
+      ...(parsed.drainInFlight ? { drainInFlight: true } : {}),
     };
   } catch {
     return { description: null, createdById: '' };
@@ -60,6 +62,13 @@ export function parseAutomationMetadata(raw: string | null): AutomationMetadata 
 
 export function buildAutomationMetadata(input: AutomationMetadata): string {
   return JSON.stringify(input);
+}
+
+export function mayDrainInFlight(workflow: Workflow): boolean {
+  return (
+    workflow.status === AutomationStatus.DISABLED &&
+    parseAutomationMetadata(workflow.metadata).drainInFlight === true
+  );
 }
 
 export function workflowToAutomation(workflow: Workflow): AutomationView {

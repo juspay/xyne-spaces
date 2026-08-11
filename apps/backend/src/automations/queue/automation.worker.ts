@@ -10,6 +10,7 @@ import { AutomationExecutor } from '../engine/automation-executor';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import {
   AUTOMATION_WORKFLOW_TYPE,
+  mayDrainInFlight,
   parseAutomationConfig,
   readAutomationMeta,
 } from '../types/workflow-adapter';
@@ -106,10 +107,15 @@ class AutomationWorker {
       logger.warn(`[AUTOMATION-WORKER] workflow ${execution.workflowId} missing — dropping`);
       return;
     }
-    if (workflow.status !== AutomationStatus.ACTIVE) {
+    if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
+      await db.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.CANCELLED },
+      });
       logger.info(
-        `[AUTOMATION-WORKER] workflow ${workflow.id} is ${workflow.status} (no longer live) — running captured config anyway for execution=${executionId}`,
+        `[AUTOMATION-WORKER] workflow ${workflow.id} is ${workflow.status} (no longer live) — execution=${executionId} CANCELLED`,
       );
+      return;
     }
 
     const stateForChain = await getAutomationPauseState(executionId);

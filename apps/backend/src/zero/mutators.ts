@@ -15937,8 +15937,12 @@ export function createMutators(
         },
       ),
       disable: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { id, timestamp } }) => {
+        z.object({
+          id: z.string(),
+          timestamp: z.number(),
+          cancelQueued: z.boolean().optional(),
+        }),
+        async ({ tx, args: { id, timestamp, cancelQueued } }) => {
           logger.info(`[Mutator] automations.disable START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
@@ -15963,7 +15967,9 @@ export function createMutators(
               const { approvalService } = await import(
                 '../automations/services/approval.service'
               );
-              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED);
+              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED, {
+                cancelQueued: cancelQueued ?? true,
+              });
               logger.info(
                 `[Mutator] automations.disable asyncTask OK id=${id} elapsedMs=${Date.now() - t0}`,
               );
