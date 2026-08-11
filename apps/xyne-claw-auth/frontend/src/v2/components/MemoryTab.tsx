@@ -425,21 +425,21 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => { setSessionUploadSource("claude"); setShowSessionUpload(true); }}
-                  title="Upload Claude session exports (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
+                  title="Upload Claude session exports (.jsonl / .json, .gz, or a .zip of them) — parsed and retained as agent memory"
                   className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
                 >
                   <Inbox size={12} /> Claude
                 </button>
                 <button
                   onClick={() => { setSessionUploadSource("opencode"); setShowSessionUpload(true); }}
-                  title="Upload OpenCode session bundles (.json, or a .zip of them) — parsed and retained as agent memory"
+                  title="Upload OpenCode session bundles (.json, .gz, or a .zip of them) — parsed and retained as agent memory"
                   className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
                 >
                   <Inbox size={12} /> OpenCode
                 </button>
                 <button
                   onClick={() => { setSessionUploadSource("codex"); setShowSessionUpload(true); }}
-                  title="Upload Codex rollout logs (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
+                  title="Upload Codex rollout logs (.jsonl / .json, .gz, or a .zip of them) — parsed and retained as agent memory"
                   className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
                 >
                   <Inbox size={12} /> Codex
@@ -2625,7 +2625,18 @@ function UploadSessionModal({
   // Zip MEMBERS must be session files, never nested archives: a zip-inside-zip
   // would be decoded as garbled binary-as-UTF-8 and uploaded as a "session".
   const acceptedMemberExts = source === "opencode" ? /\.(json)$/i : /\.(jsonl|json)$/i;
-  const acceptAttr = source === "opencode" ? ".json,.zip" : ".jsonl,.json,.zip";
+  const acceptAttr = source === "opencode" ? ".json,.zip,.gz" : ".jsonl,.json,.zip,.gz";
+
+  /** Gzipped session files (.jsonl.gz / .json.gz — how Codex rollouts and
+   *  Claude Code session archives usually arrive) are decompressed client-side
+   *  with the browser-native DecompressionStream, then treated exactly like
+   *  their inner file. Only single-file gzip: the INNER name (minus .gz) must
+   *  still match the accepted session extensions, so .tar.gz / nested archives
+   *  stay rejected instead of uploading as binary garbage. */
+  async function gunzipToString(buf: ArrayBuffer): Promise<string> {
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).text();
+  }
   const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
   const [sessions, setSessions] = useState<Array<{ name: string; content: string }>>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -2652,12 +2663,32 @@ function UploadSessionModal({
             if (entry.dir) continue;
             const base = entry.name.split("/").pop() ?? entry.name;
             if (entry.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
-            if (!acceptedMemberExts.test(base)) continue;
-            const content = await entry.async("string");
-            if (content.length > MAX_SESSION_BYTES) { skip.push(`${base} (over 20MB)`); continue; }
-            if (!content.trim()) { skip.push(`${base} (empty)`); continue; }
-            picked.push({ name: base, content });
+            // Gzipped member (rollout-*.jsonl.gz): decompress, keep inner name.
+            const gzInner = /\.gz$/i.test(base) ? base.replace(/\.gz$/i, "") : null;
+            if (gzInner !== null && !acceptedMemberExts.test(gzInner)) continue;
+            if (gzInner === null && !acceptedMemberExts.test(base)) continue;
+            let content: string;
+            try {
+              content = gzInner !== null
+                ? await gunzipToString(await entry.async("arraybuffer"))
+                : await entry.async("string");
+            } catch { skip.push(`${base} (not valid gzip)`); continue; }
+            const name = gzInner ?? base;
+            if (content.length > MAX_SESSION_BYTES) { skip.push(`${name} (over 20MB)`); continue; }
+            if (!content.trim()) { skip.push(`${name} (empty)`); continue; }
+            picked.push({ name, content });
           }
+        } else if (/\.gz$/i.test(file.name)) {
+          const inner = file.name.replace(/\.gz$/i, "");
+          if (!acceptedMemberExts.test(inner)) { skip.push(`${file.name} (unsupported type)`); continue; }
+          let content: string;
+          try { content = await gunzipToString(await file.arrayBuffer()); }
+          catch { skip.push(`${file.name} (not valid gzip)`); continue; }
+          // Size-check the DECOMPRESSED content — the backend cap is on what we
+          // upload, and gzip on JSONL routinely expands 5-10×.
+          if (content.length > MAX_SESSION_BYTES) { skip.push(`${inner} (over 20MB)`); continue; }
+          if (!content.trim()) { skip.push(`${inner} (empty)`); continue; }
+          picked.push({ name: inner, content });
         } else if (acceptedExts.test(file.name)) {
           if (file.size > MAX_SESSION_BYTES) { skip.push(`${file.name} (over 20MB)`); continue; }
           picked.push({ name: file.name, content: await file.text() });
@@ -2750,10 +2781,10 @@ function UploadSessionModal({
           <div className="space-y-3">
             <p className="text-[12px] text-xyne-fg-tertiary">
               {source === "opencode"
-                ? <>Pick OpenCode session bundles (<span className="font-mono">.json</span>) or a <span className="font-mono">.zip</span> containing them. Each bundle is parsed and retained as this agent's memory — uploading is the approval.</>
+                ? <>Pick OpenCode session bundles (<span className="font-mono">.json</span>, gzipped <span className="font-mono">.json.gz</span>) or a <span className="font-mono">.zip</span> containing them. Each bundle is parsed and retained as this agent's memory — uploading is the approval.</>
                 : source === "codex"
-                  ? <>Pick Codex rollout logs (<span className="font-mono">.jsonl</span> / <span className="font-mono">.json</span>) or a <span className="font-mono">.zip</span> containing them. Each rollout is parsed and retained as this agent's memory — uploading is the approval.</>
-                  : <>Pick Claude Code session files (<span className="font-mono">.jsonl</span>), claude.ai exports (<span className="font-mono">.json</span>), or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as this agent's memory — uploading is the approval.</>}
+                  ? <>Pick Codex rollout logs (<span className="font-mono">.jsonl</span> / <span className="font-mono">.json</span>, gzipped <span className="font-mono">.jsonl.gz</span>) or a <span className="font-mono">.zip</span> containing them. Each rollout is parsed and retained as this agent's memory — uploading is the approval.</>
+                  : <>Pick Claude Code session files (<span className="font-mono">.jsonl</span>, gzipped <span className="font-mono">.jsonl.gz</span>), claude.ai exports (<span className="font-mono">.json</span>), or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as this agent's memory — uploading is the approval.</>}
             </p>
             <input
               type="file"
