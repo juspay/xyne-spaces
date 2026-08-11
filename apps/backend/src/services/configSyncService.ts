@@ -197,25 +197,6 @@ export class ConfigSyncService {
         logger.info('TEAM-INTELLIGENCE-DASHBOARD resource already exists');
       }
 
-      // Ensure SCRIBE is available in User Management. No access records
-      // are created here, so every user defaults to No Access (false).
-      const scribeResource = await prisma.resource.findUnique({
-        where: { name: 'SCRIBE' }
-      });
-
-      if (!scribeResource) {
-        logger.info('Creating SCRIBE resource');
-        await prisma.resource.create({
-          data: {
-            name: 'SCRIBE',
-            description: 'Scribe access permissions'
-          }
-        });
-        logger.info('Successfully created SCRIBE resource');
-      } else {
-        logger.info('SCRIBE resource already exists');
-      }
-
       // Ensure VESPA resource exists (gates the Vespa backfill / reindex admin endpoints)
       const vespaResource = await prisma.resource.findUnique({
         where: { name: 'VESPA' }
