@@ -197,6 +197,7 @@ import {
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
+import { XyneCalendarSidebarHost } from '../components/Chat/XyneCalendarSidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
 import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
@@ -753,7 +754,9 @@ const AppRoot = (): ReactElement => {
                           <EditWarningModal />
                           <Outlet />
                         </main>
-                      ) : showXyneAIPanel ||
+                      ) : (
+                        <XyneCalendarSidebarHost>
+                        {showXyneAIPanel ||
                         showSdlcDebuggerPanel ||
                         browserPanelState === 'open' ||
                         webviewState === 'closed' ||
@@ -899,6 +902,8 @@ const AppRoot = (): ReactElement => {
                             </Panel>
                           </ResizableGroup>
                         </div>
+                      )}
+                        </XyneCalendarSidebarHost>
                       )}
                       {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,

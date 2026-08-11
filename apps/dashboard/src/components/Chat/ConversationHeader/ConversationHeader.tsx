@@ -46,6 +46,8 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
+import { CalendarEvent } from '@xyne/icons';
+import { toggleXyneCalendarSidebar } from '../XyneCalendarSidebar';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
@@ -359,6 +361,19 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           )}
+          <Tooltip content='Check Your Calendar' side='bottom'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={toggleXyneCalendarSidebar}
+              className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+              aria-label='Toggle Calendar sidebar'
+              data-track-category='CHANNELS'
+              data-track-name='TOGGLE_CALENDAR_SIDEBAR'
+            >
+              <CalendarEvent size={16} />
+            </Button>
+          </Tooltip>
           <Tooltip
             content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
             {...(showOnboardingTooltip ? { open: true } : {})}
