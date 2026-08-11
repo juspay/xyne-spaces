@@ -18,15 +18,19 @@ export interface AutomationView {
   automationSeriesId: string | null;
 }
 
-export interface AutomationRunView {
+/** What the run-history list renders. No context blobs — see AutomationRunView. */
+export interface AutomationRunSummaryView {
   id: string;
   automationId: string;
   status: AutomationRunStatus;
-  triggerData: Record<string, unknown>;
-  context: Record<string, unknown>;
   error: string | null;
   startedAt: Date;
   completedAt: Date | null;
+}
+
+export interface AutomationRunView extends AutomationRunSummaryView {
+  triggerData: Record<string, unknown>;
+  context: Record<string, unknown>;
 }
 
 interface AutomationMetadata {
@@ -108,22 +112,22 @@ export function parseExecutionTriggerData(raw: string | null): Record<string, un
   }
 }
 
-export function workflowExecutionToRun(
-  execution: WorkflowExecution,
+/** The execution columns a run summary needs — lets the list query select just these. */
+type WorkflowExecutionRunFields = Pick<
+  WorkflowExecution,
+  'id' | 'workflowId' | 'status' | 'createdAt' | 'updatedAt'
+>;
+
+export function workflowExecutionToRunSummary(
+  execution: WorkflowExecutionRunFields,
   state: { context: string | null } | null,
-): AutomationRunView {
+): AutomationRunSummaryView {
   const ctx = parseExecutionTriggerData(state?.context ?? null);
   const meta = (ctx['__meta'] as { error?: string | null } | undefined) ?? {};
-  const userCtx: Record<string, unknown> = { ...ctx };
-  delete userCtx['__meta'];
-  const trigger = (ctx['trigger'] as { data?: Record<string, unknown> } | undefined) ?? {};
-  const triggerData = trigger.data ?? {};
   return {
     id: execution.id,
     automationId: execution.workflowId,
     status: (execution.status as AutomationRunStatus) || AutomationRunStatus.RUNNING,
-    triggerData,
-    context: userCtx,
     error: meta.error ?? null,
     startedAt: execution.createdAt,
     completedAt:
@@ -132,5 +136,20 @@ export function workflowExecutionToRun(
       execution.status === 'EXTERNAL_WAIT'
         ? null
         : execution.updatedAt,
+  };
+}
+
+export function workflowExecutionToRun(
+  execution: WorkflowExecution,
+  state: { context: string | null } | null,
+): AutomationRunView {
+  const ctx = parseExecutionTriggerData(state?.context ?? null);
+  const userCtx: Record<string, unknown> = { ...ctx };
+  delete userCtx['__meta'];
+  const trigger = (ctx['trigger'] as { data?: Record<string, unknown> } | undefined) ?? {};
+  return {
+    ...workflowExecutionToRunSummary(execution, state),
+    triggerData: trigger.data ?? {},
+    context: userCtx,
   };
 }

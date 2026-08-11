@@ -6,6 +6,7 @@ import {
   Check,
   Copy,
   History,
+  Link2,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -26,6 +27,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { fetchStepCatalog, fetchTriggerCatalog } from '../../../api/automationsApi';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useSelf, useUser } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
@@ -435,6 +437,14 @@ function AutomationRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const isActive = automation.status === 'ACTIVE';
   const creator = useUser(automation.createdById);
+  const shareableOrigin = useShareableOrigin();
+
+  const handleCopyLink = (): void => {
+    void navigator.clipboard
+      .writeText(`${shareableOrigin}/automations/${automation.id}`)
+      .then(() => toast.success('Link copied'))
+      .catch(() => toast.error('Could not copy link'));
+  };
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>): void => {
     const target = e.target as HTMLElement;
@@ -575,6 +585,14 @@ function AutomationRow({
                 onClick={() => {
                   setMenuOpen(false);
                   onClone();
+                }}
+              />
+              <RowMenuButton
+                label='Copy link'
+                icon={<Link2 className='size-4' />}
+                onClick={() => {
+                  setMenuOpen(false);
+                  handleCopyLink();
                 }}
               />
               {onShowRuns && (
