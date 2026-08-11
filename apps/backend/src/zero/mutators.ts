@@ -14169,9 +14169,7 @@ export function createMutators(
           );
           if (existing) throw new Error('Organization name already exists');
 
-          if (config.enc.orgProvisionEnabled) {
-            await getEncryptionProvider().initializeOrg(orgId);
-          }
+          await getEncryptionProvider().initializeOrg(orgId);
 
           await tx.mutate.organizations.insert({
             orgId,

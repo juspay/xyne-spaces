@@ -24,7 +24,6 @@ import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChanne
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { redisService } from '@/services/redisService';
 import { createId } from '@paralleldrive/cuid2';
-import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 
 interface OAuthUserData {
@@ -953,9 +952,7 @@ export class UserService {
       }
 
       const orgId = createId();
-      if (config.enc.orgProvisionEnabled) {
-        await getEncryptionProvider().initializeOrg(orgId);
-      }
+      await getEncryptionProvider().initializeOrg(orgId);
 
       const { organization, workspace } = await this.prisma.$transaction(async (tx) => {
         // Step 1: Create organization with temporary createdBy (will update later)
@@ -979,13 +976,11 @@ export class UserService {
             joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
-        if (config.enc.workspaceProvisionEnabled) {
-          await getEncryptionProvider().provisionEntity({
-            entityId: workspace.id,
-            orgId: workspace.orgId,
-            entityType: 'WORKSPACE',
-          });
-        }
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
+        });
         return { organization, workspace };
       });
 
@@ -1180,13 +1175,11 @@ export class UserService {
               joinPolicy,
             },
           });
-          if (config.enc.workspaceProvisionEnabled) {
-            await getEncryptionProvider().provisionEntity({
-              entityId: createdWorkspace.id,
-              orgId: createdWorkspace.orgId,
-              entityType: 'WORKSPACE',
-            });
-          }
+          await getEncryptionProvider().provisionEntity({
+            entityId: createdWorkspace.id,
+            orgId: createdWorkspace.orgId,
+            entityType: 'WORKSPACE',
+          });
           return createdWorkspace;
         });
       } catch (error) {

@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 
 function hasEncryptedFields(obj: unknown): boolean {
@@ -41,16 +40,6 @@ export async function decryptRequestBodyMiddleware(
 
     if (!hasEncryptedFields(req.body)) {
       return next();
-    }
-
-    if (!config.enc.apiClientEncryptionEnabled) {
-      getCryptoOperations().add(1, {
-        operation: 'decrypt_request_body',
-        status: 'error',
-        reason: 'encryption_unavailable',
-        path: req.path,
-      });
-      return next(new AppError('Encrypted request bodies are not enabled for this server', 400));
     }
 
     const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
@@ -105,10 +94,6 @@ export function encryptResponseBodyMiddleware(
   const originalJson = res.json.bind(res);
 
   res.json = ((body?: unknown): Response => {
-    if (!config.enc.apiClientEncryptionEnabled) {
-      return originalJson(body);
-    }
-
     const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
     if (!sessionId || !body || typeof body !== 'object') {
       return originalJson(body);

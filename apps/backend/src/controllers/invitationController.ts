@@ -483,9 +483,7 @@ export class InvitationController {
 
       const orgId = createId();
       try {
-        if (config.enc.orgProvisionEnabled) {
-          await getEncryptionProvider().initializeOrg(orgId);
-        }
+        await getEncryptionProvider().initializeOrg(orgId);
       } catch (error) {
         logger.error('Failed to initialize org encryption before invitation bootstrap', {
           orgId,
@@ -516,13 +514,11 @@ export class InvitationController {
           },
         });
 
-        if (config.enc.workspaceProvisionEnabled) {
-          await getEncryptionProvider().provisionEntity({
-            entityId: workspace.id,
-            orgId: workspace.orgId,
-            entityType: 'WORKSPACE',
-          });
-        }
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
+        });
 
         // DM project required for every workspace
         await tx.project.create({

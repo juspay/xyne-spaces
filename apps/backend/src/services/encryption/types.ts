@@ -18,7 +18,7 @@ export type RegisterSessionKeyInput = {
 };
 
 export type RegisterSessionKeyResult = {
-  ok: true;
+  ok: boolean;
   sessionFingerprint: string;
 };
 

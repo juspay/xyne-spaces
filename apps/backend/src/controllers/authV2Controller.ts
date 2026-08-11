@@ -1366,11 +1366,7 @@ export class AuthV2Controller {
         await this.userSessionService.revokeSession(sessionId);
       }
 
-      if (
-        req.user &&
-        sessionId &&
-        (config.enc.clientEncryptionEnabled || config.enc.apiClientEncryptionEnabled)
-      ) {
+      if (req.user && sessionId) {
         await getEncryptionProvider().revokeSessionKey(sessionId);
       }
 

@@ -1,6 +1,5 @@
 import { Router, type Request, type Response } from 'express';
 import { SessionStatus } from '@xyne/shared';
-import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
@@ -12,17 +11,6 @@ router.get('/public-key', async (req: Request, res: Response) => {
   const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) {
-    res.json({
-      publicKey: '',
-      encryptedFields: {},
-      clientEncryptionEnabled: false,
-      apiClientEncryptionEnabled: false,
-      sessionFingerprint: sessionId,
-    });
     return;
   }
 
@@ -44,11 +32,6 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
   const { wrappedKey } = req.body as { wrappedKey?: string };
   if (!wrappedKey) {
     res.status(400).json({ error: 'Bad request', message: 'wrappedKey is required' });
-    return;
-  }
-
-  if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) {
-    res.json({ ok: false, sessionFingerprint: sessionId });
     return;
   }
 
@@ -115,11 +98,6 @@ router.post('/workspaces/backfill-provision', async (req: Request, res: Response
   const canProvisionOrganization = req.user.orgRole === 'OWNER' || req.user.orgRole === 'ADMIN';
   if (!canProvisionOrganization) {
     res.status(403).json({ error: 'Forbidden', message: `Organization administrator access required` });
-    return;
-  }
-
-  if (!config.enc.workspaceProvisionEnabled) {
-    res.status(409).json({ error: 'Encryption provisioning is unavailable' });
     return;
   }
 

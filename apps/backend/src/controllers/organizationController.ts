@@ -10,7 +10,6 @@ import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { buildInvitationLink } from '@/controllers/invitationController';
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
-import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createId } from '@paralleldrive/cuid2';
 
@@ -170,9 +169,7 @@ export class OrganizationController {
 
       const orgId = createId();
       try {
-        if (config.enc.orgProvisionEnabled) {
-          await getEncryptionProvider().initializeOrg(orgId);
-        }
+        await getEncryptionProvider().initializeOrg(orgId);
       } catch (error) {
         logger.error('Failed to initialize org encryption before organization creation', {
           orgId,
@@ -207,13 +204,11 @@ export class OrganizationController {
           },
         });
 
-        if (config.enc.workspaceProvisionEnabled) {
-          await getEncryptionProvider().provisionEntity({
-            entityId: workspace.id,
-            orgId: workspace.orgId,
-            entityType: 'WORKSPACE',
-          });
-        }
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
+        });
 
         await tx.project.create({
           data: {

@@ -6,7 +6,6 @@ import {
   QueryOptions,
 } from '@/types/database';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
-import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 
 export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspaceInput, UpdateWorkspaceInput> {
@@ -23,13 +22,11 @@ export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspa
           joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
         },
       });
-      if (config.enc.workspaceProvisionEnabled) {
-        await getEncryptionProvider().provisionEntity({
-          entityId: workspace.id,
-          orgId: workspace.orgId,
-          entityType: 'WORKSPACE',
-        });
-      }
+      await getEncryptionProvider().provisionEntity({
+        entityId: workspace.id,
+        orgId: workspace.orgId,
+        entityType: 'WORKSPACE',
+      });
       return workspace;
     });
   }
