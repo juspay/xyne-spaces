@@ -10,6 +10,9 @@ import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { buildInvitationLink } from '@/controllers/invitationController';
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { config } from '@/config/env';
+import { getEncryptionProvider } from '@/services/encryption';
+import { createId } from '@paralleldrive/cuid2';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -165,67 +168,93 @@ export class OrganizationController {
         return;
       }
 
-      // 1. Create organization
-      const orgData: CreateOrganizationInput = {
-        name: name.trim(),
-        description: description?.trim(),
-        createdBy: userId,
-      };
-      const organization = await this.organizationRepository.create(orgData);
+      const orgId = createId();
+      try {
+        if (config.enc.orgProvisionEnabled) {
+          await getEncryptionProvider().initializeOrg(orgId);
+        }
+      } catch (error) {
+        logger.error('Failed to initialize org encryption before organization creation', {
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
 
-      // 2. Create workspace for the org
-      const workspace = await db.workspace.create({
-        data: {
-          orgId: organization.orgId,
-          name: workspaceName.trim(),
+      const { organization, workspace } = await db.$transaction(async (tx) => {
+        const orgData: CreateOrganizationInput = {
+          name: name.trim(),
+          description: description?.trim(),
           createdBy: userId,
-          status: Status.ACTIVE,
-          workspaceType: WorkspaceType.ENTERPRISE,
-          joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-        },
-      });
+        };
+        const organization = await tx.organization.create({
+          data: {
+            orgId,
+            name: orgData.name,
+            description: orgData.description,
+            createdBy: orgData.createdBy,
+          },
+        });
 
-      // 3. Create DM project for the workspace (required by the system)
-      await db.project.create({
-        data: {
-          name: 'Direct Messages',
-          code: 'DM',
-          description: 'DM project for direct message channels',
-          type: ProjectType.DM,
-          workspaceId: workspace.id,
-          createdBy: userId,
-        },
-      });
-
-      // 4. Link workspace to organization
-      await db.workspaceOrganization.create({
-        data: {
-          orgId: organization.orgId,
-          workspaceId: workspace.id,
-          role: WorkspaceRole.ADMIN,
-        },
-      });
-
-      // 4b. Seed general channel + default project + board/stages
-      await createCommunityWorkspaceDefaults({
-        db,
-        workspaceId: workspace.id,
-        workspaceName: workspace.name,
-        createdBy: userId,
-      });
-
-      // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
-      // Provisioning writes the owner row for the newly created org, not the caller's own.
-      await withWorkspaceScope(() =>
-        db.orgMember.create({
+        const workspace = await tx.workspace.create({
           data: {
             orgId: organization.orgId,
-            email: ownerEmail.trim().toLowerCase(),
-            role: OrgRole.OWNER,
-            invitedBy: userId,
+            name: workspaceName.trim(),
+            createdBy: userId,
+            status: Status.ACTIVE,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           },
-        }),
-      );
+        });
+
+        if (config.enc.workspaceProvisionEnabled) {
+          await getEncryptionProvider().provisionEntity({
+            entityId: workspace.id,
+            orgId: workspace.orgId,
+            entityType: 'WORKSPACE',
+          });
+        }
+
+        await tx.project.create({
+          data: {
+            name: 'Direct Messages',
+            code: 'DM',
+            description: 'DM project for direct message channels',
+            type: ProjectType.DM,
+            workspaceId: workspace.id,
+            createdBy: userId,
+          },
+        });
+
+        await tx.workspaceOrganization.create({
+          data: {
+            orgId: organization.orgId,
+            workspaceId: workspace.id,
+            role: WorkspaceRole.ADMIN,
+          },
+        });
+
+        await createCommunityWorkspaceDefaults({
+          db: tx,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          createdBy: userId,
+        });
+
+        // Provisioning writes the owner row for the newly created org, not the caller's own.
+        await withWorkspaceScope(() =>
+          tx.orgMember.create({
+            data: {
+              orgId: organization.orgId,
+              email: ownerEmail.trim().toLowerCase(),
+              role: OrgRole.OWNER,
+              invitedBy: userId,
+            },
+          }),
+        );
+
+        return { organization, workspace };
+      });
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: organization.orgId,

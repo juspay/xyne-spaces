@@ -4,6 +4,7 @@ import { config } from '@/config/env';
 import { retryForever } from '@/utils/retry';
 import { installPrismaRetryMiddleware } from './retryMiddleware';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
+import { encryptionExtension } from '@/zero/prisma-encryption-extension';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
@@ -67,6 +68,63 @@ export class DatabaseClient {
 
       setupEnumTextValidation(DatabaseClient.instance);
 
+      // Per-query profiling: log every SQL query with duration, table, type
+      (DatabaseClient.instance as any).$on('query', async (e: any) => {
+        const durationMs = e.duration;
+        const query = e.query as string;
+        const params = e.params;
+
+        const trimmed = query.trimStart().toUpperCase();
+        const queryType = trimmed.startsWith('SELECT') ? 'SELECT'
+          : trimmed.startsWith('INSERT') ? 'INSERT'
+          : trimmed.startsWith('UPDATE') ? 'UPDATE'
+          : trimmed.startsWith('DELETE') ? 'DELETE'
+          : trimmed.startsWith('BEGIN') ? 'TX'
+          : trimmed.startsWith('COMMIT') ? 'TX'
+          : 'OTHER';
+
+        // Extract table name
+        let table = 'unknown';
+        const fromMatch = query.match(/(?:FROM|INTO|UPDATE)\s+"?(?:public"\.")?(\w+)"?/i);
+        if (fromMatch) table = fromMatch[1];
+
+        // Run EXPLAIN ANALYZE for SELECT queries to get rows scanned + index info
+        let explain: { rowsScanned: number; indexUsed: string | null; plan: string } | undefined;
+        if (queryType === 'SELECT' && DatabaseClient.instance) {
+          try {
+            const explainSql = `EXPLAIN (ANALYZE, FORMAT JSON) ${query}`;
+            const parsedParams = params ? JSON.parse(params) : [];
+            const explainResult = await (DatabaseClient.instance as any).$queryRawUnsafe(explainSql, ...parsedParams);
+            if (Array.isArray(explainResult) && explainResult[0]) {
+              const planJson = explainResult[0]['QUERY PLAN'] || explainResult[0]['query plan'];
+              if (Array.isArray(planJson) && planJson[0]) {
+                const topPlan = planJson[0].Plan || planJson[0].plan;
+                if (topPlan) {
+                  const rowsScanned = topPlan['Actual Rows'] ?? topPlan['Plan Rows'] ?? 0;
+                  const nodeType = topPlan['Node Type'] || '';
+                  const indexName = topPlan['Index Name'] || null;
+                  const indexUsed = indexName ? `${nodeType}: ${indexName}` : (nodeType.includes('Seq Scan') ? 'Seq Scan (no index)' : nodeType);
+                  const execTimeMs = planJson[0]['Execution Time'] ?? planJson[0]['execution time'] ?? null;
+                  explain = {
+                    rowsScanned,
+                    indexUsed,
+                    plan: `${nodeType}${indexName ? ` on ${indexName}` : ''}, rows=${rowsScanned}${execTimeMs != null ? `, execTime=${execTimeMs}ms` : ''}`,
+                  };
+                }
+              }
+            }
+          } catch (_e) {
+            // EXPLAIN can fail for some queries (e.g. with CTEs, prepared statements) — skip silently
+          }
+        }
+
+        logger.info('db:query', {
+          queryType,
+          table,
+          durationMs,
+          ...(explain ? { rowsScanned: explain.rowsScanned, indexUsed: explain.indexUsed, plan: explain.plan } : {}),
+        });
+      });
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);
@@ -87,6 +145,8 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
+      // Apply zero field encryption extension (no-op when encryptedFieldsConfig is empty)
+      DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
