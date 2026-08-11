@@ -352,6 +352,23 @@ model TicketTagMapping {
   @@schema("public")
 }
 
+
+model TicketExport {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  requestedBy     String
+  status          String
+  filters         String
+  createdAt       DateTime
+  updatedAt       DateTime
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  requester       User      @relation(fields: [requestedBy], references: [id], onDelete: Cascade, name: "RequestedTicketExports")
+
+  @@index([workspaceId, requestedBy, createdAt(sort: Desc)])
+  @@map("ticket_exports")
+  @@schema("public")
+}
+
 model TicketReferenceMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
   id             String                   @id @default(cuid())
@@ -845,6 +862,7 @@ model User {
   recordings                CallRecording[]         // call recordings this user started
 
   permissions CollectionPermission[]
+  requestedTicketExports TicketExport[] @relation("RequestedTicketExports")
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
   @@index([email])
@@ -1475,6 +1493,7 @@ model Workspace {
   tools             Tool[]
   userGroups        UserGroup[]
   roles             Role[]
+  ticketExports     TicketExport[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -1962,6 +1981,9 @@ model Email {
   externalMessageId String
   sentByUserId String?            // User who sent this outbound email (REPLY / REPLY_ALL / COMPOSE). Null for inbound and automation/system sends. Powers the per-desk "Sent" view.
   rfcMessageId String?
+  rating Int?
+  clientVersionName String?
+  clientVersionCode String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -1,4 +1,5 @@
 import { ParseResult, PostprocessContext } from './types';
+import type { ExternalSource } from '@prisma/client';
 
 /**
  * Base class for data transformation
@@ -14,7 +15,10 @@ export abstract class BaseTransformer<TRaw, TNormalized> {
    * @param rawPayload - Platform-specific payload
    * @returns ParseResult with normalized data or error
    */
-  abstract transform(rawPayload: TRaw): Promise<ParseResult<TNormalized>>;
+  abstract transform(
+    rawPayload: TRaw,
+    source?: ExternalSource,
+  ): Promise<ParseResult<TNormalized>>;
 
   /**
    * Optional: Postprocess after conversation/message creation

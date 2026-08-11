@@ -606,6 +606,7 @@ export enum NotificationType {
   CALL_UPDATED = "CALL_UPDATED",
   EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
+  EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
 }
@@ -705,6 +706,7 @@ export enum ChannelType {
   SLACK = 'SLACK',
   APP = 'APP',
   CALL = 'CALL',
+  SOCIAL_MEDIA = 'SOCIAL_MEDIA',
 }
 
 // @ts-ignore TS1294
@@ -714,6 +716,7 @@ export enum DeskType {
   SLACK = 'SLACK',
   APP = 'APP',
   CALL = 'CALL',
+  SOCIAL_MEDIA = 'SOCIAL_MEDIA',
 }
 
 // @ts-ignore TS1294
@@ -1178,4 +1181,3 @@ export enum BaseTicketType {
   DESK = 'DESK',
   Epic = 'Epic',
 }
-

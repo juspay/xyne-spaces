@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
   buildAppDeskSourceName,
   buildSlackDeskSourceName,
@@ -16,7 +17,8 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { createForwardedMessageXml,
+import {
+  createForwardedMessageXml,
   parseForwardedMessageXml,
   ChannelScopeType,
   ChannelVisibility,
@@ -27,7 +29,8 @@ import { createForwardedMessageXml,
   AppPermissionStatus,
   AppPermissionType,
   ActivityClassification,
-  ActivityClassificationJobType, ChannelType, ChannelRole } from '@xyne/shared';
+  ActivityClassificationJobType, ChannelType, ChannelRole,
+} from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
@@ -1458,17 +1461,23 @@ export class ChannelController {
       res.setHeader('Cache-Control', 'private, no-cache');
 
       const source = await db.externalSource.findFirst({
-        where: { channelId },
+        where: { channelId, workspaceId },
         select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
       const hasSource = !!source;
-      const isConnected = source?.isActive === true;
+      let isConnected = source?.isActive === true;
       const sourceType = source?.sourceType ?? null;
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      if (source?.sourceType === 'app-desk') {
+      let googlePlayApps: Array<{
+        id: string;
+        displayName: string;
+        packageName: string | null;
+        isActive: boolean;
+      }> = [];
+      if (source?.sourceType === ExternalSourcePlatform.APP_DESK) {
         const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
@@ -1478,8 +1487,30 @@ export class ChannelController {
         outboundConfigured = Boolean(
           installedApp?.webhookUrl?.trim() && installedApp.app?.signingSecret,
         );
-      } else if (source?.sourceType === 'slack-desk') {
+      } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
+      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+        const reviewSources = await db.externalSource.findMany({
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
+        isConnected = activeReviewSources.length > 0;
+        googlePlayApps = reviewSources.map(reviewSource => ({
+          id: reviewSource.id,
+          displayName: reviewSource.displayName,
+          packageName: reviewSource.externalIdentifier,
+          isActive: reviewSource.isActive,
+        }));
+        connectedLabel = activeReviewSources
+          .map(reviewSource => reviewSource.displayName)
+          .join(', ') || 'No active Google Play apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1487,7 +1518,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
         return;
       }
 
@@ -1504,12 +1535,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });

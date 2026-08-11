@@ -21,7 +21,7 @@
   /* Classic theme - default light theme */
   [data-theme="classic"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper.png");
+    --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -155,7 +155,7 @@
   /* Classic theme - default theme with current design */
   [data-theme="summer_breeze"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper.png");
+    --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -2280,6 +2280,161 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   padding: 6px 8px;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
+}
+
+/* Canvas selected-text formatting menu. Scoped to the custom toolbar class so
+   BlockNote menus in chat, previews, and other editor surfaces keep their own
+   layout. */
+.canvas-formatting-menu.bn-formatting-toolbar {
+  width: 200px;
+  min-width: 200px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  box-shadow:
+    0 18px 44px rgb(15 23 42 / 0.13),
+    0 4px 12px rgb(15 23 42 / 0.08);
+}
+
+.canvas-formatting-menu--ask-only.bn-formatting-toolbar {
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas-formatting-menu--ask-only .canvas-formatting-menu__attached-actions {
+  padding-top: 0;
+}
+
+.canvas-formatting-menu__type-row {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.canvas-formatting-menu__type-row > button {
+  width: 100%;
+  min-height: 26px;
+  justify-content: flex-start;
+  gap: 5px;
+  padding-inline: 4px;
+  border-radius: 8px;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.canvas-formatting-menu__type-row > button [data-position="right"],
+.canvas-formatting-menu__type-row > button .mantine-Button-section[data-position="right"] {
+  margin-left: auto;
+}
+
+.canvas-formatting-menu__format-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px 5px;
+  padding-block: 6px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.canvas-formatting-menu__format-grid .bn-button {
+  width: 23px;
+  height: 23px;
+  min-width: 23px;
+  min-height: 23px;
+  border-radius: 6px;
+  color: hsl(var(--foreground));
+  background: transparent;
+}
+
+.canvas-formatting-menu__format-grid .bn-button:hover,
+.canvas-formatting-menu__format-grid .bn-button[data-selected] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.canvas-formatting-menu__format-grid .bn-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.canvas-formatting-menu__attached-actions {
+  display: flex;
+  align-items: center;
+  padding-top: 6px;
+}
+
+.canvas-formatting-menu__attached-button {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  padding: 6px 10px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.canvas-formatting-menu__attached-button:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.canvas-formatting-menu__attached-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.canvas-formatting-menu__attached-button--left {
+  border-right-width: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+.canvas-formatting-menu__attached-button--right {
+  border-radius: 0 8px 8px 0;
+}
+
+.canvas-formatting-menu__attached-button--single {
+  border-right-width: 1px;
+  border-radius: 8px;
+}
+
+.canvas-formatting-menu__attached-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-inline-comment-composer button[aria-label="Mention channel"] {
+  display: none;
+}
+
+.canvas-inline-comment-composer button[data-testid="mention-user-btn"] {
+  color: hsl(var(--muted-foreground));
+}
+
+.canvas-inline-comment-composer button[data-testid="send-message-button"] {
+  width: 40px;
+  height: 40px;
 }
 
 /* ============================================================

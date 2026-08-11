@@ -1,17 +1,14 @@
-import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
+import { ReactElement, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bot,
-  CheckTickSingle,
   FileText,
-  FolderDefault,
-  ListDefault,
   PlusDefault,
   SearchBig,
   Spinner,
-  Star,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
+import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
@@ -23,7 +20,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -44,11 +40,16 @@ import {
 } from './canvasSidebarWidth';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { cn } from '../../../utils/classNames';
+import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+
+export type CanvasPanelOutletContext = {
+  leftHeaderSlot?: ReactElement | null;
+};
 
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -68,17 +69,30 @@ const CanvasPanel = (): ReactElement => {
     setViewMode,
     lastCanvasId,
     setLastCanvasId,
+    isSidebarCollapsed,
+    setSidebarCollapsed,
   } = usePersistedCanvasPreferences();
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
-  const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
-  const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [excludeCallGeneratedCanvases] = useState(true);
+  const [onlyCallGeneratedCanvases, setOnlyCallGeneratedCanvases] = useState(false);
   const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
   const [listOptionsOpen, setListOptionsOpen] = useState(false);
   const debouncedGroupedSearchQuery = useDebouncedValue(groupedSearchQuery, 300);
   const effectiveGroupedSearchQuery =
     debouncedGroupedSearchQuery.trim().length >= 2 ? debouncedGroupedSearchQuery : '';
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
+
+  useEffect(() => {
+    const panel = canvasPanelRef.current;
+    if (!panel) return;
+
+    if (isSidebarCollapsed) {
+      if (!panel.isCollapsed()) panel.collapse();
+    } else if (panel.isCollapsed()) {
+      panel.expand();
+    }
+  }, [isSidebarCollapsed]);
 
   // Remember which canvas was last opened
   useEffect(() => {
@@ -231,6 +245,35 @@ const CanvasPanel = (): ReactElement => {
     [z, navigate],
   );
 
+  const collapseCanvasSidebar = useCallback((): void => {
+    setListOptionsOpen(false);
+    setSidebarCollapsed(true);
+  }, [setSidebarCollapsed]);
+
+  const expandCanvasSidebar = useCallback((): void => {
+    setSidebarCollapsed(false);
+  }, [setSidebarCollapsed]);
+
+  const canvasPanelOutletContext = useMemo<CanvasPanelOutletContext>(
+    () => ({
+      leftHeaderSlot: isSidebarCollapsed ? (
+        <Tooltip content='Show canvases' side='bottom' delayDuration={300}>
+          <button
+            type='button'
+            className='flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            onClick={expandCanvasSidebar}
+            aria-label='Show canvases panel'
+            data-track-category='CANVAS'
+            data-track-name='EXPAND_CANVAS_SIDEBAR'
+          >
+            <PanelLeftOpenIcon className='size-4' strokeWidth={2.1} />
+          </button>
+        </Tooltip>
+      ) : null,
+    }),
+    [expandCanvasSidebar, isSidebarCollapsed],
+  );
+
   // Render the left panel content
   const renderLeftPanel = (): ReactElement => (
     <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
@@ -240,16 +283,28 @@ const CanvasPanel = (): ReactElement => {
       <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-sidebar-border-muted'>
         {/* Header — the frame is a bare title row; the list controls live behind
             the overflow menu so the chrome stays as quiet as the design. */}
-        <div className='shrink-0 px-3 pt-3'>
-          <div className='flex items-center justify-between gap-2 px-3 py-1'>
-            <h2 className='truncate text-base font-semibold leading-normal text-sidebar-accent-foreground'>
+        <div className='shrink-0 px-2.5 pt-3'>
+          <div className='flex items-center justify-between gap-2 px-1.5 py-1'>
+            <h2 className='truncate text-base font-bold leading-normal text-sidebar-accent-foreground'>
               Canvases
             </h2>
             <div className='flex shrink-0 items-center gap-1'>
+              <Tooltip content='Hide canvases' side='bottom' delayDuration={300}>
+                <button
+                  type='button'
+                  className='size-7 flex items-center justify-center rounded-lg border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-40'
+                  onClick={collapseCanvasSidebar}
+                  aria-label='Hide canvases panel'
+                  data-track-category='CANVAS'
+                  data-track-name='COLLAPSE_CANVAS_SIDEBAR'
+                >
+                  <PanelLeftCloseIcon className='size-4' strokeWidth={2.1} />
+                </button>
+              </Tooltip>
               <Tooltip content='New canvas' side='bottom' delayDuration={300}>
                 <button
                   type='button'
-                  className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-40'
+                  className='size-7 flex items-center justify-center rounded-lg border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-40'
                   onClick={() => void handleCreateCanvas()}
                   disabled={isCreatingCanvas}
                   aria-label='New Canvas'
@@ -267,7 +322,7 @@ const CanvasPanel = (): ReactElement => {
                 <DropdownMenuTrigger asChild>
                   <button
                     type='button'
-                    className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                    className='size-7 flex items-center justify-center rounded-lg border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                     aria-label='Canvas list options'
                     data-track-category='CANVAS'
                     data-track-name='CANVAS_LIST_OPTIONS_MENU'
@@ -276,52 +331,32 @@ const CanvasPanel = (): ReactElement => {
                     <ThreeDotsMenuHorizontal size={16} />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align='end' className='w-56'>
+                <DropdownMenuContent
+                  align='end'
+                  className='w-[265px] rounded-xl border-sidebar-border-muted bg-background p-1.5 shadow-xl'
+                >
                   <DropdownMenuItem
-                    className='gap-2'
-                    onClick={() => setViewMode('grouped')}
-                    data-track-category='CANVAS'
-                    data-track-name='VIEW_MODE_GROUPED'
-                    data-testid='canvas-view-grouped'
-                  >
-                    <FolderDefault size={14} className='shrink-0' />
-                    <span className='flex-1'>Group by project</span>
-                    {viewMode === 'grouped' && <CheckTickSingle size={14} className='shrink-0' />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className='gap-2'
-                    onClick={() => setViewMode('list')}
-                    data-track-category='CANVAS'
-                    data-track-name='VIEW_MODE_LIST'
-                    data-testid='canvas-view-list'
-                  >
-                    <ListDefault size={14} className='shrink-0' />
-                    <span className='flex-1'>List view</span>
-                    {viewMode === 'list' && <CheckTickSingle size={14} className='shrink-0' />}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className='gap-2'
-                    onClick={() => setShowStarredOnly(prev => !prev)}
-                    data-track-category='CANVAS'
-                    data-track-name='TOGGLE_STARRED_CANVAS_FILTER'
-                  >
-                    <Star size={14} className='shrink-0' />
-                    <span className='flex-1'>Starred only</span>
-                    {showStarredOnly && <CheckTickSingle size={14} className='shrink-0' />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className='gap-2'
-                    // Keep the menu open — this row hosts a switch, so selecting it
-                    // should toggle in place rather than dismiss.
+                    className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
                     onSelect={event => event.preventDefault()}
+                    data-track-category='CANVAS'
+                    data-track-name='TOGGLE_ONLY_BOT_GENERATED_CANVASES'
                   >
-                    <Bot size={14} className='shrink-0' />
-                    <span className='flex-1'>Show system generated</span>
+                    <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <span className='min-w-0 flex-1'>
+                      <span className='block leading-5'>Only bot-generated</span>
+                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                        Call notes and workflow docs Oats writes for you
+                      </span>
+                    </span>
                     <Switch
-                      id='exclude-call-generated-canvases'
-                      checked={!excludeCallGeneratedCanvases}
-                      onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
+                      id='only-call-generated-canvases'
+                      checked={onlyCallGeneratedCanvases}
+                      onCheckedChange={checked => {
+                        setOnlyCallGeneratedCanvases(checked);
+                        if (checked) {
+                          setViewMode('list');
+                        }
+                      }}
                     />
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -349,7 +384,7 @@ const CanvasPanel = (): ReactElement => {
         </div>
 
         {/* Canvas List */}
-        <div className='flex-1 min-h-0 overflow-auto no-scrollbar px-3 pt-2 pb-3'>
+        <div className='flex-1 min-h-0 overflow-auto no-scrollbar px-2.5 pt-2 pb-3'>
           {viewMode === 'grouped' ? (
             <CanvasListGrouped
               onSelect={handleSelectCanvas}
@@ -359,8 +394,10 @@ const CanvasPanel = (): ReactElement => {
               onDuplicate={handleDuplicateCanvas}
               isPersonalSectionCollapsed={isPersonalSectionCollapsed}
               onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
-              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
-              showStarredOnly={showStarredOnly}
+              excludeCallGeneratedCanvases={
+                onlyCallGeneratedCanvases ? false : excludeCallGeneratedCanvases
+              }
+              showStarredOnly={false}
               onToggleStar={handleToggleStar}
               searchQuery={effectiveGroupedSearchQuery}
             />
@@ -373,8 +410,11 @@ const CanvasPanel = (): ReactElement => {
               currentUserId={user?.id}
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
-              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
-              showStarredOnly={showStarredOnly}
+              excludeCallGeneratedCanvases={
+                onlyCallGeneratedCanvases ? false : excludeCallGeneratedCanvases
+              }
+              onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
+              showStarredOnly={false}
               onToggleStar={handleToggleStar}
               {...(selectedCanvasId ? { selectedCanvasId } : {})}
             />
@@ -428,12 +468,19 @@ const CanvasPanel = (): ReactElement => {
           minSize={CANVAS_SIDEBAR_MIN_WIDTH}
           maxSize={CANVAS_SIDEBAR_MAX_WIDTH}
           groupResizeBehavior='preserve-pixel-size'
+          collapsible
+          collapsedSize={0}
         >
           {renderLeftPanel()}
         </Panel>
 
         {/* RESIZE HANDLE */}
-        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+        <Separator
+          className={cn(
+            'w-[2px] transition-colors cursor-col-resize flex items-center justify-center group',
+            isSidebarCollapsed && 'hidden',
+          )}
+        >
           <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
         </Separator>
 
@@ -441,7 +488,12 @@ const CanvasPanel = (): ReactElement => {
         <Panel id='canvas-content'>
           <div className='flex-1 flex flex-col bg-background relative h-full overflow-hidden rounded-2xl border border-border'>
             <div className='flex-1 h-full overflow-hidden'>
-              {isOnIndexRoute ? renderPlaceholder() : <Outlet />}
+              {isSidebarCollapsed && isOnIndexRoute && (
+                <div className='absolute left-3 top-3 z-30' style={APP_NO_DRAG_STYLE}>
+                  {canvasPanelOutletContext.leftHeaderSlot}
+                </div>
+              )}
+              {isOnIndexRoute ? renderPlaceholder() : <Outlet context={canvasPanelOutletContext} />}
             </div>
           </div>
         </Panel>
