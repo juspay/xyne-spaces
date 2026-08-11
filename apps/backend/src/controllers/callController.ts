@@ -43,11 +43,8 @@ import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import {
-  getBuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplateId,
-} from '@/services/recordingSummaryTemplates';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -61,10 +58,7 @@ const UpdateHeadlessRecordingSchema = z
   });
 
 const RegenerateHeadlessSummarySchema = z.object({
-  summaryTemplateId: z.string().refine(
-    value => !!getBuiltinRecordingSummaryTemplate(value),
-    'Invalid recording summary template',
-  ),
+  summaryTemplateId: z.string().trim().min(1),
 });
 
 export class CallController {
@@ -1338,8 +1332,12 @@ export class CallController {
       }
 
       if (input.summaryTemplateId) {
-        const template = await repositories.summaryTemplates.findById(input.summaryTemplateId);
-        if (!template || template.workspaceId !== req.user!.workspaceId) {
+        const template = await summaryTemplateService.findAccessibleById(
+          input.summaryTemplateId,
+          req.user!.workspaceId,
+          userId,
+        );
+        if (!template) {
           res.status(400).json({ success: false, error: 'Invalid summary template' });
           return;
         }
@@ -1423,7 +1421,7 @@ export class CallController {
 
       const result = await noteTakerTranscriptService.regenerateSummary(
         call,
-        input.summaryTemplateId as BuiltinRecordingSummaryTemplateId,
+        input.summaryTemplateId,
       );
       if (!result) {
         res.status(404).json({

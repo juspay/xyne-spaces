@@ -4,6 +4,7 @@ import {
   type AnyQueryRegistry,
 } from '@rocicorp/zero';
 import {
+  AccessType,
   BaseTicketType,
   BoardType,
   CallType,
@@ -14,7 +15,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
-  ShareableEntityType, UserResponsibility } from '@xyne/shared';
+  ShareableEntityType, SummaryTemplateVisibility, UserResponsibility } from '@xyne/shared';
 import { z } from 'zod';
 import {
   CanvasVisibility,
@@ -2579,8 +2580,56 @@ export const queries: AnyQueryRegistry = defineQueries({
     ({ ctx }) =>
       zql.summary_templates
         .where('workspaceId', ctx.workspaceId)
+        .where(({ or, and, cmp, exists }) =>
+          or(
+            cmp('createdBy', ctx.userID),
+            cmp('visibility', SummaryTemplateVisibility.PUBLIC),
+            and(
+              cmp('visibility', SummaryTemplateVisibility.WAITING_FOR_APPROVAL),
+              exists('workspaceResourceAccess', access =>
+                access
+                  .where('accessType', AccessType.ADMIN)
+                  .where(({ or: accessOr, cmp: accessCmp, exists: accessExists }) =>
+                    accessOr(
+                      accessCmp('userId', ctx.userID),
+                      accessExists('userGroup', group =>
+                        group.whereExists('userGroupMappings', membership =>
+                          membership.where('userId', ctx.userID),
+                        ),
+                      ),
+                    ),
+                  )
+                  .whereExists('resource', resource => resource.where('name', 'SCRIBE')),
+              ),
+            ),
+            exists('shares', share =>
+              share
+                .where('workspaceId', ctx.workspaceId)
+                .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
+                .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+                .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
+                  shareOr(
+                    shareCmp('userId', ctx.userID),
+                    shareExists('userGroupMemberships', membership =>
+                      membership.where('userId', ctx.userID),
+                    ),
+                    shareExists('channelMembers', member => member.where('userId', ctx.userID)),
+                  ),
+                ),
+            ),
+          ),
+        )
         .orderBy('name', 'asc')
         .orderBy('version', 'desc'),
+  ),
+
+  summaryTemplateById: defineQuery(
+    z.object({ templateId: z.string() }),
+    ({ ctx, args: { templateId } }) =>
+      zql.summary_templates
+        .where('workspaceId', ctx.workspaceId)
+        .where('id', templateId)
+        .one(),
   ),
 
   recurringSeriesById: defineQuery(

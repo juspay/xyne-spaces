@@ -12,6 +12,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
+import type { SummaryTemplate } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
@@ -25,17 +26,16 @@ import type {
 } from '@/types/blockNoteTypes';
 import {
   buildSummaryTemplateSelectionPrompt,
+  formatSummaryTemplateSections,
   parseSelectedSummaryTemplate,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
 import {
-  BUILTIN_RECORDING_SUMMARY_TEMPLATES,
+  DEFAULT_RECORDING_SUMMARY_TEMPLATE,
   DEFAULT_RECORDING_SUMMARY_FIELDS,
   RECORDING_DETAILED_SUMMARY_PROMPT,
-  getBuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplateId,
 } from './recordingSummaryTemplates';
+import { summaryTemplateService } from './summaryTemplateService';
 
 // PRD Document structure
 interface PRDDocument {
@@ -901,35 +901,32 @@ export class CallDocumentService {
     return selectedTemplate;
   }
 
-  /**
-   * Select one of the built-in recording templates. These templates are
-   * intentionally code-backed for the v1 rollout, so every workspace gets the
-   * same choices without requiring seed rows in summary_templates.
-   */
+  /** Select the best persisted template, falling back to the code-backed default. */
   async selectRecordingSummaryTemplateForTranscript(
     transcript: string,
+    workspaceId: string,
+    userId: string,
     callId: string,
-  ): Promise<BuiltinRecordingSummaryTemplate> {
-    const candidates: SummaryTemplateCandidate[] = BUILTIN_RECORDING_SUMMARY_TEMPLATES.map(
-      template => ({
-        id: template.id,
-        name: template.name,
-        version: 1,
-        autoTriggerPrompt: template.selectionCriteria,
-        sections: template.fields,
-        systemPrompt: '',
-      }),
+  ): Promise<SummaryTemplate | null> {
+    const templates = await summaryTemplateService.list(workspaceId, userId);
+    const defaultTemplate = await summaryTemplateService.findAccessibleById(
+      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+      workspaceId,
+      userId,
     );
+    if (templates.length === 0) return defaultTemplate;
 
     const result = await executeStreamingLlmRequest({
-      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, candidates),
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
       operation: 'recording_summary_template_selection',
       callId,
     });
 
     if (result.ok) {
-      const selected = parseSelectedSummaryTemplate(result.content, candidates);
-      const template = selected ? getBuiltinRecordingSummaryTemplate(selected.id) : undefined;
+      const selected = parseSelectedSummaryTemplate(result.content, templates);
+      const template = selected
+        ? templates.find(candidate => candidate.id === selected.id)
+        : undefined;
       if (template) {
         logger.info(`[${callId}] recording_summary_template_selected`, {
           template_id: template.id,
@@ -940,24 +937,36 @@ export class CallDocumentService {
     }
 
     logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
-      template_id: 'default',
+      template_id: defaultTemplate?.id,
       reason: result.ok ? 'invalid_selection' : result.reason,
     });
-    return getBuiltinRecordingSummaryTemplate('default')!;
+    return defaultTemplate;
   }
 
-  /** Generate a headless-recording summary using the supplied v1 seed prompt. */
+  /** Generate a headless-recording summary using a saved or code-backed template. */
   async generateRecordingSummary(
     transcript: string,
     callId: string,
-    templateId?: BuiltinRecordingSummaryTemplateId,
+    templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
-  ): Promise<{ summary: string; template: BuiltinRecordingSummaryTemplate } | null> {
-    const template = templateId
-      ? getBuiltinRecordingSummaryTemplate(templateId)
-      : await this.selectRecordingSummaryTemplateForTranscript(transcript, callId);
+  ): Promise<{ summary: string; template: SummaryTemplate } | null> {
+    const call = await repositories.calls.findByExternalId(callId);
+    if (!call?.workspaceId) return null;
 
-    if (!template) {
+    const selectedTemplate = templateId
+      ? await summaryTemplateService.findAccessibleById(
+          templateId,
+          call.workspaceId,
+          call.createdByUserId,
+        )
+      : await this.selectRecordingSummaryTemplateForTranscript(
+          transcript,
+          call.workspaceId,
+          call.createdByUserId,
+          callId,
+        );
+
+    if (!selectedTemplate) {
       logger.error(`[${callId}] recording_summary_generation_failed`, {
         reason: 'invalid_template',
         template_id: templateId,
@@ -965,12 +974,21 @@ export class CallDocumentService {
       return null;
     }
 
+    const template = await summaryTemplateService.ensureGeneratedSystemPrompt(selectedTemplate);
+    if (!template) {
+      logger.error(`[${callId}] recording_summary_generation_failed`, {
+        reason: 'system_prompt_generation_failed',
+        template_id: selectedTemplate.id,
+      });
+      return null;
+    }
+
     const summary = await this.generateDetailedSummary(
       transcript,
       callId,
-      undefined,
-      template.fields,
-      undefined,
+      template.autoTriggerPrompt ?? undefined,
+      formatSummaryTemplateSections(template.sections),
+      template.systemPrompt,
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta,
