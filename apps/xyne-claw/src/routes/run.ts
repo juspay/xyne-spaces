@@ -1807,12 +1807,6 @@ async function processTask(
       !Array.isArray(trustedSdlcContext["permissions"])
         ? (trustedSdlcContext["permissions"] as Record<string, unknown>)
         : undefined;
-    const trustedSdlcGates =
-      trustedSdlcContext?.["gates"] &&
-      typeof trustedSdlcContext["gates"] === "object" &&
-      !Array.isArray(trustedSdlcContext["gates"])
-        ? (trustedSdlcContext["gates"] as Record<string, unknown>)
-        : undefined;
     const trustedSdlcExecution =
       trustedSdlcContext?.["execution"] &&
       typeof trustedSdlcContext["execution"] === "object" &&
@@ -1831,13 +1825,12 @@ async function processTask(
       if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
         meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
       }
-      // Runtime credentials are granted per dispatched EXECUTION (setup/
+      // Runtime credentials are issued per dispatched execution (setup/
       // artifact/work). Chat-surface runs carry repository context but no
       // execution, so setting the operation flag without the ids would only
-      // trip the incomplete-grant guard in sandbox-repo-setup. Gate on the
-      // full triple so chat runs degrade to baseline-canvas access instead.
+      // trip the incomplete-binding guard in sandbox-repo-setup. Gate on both
+      // execution identifiers so chat runs degrade to baseline-canvas access.
       if (
-        typeof trustedSdlcGates?.["accessCredentialRevision"] === "number" &&
         typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
         typeof trustedSdlcExecution?.["sessionId"] === "string"
       ) {

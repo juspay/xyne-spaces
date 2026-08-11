@@ -44,11 +44,6 @@ export function parseSdlcAgentRunContext(value: unknown): Record<string, unknown
     !["ADMIN", "MEMBER"].includes(String(permissions["repositoryRole"] ?? "")) ||
     typeof permissions["writeRequested"] !== "boolean" ||
     !gates ||
-    !nonEmptyString(gates["accessStatus"]) ||
-    !(
-      gates["accessCredentialRevision"] === null ||
-      (Number.isInteger(gates["accessCredentialRevision"]) && Number(gates["accessCredentialRevision"]) > 0)
-    ) ||
     !Array.isArray(gates["capabilities"]) ||
     typeof gates["allBaselinesApproved"] !== "boolean" ||
     !execution ||

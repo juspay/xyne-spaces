@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { injectSdlcBaselineRunContext, parseSdlcAgentRunContext } from "./sdlc-baseline-run-context.js";
+import {
+  injectSdlcBaselineRunContext,
+  parseSdlcAgentRunContext,
+} from "../../src/mcp/sdlc-baseline-run-context.js";
 
 const pinned = {
   version: 1,
@@ -11,7 +14,7 @@ const pinned = {
   actorUserId: "user-1",
   repository: { id: "repo-1", name: "repo", url: "https://github.com/acme/repo.git", baseBranch: "main" },
   permissions: { repositoryRole: "ADMIN", writeRequested: false },
-  gates: { accessStatus: "VALID", accessCredentialRevision: 1, capabilities: [], allBaselinesApproved: false },
+  gates: { capabilities: [], allBaselinesApproved: false },
   execution: { workflowExecutionId: "setup-1", sessionId: "session-1", conversationId: null },
   artifact: { kind: null, id: null, sourceType: null, sourceId: null },
   ticketId: null,
@@ -53,20 +56,26 @@ describe("SDLC baseline run context", () => {
 
   it("rejects incomplete persisted context", () => {
     expect(parseSdlcAgentRunContext({ ...pinned, repository: { ...pinned.repository, id: "" } })).toBeNull();
-    expect(parseSdlcAgentRunContext({ ...pinned, gates: { ...pinned.gates, capabilities: null } })).toBeNull();
+    expect(
+      parseSdlcAgentRunContext({ ...pinned, gates: { ...pinned.gates, capabilities: null } }),
+    ).toBeNull();
   });
 
   it("rejects operation/context mismatches", () => {
-    expect(parseSdlcAgentRunContext({
-      ...pinned,
-      operation: "work",
-      ticketId: "ticket-1",
-      permissions: { ...pinned.permissions, writeRequested: false },
-    })).toBeNull();
-    expect(parseSdlcAgentRunContext({
-      ...pinned,
-      operation: "interactive",
-      execution: { ...pinned.execution, conversationId: null },
-    })).toBeNull();
+    expect(
+      parseSdlcAgentRunContext({
+        ...pinned,
+        operation: "work",
+        ticketId: "ticket-1",
+        permissions: { ...pinned.permissions, writeRequested: false },
+      }),
+    ).toBeNull();
+    expect(
+      parseSdlcAgentRunContext({
+        ...pinned,
+        operation: "interactive",
+        execution: { ...pinned.execution, conversationId: null },
+      }),
+    ).toBeNull();
   });
 });
