@@ -1,0 +1,73 @@
+name: Nix CI
+
+# Guards the Nix-based local dev setup (the flake devShell + the process-compose
+# services bundle) against regressions. Two classes are covered:
+#   1. flake eval / build breakage (removed attrs, broken derivations, input drift)
+#   2. source-path drift in the process-compose bootstrap (project.nix) — the class
+#      that silently broke db-setup when the repo was restructured to apps/backend/.
+#
+# Installer + cache choice follows juspay/skills `nix-ci` (Option 1, GitHub
+# Actions): use nix-quick-install-action (NOT the DeterminateSystems installer),
+# because only its store layout is snapshotted by cache-nix-action.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - staging
+      - "release**"
+
+permissions:
+  contents: read
+  # Required by cache-nix-action `purge: true` — it calls the REST cache API to
+  # evict stale entries. Without it the save aborts and nothing is ever cached.
+  actions: write
+
+concurrency:
+  group: nix-ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Cancel superseded PR runs; never cancel a protected-branch push.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  nix:
+    name: Nix flake check + build + path guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: nixbuild/nix-quick-install-action@v34
+        with:
+          nix_conf: |
+            substituters = https://cache.nixos.org https://cache.nixos.asia/juspay
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= juspay:5aHaNForWL03wKOGhUn/al4BZd3HqZDWZ3hrVTcf6Fg=
+            accept-flake-config = true
+
+      # Cache /nix/store across runs — a cold closure for this stack is minutes;
+      # a warm restore is ~1 min. Keyed on the Nix inputs so it invalidates when
+      # the flake, project.nix, or nix/ tree changes.
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: 604800
+          purge-primary-key: never
+
+      # 1. Eval hygiene — cheap; catches removed attrs / eval errors across outputs.
+      - name: nix flake check
+        run: nix flake check --no-build -L
+
+      # 2. Build what a developer actually consumes: the dev shell and the
+      #    process-compose services bundle. Catches broken/removed derivations.
+      - name: nix build (devShell + services bundle)
+        run: nix build -L .#devShells.x86_64-linux.default .#xyne-space-services
+
+      # 3. Source-path drift guard — the check that would have caught the
+      #    backend/ -> apps/backend/ restructure that left db-setup pointing at a
+      #    dead path and silently skipping schema push + ACL seed + admin creation.
+      - name: Bootstrap path-drift guard
+        run: bash nix/scripts/check-referenced-paths.sh
