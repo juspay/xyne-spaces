@@ -2625,7 +2625,7 @@ function UploadSessionModal({
   // Zip MEMBERS must be session files, never nested archives: a zip-inside-zip
   // would be decoded as garbled binary-as-UTF-8 and uploaded as a "session".
   const acceptedMemberExts = source === "opencode" ? /\.(json)$/i : /\.(jsonl|json)$/i;
-  const acceptAttr = source === "opencode" ? ".json,.zip,.gz" : ".jsonl,.json,.zip,.gz";
+  const acceptAttr = source === "opencode" ? ".json,.zip,.gz,.tar.gz" : ".jsonl,.json,.zip,.gz,.tar.gz";
 
   // Finder appends ` (1)` AFTER the original extension when a download already
   // exists, producing names such as `rollout.jsonl (1).gz`. Strip only that
@@ -2645,7 +2645,12 @@ function UploadSessionModal({
     const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
     return await new Response(stream).text();
   }
+  async function gunzipToArrayBuffer(buf: ArrayBuffer): Promise<ArrayBuffer> {
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).arrayBuffer();
+  }
   const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
+  const MAX_ARCHIVE_BYTES = 250_000_000; // client-side decompression safety cap
 
   /**
    * The Codex export helper produces a single `{ session_count, sessions }`
@@ -2653,10 +2658,38 @@ function UploadSessionModal({
    * into the JSONL sessions the backend parser already understands instead of
    * rejecting a valid all-sessions export as one oversized upload.
    */
+  function splitCodexRecords(name: string, records: unknown[]): Array<{ name: string; content: string }> {
+    const rollouts: unknown[][] = [];
+    let current: unknown[] = [];
+    for (const record of records) {
+      const isMeta = typeof record === "object" && record !== null && (record as { type?: unknown }).type === "session_meta";
+      if (isMeta && current.length > 0) { rollouts.push(current); current = []; }
+      current.push(record);
+    }
+    if (current.length > 0) rollouts.push(current);
+    return rollouts.map((rollout, index) => ({
+      name: rollouts.length === 1 ? name : `${name.replace(/\.(?:jsonl|json)$/iu, "")}-${index + 1}.jsonl`,
+      content: rollout.map((record) => JSON.stringify(record)).join("\n"),
+    }));
+  }
+
+  function splitCodexJsonl(name: string, content: string): Array<{ name: string; content: string }> | null {
+    const lines = content.split(/\r?\n/u).filter((line) => line.trim());
+    const records: unknown[] = [];
+    for (const line of lines) {
+      try { records.push(JSON.parse(line)); } catch { return null; }
+    }
+    return records.some((record) => typeof record === "object" && record !== null && (record as { type?: unknown }).type === "session_meta")
+      ? splitCodexRecords(name, records)
+      : null;
+  }
+
   function expandCodexBundle(name: string, content: string): Array<{ name: string; content: string }> | null {
     if (source !== "codex") return null;
     try {
-      const parsed = JSON.parse(content) as { sessions?: unknown };
+      const parsed = JSON.parse(content) as { sessions?: unknown } | unknown[];
+      if (Array.isArray(parsed)) return splitCodexRecords(name, parsed);
+      if (typeof parsed !== "object" || parsed === null) return null;
       if (!Array.isArray(parsed.sessions)) return null;
       const expanded: Array<{ name: string; content: string }> = [];
       for (let i = 0; i < parsed.sessions.length; i++) {
@@ -2674,8 +2707,30 @@ function UploadSessionModal({
       }
       return expanded;
     } catch {
-      return null;
+      return splitCodexJsonl(name, content);
     }
+  }
+
+  /** Extract regular files from a POSIX tar archive after gzip decompression.
+   * We intentionally support only ordinary file entries; links/devices/PAX
+   * metadata are ignored and never interpreted as session content. */
+  function untar(buf: ArrayBuffer): Array<{ name: string; bytes: Uint8Array }> {
+    const bytes = new Uint8Array(buf);
+    const decoder = new TextDecoder();
+    const readField = (start: number, length: number) => decoder.decode(bytes.subarray(start, start + length)).replace(/\0.*$/u, "").trim();
+    const entries: Array<{ name: string; bytes: Uint8Array }> = [];
+    for (let offset = 0; offset + 512 <= bytes.length;) {
+      const name = readField(offset, 100);
+      if (!name) break;
+      const prefix = readField(offset + 345, 155);
+      const sizeText = readField(offset + 124, 12);
+      const size = Number.parseInt(sizeText || "0", 8);
+      const type = bytes[offset + 156] ?? 0;
+      if (!Number.isFinite(size) || size < 0 || offset + 512 + size > bytes.length) throw new Error("Invalid tar archive");
+      if (type === 0 || type === 48) entries.push({ name: prefix ? `${prefix}/${name}` : name, bytes: bytes.slice(offset + 512, offset + 512 + size) });
+      offset += 512 + Math.ceil(size / 512) * 512;
+    }
+    return entries;
   }
 
   function addUsableSessions(
@@ -2709,7 +2764,22 @@ function UploadSessionModal({
     const skip: string[] = [];
     try {
       for (const file of files) {
-        if (/\.zip$/i.test(file.name)) {
+        if (/\.tar\.gz$/i.test(file.name)) {
+          let tar: ArrayBuffer;
+          try { tar = await gunzipToArrayBuffer(await file.arrayBuffer()); }
+          catch { skip.push(`${file.name} (not valid tar.gz)`); continue; }
+          if (tar.byteLength > MAX_ARCHIVE_BYTES) { skip.push(`${file.name} (archive over 250MB)`); continue; }
+          let entries: Array<{ name: string; bytes: Uint8Array }>;
+          try { entries = untar(tar); }
+          catch { skip.push(`${file.name} (invalid tar archive)`); continue; }
+          for (const entry of entries) {
+            const base = entry.name.split("/").pop() ?? entry.name;
+            const name = normalizeSessionFilename(base);
+            if (!acceptedMemberExts.test(name)) continue;
+            const content = new TextDecoder().decode(entry.bytes);
+            addUsableSessions(name, content, picked, skip);
+          }
+        } else if (/\.zip$/i.test(file.name)) {
           const { default: JSZip } = await import("jszip");
           const zip = await JSZip.loadAsync(await file.arrayBuffer());
           for (const entry of Object.values(zip.files)) {
