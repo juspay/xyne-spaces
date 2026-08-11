@@ -693,6 +693,19 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
     </div>
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>
+        <p className='text-sm font-medium text-foreground'>Open formatting by default</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Show the formatting toolbar automatically in channel and thread message composers
+        </p>
+      </div>
+      <Switch
+        id='default-formatting-toolbar-open'
+        checked={state.defaultFormattingToolbarOpen}
+        onCheckedChange={state.setDefaultFormattingToolbarOpen}
+      />
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
         <p className='text-sm font-medium text-foreground'>
           Allow @channel/@here in thread replies
         </p>
