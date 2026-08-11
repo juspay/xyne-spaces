@@ -983,7 +983,11 @@ const AttachmentGalleryModalInner: React.FC = () => {
     const allAttachments: AttachmentRef[] = threadMessages.flatMap(msg => {
       if (!msg.hasAttachment || !msg.attachments?.length) return [];
 
-      return msg.attachments.map(att => {
+      const ordered = [...msg.attachments].sort(
+        (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+      );
+
+      return ordered.map(att => {
         const ref: AttachmentRef = {
           attachmentId: att.id,
           fileName: att.originalFilename,
