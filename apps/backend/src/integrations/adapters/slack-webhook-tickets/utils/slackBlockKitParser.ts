@@ -4,7 +4,7 @@
  */
 
 import { escapeForSlackWithMarkdown, escapeForSlack } from '@clearfeed-ai/slack-to-html';
-import { parseMrkdwnBlocks } from './slackUtils';
+import { parseMrkdwnBlocks, encodeAnglesInsideLinkUrls } from './slackUtils';
 import { logger } from '../../../../utils/logger';
 
 /**
@@ -12,14 +12,17 @@ import { logger } from '../../../../utils/logger';
  * errors from @clearfeed-ai/slack-to-html and falls back to plain-text escaping.
  */
 function safeEscapeForSlackWithMarkdown(text: string): string {
+  // Repair link URLs whose unescaped `<`/`>` would otherwise truncate the link
+  // token in the escaper (breaks Grafana graph links in Alertmanager alerts).
+  const sanitized = encodeAnglesInsideLinkUrls(text);
   try {
-    return escapeForSlackWithMarkdown(text);
+    return escapeForSlackWithMarkdown(sanitized);
   } catch (error) {
     if (error instanceof RangeError && error.message?.includes('Maximum call stack')) {
       logger.warn('[SlackBlockKitParser] escapeForSlackWithMarkdown stack overflow, falling back to plain text', {
-        textPreview: text.slice(0, 200),
+        textPreview: sanitized.slice(0, 200),
       });
-      return escapeForSlack(text);
+      return escapeForSlack(sanitized);
     }
     throw error;
   }
