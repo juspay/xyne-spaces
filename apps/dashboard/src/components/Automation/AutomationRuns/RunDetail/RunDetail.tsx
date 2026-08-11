@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Hourglass, Loader2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Hourglass, Loader2, RotateCw, XCircle } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { fetchAutomationRun } from '../../../../api/automationsApi';
+import { useVisibleReload } from '../../../../hooks/useVisibleReload';
 import type { AutomationRunStatus } from '../../Automation.types';
 import type { RunDetailProps } from './RunDetail.types';
 
-const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
+export const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
   SCHEDULED:
     'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/40',
   RUNNING:
@@ -37,11 +38,13 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
     data,
     isLoading: queryLoading,
     isError,
+    refetch,
   } = useQuery({
     queryKey: ['automation-run', runId],
     queryFn: () => fetchAutomationRun(runId),
     refetchOnWindowFocus: true,
   });
+  const { reloading, reload } = useVisibleReload(refetch);
   const run = data?.run ?? null;
   const isLoading = queryLoading && !run;
   const notFound = isError || (!queryLoading && !run);
@@ -59,7 +62,7 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
         >
           <ArrowLeft className='size-4' />
         </button>
-        <h1 className='font-mono text-sm text-foreground'>Run {runId}</h1>
+        <h1 className='flex-1 font-mono text-sm text-foreground'>Run {runId}</h1>
         {run && (
           <span
             className={cn(
@@ -71,6 +74,18 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
             {STATUS_LABELS[run.status] ?? run.status}
           </span>
         )}
+        <button
+          type='button'
+          onClick={reload}
+          disabled={reloading}
+          aria-label='Reload steps of this run'
+          title='Reload steps of this run'
+          data-track-category='automation-runs'
+          data-track-name='run-detail-reload'
+          className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+        >
+          <RotateCw className={cn('size-4', reloading && 'animate-spin')} />
+        </button>
       </div>
 
       <div className='flex-1 overflow-y-auto'>

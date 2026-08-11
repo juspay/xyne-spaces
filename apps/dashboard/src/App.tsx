@@ -25,6 +25,7 @@ import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
+import { AutomationDebugProvider } from './providers/AutomationDebugProvider';
 import {
   CheckTickCircle,
   AlertCircle,
@@ -123,7 +124,9 @@ const App = (): ReactElement => {
                   <TooltipProvider delayDuration={0}>
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <Wallpaper />
-                      <RouterProvider router={router}></RouterProvider>
+                      <AutomationDebugProvider>
+                        <RouterProvider router={router}></RouterProvider>
+                      </AutomationDebugProvider>
                     </main>
                     <SwitchLoadingOverlay />
                     <Toaster

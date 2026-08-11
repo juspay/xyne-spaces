@@ -24,6 +24,7 @@ import {
   Archive,
   GitBranch,
   Lock,
+  Zap,
 } from 'lucide-react';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
@@ -81,6 +82,8 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
+import { useDebugAutomationsEnabled } from '../../../hooks/useDebugSettings';
+import { openAutomationDebug } from '../../../providers/AutomationDebugProvider';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
@@ -733,6 +736,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query all user groups for activity display
   const userGroups = useUserGroups();
   const { user: currentUser } = useAuth();
+  const debugAutomationsEnabled = useDebugAutomationsEnabled();
   const currentUserRoleIds = useCurrentUserRoleIds();
 
   const handleNonFormReviewSubmit = async (): Promise<void> => {
@@ -3071,6 +3075,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <Sparkles size={20} />
               </Button>
             </Tooltip>
+            {debugAutomationsEnabled && (
+              <Tooltip content='Debug automations'>
+                <Button
+                  className='p-2 border border-border rounded-lg h-8 w-8 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10'
+                  variant='ghost'
+                  size='sm'
+                  onClick={(): void => openAutomationDebug({ type: 'TICKET', id: ticketId })}
+                  aria-label='Debug automations'
+                  data-track-category='automation-run-debug'
+                  data-track-name='open-from-ticket'
+                  data-track-metadata={JSON.stringify({ ticketId })}
+                >
+                  <Zap size={20} />
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip content={'Archive Ticket'}>
               <Button
                 className='p-2 border border-border rounded-lg h-8 w-8'

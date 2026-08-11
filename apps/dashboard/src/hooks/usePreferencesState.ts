@@ -42,7 +42,11 @@ export function usePreferencesState(enabled: boolean) {
   );
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
-  const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
+  const {
+    settings: debugSettings,
+    toggleSendIndicators,
+    toggleDebugAutomations,
+  } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
     useDefaultFormattingToolbarOpen();
@@ -138,6 +142,7 @@ export function usePreferencesState(enabled: boolean) {
     setAiLandingDefault,
     debugSettings,
     toggleSendIndicators,
+    toggleDebugAutomations,
     enterSendsMessage,
     defaultFormattingToolbarOpen,
     setDefaultFormattingToolbarOpen,

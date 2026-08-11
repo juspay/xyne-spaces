@@ -1,7 +1,10 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { WorkflowEventType } from '@xyne/shared';
 import { triggerRegistry } from '../triggers/trigger-registry';
+import { matchTicketScopeFilters, type TicketScopeFilter } from '../triggers/ticket-context';
 import { stepRegistry } from '../steps/step-registry';
 import { ConditionOperator } from '../types/operators';
 import { automationService } from '../services/automation.service';
@@ -22,6 +25,8 @@ import {
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
+  parseAutomationConfig,
+  parseExecutionTriggerData,
   triggerTypeToEventType,
   workflowToAutomation,
 } from '../types/workflow-adapter';
@@ -560,6 +565,251 @@ router.get('/claw/agents', async (_req: Request, res: Response) => {
         error: 'Failed to fetch claw agents',
         detail: err instanceof Error ? err.message : String(err),
       });
+  }
+});
+
+// ─── Debug: entity runs (auth + workspace scoped only) ────────────────────
+// Lists automation runs triggered by a message/mail/ticket. The entity id
+// only lives inside `context.trigger` (no indexed relation to it), so we
+// narrow candidate automations by scope (step 1, safe — static config), then
+// page newest-first through their executions matching each against
+// `context.trigger` (steps 2+3) until `limit` matches or a row-scanned
+// ceiling is hit. Also windowed to [entity `createdAt`, +1h] as a cheap
+// DB-side filter, since automations fire near-instantly on creation —
+// avoids scanning years of unrelated newer executions for an old entity.
+// email/ticket `createdAt` can be backdated on refetch/import, so this can
+// in theory skip a genuinely older run — acceptable here since this is a
+// debug aid, not the automation engine itself. Matching is scoped to
+// `context.trigger` specifically, not the whole context, since a step like
+// CREATE_TICKET embeds the id of the entity it *produced*, not the trigger.
+// Declared before `/:automationId/runs` (both 2-segment paths) so
+// `:automationId` doesn't capture the literal `debug` segment.
+const DEBUG_ENTITY_PAGE_SIZE = 200;
+const DEBUG_ENTITY_MAX_EXAMINED = 5000; // cost backstop, not a correctness bound
+const DEBUG_ENTITY_TRIGGER_WINDOW_MS = 60 * 60 * 1000; // automations fire near-instantly on the entity's own creation
+
+type DebugEntityType = 'MESSAGE' | 'EMAIL' | 'TICKET';
+
+const DEBUG_ENTITY_TYPES: ReadonlySet<DebugEntityType> = new Set([
+  'MESSAGE',
+  'EMAIL',
+  'TICKET',
+]);
+
+// TICKET only covers TICKET_CREATED — no per-update id to scope updates/comments to here.
+const ENTITY_EVENT_TYPES: Record<DebugEntityType, WorkflowEventType[]> = {
+  MESSAGE: [WorkflowEventType.MESSAGE_RECEIVED],
+  EMAIL: [WorkflowEventType.EMAIL_RECEIVED, WorkflowEventType.EMAIL_SENT],
+  TICKET: [WorkflowEventType.TICKET_CREATED],
+};
+
+const ENTITY_ID_KEY: Record<DebugEntityType, string> = {
+  MESSAGE: 'messageId',
+  EMAIL: 'emailId',
+  TICKET: 'ticketId',
+};
+
+function matchesEntityTrigger(contextRaw: string | null, type: DebugEntityType, entityId: string): boolean {
+  const trigger = parseExecutionTriggerData(contextRaw)['trigger'] as Record<string, unknown> | undefined;
+  return trigger?.[ENTITY_ID_KEY[type]] === entityId;
+}
+
+function parseDebugEntityType(raw: unknown): DebugEntityType | null {
+  return typeof raw === 'string' && DEBUG_ENTITY_TYPES.has(raw as DebugEntityType)
+    ? (raw as DebugEntityType)
+    : null;
+}
+
+interface DebugEntityScopeFacts {
+  channelId: string | null;
+  projectId: string | null;
+  boardId: string | null;
+  createdAt: Date;
+}
+
+// One indexed PK lookup per type — just channel/project/board, for scope narrowing.
+async function fetchEntityScopeFacts(
+  type: DebugEntityType,
+  id: string,
+): Promise<DebugEntityScopeFacts | null> {
+  if (type === 'MESSAGE') {
+    // Message has no channelId of its own — resolve via its conversation.
+    const m = await db.message.findUnique({ where: { messageId: id }, select: { conversationId: true, createdAt: true } });
+    if (!m) return null;
+    const conversation = await db.conversation.findUnique({
+      where: { conversationId: m.conversationId },
+      select: { channelId: true },
+    });
+    return { channelId: conversation?.channelId ?? null, projectId: null, boardId: null, createdAt: m.createdAt };
+  }
+  if (type === 'EMAIL') {
+    const e = await db.email.findUnique({ where: { id }, select: { channelId: true, createdAt: true } });
+    return e ? { channelId: e.channelId, projectId: null, boardId: null, createdAt: e.createdAt } : null;
+  }
+  const t = await db.ticket.findUnique({
+    where: { id },
+    select: { channelId: true, projectId: true, boardId: true, createdAt: true },
+  });
+  return t ? { channelId: t.channelId, projectId: t.projectId, boardId: t.boardId, createdAt: t.createdAt } : null;
+}
+
+// Does this automation's own scope config even reach this entity? Ticket
+// triggers reuse the engine's own matchTicketScopeFilters; message/email
+// triggers only ever scope by channelIds.
+function workflowMatchesEntityScope(
+  type: DebugEntityType,
+  triggerConfig: Record<string, unknown>,
+  facts: DebugEntityScopeFacts,
+): boolean {
+  if (type === 'TICKET') {
+    return matchTicketScopeFilters(triggerConfig as TicketScopeFilter, {
+      channelId: facts.channelId,
+      projectId: facts.projectId,
+      boardId: facts.boardId,
+    });
+  }
+  const channelIds = Array.isArray(triggerConfig['channelIds'])
+    ? (triggerConfig['channelIds'] as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0)
+    : [];
+  return channelIds.length === 0 || (!!facts.channelId && channelIds.includes(facts.channelId));
+}
+
+interface DebugRunRow {
+  id: string;
+  automationId: string;
+  automationName: string | null;
+  automationStatus: string | null;
+  status: string;
+  startedAt: Date;
+  completedAt: Date | null;
+}
+
+function toDebugRunRow(
+  exec: { id: string; workflowId: string; status: string; createdAt: Date; updatedAt: Date },
+  workflow: { workflowName: string | null; status: string } | undefined,
+): DebugRunRow {
+  const inProgress =
+    exec.status === AutomationRunStatus.RUNNING ||
+    exec.status === AutomationRunStatus.SCHEDULED ||
+    exec.status === 'EXTERNAL_WAIT';
+  return {
+    id: exec.id,
+    automationId: exec.workflowId,
+    automationName: workflow?.workflowName ?? null,
+    automationStatus: workflow?.status ?? null,
+    status: exec.status,
+    startedAt: exec.createdAt,
+    completedAt: inProgress ? null : exec.updatedAt,
+  };
+}
+
+router.get('/debug/runs', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const type = parseDebugEntityType(req.query['type']);
+    if (!type) {
+      res.status(400).json({ success: false, error: '`type` (MESSAGE|EMAIL|TICKET) is required' });
+      return;
+    }
+    const entityId = typeof req.query['id'] === 'string' ? (req.query['id'] as string) : null;
+    if (!entityId) {
+      res.status(400).json({ success: false, error: '`id` is required' });
+      return;
+    }
+
+    const limit = parseListLimit(req.query['limit']);
+
+    // Deleted/missing entity → no scope facts → step 1 stays unscoped.
+    const scopeFacts = await fetchEntityScopeFacts(type, entityId);
+
+    const candidateWorkflows = await db.workflow.findMany({
+      where: {
+        workspaceId: auth.workspaceId,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        eventType: { in: ENTITY_EVENT_TYPES[type] },
+      },
+      select: { id: true, workflowName: true, status: true, context: true },
+    });
+    const workflows = scopeFacts
+      ? candidateWorkflows.filter(w => {
+          try {
+            return workflowMatchesEntityScope(type, parseAutomationConfig(w.context).trigger.config, scopeFacts);
+          } catch {
+            return true; // malformed config on a legacy automation — fail open, don't 500
+          }
+        })
+      : candidateWorkflows;
+    if (workflows.length === 0) {
+      res.json({ success: true, data: { runs: [] }, timestamp: new Date().toISOString() });
+      return;
+    }
+    const workflowById = new Map(workflows.map(w => [w.id, w]));
+    const workflowIds = [...workflowById.keys()];
+
+    const runs: DebugRunRow[] = [];
+    // Try the windowed fast path first (covers near-instant triggers); if it
+    // finds nothing, fall back to an unwindowed scan for stragglers like
+    // reruns or backfills, whose execution createdAt isn't near the entity's.
+    for (const useWindow of scopeFacts ? [true, false] : [false]) {
+      if (runs.length > 0) break;
+      const windowFilter =
+        useWindow && scopeFacts
+          ? {
+              gte: scopeFacts.createdAt,
+              lte: new Date(scopeFacts.createdAt.getTime() + DEBUG_ENTITY_TRIGGER_WINDOW_MS),
+            }
+          : null;
+      const dir = useWindow ? 'asc' : 'desc'; // windowed pass reads forward from the trigger moment
+      const cmp = useWindow ? 'gt' : 'lt';
+      let cursor: { createdAt: Date; id: string } | null = null;
+      let examined = 0;
+
+      while (runs.length < limit && examined < DEBUG_ENTITY_MAX_EXAMINED) {
+        const where: Prisma.WorkflowExecutionWhereInput = {
+          workflowId: { in: workflowIds },
+          ...(windowFilter ? { createdAt: windowFilter } : {}),
+          ...(cursor
+            ? { OR: [{ createdAt: { [cmp]: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { [cmp]: cursor.id } }] }
+            : {}),
+        };
+        const page = await db.workflowExecution.findMany({
+          where,
+          select: { id: true, workflowId: true, status: true, createdAt: true, updatedAt: true },
+          orderBy: [{ createdAt: dir }, { id: dir }],
+          take: DEBUG_ENTITY_PAGE_SIZE,
+        });
+        if (page.length === 0) break;
+        examined += page.length;
+        const lastRow = page[page.length - 1];
+        if (!lastRow) break;
+        cursor = { createdAt: lastRow.createdAt, id: lastRow.id };
+
+        const states = await db.workflowExecutionState.findMany({
+          where: { workflowExecutionId: { in: page.map(e => e.id) } },
+          select: { workflowExecutionId: true, context: true },
+        });
+        const contextById = new Map(states.map(s => [s.workflowExecutionId, s.context]));
+
+        for (const exec of page) {
+          if (runs.length >= limit) break;
+          if (matchesEntityTrigger(contextById.get(exec.id) ?? null, type, entityId)) {
+            runs.push(toDebugRunRow(exec, workflowById.get(exec.workflowId)));
+          }
+        }
+
+        if (page.length < DEBUG_ENTITY_PAGE_SIZE) break; // exhausted every execution for these workflows
+      }
+    }
+
+    res.json({ success: true, data: { runs }, timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('[automations] debug/runs failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list debug runs' });
   }
 });
 
