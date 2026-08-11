@@ -510,6 +510,7 @@ const DmsPage = (): ReactElement => {
               id='dm-search-input'
               ref={dmSearchInputRef}
               type='text'
+              data-testid='search-messages-input'
               className='w-full h-11 pl-12 pr-10 py-3 bg-background rounded-full border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0'
               placeholder='Search DMs (Cmd+K)'
               autoFocus={!isMobile}
