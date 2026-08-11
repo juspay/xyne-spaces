@@ -9,6 +9,7 @@ export interface CanvasEditorRef {
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
+  toggleComments: () => void;
   selectedTheme: string;
 }
 
@@ -32,6 +33,8 @@ export interface CanvasEditorProps {
   initialBlockIdToFocus?: string | undefined;
   /** When set with initialBlockIdToFocus, open the matching comment thread on load. */
   initialCommentThreadId?: string | undefined;
+  /** Emits the number of open comment threads already loaded by the editor highlight query. */
+  onOpenCommentCountChange?: (count: number) => void;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */
@@ -49,6 +52,7 @@ export interface CollaborativeCanvasEditorRef {
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
+  toggleComments: () => void;
   selectedTheme: string;
 }
 
@@ -145,12 +149,13 @@ export interface CanvasListProps {
   onDelete?: (canvasId: string) => void;
   onDuplicate?: (canvasId: string, canvas?: Canvas) => void;
   currentUserId?: string | undefined;
-  activeFilter?: 'all' | 'created_by_me';
-  onFilterChange?: (filter: 'all' | 'created_by_me') => void;
+  activeFilter?: 'all' | 'created_by_me' | 'shared';
+  onFilterChange?: (filter: 'all' | 'created_by_me' | 'shared') => void;
   selectedCanvasId?: string;
   paginated?: boolean;
   channelId?: string;
   excludeCallGeneratedCanvases?: boolean;
+  onlyCallGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
 }

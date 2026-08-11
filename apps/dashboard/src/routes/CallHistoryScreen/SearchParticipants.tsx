@@ -27,6 +27,14 @@ interface SearchParticipantsProps {
     allUserIds?: string[],
   ) => void;
   exclusiveSelection?: boolean;
+  /**
+   * Skip the built-in `label.includes(query)` substring filter. Set this when the
+   * caller has already ranked `options` with the shared participant matcher
+   * (`rankParticipantOptions`) so the fuzzy/prefix results are not re-filtered
+   * (and dropped) by substring matching. The exclusive-selection filtering below
+   * still applies.
+   */
+  disableClientFiltering?: boolean;
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -43,6 +51,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   hoistSelectedChannelMembers = false,
   toggleExcludedChannelMember,
   exclusiveSelection = true,
+  disableClientFiltering = false,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
@@ -90,14 +99,21 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       );
     }
 
-    if (!searchQuery.trim()) return opts;
+    if (disableClientFiltering || !searchQuery.trim()) return opts;
 
     return opts.filter(
       opt =>
         opt.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
         opt.subtitle?.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-  }, [options, searchQuery, hasUserSelected, hasGroupSelected, exclusiveSelection]);
+  }, [
+    options,
+    searchQuery,
+    hasUserSelected,
+    hasGroupSelected,
+    exclusiveSelection,
+    disableClientFiltering,
+  ]);
 
   const selectedOptions = useMemo(() => {
     return selectedValues

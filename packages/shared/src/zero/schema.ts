@@ -37,6 +37,7 @@ import {
   CanvasRole,
   CanvasVisibility,
   ChannelAddUserPolicy,
+  ChannelFilterMode,
   ChannelRole,
   ChannelScopeType,
   ChannelSortOrder,
@@ -173,6 +174,7 @@ export const ticketTable = table('tickets')
     eta: number().optional(),
     priority: enumeration<TicketPriority>(),
     metadata: json().optional(),
+    rootId: string().optional(),
     closedAt: number().optional(),
     closedBy: string().optional(),
     xyneId: string(),
@@ -276,6 +278,18 @@ export const projectTagTable = table('project_tags')
   })
   .primaryKey('id');
 
+export const ticketExportTable = table('ticket_exports') // TicketExport
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    requestedBy: string(),
+    status: string(),
+    filters: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const ticketTagMappingTable = table('ticket_tag_mappings')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -343,6 +357,7 @@ export const boardTable = table('boards')
     createdBy: string(),
     updatedBy: string().optional(),
     metadata: json().optional(),
+    flowPlan: string().optional(),
     vcsProvider: enumeration<VCSProviderType>().optional(),
     releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
     createdAt: number(),
@@ -508,6 +523,7 @@ export const userGroupTable = table('user_groups')
     autoRotationEnabled: boolean(),
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
+    reassignOnUnavailable: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -596,6 +612,11 @@ export const userPreferenceTable = table('user_preferences')
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
+    channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
+    starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter
+    starredSortOrder: enumeration<ChannelSortOrder>().optional(),   // Starred group sort
+    dmFilterMode: enumeration<ChannelFilterMode>().optional(),      // DM group filter
+    dmSortOrder: enumeration<ChannelSortOrder>().optional(),        // DM group sort
     enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     allowThreadBroadcastMentions: boolean(), // Allow @channel/@here in thread replies
     // Global notification settings
@@ -832,6 +853,7 @@ export const channelSectionTable = table('channel_sections') // Prisma model: Ch
     createdAt: number(),
     updatedAt: number().optional(),
     sortOrder: enumeration<ChannelSortOrder>().optional(),
+    filterMode: enumeration<ChannelFilterMode>().optional(),
   })
   .primaryKey('id');
 
@@ -1160,6 +1182,7 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey('id');
 
@@ -1286,6 +1309,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     blockId: string(),
     anchorText: string().optional(),
     initialCommentId: string().optional(),
+    commentCount: number(),
     status: enumeration<CanvasCommentThreadStatus>(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
@@ -1406,6 +1430,9 @@ export const emailTable = table('emails')
     externalMessageId: string(),
     sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
+    rating: number().optional(),
+    clientVersionName: string().optional(),
+    clientVersionCode: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1812,6 +1839,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(), // release-scoped: dev ticket entered as a hotfix
     createdAt: number(),
     updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
@@ -2845,6 +2873,11 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
     destField: ['userGroupId'],
     destSchema: collectionPermissionTable,
   }),
+  ticketExports: many({
+    sourceField: ['id'],
+    destField: ['requestedBy'],
+    destSchema: ticketExportTable,
+  }),
 }));
 
 export const userTableRelationships = relationships(userTable, ({ one, many }) => ({
@@ -3537,7 +3570,7 @@ export const entityAccessTableRelationships = relationships(
 
 export const summaryTemplateTableRelationships = relationships(
   summaryTemplateTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     workspace: one({
       sourceField: ['workspaceId'],
       destField: ['id'],
@@ -3547,6 +3580,16 @@ export const summaryTemplateTableRelationships = relationships(
       sourceField: ['createdBy'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    shares: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: entityAccessTable,
+    }),
+    workspaceResourceAccess: many({
+      sourceField: ['workspaceId'],
+      destField: ['workspaceId'],
+      destSchema: resourceAccessTable,
     }),
   }),
 );
@@ -3885,6 +3928,24 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     sourceField: ['id'],
     destField: ['workspaceId'],
     destSchema: userGroupTable,
+  }),
+  ticketExports: many({
+    sourceField: ['id'],
+    destField: ['workspaceId'],
+    destSchema: ticketExportTable,
+  }),
+}));
+
+export const ticketExportTableRelationships = relationships(ticketExportTable, ({ one }) => ({
+  workspace: one({
+    sourceField: ['workspaceId'],
+    destField: ['id'],
+    destSchema: workspaceTable,
+  }),
+  requestedByUser: one({
+    sourceField: ['requestedBy'],
+    destField: ['id'],
+    destSchema: userTable,
   }),
 }));
 
@@ -4448,6 +4509,7 @@ export const schema = createSchema({
     ticketEntityMappingTable,
     ticketTagTable,
     projectTagTable,
+    ticketExportTable,
     ticketTagMappingTable,
     ticketReferenceMappingTable,
     ticketStageEtaTable,
@@ -4579,6 +4641,7 @@ export const schema = createSchema({
     ticketEntityMappingTableRelationships,
     ticketTagTableRelationships,
     projectTagTableRelationships,
+    ticketExportTableRelationships,
     ticketTagMappingTableRelationships,
     ticketReferenceMappingTableRelationships,
     ticketStageEtaTableRelationships,
@@ -4708,6 +4771,7 @@ export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
 export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mappings>;
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
 export type ProjectTag = Row<typeof schema.tables.project_tags>;
+export type TicketExport = Row<typeof schema.tables.ticket_exports>;
 export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
@@ -4782,8 +4846,8 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
-export type FormFields = Row<typeof schema.tables.form_fields>;
 export type GlobalField = Row<typeof schema.tables.global_fields>;
+export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;

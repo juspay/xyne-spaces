@@ -2,7 +2,6 @@ import React, { ReactElement, useContext } from 'react';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
-import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import { usePlatform } from '../../../hooks/usePlatform';
 
 import { parseTicketMd } from '@xyne/shared';
@@ -145,38 +144,6 @@ const TicketCreateModeWithChannel: React.FC<{
     xyneId?: string;
   }): void => {
     onModalOpenChange(false);
-
-    // Workflow selection is now purely driven by user's choice from CreateTicketModal
-    const workflowType: string | undefined = ticket.workflowType;
-
-    // Only trigger workflow if one is selected
-    if (workflowType) {
-      // Base workflow data
-      const workflowData: CreateWorkflowRequest = {
-        title: '',
-        workflowType,
-        description: stripHtml(messageContent),
-        ticketId: ticket.id,
-        ...(ticket.conversationId && { conversationId: ticket.conversationId }),
-        ...(ticket.xyneId && { xyneId: ticket.xyneId }),
-      };
-
-      // Add BUG_WORKFLOW specific required fields
-      if (workflowType === 'BUG_WORKFLOW') {
-        // For BUG_WORKFLOW, add required fields using ticket data
-        const bugWorkflowData = {
-          ...workflowData,
-          bugId: ticket.id,
-          severity: 'medium', // Default severity - can be enhanced later if needed
-          reportedBy: ticket.createdBy || 'unknown',
-          assignedTo: ticket.assignedTo || ticket.createdBy || 'unknown',
-        };
-
-        void createWorkflow(bugWorkflowData);
-      } else {
-        void createWorkflow(workflowData);
-      }
-    }
 
     // Call the callback to handle linking in the parent component
     if (onTicketCreated) {

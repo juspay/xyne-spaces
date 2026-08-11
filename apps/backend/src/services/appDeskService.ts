@@ -13,7 +13,7 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { decrypt } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
-import { extractInstalledAppId } from '@/integrations/core/deskSources';
+import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, BaseAppEvent, DeskReplyEventPayload, DeskReplyAttachment } from '@/apps/types';
@@ -52,9 +52,9 @@ class AppDeskService {
     const threadId = initialEmail.externalThreadId; // the app's thread key
     if (!threadId) throw new Error(`No externalThreadId found for conversation ${conversationId}`);
 
-    const installedAppId = extractInstalledAppId(externalSource.name);
+    const installedAppId = resolveAppDeskInstalledAppId(externalSource);
     if (!installedAppId) {
-      throw new Error(`Invalid app-desk source name: ${externalSource.name}`);
+      throw new Error(`App-desk source ${externalSource.name} is missing its backing install`);
     }
     const installedApp = await this.prisma.installedApps.findUnique({
       where: { id: installedAppId },

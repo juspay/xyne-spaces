@@ -46,6 +46,11 @@ interface WatchResult {
   expiration: string;
 }
 
+export interface GmailMessageRef {
+  id: string;
+  threadId: string;
+}
+
 interface SetupExternalSourceParams {
   channelId: string;
   emailAddress: string;
@@ -157,9 +162,7 @@ export class GoogleService {
       // 404 = message was deleted/expired between Gmail publishing the event
       // and us fetching it. Surface as null so caller can skip-ack instead of
       // throwing (which would make Pub/Sub retry the dead message for 7 days).
-      const status = (error as { status?: number; code?: number })?.status
-        ?? (error as { status?: number; code?: number })?.code;
-      if (status === 404) {
+      if (getHttpStatus(error) === 404) {
         logger.warn(`${TAG} Message ${messageId} not found (likely deleted) — skipping`);
         return null;
       }
@@ -182,21 +185,24 @@ export class GoogleService {
     }
   }
 
-  async listMessagesFromHistory(startHistoryId: string): Promise<string[]> {
-    const { messageIds } = await this.listMessagesFromHistoryWithCursor(startHistoryId);
-    return messageIds;
-  }
-
   /**
-   * Same as listMessagesFromHistory but also returns the latest historyId
+   * Drain `history.list` from `startHistoryId`, returning the message ids added
+   * since, plus the latest historyId
    * reported by Gmail. Callers that persist a sync cursor (manual reload)
    * need this value to advance the watermark.
    */
   async listMessagesFromHistoryWithCursor(
     startHistoryId: string,
   ): Promise<{ messageIds: string[]; historyId: string | null }> {
+    const { messages, historyId } = await this.listMessageRefsFromHistory(startHistoryId);
+    return { messageIds: messages.map(m => m.id), historyId };
+  }
+
+  async listMessageRefsFromHistory(
+    startHistoryId: string,
+  ): Promise<{ messages: GmailMessageRef[]; historyId: string | null }> {
     try {
-      const messageIds: string[] = [];
+      const messages: GmailMessageRef[] = [];
       let historyId: string | null = null;
       let pageToken: string | undefined;
 
@@ -210,7 +216,8 @@ export class GoogleService {
 
         for (const record of response.data.history || []) {
           for (const msg of record.messagesAdded || []) {
-            if (msg.message?.id) messageIds.push(msg.message.id);
+            const id = msg.message?.id;
+            if (id) messages.push({ id, threadId: msg.message?.threadId ?? id });
           }
         }
 
@@ -218,10 +225,14 @@ export class GoogleService {
         pageToken = response.data.nextPageToken ?? undefined;
       } while (pageToken);
 
-      return { messageIds, historyId };
+      return { messages, historyId };
     } catch (error) {
-      logger.error(`${TAG} Failed to fetch history`, error);
-      throw new Error(`Failed to fetch Gmail history: ${getErrorMessage(error)}`);
+      const status = getHttpStatus(error);
+      logger.error(`${TAG} Failed to fetch Gmail history`, { status, startHistoryId, error });
+      throw Object.assign(
+        new Error(`Failed to fetch Gmail history: ${getErrorMessage(error)}`),
+        { status },
+      );
     }
   }
 
@@ -556,6 +567,7 @@ export class GoogleService {
         channelId,
         boardId: boardId || (existing.boardId ?? undefined), // @deprecated - kept for backward compatibility
         displayName: emailAddress,
+        ...(existing.lastSyncCursor == null && { lastSyncCursor: watchResult.historyId }),
       });
     } else {
       await repo.create({
@@ -565,6 +577,7 @@ export class GoogleService {
         channelId,
         boardId: boardId ?? undefined, // @deprecated - kept for backward compatibility
         displayName: emailAddress,
+        lastSyncCursor: watchResult.historyId,
       });
     }
 
@@ -576,9 +589,6 @@ export class GoogleService {
       ownerUserId: channel?.createdBy,
       boardId: boardId ?? undefined, // Save boardId to EmailChannelPreference (new location)
     });
-    // Cursor intentionally left null — the caller triggers an initial core.reload()
-    // which takes the no-cursor fallback (listRecentMessages) and writes the cursor
-    // via nextCursor, so the first N messages are auto-imported.
 
     logger.info(`${TAG} ExternalSource setup complete`, { sourceName, webhookUrl });
 
@@ -1162,4 +1172,8 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   return 'Unknown error';
+}
+
+export function getHttpStatus(error: unknown): number | undefined {
+  return (error as { status?: number } | null | undefined)?.status;
 }

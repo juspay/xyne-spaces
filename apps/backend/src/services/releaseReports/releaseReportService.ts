@@ -4,6 +4,7 @@ import {
   type ReleaseReport,
   type ReleaseReportChange,
   type ReleaseReportDevTicket,
+  ReleaseEventType,
   MessageType,
   UserType,
 } from '@xyne/shared';
@@ -11,6 +12,7 @@ import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
+import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { conversationService } from '@/services/conversationService';
 import { unifiedBotUserService } from '@/bots/unified';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
@@ -64,6 +66,7 @@ function formatChanges(envCount: number, migrationCount: number): string {
 export class ReleaseReportService {
   private readonly ticketRepository = new TicketRepository();
   private readonly messageRepository = new MessageRepository();
+  private readonly releaseRepository = new ReleaseRepository();
   private readonly canvasService = new ReleaseReportCanvasService();
 
   async gatherReleaseReport(ticketId: string): Promise<ReleaseReport> {
@@ -314,6 +317,28 @@ export class ReleaseReportService {
       existingMetadata.releaseReportCanvasId
     );
     const canvasUrl = buildReleaseReportCanvasUrl(report.release.workspaceId, canvas.canvasId);
+
+    // Timeline event — best-effort, never blocks the publish path.
+    void this.releaseRepository
+      .createReleaseEvent({
+        releaseId: ticketId,
+        eventType: ReleaseEventType.CANVAS,
+        eventName: canvas.action === 'created' ? 'REPORT_PUBLISHED' : 'REPORT_UPDATED',
+        message:
+          canvas.action === 'created'
+            ? `Published release report (v${version})`
+            : `Updated release report (now v${version})`,
+        userId: publisher.id,
+        userName: publisher.name ?? null,
+        channelId: report.release.channelId ?? '',
+        conversationId: report.release.conversationId,
+        payload: { canvasUrl, canvasId: canvas.canvasId, version },
+      })
+      .catch(err =>
+        logger.warn(
+          `[ReleaseReport] failed to emit CANVAS event: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
 
     const baseMetadata = {
       releaseReportCanvasId: canvas.canvasId,

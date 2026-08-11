@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse"]
 }
 
 datasource db {
@@ -131,6 +131,7 @@ model Ticket {
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
   priority         String            @default("LOW")
   metadata         Json?             // Additional metadata - external source tracking, domain-specific context
+  rootId           String?           // FLOW root ticket id for this materialized step ticket.
   closedAt         DateTime?         // When the reporter closed the ticket after verification
   closedBy         String?           // User who closed the ticket
   referenceTicket  String[]          // Array of ticket IDs for related tickets (duplicates, related incidents, etc.)
@@ -348,6 +349,23 @@ model TicketTagMapping {
   @@index([ticketId])
   @@index([tagId])
   @@map("ticket_tag_mappings")
+  @@schema("public")
+}
+
+
+model TicketExport {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  requestedBy     String
+  status          String
+  filters         String
+  createdAt       DateTime
+  updatedAt       DateTime
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  requester       User      @relation(fields: [requestedBy], references: [id], onDelete: Cascade, name: "RequestedTicketExports")
+
+  @@index([workspaceId, requestedBy, createdAt(sort: Desc)])
+  @@map("ticket_exports")
   @@schema("public")
 }
 
@@ -682,6 +700,7 @@ model UserGroup {
   autoRotationEnabled  Boolean           @default(false)
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
+  reassignOnUnavailable Boolean?         // When true, a member going unavailable triggers reassignment of their open tickets in this group
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
@@ -843,6 +862,7 @@ model User {
   recordings                CallRecording[]         // call recordings this user started
 
   permissions CollectionPermission[]
+  requestedTicketExports TicketExport[] @relation("RequestedTicketExports")
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
   @@index([email])
@@ -860,6 +880,11 @@ model UserPreference {
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
   channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
+  channelFilterMode        String?          // Channels group filter (null = app default)
+  starredFilterMode        String?          // Starred group filter (null = app default)
+  starredSortOrder         String?          // Starred group sort (null = app default)
+  dmFilterMode             String?          // DM group filter (null = app default)
+  dmSortOrder              String?          // DM group sort (null = app default)
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
   showThreadTags           Boolean  @default(false) // Render thread classification chips in chat; opt-in
@@ -888,6 +913,21 @@ model UserSkill {
 
   @@id([userId, name])
   @@map("user_skills")
+  @@schema("non_zero")
+}
+
+// Generic questionnaire responses - intentionally non-Zero.
+model QuestionnaireResponse {
+  workspaceId       String
+  id                String   @id @default(cuid())
+  userId            String
+  questionnaireType String
+  payload           Json
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([workspaceId, questionnaireType, userId])
+  @@map("questionnaire_responses")
   @@schema("non_zero")
 }
 
@@ -1458,6 +1498,7 @@ model Workspace {
   tools             Tool[]
   userGroups        UserGroup[]
   roles             Role[]
+  ticketExports     TicketExport[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -1606,6 +1647,7 @@ model Board {
   updatedBy           String?              // User ID (no FK constraint)
   description         String?              // Board description
   metadata            Json?                // Board configuration including ticketFormConfig
+  flowPlan            String?              // Serialized design-time DAG for FLOW boards
   vcsProvider         String?               // Main release board VCS provider
   releaseTrackingMode String?              // Main release board tracking mode
   createdAt           DateTime             @default(now())
@@ -1846,6 +1888,7 @@ model ChannelSection {
   isCollapsed Boolean           @default(false) // Per-user collapse state, synced across devices
   isDeleted   Boolean           @default(false) // Soft delete flag
   sortOrder   String?           // Optional per-section channel sort order
+  filterMode  String?           // Per-section channel filter (null = app default)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
 
@@ -1944,6 +1987,9 @@ model Email {
   externalMessageId String
   sentByUserId String?            // User who sent this outbound email (REPLY / REPLY_ALL / COMPOSE). Null for inbound and automation/system sends. Powers the per-desk "Sent" view.
   rfcMessageId String?
+  rating Int?
+  clientVersionName String?
+  clientVersionCode String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2173,7 +2219,6 @@ model Message {
   messageActs       String?
 
   // Relations
-  messageSearch  MessageSearch? // One-to-one relation with search index
   conversation   Conversation   @relation(fields: [conversationId], references: [conversationId])
   sender         User           @relation("MessageSender", fields: [senderId], references: [id])
   reactions      Reaction[]
@@ -2191,20 +2236,6 @@ model Message {
   @@index([conversationId, createdAt, messageId])
   @@map("messages")
   @@schema("public")
-}
-//Message Search Model
-model MessageSearch {
-  workspaceId String // denormalized tenant key (stamped on insert)
-  messageId        String      @id
-  plaintextContent String
-  searchVector     Unsupported("tsvector")
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  message          Message     @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
-
-  @@map("message_search")
-  @@schema("workflow")
 }
 
 // File Attachment Models
@@ -2676,6 +2707,7 @@ model SummaryTemplate {
   defaultOutlet     String   @default("EMAIL") // EMAIL/MESSAGE (see DefaultOutlet in @xyne/shared; app-validated, no DB enum)
   createdBy         String
   createdAt         DateTime @default(now())
+  visibility        String   @default("PRIVATE") // PRIVATE | WAITING_FOR_APPROVAL | PUBLIC
 
   @@index([workspaceId, name])
   @@unique([workspaceId, name, version])
@@ -2914,6 +2946,7 @@ model CanvasCommentThread {
   blockId         String
   anchorText      String?
   initialCommentId String?
+  commentCount    Int                       @default(1)
   status          String                    @default("OPEN")
   statusUpdatedBy String?
   statusUpdatedAt DateTime?
@@ -3510,6 +3543,9 @@ model ApplicationReleaseTicket {
   testedBy              String?                         // User ID (no FK constraint)
   testedAt              DateTime?
   failureReason         String?
+  // Nullable, no DB default: Zero client inserts don't run Postgres defaults, so
+  // it's written app-side; NULL = not a hotfix. Release-scoped.
+  isHotfix              Boolean?
   createdAt             DateTime                        @default(now())
   // No @default(now()): see Application.updatedAt — every write sets it explicitly.
   updatedAt             DateTime?                        @updatedAt
@@ -3543,6 +3579,9 @@ model ReleaseEvent {
   @@index([channelId, conversationId])
   @@index([eventType])
   @@index([createdAt])
+  // Serves releaseEventsByReleaseId (filter releaseId, order createdAt desc, id desc);
+  // avoids a zero-cache TEMP B-TREE sort. Built CONCURRENTLY in a raw migration.
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_events_releaseId_createdAt_id_idx")
   @@map("release_events")
   @@schema("public")
 }
@@ -3592,6 +3631,8 @@ model ReleaseChangeType {
   @@index([releaseId])
   @@index([applicationReleaseId])
   @@index([devTicketXyneId])
+  // Partial unique dedupe indexes (release_change_types_release_dedupe_key +
+  // _nocommit_key) live in a raw migration — Prisma can't express filtered indexes.
   @@map("release_change_types")
   @@schema("public")
 }

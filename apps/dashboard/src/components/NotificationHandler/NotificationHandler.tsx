@@ -16,7 +16,11 @@ import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
-import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import {
+  sendRecordingEvent,
+  stopRecordingForTeardown,
+  useRecordingStore,
+} from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -520,6 +524,11 @@ export const NotificationHandler: React.FC = () => {
     return meetingDetector.onStopRecordingFromMeeting(() => {
       sendRecordingEvent({ type: 'requestStop' });
     });
+  }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
+    return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
   }, [isElectron]);
 
   const recordingStatus = useRecordingStore(ctx => ctx.status);

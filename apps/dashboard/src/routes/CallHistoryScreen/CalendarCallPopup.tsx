@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Download,
   MessageSquare,
@@ -19,6 +19,7 @@ import {
   Circle,
   AudioLines,
   CalendarFold,
+  Loader2,
 } from 'lucide-react';
 import { RRule } from 'rrule';
 import { useSelector } from '@xstate/react';
@@ -26,6 +27,7 @@ import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import {
   Call,
+  getPreviewParticipantUserIds,
   isGoogleCalendarCall,
   isMicrosoftCalendarCall,
   isScheduledCallJoinable,
@@ -35,6 +37,7 @@ import Button from '../../components/ui/Button';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import { useUser } from '../../hooks/useUsers';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
@@ -47,6 +50,7 @@ import {
 } from './CalenderViewUtils';
 import { roomActor } from '../../machines/roomMachine';
 import { useNowWithBoundary } from '../../hooks/useNowWithBoundary';
+import { queries } from '../../zero/queries';
 
 interface CalendarCallPopupProps {
   call: Call;
@@ -184,6 +188,17 @@ const CalendarCallPopup = ({
   const isGoogleCalendar = isGoogleCalendarCall(call);
   const isMicrosoftCalendar = isMicrosoftCalendarCall(call);
   const isExternalCalendar = isGoogleCalendar || isMicrosoftCalendar;
+  const hasFullParticipants =
+    call.status === CallStatus.ACTIVE ||
+    (call.participantCount !== null &&
+      call.participantCount !== undefined &&
+      call.participantCount <= (call.participants?.length ?? 0));
+  const [fullParticipants, fullParticipantsDetails] = useCachedQuery(
+    queries.callParticipantsByCallId({ callId: call.id }),
+    {
+      enabled: !isExternalCalendar && !hasFullParticipants,
+    },
+  );
 
   const now = useNowWithBoundary(
     startsAtTime,
@@ -199,8 +214,59 @@ const CalendarCallPopup = ({
 
   const currentParticipant = call.participants?.find(p => p.userId === currentUserId);
   const isCurrentUserInCall = isRoomActive && currentCallExternalId === call.externalId;
+  const previewParticipantUserIds = useMemo(
+    () => getPreviewParticipantUserIds(call.participantPreviewUserIds, currentUserId),
+    [call.participantPreviewUserIds, currentUserId],
+  );
+  const previewParticipants = useMemo(() => {
+    const nextParticipants: Array<
+      { userId: string } & Partial<NonNullable<Call['participants']>[number]>
+    > = [];
+    const seen = new Set<string>();
+
+    for (const participant of call.participants ?? []) {
+      if (participant.userId && !seen.has(participant.userId)) {
+        nextParticipants.push(participant);
+        seen.add(participant.userId);
+      }
+    }
+
+    for (const userId of previewParticipantUserIds) {
+      if (!seen.has(userId)) {
+        nextParticipants.push({ userId });
+        seen.add(userId);
+      }
+    }
+
+    return nextParticipants;
+  }, [call.participants, previewParticipantUserIds]);
+  const participants = useMemo(() => {
+    const merged = [...previewParticipants];
+    const indicesByUserId = new Map(
+      merged.map((participant, index) => [participant.userId, index] as const),
+    );
+
+    for (const participant of fullParticipants ?? []) {
+      if (!participant.userId) continue;
+
+      const existingIndex = indicesByUserId.get(participant.userId);
+      if (existingIndex !== undefined) {
+        merged[existingIndex] = {
+          ...merged[existingIndex],
+          ...participant,
+        };
+      } else {
+        merged.push(participant);
+        indicesByUserId.set(participant.userId, merged.length - 1);
+      }
+    }
+
+    return merged;
+  }, [fullParticipants, previewParticipants]);
+  const hydratedCurrentParticipant =
+    participants.find(p => p.userId === currentUserId) ?? currentParticipant;
   const currentMeetingStatus: MeetingStatus =
-    localRsvp ?? currentParticipant?.meetingStatus ?? MeetingStatus.PENDING;
+    localRsvp ?? hydratedCurrentParticipant?.meetingStatus ?? MeetingStatus.PENDING;
 
   const dateLabel = call.startsAt ? formatPopupDate(call.startsAt) : '';
   const timeLabel = call.startsAt
@@ -485,18 +551,20 @@ const CalendarCallPopup = ({
   }
 
   // ── Main popup view ───────────────────────────────────────────────────────
-  const participants = call.participants ?? [];
-
+  const statusParticipants = hasFullParticipants ? participants : (fullParticipants ?? []);
   const rsvpCounts = new Map<MeetingStatus, number>();
-  for (const p of participants) {
-    const status = p.userId === currentUserId && localRsvp !== null ? localRsvp : p.meetingStatus;
+  for (const p of statusParticipants) {
+    const status =
+      p.userId === currentUserId && localRsvp !== null
+        ? localRsvp
+        : (p.meetingStatus ?? MeetingStatus.PENDING);
     rsvpCounts.set(status, (rsvpCounts.get(status) ?? 0) + 1);
   }
   const goingCount = rsvpCounts.get(MeetingStatus.ACCEPTED) ?? 0;
   const notGoingCount =
     (rsvpCounts.get(MeetingStatus.DECLINED) ?? 0) + (rsvpCounts.get(MeetingStatus.HIDDEN) ?? 0);
-  const waitingCount = participants.length - goingCount - notGoingCount;
-  const attendedCount = participants.filter(didAttend).length;
+  const waitingCount = statusParticipants.length - goingCount - notGoingCount;
+  const attendedCount = statusParticipants.filter(didAttend).length;
 
   const sortedParticipants = [...participants].sort((a, b) => {
     if (a.userId === organizerUserId) return -1;
@@ -504,8 +572,12 @@ const CalendarCallPopup = ({
     return 0;
   });
 
-  // Get participant user IDs for avatar stack
-  const participantUserIds = sortedParticipants.slice(0, MAX_AVATARS_TO_SHOW).map(p => p.userId);
+  const previewAvatarUserIds =
+    previewParticipantUserIds.length > 0
+      ? previewParticipantUserIds.slice(0, MAX_AVATARS_TO_SHOW)
+      : sortedParticipants.slice(0, MAX_AVATARS_TO_SHOW).map(p => p.userId);
+  const previewParticipantCount =
+    call.participantCount ?? (call.participants?.length || previewParticipantUserIds.length);
 
   // Duration for ended calls
   const callDuration = isEnded ? formatCallDuration(call.startedAt, call.endedAt) : '';
@@ -523,8 +595,12 @@ const CalendarCallPopup = ({
   const canEdit = isManageableScheduledCall && !!onEditClick;
   const canDelete = isManageableScheduledCall && !!onDeleteClick;
   const canHide =
-    !isEnded && currentUserId !== organizerUserId && !!currentParticipant && !!onHideClick;
+    !isEnded && currentUserId !== organizerUserId && !!hydratedCurrentParticipant && !!onHideClick;
   const canGotoMessage = isEnded && !!onGotoMessage;
+  const isLoadingParticipants = !isExternalCalendar && !hasFullParticipants;
+  const showParticipantsLoading =
+    isLoadingParticipants && fullParticipantsDetails.type !== 'complete';
+  const hasLoadedParticipantStatuses = !showParticipantsLoading;
 
   const visibleHeaderActionCount =
     1 + [canEdit, canDelete, canHide, canGotoMessage].filter(Boolean).length;
@@ -670,7 +746,7 @@ const CalendarCallPopup = ({
       )}
 
       {/* Guests section - card style */}
-      {participants.length > 0 && (
+      {(previewParticipantCount > 0 || showParticipantsLoading) && (
         <div className='mt-4 rounded-xl border border-border overflow-hidden'>
           {/* Collapsible header */}
           <button
@@ -681,7 +757,7 @@ const CalendarCallPopup = ({
           >
             {/* Avatar stack using AvatarStackItem - rounded square style */}
             <div className='flex items-center -space-x-1.5'>
-              {participantUserIds.map((userId, index) => (
+              {previewAvatarUserIds.map((userId, index) => (
                 <AvatarStackItem
                   key={`${userId}-${index}`}
                   size={24}
@@ -693,19 +769,24 @@ const CalendarCallPopup = ({
                 </AvatarStackItem>
               ))}
             </div>
-            {participants.length > MAX_AVATARS_TO_SHOW && (
+            {previewParticipantCount > MAX_AVATARS_TO_SHOW && (
               <span className='text-xs text-muted-foreground tabular-nums'>
-                +{participants.length - MAX_AVATARS_TO_SHOW}
+                +{previewParticipantCount - MAX_AVATARS_TO_SHOW}
               </span>
             )}
 
             {/* Guest count and status */}
             <div className='flex-1 min-w-0 text-left'>
               <span className='text-sm font-medium text-foreground'>
-                {participants.length} Guest{participants.length !== 1 ? 's' : ''}
+                {previewParticipantCount} Guest{previewParticipantCount !== 1 ? 's' : ''}
               </span>
               <div className='flex items-center gap-3 mt-0.5'>
-                {isEnded ? (
+                {!hasLoadedParticipantStatuses ? (
+                  <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+                    <Loader2 className='size-3 animate-spin' />
+                    <span>Loading guest status...</span>
+                  </span>
+                ) : isEnded ? (
                   <span className='flex items-center gap-1.5 text-xs'>
                     <span className='size-1.5 rounded-full bg-green-500' />
                     <span className='text-green-600'>{attendedCount} attended</span>
@@ -751,18 +832,24 @@ const CalendarCallPopup = ({
                   <ParticipantItem
                     key={p.userId}
                     userId={p.userId}
-                    displayName={p.displayName}
-                    email={p.email}
-                    isExternal={p.isExternal}
+                    {...(p.displayName !== undefined ? { displayName: p.displayName } : {})}
+                    {...(p.email !== undefined ? { email: p.email } : {})}
+                    {...(p.isExternal !== undefined ? { isExternal: p.isExternal } : {})}
                     meetingStatus={
                       p.userId === currentUserId && localRsvp !== null
                         ? localRsvp
-                        : ((p.meetingStatus as MeetingStatus | undefined) ?? MeetingStatus.PENDING)
+                        : (p.meetingStatus ?? MeetingStatus.PENDING)
                     }
                     isOrganizer={p.userId === organizerUserId}
                     didAttend={isEnded ? didAttend(p) : null}
                   />
                 ))}
+                {showParticipantsLoading && (
+                  <div className='flex items-center justify-center gap-2 px-3 py-3 text-xs text-muted-foreground'>
+                    <Loader2 className='size-3.5 animate-spin' />
+                    <span>Loading full participant list...</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -783,7 +870,7 @@ const CalendarCallPopup = ({
             </button>
           )
         : onJoinCall &&
-          currentParticipant && (
+          hydratedCurrentParticipant && (
             <button
               onClick={onJoinCall}
               disabled={isJoinDisabled}

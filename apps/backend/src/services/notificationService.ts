@@ -1516,6 +1516,61 @@ class NotificationService {
     return { deliveredUserIds };
   }
 
+  async createSummaryTemplateSharedNotifications(
+    recipientUserIds: string[],
+    templateId: string,
+    templateName: string,
+    workspaceId: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'summary_template_shared' | 'summary_template_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+    if (recipientIds.length === 0) return { deliveredUserIds: [] };
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'summary_template',
+    });
+
+    const isRevoked = actorAction === 'summary_template_access_revoked';
+    const title = isRevoked
+      ? `${actorName} removed your access to a summary template`
+      : `${actorName} shared a summary template with you`;
+    const message = isRevoked
+      ? `${actorName} removed your access to "${templateName}"`
+      : `${actorName} shared "${templateName}" with you`;
+    const actionUrl = `/recordings?templates=1&summaryTemplateId=${encodeURIComponent(templateId)}`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.SUMMARY_TEMPLATE_SHARED,
+          relatedEntityType: 'summary_template',
+          relatedEntityId: templateId,
+          actionUrl,
+          workspaceId,
+          metadata: {
+            summaryTemplateId: templateId,
+            templateName,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      }),
+    );
+
+    return {
+      deliveredUserIds: results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map(result => result.value),
+    };
+  }
+
   async createThreadReplyNotifications(
     userIds: string[],
     replyMessageId: string,
