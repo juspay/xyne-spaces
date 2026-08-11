@@ -30,6 +30,7 @@ import { parseCallInviteLink } from './components/Chat/RenderMessageWithHTML/int
 import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
 import { detectPlatform } from './hooks/usePlatform';
 import { DEFAULT_WORKSPACE_ID } from './config';
+import { AutomationDebugProvider } from './providers/AutomationDebugProvider';
 import {
   CheckTickCircle,
   AlertCircle,
@@ -154,7 +155,9 @@ const App = (): ReactElement => {
                   <TooltipProvider delayDuration={0}>
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <Wallpaper />
-                      <RouterProvider router={router}></RouterProvider>
+                      <AutomationDebugProvider>
+                        <RouterProvider router={router}></RouterProvider>
+                      </AutomationDebugProvider>
                     </main>
                     <SwitchLoadingOverlay />
                     <RecordingInterruptGuard />
