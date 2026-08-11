@@ -35,6 +35,7 @@ check() {
 }
 
 # 1. $PROJECT_ROOT/<path> references.
+# shellcheck disable=SC2016  # we grep for the literal string $PROJECT_ROOT, no expansion intended
 while IFS= read -r ref; do
   check "${ref#\$PROJECT_ROOT/}" project.nix
 done < <(grep -oE '\$PROJECT_ROOT/[A-Za-z0-9_./-]+' project.nix | sort -u)
