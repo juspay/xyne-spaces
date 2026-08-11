@@ -21,7 +21,11 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
-import { emitTicketUpdated, type TicketChanges } from '@/automations/triggers/ticket-updated.trigger';
+import {
+  emitTicketUpdated,
+  type TicketChanges,
+  type FormFieldChanges,
+} from '@/automations/triggers/ticket-updated.trigger';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
@@ -77,7 +81,15 @@ export class TicketRepository {
    * @param data - Ticket data
    * @param tx - Optional transaction client for atomic operations
    */
-  async createTicket(data: CreateTicketRequest & { xyneId: string; createdBy: string; updatedBy: string }, tx?: PrismaTransaction) {
+  async createTicket(
+    data: CreateTicketRequest & {
+      xyneId: string;
+      createdBy: string;
+      updatedBy: string;
+      formFieldChanges?: FormFieldChanges;
+    },
+    tx?: PrismaTransaction,
+  ) {
     const db = tx || prisma; // Use transaction if provided, else default prisma
 
     // Validate required fields
@@ -228,7 +240,14 @@ export class TicketRepository {
     void (async (): Promise<void> => {
       try {
         await eventRouter.emit(
-          { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+          {
+            type: TICKET_CREATED_EVENT,
+            payload: {
+              ticketId: ticket.id,
+              formFieldChanges: data.formFieldChanges,
+              performedBy: { id: data.createdBy },
+            },
+          },
           ticket.workspaceId,
         );
       } catch (err) {
