@@ -1,6 +1,6 @@
 import {
   createBuilder,
-  defineQueries, type AnyQueryDefinition, type QueryRegistry,
+  defineQueries,
   type AnyQueryRegistry,
 } from '@rocicorp/zero';
 import {
@@ -42,7 +42,6 @@ import {
   DelayedMessageStatus,
   RecapEntityType,
 } from '@xyne/shared';
-import type { Schema as XyneSchema } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
 
@@ -526,7 +525,7 @@ const applyCanvasVisibilityQueryFilter = (
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
   query.related('userStatuses', (status: any) => status.where('userId', userId));
 
-export const queries: QueryRegistry<Record<string, AnyQueryDefinition>, XyneSchema> = defineQueries({
+export const queries: AnyQueryRegistry = defineQueries({
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
@@ -4805,4 +4804,4 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('userMappings')
       .one();
   }),
-}) as unknown as QueryRegistry<Record<string, AnyQueryDefinition>, XyneSchema>;
+});
