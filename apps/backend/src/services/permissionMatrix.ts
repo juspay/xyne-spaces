@@ -12,6 +12,7 @@ import { aclAuditService } from './aclAuditService';
  */
 export type ResourceName =
   | 'TICKETS'
+  | 'TICKET-REPORTS'
   | 'WORKFLOWS'
   | 'AGENTS'
   | 'MODELS'
@@ -80,6 +81,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
   ],
   ADMIN: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
+    { resourceName: 'TICKET-REPORTS', accessType: AccessType.ADMIN },
     { resourceName: 'WORKFLOWS', accessType: AccessType.ADMIN },
     { resourceName: 'AGENTS', accessType: AccessType.ADMIN },
     { resourceName: 'MODELS', accessType: AccessType.ADMIN },
@@ -103,6 +105,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
   ],
   OWNER: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
+    { resourceName: 'TICKET-REPORTS', accessType: AccessType.ADMIN },
     { resourceName: 'WORKFLOWS', accessType: AccessType.ADMIN },
     { resourceName: 'AGENTS', accessType: AccessType.ADMIN },
     { resourceName: 'MODELS', accessType: AccessType.ADMIN },

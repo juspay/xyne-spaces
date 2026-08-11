@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePath } from '../../../hooks/usePath';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -86,6 +86,8 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -149,6 +151,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const skipAutoFocus = searchParams.get('nofocus') === '1';
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
+  const canvasPanelContext = useOutletContext<CanvasPanelOutletContext | null>();
 
   // Determine if we're on /chat/canvas (full-screen canvas page)
   const isOnChatCanvasPage = usePath().startsWith('/chat/canvas');
@@ -1074,6 +1077,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     </Button>
 
                     <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
+                      {canvasPanelContext?.leftHeaderSlot}
                       <FileText size={16} className='shrink-0 text-foreground' />
                       <Input
                         type='text'
@@ -1384,7 +1388,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             </div>
 
             {baseRoute === '/chat/activity' && (
-              <div className='hidden h-[27px] shrink-0 border-b border-border bg-background md:block' />
+              <div className='hidden h-[27px] shrink-0 bg-background md:block' />
             )}
 
             {previewVersion && (

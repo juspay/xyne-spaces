@@ -285,8 +285,12 @@ class WorkerService {
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
 
-      logger.info('Starting entity extraction worker...');
-      await entityExtractionWorker.start();
+      if (appConfig.entityExtraction.enabled) {
+        logger.info('Starting entity extraction worker...');
+        await entityExtractionWorker.start();
+      } else {
+        logger.info('Entity extraction is disabled; skipping worker startup');
+      }
 
       if (appConfig.enableTagGenerationPipeline) {
         logger.info('Initializing tag generation pipeline...');

@@ -88,6 +88,7 @@ import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
+import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
@@ -404,6 +405,12 @@ export class App {
       authMiddleware.authenticate,
       aclMiddleware.checkAccess,
       ticketRoutes
+    );
+    this.app.use(
+      '/api/ticket-reports',
+      authMiddleware.authenticate,
+      aclMiddleware.checkAccess,
+      ticketReportRoutes
     );
     this.app.use(
       '/api/workflows',
@@ -810,7 +817,7 @@ export class App {
       await emailClassificationQueue.initialize();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
-      // separate process) drains them nightly.
+      // separate process) drains each thread once its debounce window elapses.
       logger.info('Initializing entity extraction queue...');
       await entityExtractionQueue.initialize();
 

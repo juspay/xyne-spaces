@@ -3131,6 +3131,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  ticketExportsForCurrentUser: defineQuery(() => {
+    return zql.ticket_exports.orderBy('createdAt', 'desc').limit(100);
+  }),
   getAllProjects: defineQuery(() => {
     return zql.projects
       .where('type', '!=', ProjectType.DM)
@@ -3685,7 +3688,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
       direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ args: { limit, start, direction } }) => {
+    ({ ctx, args: { limit, start, direction } }) => {
       const isBackward = direction === 'backward';
 
       // For backward: order ASC to get items before cursor, then reverse
@@ -3713,7 +3716,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .limit(limit)
         .related('channel', channelQuery =>
         channelQuery.related('conversations', conversationQuery =>
-          conversationQuery.orderBy('createdAt', 'desc').limit(1),
+          conversationQuery
+            .whereExists('initialMessage', messageQuery =>
+              messageQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('visibleTo', 'IS', null),
+                  helpers.cmp('visibleTo', '=', ctx.userID),
+                ),
+              ),
+            )
+            .orderBy('createdAt', 'desc')
+            .limit(1),
         ),
       );
     },
