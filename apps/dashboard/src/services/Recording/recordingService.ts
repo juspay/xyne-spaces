@@ -32,6 +32,8 @@ export interface Recording {
   hasTranscript: boolean;
   hasSummary: boolean;
   hasRecording?: boolean;
+  /** Terminal egress/upload failure with no playable audio (RECORDING_FAILED / RECORDING_UPLOAD_FAILED). */
+  recordingFailed?: boolean;
   labels?: string[];
   markedItems?: unknown[];
   summaryTemplateId?: string | null;
@@ -177,6 +179,8 @@ export interface RecordingDetail extends Recording {
   detailedSummaryCanvasId: string | null;
   citationSegments: CitationSegment[];
   hasRecording?: boolean;
+  /** Latest recording attempt's status (any state), or null when none exists. */
+  recordingStatus?: string | null;
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
 }

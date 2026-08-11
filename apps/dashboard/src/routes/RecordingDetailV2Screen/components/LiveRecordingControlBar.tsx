@@ -41,6 +41,8 @@ interface LiveRecordingControlBarProps {
   isAudioPreparing?: boolean;
   /** True once playback is known to be unavailable for this recording. */
   isAudioUnavailable?: boolean;
+  /** True when the recording is unavailable specifically because egress/upload failed. */
+  isAudioFailed?: boolean;
 }
 
 /** Stands in when there is no audio to load, so the playback hook can stay unconditional. */
@@ -54,6 +56,7 @@ export const LiveRecordingControlBar = ({
   onMarkerSelect,
   isAudioPreparing = false,
   isAudioUnavailable = false,
+  isAudioFailed = false,
 }: LiveRecordingControlBarProps): ReactElement | null => {
   // Recording session state — only meaningful when this tab owns the live session.
   const activeExternalId = useRecordingStore(context => context.externalId);
@@ -119,6 +122,7 @@ export const LiveRecordingControlBar = ({
         recording={recording}
         isAudioPreparing={isAudioPreparing}
         isAudioUnavailable={isAudioUnavailable}
+        isAudioFailed={isAudioFailed}
         {...(onLoadAudio ? { onLoadAudio } : {})}
         {...(onMarkerSelect ? { onMarkerSelect } : {})}
       />
@@ -353,6 +357,8 @@ interface RecordedTimelineBarProps {
   isAudioPreparing?: boolean;
   /** True once playback is known to be unavailable (e.g. older recordings). */
   isAudioUnavailable?: boolean;
+  /** True when unavailability is due to a terminal egress/upload failure. */
+  isAudioFailed?: boolean;
 }
 
 const RecordedTimelineBar = ({
@@ -361,6 +367,7 @@ const RecordedTimelineBar = ({
   onMarkerSelect,
   isAudioPreparing = false,
   isAudioUnavailable = false,
+  isAudioFailed = false,
 }: RecordedTimelineBarProps): ReactElement => {
   const fallbackDurationMs =
     recording.durationMs ??
@@ -394,7 +401,9 @@ const RecordedTimelineBar = ({
   const audioControlLabel = isStitching
     ? 'Preparing audio'
     : showAudioUnavailable
-      ? 'Recording is not available for playback.'
+      ? isAudioFailed
+        ? 'Recording failed — no audio was captured.'
+        : 'Recording is not available for playback.'
       : !onLoadAudio
         ? 'Audio is unavailable for this recording'
         : playback.state === 'loading'
@@ -468,7 +477,15 @@ const RecordedTimelineBar = ({
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
       <div className='flex min-h-11 items-center gap-4'>
         {showAudioUnavailable ? (
-          <Tooltip content='Recording is not available for playback.'>{playButton}</Tooltip>
+          <Tooltip
+            content={
+              isAudioFailed
+                ? 'Recording failed — no audio was captured.'
+                : 'Recording is not available for playback.'
+            }
+          >
+            {playButton}
+          </Tooltip>
         ) : (
           playButton
         )}

@@ -107,6 +107,34 @@ export class CallRecordingRepository {
     return new Set(rows.map((r) => r.callId));
   }
 
+  /**
+   * Of the given calls, which have at least one recording in a terminal failure
+   * state (egress/upload failed). Bulk lookup mirroring callIdsWithRecording so
+   * the list/detail endpoints can surface failures instead of silently omitting
+   * them. Callers should treat a call as "failed" only when it also has no
+   * UPLOADED recording (a later successful attempt supersedes an earlier failure).
+   */
+  async callIdsWithFailedRecording(callIds: string[]): Promise<Set<string>> {
+    if (callIds.length === 0) return new Set();
+    const rows = await this.db.callRecording.findMany({
+      where: {
+        callId: { in: callIds },
+        status: { in: [RecordingStatus.RECORDING_FAILED, RecordingStatus.RECORDING_UPLOAD_FAILED] },
+      },
+      select: { callId: true },
+      distinct: ['callId'],
+    });
+    return new Set(rows.map((r) => r.callId));
+  }
+
+  /** Most recent non-deleted recording for a call (any status), newest first. */
+  async findLatestByCallId(callId: string): Promise<CallRecording | null> {
+    return this.db.callRecording.findFirst({
+      where: { callId, status: { not: RecordingStatus.RECORDING_DELETED } },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
   /** Patch the egressId in after startEgress() returns. */
   async setEgressId(id: string, egressId: string): Promise<void> {
     await this.db.callRecording.update({ where: { id }, data: { egressId } });

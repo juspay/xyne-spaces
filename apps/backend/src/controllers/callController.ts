@@ -38,7 +38,8 @@ import {
   InvitationResponse,
   MeetingStatus,
   NotificationType,
-  RecordingType, AttachmentEntityType } from '@xyne/shared';
+  RecordingType, AttachmentEntityType,
+  isRecordingFailure } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
@@ -1085,6 +1086,11 @@ export class CallController {
       const callsWithRecording = await repositories.callRecordings.callIdsWithRecording(
         calls.map((call) => call.id),
       );
+      // A call is "failed" only when it has a terminal-failed recording AND no
+      // UPLOADED one — a later successful attempt supersedes an earlier failure.
+      const callsWithFailedRecording = await repositories.callRecordings.callIdsWithFailedRecording(
+        calls.map((call) => call.id),
+      );
 
       const recordings = calls.map((call) => {
         const metadata = call.metadata as { systemMessageId?: string } | null;
@@ -1103,6 +1109,8 @@ export class CallController {
           hasTranscript: !!call.transcript,
           hasSummary: !!call.aiSummary,
           hasRecording: callsWithRecording.has(call.id),
+          recordingFailed:
+            !callsWithRecording.has(call.id) && callsWithFailedRecording.has(call.id),
           labels: call.labels,
           markedItems: call.markedItems,
           summaryTemplateId: call.summaryTemplateId,
@@ -1242,6 +1250,11 @@ export class CallController {
       // recordings-list endpoint. Not message-attachment-based: NOTE_TAKER
       // (headless) calls never create a message/attachment for their recording.
       const uploadedRecording = await repositories.callRecordings.findLatestUploadedByCallId(call.id).catch(() => null);
+      // The most recent recording attempt (any status) drives the failed-state
+      // surfacing: without an UPLOADED recording, a terminal-failed latest attempt
+      // is shown to the user instead of an indefinite "preparing"/"unavailable".
+      const latestRecording = await repositories.callRecordings.findLatestByCallId(call.id).catch(() => null);
+      const recordingFailed = !uploadedRecording && isRecordingFailure(latestRecording?.status);
       // Backward-compat: historical call rows stored the notes canvas link as
       // `notesCanvasViewAccessId`. Fall back to that key if the new one isn't
       // present so the notes tab keeps rendering for pre-migration calls.
@@ -1291,6 +1304,8 @@ export class CallController {
               : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
+          recordingStatus: latestRecording?.status ?? null,
+          recordingFailed,
         },
       });
     } catch (error) {
