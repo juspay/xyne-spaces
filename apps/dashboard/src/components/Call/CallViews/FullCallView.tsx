@@ -196,6 +196,19 @@ export function FullCallView({
     state => state.context.isTranscriptionEnabled,
   );
 
+  // Host display name (from room-metadata `createdBy`) for the non-host "who can
+  // remove the agent" note in the transcription popover.
+  const hostName = useMemo(() => {
+    if (!room?.metadata) return null;
+    try {
+      const createdBy = (JSON.parse(room.metadata) as { createdBy?: string }).createdBy;
+      if (!createdBy) return null;
+      return participants.find(p => p.identity === createdBy)?.name ?? null;
+    } catch {
+      return null;
+    }
+  }, [room?.metadata, participants]);
+
   // Active-recording state is driven by room metadata so every participant (incl.
   // late joiners) sees the indicator. `isRecordingProp`/optimistic local state are
   // only fallbacks for the brief window before metadata propagates.
@@ -491,6 +504,7 @@ export function FullCallView({
             callId={callId}
             isTranscriptionEnabled={isTranscriptionEnabled}
             isHost={isHost}
+            hostName={hostName}
             onToggleTranscription={() => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' })}
             description={CALL_PRIVACY_DESCRIPTION}
             actions={callPrivacyActions}

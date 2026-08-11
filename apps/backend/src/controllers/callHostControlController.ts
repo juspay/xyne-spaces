@@ -197,6 +197,50 @@ class CallHostControlController {
     }
   };
 
+  /**
+   * PATCH /api/calls/:callId/transcription-state
+   * Mirrors the host's mid-call transcription on/off state into LiveKit room metadata
+   * so participants who join AFTER the host toggled it stay in sync (data messages
+   * only reach participants present at broadcast time).
+   */
+  setTranscriptionState = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { enabled } = req.body as { enabled?: boolean };
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ success: false, error: 'enabled (boolean) is required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallHostControlController] transcription-state not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+        res
+          .status(403)
+          .json({ success: false, error: 'Only the call host can change transcription state' });
+        return;
+      }
+
+      await livekitService.setRoomTranscriptionEnabled(callId, enabled);
+      logger.info(`[CallHostControlController] transcription-state set | callId=${callId}, enabled=${enabled}`);
+      res.json({ success: true, enabled });
+    } catch (error) {
+      logger.error(`[CallHostControlController] transcription-state failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to update transcription state' });
+    }
+  };
+
   /** POST /api/calls/:callId/remove-participant */
   removeCallParticipant = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;

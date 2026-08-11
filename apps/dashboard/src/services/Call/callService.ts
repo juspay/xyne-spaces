@@ -350,6 +350,20 @@ export class CallService {
       throw error;
     }
   }
+
+  /**
+   * Mirror the host's mid-call transcription on/off state into room metadata so
+   * participants who join later stay in sync. Best-effort: present participants
+   * already got the live data-channel toggle, so a failure here only affects
+   * late-joiner sync.
+   */
+  async setTranscriptionState(callId: string, enabled: boolean): Promise<void> {
+    try {
+      await apiInstance.patch(`/calls/${callId}/transcription-state`, { enabled });
+    } catch {
+      // Swallow: late-joiner sync is best-effort.
+    }
+  }
   /**
    * Mute all participants (host only)
    * Mutes the audio tracks of all participants except the host

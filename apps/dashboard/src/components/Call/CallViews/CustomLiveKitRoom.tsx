@@ -11,6 +11,7 @@ import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyRemin
 import { useHandRaise } from '../hooks/useHandRaise';
 import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
 import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNotice';
+import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -219,6 +220,18 @@ export function CustomLiveKitRoom({
   const [dispositionError, setDispositionError] = useState<string | null>(null);
 
   const isHost = useIsCallHost(externalId, user?.id);
+  // Host's own "Transcription off … Undo" toast when they stop the agent.
+  useTranscriptionHostToast(isTranscriptionEnabled, isHost);
+  // Mirror the host's transcription on/off into room metadata (on change) so
+  // participants who join later stay in sync — LiveKit data messages don't reach
+  // participants who weren't present when the host toggled.
+  const prevTranscriptionEnabledRef = useRef(isTranscriptionEnabled);
+  useEffect(() => {
+    if (!isHost) return;
+    if (prevTranscriptionEnabledRef.current === isTranscriptionEnabled) return;
+    prevTranscriptionEnabledRef.current = isTranscriptionEnabled;
+    void callService.setTranscriptionState(callId, isTranscriptionEnabled);
+  }, [isHost, isTranscriptionEnabled, callId]);
 
   const allUsers = useUsers();
 

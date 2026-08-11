@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ConnectionQuality, Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { Hand, MicOff, Monitor, ImagePlus, UserMinus } from 'lucide-react';
+import { Hand, MicOff, Monitor, ImagePlus } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
@@ -12,6 +12,7 @@ import { cn } from '../../../utils/classNames';
 import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import CompactActionsMenu from '../../ui/CompactActionsMenu';
+import { SlashedBot } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
@@ -81,20 +82,23 @@ export function ParticipantTile({
   const isAIAgent = participant.identity.startsWith('agent-');
   const isControlled = isAIAgent && aiController;
 
-  // Host detection for the agent-tile menu: the backend stamps the host's LiveKit
-  // identity as `createdBy` in room metadata (same source the toggle uses).
+  // Host detection + host name for the agent-tile menu: the backend stamps the
+  // host's LiveKit identity as `createdBy` in room metadata (same source the toggle uses).
   const room = useSelector(roomActor, state => state.context.room);
-  const isHost = useMemo(() => {
-    const metadata = room?.metadata;
-    const localIdentity = room?.localParticipant.identity;
-    if (!metadata || !localIdentity) return false;
+  const hostIdentity = useMemo(() => {
+    if (!room?.metadata) return null;
     try {
-      const createdBy = (JSON.parse(metadata) as { createdBy?: string }).createdBy;
-      return !!createdBy && createdBy === localIdentity;
+      return (JSON.parse(room.metadata) as { createdBy?: string }).createdBy ?? null;
     } catch {
-      return false;
+      return null;
     }
-  }, [room?.metadata, room?.localParticipant.identity]);
+  }, [room?.metadata]);
+  const isHost = !!hostIdentity && hostIdentity === room?.localParticipant.identity;
+  const hostName = useMemo(() => {
+    if (!room || !hostIdentity) return null;
+    if (hostIdentity === room.localParticipant.identity) return room.localParticipant.name ?? null;
+    return room.remoteParticipants.get(hostIdentity)?.name ?? null;
+  }, [room, hostIdentity]);
 
   // Use LiveKit's built-in hook for speaking detection - uses observables internally
   const isSpeaking = useIsSpeaking(participant.participant);
@@ -200,20 +204,53 @@ export function ParticipantTile({
         participantName: participant.name,
       })}
     >
-      {/* Host-only agent controls: the agent tile only renders while transcription is
-          ON, so "Remove from call" fires the same soft kill-switch (silence + hide),
-          reversible from the transcribing toggle — not a hard, unrecoverable removal. */}
-      {isAIAgent && isHost && !compact && (
-        <div className='absolute top-2 right-2 z-20 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
+      {/* Agent-tile actions. Host: "Remove from call" opens the transcription popover
+          (one-click stop/start there) — the reversible soft kill-switch, not a hard
+          removal. Non-host: a disabled note pointing them to the host. */}
+      {isAIAgent && !compact && (
+        <div
+          data-theme='midnight'
+          className='absolute top-2 right-2 z-20 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'
+        >
           <CompactActionsMenu
-            triggerClassName='p-1.5 h-7 w-7 rounded-md border-0 bg-black/50 text-white hover:bg-black/70'
+            triggerClassName='p-1.5 h-7 w-7 rounded-md border-0 bg-background/70 text-foreground hover:bg-background'
+            forceDarkTheme
             items={[
-              {
-                icon: <UserMinus size={16} />,
-                label: 'Remove from call',
-                onSelect: () => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' }),
-                testId: 'remove-agent-menu-item',
-              },
+              isHost
+                ? {
+                    onSelect: () => roomActor.send({ type: 'SET_PRIVACY_POPOVER', open: true }),
+                    testId: 'remove-agent-menu-item',
+                    customContent: (
+                      <div className='flex items-start gap-2.5 px-3 py-2'>
+                        <SlashedBot className='mt-0.5 h-4 w-4 text-destructive' />
+                        <div className='min-w-0'>
+                          <div className='text-sm font-semibold text-destructive'>
+                            Remove from call
+                          </div>
+                          <div className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                            Stops transcription for everyone. You can add the agent back later.
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  }
+                : {
+                    disabled: true,
+                    onSelect: () => undefined,
+                    testId: 'remove-agent-menu-item-disabled',
+                    customContent: (
+                      <div className='flex max-w-[16rem] items-start gap-2.5 px-3 py-2'>
+                        <SlashedBot className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
+                        <div className='min-w-0 text-xs leading-snug text-muted-foreground'>
+                          Please ask{' '}
+                          <span className='font-semibold text-foreground'>
+                            {hostName ?? 'the host'}
+                          </span>{' '}
+                          (host) to stop transcribing the call.
+                        </div>
+                      </div>
+                    ),
+                  },
             ]}
           />
         </div>

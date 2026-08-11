@@ -122,6 +122,9 @@ router.patch('/:callId/host-controls', callHostControlController.setHostControls
 // End-of-call transcript disposition when transcription was toggled off (host only): keep | discard
 router.post('/:callId/transcript-disposition', callHostControlController.setTranscriptDisposition);
 
+// Mid-call transcription on/off state → room metadata so late joiners sync (host only)
+router.patch('/:callId/transcription-state', callHostControlController.setTranscriptionState);
+
 // Remove a participant from the call (host only); rejoin requires re-admission
 router.post('/:callId/remove-participant', callHostControlController.removeCallParticipant);
 

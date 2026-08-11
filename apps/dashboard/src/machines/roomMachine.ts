@@ -173,6 +173,7 @@ export interface RoomContext {
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
   isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
   transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
+  privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -283,6 +284,8 @@ export type RoomMachineEvent =
       participantName: string;
     }
   | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
+  | { type: 'SET_PRIVACY_POPOVER'; open: boolean } // Open/close the transcription privacy popover
+  | { type: 'SYNC_TRANSCRIPTION_STATE'; enabled: boolean } // Late-joiner sync from room metadata
   | { type: 'AI_CONTROL_REQUEST'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_PENDING'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_SENT' } // Local user sent a control request
@@ -437,6 +440,20 @@ export const roomMachine = setup({
           }
         };
 
+        // Late-joiner sync: the host's transcription on/off state is mirrored into room
+        // metadata by the backend (data messages don't reach participants who join later).
+        const syncTranscriptionState = (metadata?: string) => {
+          if (!metadata) return;
+          try {
+            const parsed = JSON.parse(metadata) as { transcriptionEnabled?: unknown };
+            if (typeof parsed.transcriptionEnabled === 'boolean') {
+              sendBack({ type: 'SYNC_TRANSCRIPTION_STATE', enabled: parsed.transcriptionEnabled });
+            }
+          } catch {
+            // ignore malformed metadata
+          }
+        };
+
         // Authoritative host identity for verifying privileged data-channel messages.
         // The backend stamps `createdBy` (the host's LiveKit identity) into room metadata.
         const getRoomHostId = (): string | null => {
@@ -454,15 +471,18 @@ export const roomMachine = setup({
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
           updateParticipants();
           syncHostControls(room.metadata);
+          syncTranscriptionState(room.metadata);
         });
 
         room.on(LiveKitRoomEvent.RoomMetadataChanged, (metadata: string) => {
           syncHostControls(metadata);
+          syncTranscriptionState(metadata);
           updateParticipants();
         });
 
         // Listener mounts after connect; sync current metadata once.
         syncHostControls(room.metadata);
+        syncTranscriptionState(room.metadata);
         updateParticipants();
 
         // Same for connection state: the Connected event fired before this listener
@@ -1298,6 +1318,7 @@ export const roomMachine = setup({
       transcriptionAgentLeft: () => false,
       isTranscriptionEnabled: () => true,
       transcriptionToggleNotice: () => null,
+      privacyPopoverOpen: () => false,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1451,6 +1472,7 @@ export const roomMachine = setup({
     transcriptionAgentLeft: false,
     isTranscriptionEnabled: true,
     transcriptionToggleNotice: null,
+    privacyPopoverOpen: false,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -2068,6 +2090,20 @@ export const roomMachine = setup({
         DISMISS_TRANSCRIPTION_NOTICE: {
           actions: assign({
             transcriptionToggleNotice: () => null,
+          }),
+        },
+        SET_PRIVACY_POPOVER: {
+          actions: assign({
+            privacyPopoverOpen: ({ event }) => event.open,
+          }),
+        },
+        // Silent late-joiner sync from room metadata (no toast; idempotent for peers
+        // who already reflected the live data-channel toggle).
+        SYNC_TRANSCRIPTION_STATE: {
+          actions: assign({
+            isTranscriptionEnabled: ({ event }) => event.enabled,
+            isAIAssistantEnabled: ({ event, context }) =>
+              event.enabled ? context.isAIAssistantEnabled : false,
           }),
         },
         AI_CONTROLLER_CHANGED: {
