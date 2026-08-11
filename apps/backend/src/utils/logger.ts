@@ -1,6 +1,7 @@
 import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
+import type { Socket } from 'net';
 import { config } from '@/config/env';
 
 export interface LogContext {
@@ -56,26 +57,33 @@ const normalizeErrors = winston.format((info) => {
 
 // fluent-logger's msgpack encoder has no cycle detection and throws on BigInt;
 // break cycles and stringify BigInt before anything reaches it.
-const sanitizeForFluent = winston.format((info) => {
-  const seen = new WeakSet<object>();
-  return JSON.parse(
-    JSON.stringify(info, (_key, value) => {
-      if (typeof value === 'bigint') return value.toString();
-      if (value instanceof Error) return serializeError(value);
-      if (typeof value === 'object' && value !== null) {
-        if (seen.has(value)) return '[Circular]';
-        seen.add(value);
-      }
-      return value;
-    })
-  );
-});
+//
+// Tracks the current ancestor chain (not every object ever seen) so two
+// separate references to the same shared, non-cyclic object
+function decycle(value: unknown, ancestors: unknown[]): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Error) return serializeError(value);
+  if (typeof value !== 'object' || value === null) return value;
+  if (ancestors.includes(value)) return '[Circular]';
+
+  const nextAncestors = [...ancestors, value];
+  if (Array.isArray(value)) {
+    return value.map((item) => decycle(item, nextAncestors));
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    out[key] = decycle((value as Record<string, unknown>)[key], nextAncestors);
+  }
+  return out;
+}
+
+const sanitizeForFluent = winston.format((info) => decycle(info, []) as winston.Logform.TransformableInfo);
 
 // Runs once at call time, before winston-transport clones `info` per
 // transport -- that clone drops non-enumerable Error fields and can happen
 // asynchronously under a different request's AsyncLocalStorage context.
 const sharedFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.timestamp(),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
   injectContext()
@@ -110,20 +118,37 @@ const transports: winston.transport[] = [
   }),
 ];
 
+// fluent-logger's Sender calls `socket.setTimeout(timeout)` but never
+// attaches a 'timeout' listener -- per Node's net.Socket docs that event
+// fires on idle 
+function guardSenderSocketTimeout(sender: { _socket: Socket | null }): void {
+  let socket: Socket | null = null;
+  Object.defineProperty(sender, '_socket', {
+    configurable: true,
+    get: () => socket,
+    set: (next: Socket | null) => {
+      socket = next;
+      socket?.once('timeout', () => {
+        socket?.destroy(new Error('fluent socket idle timeout'));
+      });
+    },
+  });
+}
+
 if (config.logging.fluent.enabled) {
   const FluentTransport = fluentLogger.support.winstonTransport();
-  transports.push(
-    new FluentTransport('error.backend', {
-      host: config.logging.fluent.host,
-      port: config.logging.fluent.port,
-      timeout: 3000, // ms, not seconds
-      reconnectInterval: 30000,
-      messageQueueSizeLimit: 1000, // bound memory when Fluent Bit is unreachable
-      highWaterMark: 1000, // avoid backpressure freezing the Console transport too
-      level: 'error',
-      format: fluentFormat,
-    }) as winston.transport
-  );
+  const fluentTransport = new FluentTransport('error.backend', {
+    host: config.logging.fluent.host,
+    port: config.logging.fluent.port,
+    timeout: 3000, // ms, not seconds
+    reconnectInterval: 30000,
+    messageQueueSizeLimit: 1000, // bound memory when Fluent Bit is unreachable
+    highWaterMark: 1000, // avoid backpressure freezing the Console transport too
+    level: 'error',
+    format: fluentFormat,
+  }) as winston.transport & { sender: { _socket: Socket | null } };
+  guardSenderSocketTimeout(fluentTransport.sender);
+  transports.push(fluentTransport);
 }
 
 export const logger = winston.createLogger({
