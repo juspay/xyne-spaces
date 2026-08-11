@@ -799,6 +799,7 @@ export class CallController {
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
           projectId: channel.projectId,
+          createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
 

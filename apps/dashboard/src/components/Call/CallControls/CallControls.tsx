@@ -187,6 +187,11 @@ export function CallControls({
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
   const hostControls = useSelector(roomActor, state => state.context.hostControls);
+  // AI voice talk-back needs STT, so the button is hidden while transcription is off.
+  const isTranscriptionEnabled = useSelector(
+    roomActor,
+    state => state.context.isTranscriptionEnabled,
+  );
   const externalId = useSelector(roomActor, state => state.context.externalId);
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const currentCall = useMemo(() => {
@@ -1001,8 +1006,9 @@ export function CallControls({
           </div>
         )}
 
-        {/* AI Assistant Button - Single button for all cases */}
-        {!hideAIAssistant && (
+        {/* AI Assistant Button - Single button for all cases.
+            Hidden while transcription is off (talk-back depends on STT). */}
+        {!hideAIAssistant && isTranscriptionEnabled && (
           <div className='relative'>
             <button
               onClick={() =>
