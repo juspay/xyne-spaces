@@ -215,6 +215,19 @@ export const TicketFiltersDropdown = ({
       if (item.filterKey === 'createdAt') {
         return !!(filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined);
       }
+      // Dynamic (custom) fields are nested under filters.dynamicFields[fieldId],
+      // not a flat key — filterKey is the dotted path "dynamicFields.<fieldId>".
+      if (item.filterKey.startsWith('dynamicFields.')) {
+        const fieldId = item.filterKey.slice('dynamicFields.'.length);
+        const value = filters.dynamicFields?.[fieldId];
+        if (Array.isArray(value)) {
+          return value.length > 0;
+        }
+        if (typeof value === 'object' && value !== null) {
+          return value.start !== undefined || value.end !== undefined;
+        }
+        return !!value;
+      }
       const filterValue = filters[item.filterKey as keyof TicketFilters];
       if (Array.isArray(filterValue)) {
         return filterValue.length > 0;

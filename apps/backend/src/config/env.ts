@@ -306,6 +306,14 @@ const envSchema = Joi.object({
   JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   GITHUB_TOKEN: Joi.string().allow('').default(''),
   GITHUB_API_URL: Joi.string().uri().default('https://api.github.com'),
+  // GitHub App (community ticketing)
+  GITHUB_APP_ID: Joi.string().allow('').default(''),
+  GITHUB_APP_PRIVATE_KEY: Joi.string().allow('').default(''),
+  GITHUB_APP_WEBHOOK_SECRET: Joi.string().allow('').default(''),
+  // Community intake
+  COMMUNITY_WORKSPACE_ID: Joi.string().allow('').default(''),
+  COMMUNITY_INTAKE_BOARD_ID: Joi.string().allow('').default(''),
+  COMMUNITY_INTAKE_CHANNEL_ID: Joi.string().allow('').default(''),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -749,6 +757,14 @@ export const config = {
     webhookSecret: envVars.SCM_WEBHOOK_SECRET,
     token: envVars.GITHUB_TOKEN,
     apiUrl: envVars.GITHUB_API_URL,
+    appId: envVars.GITHUB_APP_ID,
+    appPrivateKey: envVars.GITHUB_APP_PRIVATE_KEY,
+    appWebhookSecret: envVars.GITHUB_APP_WEBHOOK_SECRET,
+  },
+  community: {
+    workspaceId: envVars.COMMUNITY_WORKSPACE_ID,
+    intakeBoardId: envVars.COMMUNITY_INTAKE_BOARD_ID,
+    intakeChannelId: envVars.COMMUNITY_INTAKE_CHANNEL_ID,
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,
