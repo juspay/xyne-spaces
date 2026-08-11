@@ -9,7 +9,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
-import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
 
@@ -224,6 +224,7 @@ export interface S2SClawAgent {
   enabled: boolean;
   isDefault: boolean;
   color: string;
+  spacesAppId?: string | null;
   spacesAppUserId?: string | null;
 }
 
@@ -278,13 +279,14 @@ function getClawBaseUrl(): string {
   return config.xyneClaw.authUrl;
 }
 
-function getS2SWebhookUrl(agentSlug: string): string {
-  const url = new URL(config.xyneClaw.webhookUrl);
+function getS2SWebhookUrl(spacesAppId: string): string {
+  const url = new URL(config.xyneClaw.clawAuthCallbackUrlAutomation);
   const pathname = url.pathname.replace(/\/+$/, '');
-  const encodedSlug = encodeURIComponent(agentSlug);
-  url.pathname = /\/webhook\/[^/]+$/.test(pathname)
-    ? pathname.replace(/\/webhook\/[^/]+$/, `/webhook/${encodedSlug}`)
-    : `${pathname}/${encodedSlug}`;
+  const webhookMarker = '/webhook';
+  const webhookIndex = pathname.indexOf(webhookMarker);
+  const webhookRoot =
+    webhookIndex >= 0 ? pathname.slice(0, webhookIndex + webhookMarker.length) : pathname;
+  url.pathname = `${webhookRoot}/app/${encodeURIComponent(spacesAppId)}`;
   return url.toString();
 }
 
@@ -325,10 +327,7 @@ function extractCookieHeader(req: { headers?: { cookie?: string } }): Record<str
   return cookie ? { Cookie: cookie } : {};
 }
 
-function extractUserIdHeader(
-  userId: string,
-  workspaceId?: string,
-): Record<string, string> {
+function extractUserIdHeader(userId: string, workspaceId?: string): Record<string, string> {
   // `userId` is the raw, workspace-scoped Spaces user id. Keep the legacy
   // x-user-id header for older Claw deployments, and send the explicit source
   // identity for Claw versions that canonicalize it at the auth boundary.
@@ -820,7 +819,7 @@ export async function cancelClawAgentRun(
   req: { headers?: { cookie?: string } },
   userId: string,
   sessionId: string,
-  workspaceId?: string,
+  workspaceId?: string
 ): Promise<{ success: boolean; status: string; error?: string }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/run/stream/cancel`;
   try {
@@ -1317,35 +1316,61 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
 
 /** Run a claw agent via S2S (non-streaming, callback-based). Mirrors legacy clawClient.runAgent(). */
 export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAgentResponse> {
-  const url = getS2SWebhookUrl(req.agentSlug);
+  const agent = (await listS2SClawAgents()).find((candidate) => candidate.slug === req.agentSlug);
+  if (!agent?.spacesAppId) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: agent "${req.agentSlug}" has no registered Spaces app`
+    );
+  }
+  const app = await db.apps.findFirst({
+    where: {
+      id: agent.spacesAppId,
+      ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
+    },
+    select: { signingSecret: true },
+  });
+  if (!app?.signingSecret) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: no app signing secret for agent "${req.agentSlug}"`
+    );
+  }
+
+  const url = getS2SWebhookUrl(agent.spacesAppId);
   const sessionId = req.sessionId ?? randomUUID();
+  const body = JSON.stringify({
+    s2sKey: config.xyneClaw.s2sKey,
+    sessionId,
+    agentSlug: req.agentSlug,
+    task: req.task,
+    userId: req.userId,
+    spacesWorkspaceId: req.spacesWorkspaceId,
+    spacesOrgId: req.spacesOrgId,
+    spacesOrgMemberId: req.spacesOrgMemberId,
+    userName: req.userName,
+    userEmail: req.userEmail,
+    callbackUrl: req.callbackUrl,
+    ...(req.callbackSecret ? { callbackSecret: req.callbackSecret } : {}),
+    ...(req.conversationId ? { conversationId: req.conversationId } : {}),
+    ...(req.channelId ? { channelId: req.channelId } : {}),
+    ...(req.context ? { context: req.context } : {}),
+    ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
+    ...(req.executionProfile ? { executionProfile: req.executionProfile } : {}),
+    ...(req.sdlcOperation ? { sdlcOperation: req.sdlcOperation } : {}),
+    ...(req.sdlcContext ? { sdlcContext: req.sdlcContext } : {}),
+    ...(req.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
+  });
+  const signature = signWebhookPayload(body, decrypt(app.signingSecret));
   let res: globalThis.Response;
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
-      body: JSON.stringify({
-        s2sKey: config.xyneClaw.s2sKey,
-        sessionId,
-        agentSlug: req.agentSlug,
-        task: req.task,
-        userId: req.userId,
-        spacesWorkspaceId: req.spacesWorkspaceId,
-        spacesOrgId: req.spacesOrgId,
-        spacesOrgMemberId: req.spacesOrgMemberId,
-        userName: req.userName,
-        userEmail: req.userEmail,
-        callbackUrl: req.callbackUrl,
-        ...(req.callbackSecret ? { callbackSecret: req.callbackSecret } : {}),
-        ...(req.conversationId ? { conversationId: req.conversationId } : {}),
-        ...(req.channelId ? { channelId: req.channelId } : {}),
-        ...(req.context ? { context: req.context } : {}),
-        ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
-        ...(req.executionProfile ? { executionProfile: req.executionProfile } : {}),
-        ...(req.sdlcOperation ? { sdlcOperation: req.sdlcOperation } : {}),
-        ...(req.sdlcContext ? { sdlcContext: req.sdlcContext } : {}),
-        ...(req.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Xyne-Signature': signature,
+        'X-Source': 'XyneSpaces',
+        ...getS2SHeaders(),
+      },
+      body,
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
@@ -1529,7 +1554,7 @@ async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Pro
   const orgMemberId = req.spacesOrgMemberId ?? actor?.orgMemberId;
   if (!workspaceId || !orgId || !orgMemberId) {
     throw new Error(
-      `[ClawAgentService] Cannot dispatch a headless Claw event without workspace, org, and org-member identity for user ${req.userId}`,
+      `[ClawAgentService] Cannot dispatch a headless Claw event without workspace, org, and org-member identity for user ${req.userId}`
     );
   }
   return {

@@ -32,3 +32,6 @@ Before changing or rebasing the SDLC/Claw integration, fetch and verify both sou
 - layer SDLC-specific working changes over the verified Claw snapshot, then run Claw and integration tests.
 
 Current verified Claw baseline: `4d9c2d90dd6b0ad95ed1ae293b0b80fbb62cada8` (2026-08-10).
+
+For the permanent development-branch ownership and two-PR release workflow, see
+[`docs/sdlc/DEVELOPMENT_AND_PULL_REQUESTS.md`](docs/sdlc/DEVELOPMENT_AND_PULL_REQUESTS.md).

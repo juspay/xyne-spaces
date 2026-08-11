@@ -285,10 +285,30 @@ configured manual smoke; no new broad automated suite.
 - fake GitHub HTTP adapter tests for permission/error mapping;
 - credential ACL/secret non-disclosure integration tests;
 - progressive gate state-machine tests;
-- runtime grant replay/expiry/cross-repository rejection tests;
+- runtime credential expiry/cross-repository binding rejection tests;
 - malicious-output redaction/exfiltration regression tests;
 - disposable-repository end-to-end CI.
 
 ### Decision trigger
 
 Before adding a second provider adapter or changing the runtime credential delivery model.
+
+## D13 — credential expiry and access-check job retention
+
+### Current choice
+
+Use count-based Bull retention initially: keep the newest 100 completed SDLC jobs and 500 failed SDLC jobs.
+There is no terminal-job time TTL yet. Sandbox credential envelopes and abandoned SDLC admission permits remain
+automatically limited to 15 minutes. `Repo` stores only durable `accessCapabilities`; Bull/Redis owns transient
+check status, timestamps, retries, errors, and evidence.
+
+### Decisions needed
+
+- whether provider-reported credential expiry belongs inside encrypted `ExternalSource.credentials`;
+- choose completed/failed time windows for production-scale cleanup;
+- decide whether time windows replace count limits or act as a second bound;
+- preserve enough access-check history for UI diagnostics and operations without unbounded Redis growth.
+
+### Decision trigger
+
+Before production-scale Redis sizing or once queue volume makes count-only retention operationally unclear.

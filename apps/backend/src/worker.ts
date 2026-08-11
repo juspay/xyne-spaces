@@ -38,9 +38,7 @@ import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
-import { sdlcSetupWorker } from '@/workers/sdlcSetupWorker';
-import { sdlcWorkWorker } from '@/workers/sdlcWorkWorker';
-import { sdlcAccessCheckWorker } from '@/workers/sdlcAccessCheckWorker';
+import { sdlcWorker } from '@/workers/sdlcWorker';
 import { sdlcClawExecutionService } from '@/sdlc/SdlcClawExecutionService';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
@@ -284,19 +282,20 @@ class WorkerService {
       logger.info('Starting entity extraction worker...');
       await entityExtractionWorker.start();
 
-      logger.info('Starting SDLC setup worker...');
-      await sdlcAccessCheckWorker.start();
-      await sdlcSetupWorker.start();
-      logger.info('Starting SDLC work worker...');
-      await sdlcWorkWorker.start();
-      const reconcileSdlc = (): void => {
-        void sdlcClawExecutionService.reconcileExecutions().catch(error => {
-          logger.error('[SDLC-CLAW] reconciliation failed', error);
-        });
-      };
-      reconcileSdlc();
-      this.sdlcReconciliationTimer = setInterval(reconcileSdlc, 60_000);
-      this.sdlcReconciliationTimer.unref();
+      if (appConfig.enableSdlcWorker) {
+        logger.info('Starting SDLC worker...');
+        await sdlcWorker.start();
+        const reconcileSdlc = (): void => {
+          void sdlcClawExecutionService.reconcileExecutions().catch(error => {
+            logger.error('[SDLC-CLAW] reconciliation failed', error);
+          });
+        };
+        reconcileSdlc();
+        this.sdlcReconciliationTimer = setInterval(reconcileSdlc, 60_000);
+        this.sdlcReconciliationTimer.unref();
+      } else {
+        logger.info('SDLC worker is disabled (ENABLE_SDLC_WORKER=false)');
+      }
 
       if (appConfig.enableTagGenerationPipeline) {
         logger.info('Initializing tag generation pipeline...');
@@ -464,9 +463,7 @@ class WorkerService {
       }
 
       await autoDraftWorker.shutdown();
-      await sdlcAccessCheckWorker.stop();
-      await sdlcSetupWorker.stop();
-      await sdlcWorkWorker.stop();
+      if (appConfig.enableSdlcWorker) await sdlcWorker.stop();
 
       if (appConfig.enableTagGenerationPipeline) {
         await tagGenerationPipeline.close();

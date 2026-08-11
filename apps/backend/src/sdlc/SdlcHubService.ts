@@ -6,7 +6,6 @@ import {
 import {
   AccessType,
   BoardType,
-  CanvasRole,
   CanvasVisibility,
   ChannelAddUserPolicy,
   ChannelRole,
@@ -27,8 +26,8 @@ import {
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcSetupQueue } from '@/queues/sdlcSetupQueue';
-import { sdlcWorkQueue } from '@/queues/sdlcWorkQueue';
+import { sdlcQueue } from '@/queues/sdlcQueue';
+import { sdlcAdmission } from '@/queues/sdlcAdmission';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/services/canvasService';
 import {
@@ -50,7 +49,7 @@ import {
   isCompletedBaselineMetadata,
 } from './sdlcBaselineDraft';
 import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
-import { sdlcClawExecutionService } from './SdlcClawExecutionService';
+import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
 import {
   allBaselinesApproved,
   ARTIFACT_CAPABILITIES,
@@ -196,7 +195,6 @@ export class SdlcHubService implements SdlcHub {
             createdBy: actor.userId,
             projectId: project.id,
             channelId,
-            accessCheckStatus: 'NOT_CHECKED',
           },
         });
 
@@ -291,7 +289,7 @@ export class SdlcHubService implements SdlcHub {
     });
 
     try {
-      await sdlcSetupQueue.enqueue(execution.id);
+      await sdlcQueue.enqueueSetup(execution.id, repoId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.prisma.$transaction([
@@ -346,6 +344,7 @@ export class SdlcHubService implements SdlcHub {
     delete context.error;
     delete context.currentBaselineKind;
     delete context.sessionId;
+    delete context.admissionPermitId;
     context.phase = 'QUEUED';
     context.repoId = repoId;
     await this.prisma.$transaction([
@@ -359,7 +358,7 @@ export class SdlcHubService implements SdlcHub {
       }),
     ]);
     try {
-      await sdlcSetupQueue.enqueue(execution.id);
+      await sdlcQueue.enqueueSetup(execution.id, repoId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failureContext = {
@@ -486,7 +485,6 @@ export class SdlcHubService implements SdlcHub {
         },
       });
       if (updated.count === 0) return false;
-      await tx.sdlcVcsRuntimeGrant.deleteMany({ where: { executionId: execution.id } });
       await tx.workflow.update({
         where: { id: execution.workflow.id },
         data: { status: 'CANCELLED' },
@@ -503,6 +501,9 @@ export class SdlcHubService implements SdlcHub {
       }
       return { executionId: execution.id, status: latest?.status || execution.status };
     }
+
+    const admissionPermitId =
+      typeof context.admissionPermitId === 'string' ? context.admissionPermitId : undefined;
 
     if (sessionId) {
       const cancellation = await cancelS2SClawRun(sessionId, execution.createdBy || actor.userId);
@@ -532,6 +533,7 @@ export class SdlcHubService implements SdlcHub {
         throw new AppError(error, 502);
       }
     }
+    await sdlcAdmission.release(admissionPermitId);
     return { executionId: execution.id, status: 'CANCELLED' };
   }
 
@@ -603,7 +605,7 @@ export class SdlcHubService implements SdlcHub {
         });
       });
       try {
-        await sdlcClawExecutionService.dispatchArtifact(execution.id);
+        await sdlcQueue.enqueueArtifact(execution.id, repoId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await this.prisma.$transaction([
@@ -664,11 +666,7 @@ export class SdlcHubService implements SdlcHub {
             artifactKind: input.kind,
           },
           participants: {
-            create: {
-              workspaceId: actor.workspaceId,
-              channelId: repo.channelId,
-              role: CanvasRole.EDITOR,
-            },
+            create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
           },
         },
       });
@@ -836,11 +834,7 @@ export class SdlcHubService implements SdlcHub {
                 ...(input.kind === 'BASELINE' ? { generationStatus: 'READY' } : {}),
               },
               participants: {
-                create: {
-                  workspaceId: actor.workspaceId,
-                  channelId: repo.channelId,
-                  role: input.kind === 'BASELINE' ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-                },
+                create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
               },
             },
           });
@@ -970,11 +964,7 @@ export class SdlcHubService implements SdlcHub {
                 isCollaborative: true,
                 metadata: nextMetadata as Prisma.InputJsonValue,
                 participants: {
-                  create: {
-                    workspaceId: actor.workspaceId,
-                    channelId: repo.channelId,
-                    role: CanvasRole.VIEWER,
-                  },
+                  create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
                 },
               },
               select: { id: true, viewAccessId: true, metadata: true, content: true },
@@ -1442,7 +1432,7 @@ export class SdlcHubService implements SdlcHub {
     });
 
     try {
-      await sdlcWorkQueue.enqueue(created.workflowExecutionId);
+      await sdlcQueue.enqueueWork(created.workflowExecutionId, repoId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const execution = await this.prisma.workflowExecution.findUnique({

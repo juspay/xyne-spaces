@@ -7673,7 +7673,6 @@ export const mutators = defineMutators({
           baseBranch,
           prefix,
           createdBy: ctx.userID,
-          accessCheckStatus: 'NOT_CHECKED',
         });
       },
     ),

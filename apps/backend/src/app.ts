@@ -163,9 +163,7 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
-import { sdlcSetupQueue } from '@/queues/sdlcSetupQueue';
-import { sdlcWorkQueue } from '@/queues/sdlcWorkQueue';
-import { sdlcAccessCheckQueue } from '@/queues/sdlcAccessCheckQueue';
+import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -832,10 +830,8 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    logger.info('Initializing SDLC setup queue...');
-    await sdlcSetupQueue.initialize();
-    await sdlcWorkQueue.initialize();
-    await sdlcAccessCheckQueue.initialize();
+    logger.info('Initializing SDLC queue (producer)...');
+    await sdlcQueue.initialize();
 
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
@@ -1028,10 +1024,8 @@ export class App {
       // Close auto draft queue
       await autoDraftQueue.close();
 
-      // Close SDLC setup producer queue
-      await sdlcSetupQueue.close();
-      await sdlcWorkQueue.close();
-      await sdlcAccessCheckQueue.close();
+      // Close SDLC producer queue
+      await sdlcQueue.close();
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();

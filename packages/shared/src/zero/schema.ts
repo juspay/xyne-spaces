@@ -1393,14 +1393,7 @@ export const repoTable = table('repos')
     projectId: string().optional(),
     channelId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
-    accessCheckStatus: string(),
     accessCapabilities: json().optional(),
-    accessEvidence: json().optional(),
-    accessCredentialRevision: number().optional(),
-    accessCheckedAt: number().optional(),
-    accessCheckStartedAt: number().optional(),
-    accessErrorCode: string().optional(),
-    accessErrorMessage: string().optional(),
   })
   .primaryKey('id');
 

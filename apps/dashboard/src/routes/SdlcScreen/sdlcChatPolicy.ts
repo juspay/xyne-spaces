@@ -99,6 +99,17 @@ export const shouldClearSelectedSdlcConversation = (input: {
   return input.selectedQueryComplete && !input.selectedConversationFound;
 };
 
+export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
+  repoQueryComplete: boolean;
+  discussionOpen: boolean;
+  selectedConversationId: string | null;
+  discussionContextResolved: boolean;
+}): boolean =>
+  input.repoQueryComplete &&
+  input.discussionOpen &&
+  Boolean(input.selectedConversationId) &&
+  !input.discussionContextResolved;
+
 export const escapeSdlcConversationTitle = (value: string): string =>
   value
     .replace(/&/g, '&amp;')

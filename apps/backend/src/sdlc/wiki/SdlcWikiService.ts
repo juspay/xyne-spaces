@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { CanvasVisibility } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -17,6 +17,7 @@ import type {
   SdlcWikiSyncResult,
   SyncSdlcWikiInput,
 } from './types';
+import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
 import { normalizeWikiSourcePath, WIKI_FOLDER_PREFIX, wikiFolderName } from './wikiPaths';
 
 const WIKI_SOURCE = 'research-agent';
@@ -347,11 +348,7 @@ export class SdlcWikiService implements SdlcWiki {
             isCollaborative: true,
             metadata,
             participants: {
-              create: {
-                workspaceId: repo.workspaceId,
-                channelId: repo.channelId,
-                role: CanvasRole.VIEWER,
-              },
+              create: sdlcChannelCanvasParticipant(repo.workspaceId, repo.channelId),
             },
           },
           select: { id: true },

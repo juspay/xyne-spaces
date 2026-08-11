@@ -96,6 +96,8 @@ Evidence: two approvals update one Knowledge Document; role smoke; coding gate s
 - [x] T6.5 Enforce PRD/Tech Doc→Ticket optional 1:1.
 - [x] T6.6 Starting from PRD/Tech Doc reuses linked Ticket or creates one.
 - [x] T6.7 Add AI actions that create directly editable drafts.
+- [x] T6.8 Give the hidden repository Channel `VIEWER` access on every new baseline, PRD, Tech Doc, and Wiki
+      Canvas while preserving creator edit access. Leave existing participant rows unchanged.
 
 Evidence: manual chain creation, duplicate attempt returns 409, rows/canvases/ticket inspect correctly.
 
@@ -212,14 +214,14 @@ Evidence: `docs/sdlc/VCS_CREDENTIALS_PLAN.md`, `docs/sdlc/DECISIONS_NEEDED_FOR_V
 - [x] T14.1 Add workspace/provider credential persistence with versioned authenticated-encryption metadata,
       revision, validation metadata, identity, actors, and timestamps. T21.4 moved the delivered persistence
       from the temporary `SdlcVcsCredential` model into a dedicated `ExternalSource` type.
-- [x] T14.2 Extend `Repo` with provider-neutral access status, normalized capabilities/evidence, credential
-      revision, identity/visibility, checked time, and stable error fields.
+- [x] T14.2 Extend `Repo` only with normalized `accessCapabilities`; keep transient access-check state,
+      timestamps, errors, and evidence in Redis job metadata.
 - [x] T14.3 Add a safe migration preserving existing Repo rows, baseline approvals, and legacy provider data.
 - [x] T14.4 Implement authenticated credential encryption; do not reuse unauthenticated AES-CBC for PATs.
 - [x] T14.5 Add workspace owner/admin checks for configure/replace/disconnect and project/repository checks
       for credential consumption.
-- [x] T14.6 Validate replacement before atomic swap; disconnect/replacement increments revision and marks
-      all workspace GitHub repository checks stale.
+- [x] T14.6 Validate replacement before atomic swap; disconnect/replacement increments revision and
+      atomically clears affected repository capabilities before rechecking.
 - [x] T14.7 Ensure no user-facing API/Zero/query/log path returns ciphertext, plaintext, helper contents, or
       reversible token fragments; the S2S bootstrap returns only a sandbox-public-key-bound encrypted envelope.
 - [x] T14.8 Emit metadata-only audit events for credential create/validate/replace/disconnect.
@@ -230,7 +232,7 @@ response/Zero/log secret audit.
 ## T15 — Deep `SdlcVcs` module and GitHub adapter
 
 - [x] T15.1 Define the small `SdlcVcs` interface for credential lifecycle, repository access checks,
-      capability gates, runtime grants, draft PR creation, and PR validation.
+      capability gates, runtime credential delivery, draft PR creation, and PR validation.
 - [x] T15.2 Define the internal `VcsProviderAdapter` seam with provider-neutral inputs/results.
 - [x] T15.3 Implement `GitHubVcsAdapter` for GitHub.com URL parsing/canonicalization, identity validation,
       repository/branch inspection, Git authentication, draft PR creation, and PR URL validation.
@@ -268,8 +270,8 @@ dashboard typecheck/lint.
 
 - [x] T17.1 Attachment commits the existing cheap shell, then queues one durable non-mutating access check;
       remove automatic baseline dispatch for new repositories.
-- [x] T17.2 Enforce one active check, PostgreSQL truth, Redis coordination only, refresh-safe progress, retry,
-      and credential-revision staleness.
+- [x] T17.2 Enforce one active check using repository ID as Bull job ID; Redis owns progress/retry/error state,
+      while PostgreSQL stores only resulting capabilities.
 - [x] T17.3 Check identity, repository/visibility, configured base branch, API read, and authenticated
       `git ls-remote` without creating remote resources.
 - [x] T17.4 Support anonymous public read fallback and credentialed private read; label fallback/invalid-token
@@ -288,12 +290,12 @@ matrix, baseline/artifact/Start Work gate inspection.
 
 ## T18 — Runtime credential delivery, private clone, and draft PR
 
-- [x] T18.1 Add opaque runtime grants bound to execution, session, workspace, repository, provider,
-      operation, credential revision, and expiry.
-- [x] T18.2 Add S2S-only grant redemption; reject replay, expiry, wrong execution/session/repository, stale
-      credential, and inactive workflow.
-- [x] T18.3 Keep runtime grant IDs backend-only. Forward durable execution/repository/session binding through
-      authoritative SDLC context; never serialize PAT or grant ID into workflow/queue/prompt/conversation/debug/Redis/Zero state.
+- [x] T18.1 Add S2S-only runtime credential bootstrap bound to execution, session, workspace, repository,
+      provider, operation, sandbox public key, credential revision, and expiry.
+- [x] T18.2 Validate current capability, credential, and active execution/session/repository scope before each
+      encrypted credential delivery.
+- [x] T18.3 Forward durable execution/repository/session binding through authoritative SDLC context; never
+      serialize PAT into workflow/queue/prompt/conversation/debug/Redis/Zero state.
 - [x] T18.4 Extend dynamic sandbox setup for credentialed private clone/fetch and direct push using a
       restrictive temporary Git credential helper with cleanup.
 - [x] T18.5 Keep public no-credential clone path working.
@@ -305,7 +307,7 @@ matrix, baseline/artifact/Start Work gate inspection.
       do not sync PAT to generic Claw user/global MCP credential stores.
 - [x] T18.9 Validate remote commit and draft PR provider/repository/base/head before callback success and
       ticket movement.
-- [x] T18.10 On clone/push/PR 401/403, mark capability stale/blocked and surface credential revalidation.
+- [x] T18.10 On clone/push/PR 401/403, remove failed capability evidence and surface credential revalidation.
 - [x] T18.11 Extend redaction/path guards for fine-grained PAT, authenticated URLs, helpers, Git config,
       command errors, and callbacks.
 
@@ -380,8 +382,8 @@ clickable commit-pinned code citations.
       long-lived VCS credentials. Use a deterministic workspace/provider source name, dedicated SDLC source type,
       `isActive` lifecycle, and an AES-256-GCM authenticated envelope serialized in `credentials`; retain revision,
       provider identity, validation, fingerprint, and error metadata inside the encrypted payload. Keep the
-      `SdlcVcs` interface as the persistence seam, retain `SdlcVcsRuntimeGrant` for one-use Claw delivery, and make
-      no Claw database-schema change. Explicitly prevent `ExternalSource.credentials` from entering Zero, public
+      `SdlcVcs` interface as the persistence seam, validate runtime delivery directly from active execution state,
+      and make no Claw database-schema change. Explicitly prevent `ExternalSource.credentials` from entering Zero, public
       reads, logs, queues, workflow context, prompts, conversations, or debug artifacts.
 - [x] T21.5 Remove duplicated Repo VCS metadata columns: `vcsProvider`, `vcsRepositoryOwner`,
       `vcsRepositoryName`, `vcsResourceOwner`, `vcsVisibility`, and `vcsDefaultBranch`. Derive provider and
@@ -392,15 +394,15 @@ clickable commit-pinned code citations.
       deterministic context from durable state (workspace/project/channel/repository, ticket/artifact, workflow
       execution/session, configured base branch, permissions/gates, and other required IDs/invariants) and inject
       it at the agent seam on initial start, resume, retry, handoff, and every post-compaction continuation. Do not
-      rely on IDs or rules surviving conversational history compression, and do not re-inject expired runtime
-      grants or secrets. Audit all baseline, artifact, interactive chat, and Start Work entry points to use the
-      wrapper instead of assembling context independently.
+      rely on IDs or rules surviving conversational history compression, and do not re-inject secrets. Audit all
+      baseline, artifact, interactive chat, and Start Work entry points to use the wrapper instead of assembling
+      context independently.
 - [x] T21.7 Move SDLC Git credential provisioning into a sandbox-creation bootstrap module, outside agent
       conversation memory. Each sandbox generates an ephemeral keypair; trusted Claw carries only public-key
       stdout from Kata to the backend and never reads the pod directly. It registers the key against the
       authenticated `sdlc-agent`/workspace/repository/execution/session, receives an authenticated encrypted PAT envelope,
       decrypts it locally, and installs a restrictive temporary Git credential helper. Bind delivery to operation,
-      credential revision, expiry, and one-time/replay state; never expose PAT, private key, grant ID, helper path,
+      credential revision and expiry; never expose PAT, private key, helper path,
       or decryption commands to the agent. Re-provision with a fresh key and envelope when a sandbox is recreated,
       remove all secret/key material on success, failure, cancellation, timeout, and destruction, and retain
       backend-owned remote-SHA/head/base verification plus draft-PR creation. Use vetted cryptographic libraries,
@@ -433,11 +435,11 @@ credential was decrypted, re-encrypted into an active `ExternalSource`, verified
 SQL then removed the legacy table and all six duplicate Repo columns. The temporary migrator and its package
 command were deleted after successful verification. Crypto tests prove correct-key decryption, wrong-key and
 tampered-binding rejection, no plaintext in the envelope, Node preflight before network use, fresh sandbox-bound
-bootstrap requests on recreation, no grant ID in bootstrap requests, strict `sdlc-agent` request/AAD binding,
+bootstrap requests on recreation, strict `sdlc-agent` request/AAD binding,
 syntactically valid hidden bootstrap/hook scripts, and real Git commits rewritten to the sandbox-fetched PAT
 identity for both author and committer. Local DB verification confirms the
-unique replay-binding index across execution, session, repository, operation, sandbox, and ephemeral public-key
-hash. Run-finally cleanup removes helper/key material on success, failure, cancellation, and timeout; cached
+request-time binding checks across execution, session, repository, operation, sandbox, and ephemeral public key.
+Run-finally cleanup removes helper/key material on success, failure, cancellation, and timeout; cached
 sandbox reuse first scrubs old material and performs a fresh key/envelope bootstrap. Configured live-sandbox compaction/recreation/push acceptance remains an operational
 rollout check because no Kata sandbox was provisioned during this cleanup.
 
@@ -470,7 +472,9 @@ rollout check because no Kata sandbox was provisioned during this cleanup.
       read state, or navigate into hidden Chat.
 - [x] T22.12 Add existing-style instrumentation for panel open/close, owner kind, new conversation, and thread
       selection without recording message content.
-- [ ] T22.13 Verify shared/backend/dashboard builds, targeted lint/typecheck, enum coverage, and the manual
+- [x] T22.13 Route global Activity for hidden SDLC Channels back into the repository Hub. Open exact linked
+      messages, Canvases, and Tickets; use Overview for other activity; never expose the hidden normal-Chat view.
+- [ ] T22.14 Verify shared/backend/dashboard builds, targeted lint/typecheck, enum coverage, and the manual
       acceptance walkthrough in `CONVERSATIONS_PLAN.md`. Confirm Chat/global Wiki/global Pull Request/mobile,
       existing Ask AI, and non-SDLC repositories remain unchanged.
 
@@ -480,7 +484,7 @@ the pending manual walkthrough checklist.
 
 Automated implementation verification (2026-08-09): shared build, backend/dashboard typechecks, dashboard
 production build, targeted dashboard lint (zero errors; existing warnings only), and `git diff --check` pass.
-T22.13 remains open solely for the authenticated two-member interactive walkthrough and cross-surface smoke test.
+T22.14 remains open solely for the authenticated two-member interactive walkthrough and cross-surface smoke test.
 
 ## T23 — SDLC Chat shell and title-first conversation index
 
@@ -575,6 +579,14 @@ delivery scope.
 
 V1 operational rule: trigger implementation from individual Ticket tickets. Tech Doc-level sequential
 orchestration is intentionally deferred.
+
+## V2 backlog — SDLC queue retention
+
+- [x] V2Q.1 Start with one `sdlc` queue, worker env isolation, nine global active permits, three per repository,
+      and repository round-robin admission.
+- [x] V2Q.2 Start with count-based Redis history: newest 100 completed and 500 failed Bull jobs.
+- [ ] V2Q.3 Replace or supplement count-only history with explicit completed/failed time windows before sustained
+      production queue volume; document Redis sizing and diagnostic-history requirements first.
 
 ## V2 backlog — conversation and Ask AI convergence
 

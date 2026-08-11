@@ -18,10 +18,9 @@ interface ProjectRepository {
   provider: string;
   visibility: string | null;
   configuredBaseBranch: string | null;
-  accessCheckStatus: string;
+  accessJobStatus: string;
   accessCapabilities: unknown;
-  accessCheckedAt: string | null;
-  accessErrorMessage: string | null;
+  accessJobErrorMessage: string | null;
   setupExecution: { status: string } | null;
 }
 
@@ -59,7 +58,7 @@ export function ProjectRepositoriesSection(props: {
     void load();
   }, [load, props.refreshKey]);
   const hasRunningCheck = repositories.some(repo =>
-    ['QUEUED', 'CHECKING'].includes(repo.accessCheckStatus),
+    ['QUEUED', 'CHECKING'].includes(repo.accessJobStatus),
   );
   useEffect((): (() => void) | undefined => {
     if (!hasRunningCheck) return;
@@ -141,7 +140,7 @@ function RepositoryCard(props: {
     () => (Array.isArray(repo.accessCapabilities) ? (repo.accessCapabilities as Capability[]) : []),
     [repo.accessCapabilities],
   );
-  const running = ['QUEUED', 'CHECKING'].includes(repo.accessCheckStatus);
+  const running = ['QUEUED', 'CHECKING'].includes(repo.accessJobStatus);
   return (
     <article className='rounded-lg border border-border p-5'>
       <div className='flex flex-wrap items-start justify-between gap-4'>
@@ -151,7 +150,7 @@ function RepositoryCard(props: {
             {repo.visibility === 'PRIVATE' && (
               <Lock className='h-3.5 w-3.5 text-muted-foreground' />
             )}
-            <Status status={repo.accessCheckStatus} />
+            <Status status={repo.accessJobStatus} />
           </div>
           <p className='mt-1 text-sm text-muted-foreground'>
             {repo.provider || 'GitHub'} · {repo.visibility?.toLowerCase() || 'visibility pending'} ·{' '}
@@ -160,8 +159,8 @@ function RepositoryCard(props: {
           <p className='mt-1 text-xs text-muted-foreground'>
             {running
               ? 'Checking automatically…'
-              : repo.accessCheckedAt
-                ? `Checked ${new Date(repo.accessCheckedAt).toLocaleString()}`
+              : repo.accessJobStatus === 'READY'
+                ? 'Access ready'
                 : 'Access check pending'}
           </p>
         </div>
@@ -192,11 +191,11 @@ function RepositoryCard(props: {
           ))}
         </div>
       )}
-      {repo.accessErrorMessage && (
+      {repo.accessJobErrorMessage && (
         <div className='mt-4 flex items-start justify-between gap-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200'>
           <span className='flex gap-2'>
             <AlertCircle className='mt-0.5 h-4 w-4 shrink-0' />
-            {repo.accessErrorMessage}
+            {repo.accessJobErrorMessage}
           </span>
           <button
             className='shrink-0 underline'

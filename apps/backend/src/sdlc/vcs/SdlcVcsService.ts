@@ -1,16 +1,8 @@
-import {
-  createHash,
-  randomUUID,
-} from 'crypto';
-import {
-  Prisma,
-  type PrismaClient,
-  type SdlcVcsRuntimeGrant,
-} from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { ACLAuditEventType, ACLAuditTargetType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcAccessCheckQueue } from '@/queues/sdlcAccessCheckQueue';
+import { sdlcQueue } from '@/queues/sdlcQueue';
 import { logger } from '@/utils/logger';
 import type { SdlcActor } from '../types';
 import { isSafeSdlcGitRef, requireSdlcBaseBranch } from '../sdlcRepositoryContext';
@@ -20,7 +12,7 @@ import {
   SdlcVcsCredentialStore,
   type StoredSdlcVcsCredential,
 } from './SdlcVcsCredentialStore';
-import { classifyRuntimeAccessFailure, shouldEnsureRepositoryAccess } from './accessCheckPolicy';
+import { classifyRuntimeAccessFailure } from './accessCheckPolicy';
 import {
   encryptSandboxCredentialEnvelope,
   parseSandboxPublicKey,
@@ -29,7 +21,6 @@ import {
 import type {
   CapabilityEvidence,
   RepositoryAccessCheckResult,
-  RuntimeGrant,
   SdlcVcs,
   VcsCapability,
   VcsProvider,
@@ -42,8 +33,6 @@ const adapters: Record<VcsProvider, VcsProviderAdapter> = {
 };
 
 const activeExecutionStatuses = ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING', 'EXTERNAL_WAIT'];
-// This is only a lease for recovering a stuck queue job. It is not a credential TTL.
-const ACCESS_CHECK_RUNNING_LEASE_MS = 5 * 60_000;
 const SDLC_AGENT_SLUG = 'sdlc-agent';
 
 export class SdlcVcsService implements SdlcVcs {
@@ -119,12 +108,7 @@ export class SdlcVcsService implements SdlcVcs {
       const repoIds = await this.repositoryIdsForProvider(tx, actor.workspaceId, provider);
       await tx.repo.updateMany({
         where: { id: { in: repoIds } },
-        data: {
-          accessCheckStatus: 'STALE',
-          accessErrorCode: 'CREDENTIAL_REVISION_CHANGED',
-          accessErrorMessage:
-            'Repository access must be checked with the current workspace credential',
-        },
+        data: { accessCapabilities: [] },
       });
       return saved;
     });
@@ -141,27 +125,25 @@ export class SdlcVcsService implements SdlcVcs {
     try {
       const validation = await this.adapter(provider).validateCredential(row.token, row.resourceOwner);
       const now = new Date().toISOString();
-      await this.credentialStore.save(this.prisma, {
-        ...row,
-        validationStatus: 'VALID',
-        validatedAt: now,
-        validationErrorCode: null,
-        validationErrorMessage: null,
-        identityLogin: validation.identityLogin,
-        resourceOwner: validation.resourceOwner,
-        updatedBy: actor.userId,
-        updatedAt: now,
+      await this.prisma.$transaction(async (tx) => {
+        await this.credentialStore.save(tx, {
+          ...row,
+          validationStatus: 'VALID',
+          validatedAt: now,
+          validationErrorCode: null,
+          validationErrorMessage: null,
+          identityLogin: validation.identityLogin,
+          resourceOwner: validation.resourceOwner,
+          updatedBy: actor.userId,
+          updatedAt: now,
+        });
+        const repoIds = await this.repositoryIdsForProvider(tx, actor.workspaceId, provider);
+        await tx.repo.updateMany({
+          where: { id: { in: repoIds } },
+          data: { accessCapabilities: [] },
+        });
       });
       await this.audit(actor, row.id, 'validated');
-      const repoIds = await this.repositoryIdsForProvider(this.prisma, actor.workspaceId, provider);
-      await this.prisma.repo.updateMany({
-        where: { id: { in: repoIds } },
-        data: {
-          accessCheckStatus: 'STALE',
-          accessErrorCode: 'CREDENTIAL_REVALIDATED',
-          accessErrorMessage: 'Repository access is refreshing automatically',
-        },
-      });
       await this.queueWorkspaceRepositoryChecks(actor, provider);
     } catch (error) {
       const mapped = this.providerError(error);
@@ -179,11 +161,7 @@ export class SdlcVcsService implements SdlcVcs {
         const repoIds = await this.repositoryIdsForProvider(tx, actor.workspaceId, provider);
         await tx.repo.updateMany({
           where: { id: { in: repoIds } },
-          data: {
-            accessCheckStatus: 'STALE',
-            accessErrorCode: mapped.code,
-            accessErrorMessage: `${mapped.message}. Fix or replace the credential, then check access again.`,
-          },
+          data: { accessCapabilities: [] },
         });
       });
       await this.audit(actor, row.id, 'validation_failed');
@@ -216,11 +194,7 @@ export class SdlcVcsService implements SdlcVcs {
       const repoIds = await this.repositoryIdsForProvider(tx, actor.workspaceId, provider);
       await tx.repo.updateMany({
         where: { id: { in: repoIds } },
-        data: {
-          accessCheckStatus: 'STALE',
-          accessErrorCode: 'CREDENTIAL_DISCONNECTED',
-          accessErrorMessage: 'Workspace credential disconnected; check access again',
-        },
+        data: { accessCapabilities: [] },
       });
       return disconnected;
     });
@@ -234,24 +208,8 @@ export class SdlcVcsService implements SdlcVcs {
     options: { force?: boolean } = {}
   ): Promise<RepositoryAccessCheckResult> {
     const repo = await this.requireRepositoryMember(actor, repoId);
-    const credential = await this.credentialStore.find(this.prisma, actor.workspaceId, 'GITHUB');
-    const shouldQueue = shouldEnsureRepositoryAccess({
-      repository: {
-        status: repo.accessCheckStatus,
-        errorCode: repo.accessErrorCode,
-        startedAt: repo.accessCheckStartedAt,
-        credentialRevision: repo.accessCredentialRevision,
-      },
-      credential,
-      force: options.force,
-      runningLeaseMs: ACCESS_CHECK_RUNNING_LEASE_MS,
-    });
-    if (!shouldQueue) {
-      return {
-        queued: false,
-        status: repo.accessCheckStatus,
-        checkedAt: repo.accessCheckedAt?.toISOString() ?? null,
-      };
+    if (!options.force && this.capabilities(repo.accessCapabilities).length > 0) {
+      return { queued: false, status: 'READY' };
     }
     return this.claimAndEnqueueRepositoryCheck({
       repoId: repo.id,
@@ -265,41 +223,7 @@ export class SdlcVcsService implements SdlcVcs {
     workspaceId: string;
     userId: string;
   }): Promise<RepositoryAccessCheckResult> {
-    const startedAt = new Date();
-    const staleBefore = new Date(startedAt.getTime() - ACCESS_CHECK_RUNNING_LEASE_MS);
-    const claimed = await this.prisma.repo.updateMany({
-      where: {
-        id: input.repoId,
-        OR: [
-          { accessCheckStatus: { notIn: ['QUEUED', 'CHECKING'] } },
-          { accessCheckStartedAt: null },
-          { accessCheckStartedAt: { lt: staleBefore } },
-        ],
-      },
-      data: {
-        accessCheckStatus: 'QUEUED',
-        accessCheckStartedAt: startedAt,
-        accessErrorCode: null,
-        accessErrorMessage: null,
-      },
-    });
-    if (claimed.count === 0) {
-      return { queued: false, status: 'CHECKING', checkedAt: null };
-    }
-    try {
-      await sdlcAccessCheckQueue.enqueue(input);
-    } catch (error) {
-      await this.prisma.repo.updateMany({
-        where: { id: input.repoId, accessCheckStartedAt: startedAt },
-        data: {
-          accessCheckStatus: 'BLOCKED',
-          accessErrorCode: 'ACCESS_CHECK_QUEUE_UNAVAILABLE',
-          accessErrorMessage: 'Could not queue repository access check',
-        },
-      });
-      throw error;
-    }
-    return { queued: true, status: 'QUEUED', checkedAt: null };
+    return sdlcQueue.enqueueAccessCheck(input);
   }
 
   async markRuntimeFailure(
@@ -338,13 +262,7 @@ export class SdlcVcsService implements SdlcVcs {
     if (!credentialInvalid) {
       await this.prisma.repo.update({
         where: { id: repoId },
-        data: {
-          accessCheckStatus: 'READY',
-          accessCapabilities: capabilities as unknown as Prisma.InputJsonValue,
-          accessErrorCode: 'REPOSITORY_WRITE_PERMISSION_REQUIRED',
-          accessErrorMessage:
-            'The workspace key is valid, but GitHub denied this repository operation. Grant the required repository permissions before retrying Start Work.',
-        },
+        data: { accessCapabilities: capabilities as unknown as Prisma.InputJsonValue },
       });
       return;
     }
@@ -373,15 +291,11 @@ export class SdlcVcsService implements SdlcVcs {
     repoId: string;
     workspaceId: string;
     userId: string;
-  }): Promise<void> {
+  }): Promise<unknown> {
     const repo = await this.prisma.repo.findFirst({
       where: { id: input.repoId, workspaceId: input.workspaceId, projectId: { not: null } },
     });
     if (!repo) throw new Error('SDLC repository not found');
-    await this.prisma.repo.update({
-      where: { id: repo.id },
-      data: { accessCheckStatus: 'CHECKING', accessCheckStartedAt: new Date() },
-    });
     const provider: VcsProvider = 'GITHUB';
     const adapter = this.adapter(provider);
     let credentialInvalidated = false;
@@ -392,8 +306,8 @@ export class SdlcVcsService implements SdlcVcs {
         input.workspaceId,
         provider
       );
+      const credentialState = this.credentialState(credential);
       let token: string | undefined;
-      const credentialRevision = credential?.revision ?? null;
       let identityLogin: string | null = null;
       if (
         credential?.status === 'CONNECTED' &&
@@ -405,20 +319,6 @@ export class SdlcVcsService implements SdlcVcs {
       }
       let inspection;
       let fallbackError: VcsProviderError | null = null;
-      const storedCredentialError =
-        credential?.status === 'DISCONNECTED'
-          ? new VcsProviderError(
-              'CREDENTIAL_DISCONNECTED',
-              'Workspace GitHub key is disconnected',
-              409
-            )
-          : credential?.validationStatus === 'INVALID'
-            ? new VcsProviderError(
-                'GITHUB_CREDENTIAL_INVALID',
-                'Workspace GitHub key is invalid',
-                401
-              )
-            : null;
       if (token) {
         if (
           credential?.resourceOwner &&
@@ -470,43 +370,26 @@ export class SdlcVcsService implements SdlcVcs {
           baseBranch: this.baseBranch(repo.baseBranch),
         });
       }
-      await this.prisma.$transaction([
-        this.prisma.repo.update({
+      await this.prisma.$transaction(async (tx) => {
+        await this.credentialStore.lock(tx, input.workspaceId, provider);
+        const currentCredential = await this.credentialStore.find(tx, input.workspaceId, provider);
+        if (this.credentialState(currentCredential) !== credentialState) {
+          throw new VcsProviderError(
+            'CREDENTIAL_CHANGED_DURING_CHECK',
+            'Workspace credential changed during repository access check',
+            409,
+            true
+          );
+        }
+        await tx.repo.update({
           where: { id: repo.id },
           data: {
             canonicalUrl: inspection.repository.canonicalUrl,
-            accessCheckStatus: 'READY',
             accessCapabilities: inspection.capabilities as unknown as Prisma.InputJsonValue,
-            accessEvidence: {
-              ...inspection.evidence,
-              repositoryVisibility: inspection.visibility,
-              identityLogin,
-              credentialState:
-                credentialInvalidated || credential?.validationStatus === 'INVALID'
-                  ? 'INVALID'
-                  : fallbackError
-                    ? 'VALID_REPOSITORY_ACCESS_DENIED'
-                    : token
-                      ? 'CONNECTED'
-                      : credential?.status === 'DISCONNECTED'
-                        ? 'DISCONNECTED'
-                        : 'ANONYMOUS',
-              credentialErrorCode: fallbackError?.code,
-            } as Prisma.InputJsonValue,
-            accessCredentialRevision: credentialRevision,
-            accessCheckedAt: new Date(),
-            accessErrorCode: (fallbackError ?? storedCredentialError)?.code ?? null,
-            accessErrorMessage:
-              fallbackError || storedCredentialError
-                ? this.repositoryCredentialErrorMessage(
-                    fallbackError ?? storedCredentialError!,
-                    parsed.owner
-                  )
-                : null,
           },
-        }),
-        this.accessCheckAudit(input, repo.id, fallbackError?.code ?? 'READY'),
-      ]);
+        });
+        await this.accessCheckAudit(input, repo.id, fallbackError?.code ?? 'READY', tx);
+      });
       if (credentialInvalidated) {
         await this.queueWorkspaceRepositoryChecks(
           { workspaceId: input.workspaceId, userId: input.userId },
@@ -514,28 +397,22 @@ export class SdlcVcsService implements SdlcVcs {
           repo.id
         );
       }
+      return {
+        status: 'READY',
+        capabilities: inspection.capabilities,
+        evidence: {
+          ...inspection.evidence,
+          repositoryVisibility: inspection.visibility,
+          identityLogin,
+          credentialErrorCode: fallbackError?.code ?? null,
+        },
+      };
     } catch (error) {
       const mapped = this.providerError(error);
-      const preserveLastVerifiedEvidence =
-        mapped.retryable &&
-        repo.accessCheckStatus === 'READY' &&
-        this.capabilities(repo.accessCapabilities).some((item) => item.state === 'PROVEN');
       await this.prisma.$transaction([
         this.prisma.repo.update({
           where: { id: repo.id },
-          data: {
-            accessCheckStatus: preserveLastVerifiedEvidence ? 'READY' : 'BLOCKED',
-            ...(!preserveLastVerifiedEvidence && {
-              accessCheckedAt: new Date(),
-              accessCapabilities: this.unavailableCapabilities(
-                mapped
-              ) as unknown as Prisma.InputJsonValue,
-            }),
-            accessErrorCode: mapped.code,
-            accessErrorMessage: preserveLastVerifiedEvidence
-              ? `${mapped.message}; using the last verified repository access evidence`
-              : mapped.message,
-          },
+          data: { accessCapabilities: [] },
         }),
         this.accessCheckAudit(input, repo.id, mapped.code),
       ]);
@@ -556,16 +433,7 @@ export class SdlcVcsService implements SdlcVcs {
     required: VcsCapability[]
   ): Promise<void> {
     const repo = await this.requireRepositoryMember(actor, repoId);
-    if (repo.accessCheckStatus !== 'READY') {
-      throw new AppError('Run repository access check before continuing', 409);
-    }
     const credential = await this.credentialStore.find(this.prisma, actor.workspaceId, 'GITHUB');
-    if (
-      repo.accessCredentialRevision !== null &&
-      repo.accessCredentialRevision !== credential?.revision
-    ) {
-      throw new AppError('Repository access check is stale; check access again', 409);
-    }
     const evidence = this.capabilities(repo.accessCapabilities);
     const missing = required.filter((capability) => {
       const state = evidence.find((item) => item.capability === capability)?.state;
@@ -582,39 +450,6 @@ export class SdlcVcsService implements SdlcVcs {
     ) {
       throw new AppError('Replace or reconnect the workspace GitHub key before starting work', 409);
     }
-  }
-
-  async issueRuntimeGrant(input: {
-    actor: SdlcActor;
-    repoId: string;
-    executionId: string;
-    sessionId: string;
-    operation: 'CLONE' | 'PUSH' | 'CREATE_PULL_REQUEST';
-  }): Promise<RuntimeGrant> {
-    const required: VcsCapability[] =
-      input.operation === 'CLONE'
-        ? ['READ_REPOSITORY']
-        : input.operation === 'PUSH'
-          ? ['READ_REPOSITORY', 'PUSH_BRANCH']
-          : ['READ_REPOSITORY', 'CREATE_PULL_REQUEST'];
-    await this.requireCapabilities(input.actor, input.repoId, required);
-    const credential = await this.requireConnectedCredential(input.actor.workspaceId, 'GITHUB');
-    const expiresAt = new Date(Date.now() + 15 * 60_000);
-    const grantId = randomUUID();
-    await this.prisma.sdlcVcsRuntimeGrant.create({
-      data: {
-        id: grantId,
-        workspaceId: input.actor.workspaceId,
-        repoId: input.repoId,
-        provider: 'GITHUB',
-        operation: input.operation,
-        credentialRevision: credential.revision,
-        executionId: input.executionId,
-        sessionId: input.sessionId,
-        expiresAt,
-      },
-    });
-    return { grantId, expiresAt: expiresAt.toISOString() };
   }
 
   async bootstrapSandboxCredential(binding: {
@@ -655,139 +490,74 @@ export class SdlcVcsService implements SdlcVcs {
     ) {
       throw new AppError('Sandbox credential execution binding mismatch', 403);
     }
-    const publicKeyHash = createHash('sha256')
-      .update(Buffer.from(binding.sandboxPublicKey, 'base64'))
-      .digest('hex');
-    const priorBootstrap = await this.prisma.sdlcVcsRuntimeGrant.findFirst({
-      where: {
-        executionId: execution.id,
-        sessionId: binding.sessionId,
-        repoId: repo.id,
-        operation: binding.operation,
-        sandboxId: binding.sandboxId,
-        sandboxPublicKeyHash: publicKeyHash,
-      },
-      select: { id: true },
-    });
-    if (priorBootstrap) throw new AppError('Sandbox credential bootstrap was already used', 409);
-    const grant = await this.issueRuntimeGrant({
-      actor: { userId: execution.createdBy, workspaceId: repo.workspaceId },
-      repoId: repo.id,
-      executionId: execution.id,
-      sessionId: binding.sessionId,
-      operation: binding.operation,
-    });
-    return this.redeemRuntimeGrant(grant.grantId, binding);
-  }
-
-  private async redeemRuntimeGrant(
-    grantId: string,
-    binding: {
-      agentSlug: typeof SDLC_AGENT_SLUG;
-      executionId: string;
-      sessionId: string;
-      repoId: string;
-      operation: 'CLONE' | 'PUSH';
-      sandboxId: string;
-      sandboxPublicKey: string;
-    }
-  ): Promise<SandboxCredentialEnvelope> {
     let sandboxPublicKey: ReturnType<typeof parseSandboxPublicKey>;
     try {
       sandboxPublicKey = parseSandboxPublicKey(binding.sandboxPublicKey);
     } catch {
       throw new AppError('Invalid sandbox public key', 400);
     }
-    const publicKeyHash = createHash('sha256')
-      .update(Buffer.from(binding.sandboxPublicKey, 'base64'))
-      .digest('hex');
-    let grant: SdlcVcsRuntimeGrant;
-    try {
-      grant = await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "id" FROM "workflow"."sdlc_vcs_runtime_grants" WHERE "id" = ${grantId} FOR UPDATE`;
-        const current = await tx.sdlcVcsRuntimeGrant.findUnique({ where: { id: grantId } });
-        if (!current) throw new AppError('Runtime grant not found', 404);
-        if (current.redeemedAt) throw new AppError('Runtime grant was already redeemed', 409);
-        if (current.expiresAt.getTime() <= Date.now())
-          throw new AppError('Runtime grant expired', 410);
-        if (
-          current.executionId !== binding.executionId ||
-          current.sessionId !== binding.sessionId ||
-          current.repoId !== binding.repoId ||
-          current.operation !== binding.operation
-        ) {
-          throw new AppError('Runtime grant binding mismatch', 403);
-        }
-        const execution = await tx.workflowExecution.findFirst({
-          where: { id: current.executionId, status: { in: activeExecutionStatuses } },
-          select: { id: true },
-        });
-        if (!execution) throw new AppError('Runtime grant workflow is inactive', 409);
-        await tx.sdlcVcsRuntimeGrant.update({
-          where: { id: current.id },
-          data: {
-            redeemedAt: new Date(),
-            sandboxId: binding.sandboxId,
-            sandboxPublicKeyHash: publicKeyHash,
-            envelopeIssuedAt: new Date(),
-          },
-        });
-        return current;
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new AppError('Sandbox credential bootstrap was already used', 409);
-      }
-      throw error;
-    }
-    const credential = await this.requireConnectedCredential(grant.workspaceId, 'GITHUB');
-    if (credential.revision !== grant.credentialRevision) {
-      throw new AppError('Runtime grant credential revision is stale', 409);
-    }
-    const token = credential.token;
-    const auth = this.adapter('GITHUB').buildGitAuthentication(token);
-    return encryptSandboxCredentialEnvelope(auth, {
-      grantId,
-      agentSlug: binding.agentSlug,
-      workspaceId: grant.workspaceId,
-      repoId: grant.repoId,
-      operation: grant.operation,
-      executionId: grant.executionId,
-      sessionId: grant.sessionId,
-      sandboxId: binding.sandboxId,
-      credentialRevision: grant.credentialRevision,
-      expiresAt: grant.expiresAt.toISOString(),
-    }, sandboxPublicKey);
+    const actor = { userId: execution.createdBy, workspaceId: repo.workspaceId };
+    const required: VcsCapability[] =
+      binding.operation === 'CLONE' ? ['READ_REPOSITORY'] : ['READ_REPOSITORY', 'PUSH_BRANCH'];
+    await this.requireCapabilities(actor, repo.id, required);
+    const credential = await this.requireConnectedCredential(repo.workspaceId, 'GITHUB');
+    const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    const auth = this.adapter('GITHUB').buildGitAuthentication(credential.token);
+    return encryptSandboxCredentialEnvelope(
+      auth,
+      {
+        agentSlug: binding.agentSlug,
+        workspaceId: repo.workspaceId,
+        repoId: repo.id,
+        operation: binding.operation,
+        executionId: execution.id,
+        sessionId: binding.sessionId,
+        sandboxId: binding.sandboxId,
+        credentialRevision: credential.revision,
+        expiresAt,
+      },
+      sandboxPublicKey
+    );
   }
 
-  async createDraftPullRequestFromGrant(
-    input: {
-      executionId: string;
-      sessionId: string;
-      repoId: string;
-      title: string;
-      body: string;
-      head: string;
-      base: string;
-      commitHash: string;
+  async createDraftPullRequest(input: {
+    executionId: string;
+    sessionId: string;
+    repoId: string;
+    title: string;
+    body: string;
+    head: string;
+    base: string;
+    commitHash: string;
+  }) {
+    const [execution, repo] = await Promise.all([
+      this.prisma.workflowExecution.findFirst({
+        where: { id: input.executionId, status: { in: activeExecutionStatuses } },
+        select: { id: true, workspaceId: true, createdBy: true, context: true },
+      }),
+      this.prisma.repo.findUnique({ where: { id: input.repoId } }),
+    ]);
+    if (!execution?.createdBy || !repo?.workspaceId) {
+      throw new AppError('Active SDLC execution binding not found', 404);
     }
-  ) {
-    const grant = await this.prisma.sdlcVcsRuntimeGrant.findFirst({
-      where: {
-        executionId: input.executionId,
-        sessionId: input.sessionId,
-        repoId: input.repoId,
-        operation: 'CREATE_PULL_REQUEST',
-        redeemedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!grant) throw new AppError('Runtime grant not found', 404);
-    const repo = await this.prisma.repo.findFirst({
-      where: { id: grant.repoId, workspaceId: grant.workspaceId },
-    });
-    if (!repo) throw new AppError('SDLC repository not found', 404);
+    let context: Record<string, unknown>;
+    try {
+      context = JSON.parse(execution.context || '{}') as Record<string, unknown>;
+    } catch {
+      throw new AppError('SDLC execution context is invalid', 409);
+    }
+    if (
+      context['agentSlug'] !== SDLC_AGENT_SLUG ||
+      context['phase'] !== 'IMPLEMENTING' ||
+      (execution.workspaceId !== null && execution.workspaceId !== repo.workspaceId) ||
+      context['repoId'] !== repo.id ||
+      (context['credentialSessionId'] ?? context['sessionId']) !== input.sessionId
+    ) {
+      throw new AppError('Pull request execution binding mismatch', 403);
+    }
+    const actor = { userId: execution.createdBy, workspaceId: repo.workspaceId };
+    await this.requireCapabilities(actor, repo.id, ['READ_REPOSITORY', 'CREATE_PULL_REQUEST']);
+    const credential = await this.requireConnectedCredential(repo.workspaceId, 'GITHUB');
     const expectedBase = requireSdlcBaseBranch(repo.baseBranch);
     if (!expectedBase || input.base !== expectedBase) {
       throw new AppError('Pull request base must match the configured base branch', 409);
@@ -795,17 +565,11 @@ export class SdlcVcsService implements SdlcVcs {
     if (!isSafeSdlcGitRef(input.head) || input.head === input.base) {
       throw new AppError('Refusing to create a pull request from the default branch', 409);
     }
-    const credential = await this.redeemRuntimeGrantForBackend(grant.id, {
-      executionId: input.executionId,
-      sessionId: input.sessionId,
-      repoId: repo.id,
-      operation: 'CREATE_PULL_REQUEST',
-    });
     const adapter = this.adapter('GITHUB');
     const parsed = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
     try {
-      await adapter.verifyRemoteCommit(credential.password, parsed, input.head, input.commitHash);
-      const result = await adapter.createDraftPullRequest(credential.password, {
+      await adapter.verifyRemoteCommit(credential.token, parsed, input.head, input.commitHash);
+      const result = await adapter.createDraftPullRequest(credential.token, {
         owner: parsed.owner,
         repository: parsed.name,
         title: input.title,
@@ -832,32 +596,6 @@ export class SdlcVcsService implements SdlcVcs {
       }
       throw this.toAppError(mapped);
     }
-  }
-
-  private async redeemRuntimeGrantForBackend(
-    grantId: string,
-    binding: { executionId: string; sessionId: string; repoId: string; operation: 'CREATE_PULL_REQUEST' },
-  ): Promise<{ password: string }> {
-    const grant = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "workflow"."sdlc_vcs_runtime_grants" WHERE "id" = ${grantId} FOR UPDATE`;
-      const current = await tx.sdlcVcsRuntimeGrant.findUnique({ where: { id: grantId } });
-      if (!current) throw new AppError('Runtime grant not found', 404);
-      if (current.redeemedAt) throw new AppError('Runtime grant was already redeemed', 409);
-      if (current.expiresAt.getTime() <= Date.now()) throw new AppError('Runtime grant expired', 410);
-      if (current.executionId !== binding.executionId || current.sessionId !== binding.sessionId || current.repoId !== binding.repoId || current.operation !== binding.operation) {
-        throw new AppError('Runtime grant binding mismatch', 403);
-      }
-      const execution = await tx.workflowExecution.findFirst({
-        where: { id: current.executionId, status: { in: activeExecutionStatuses } },
-        select: { id: true },
-      });
-      if (!execution) throw new AppError('Runtime grant workflow is inactive', 409);
-      await tx.sdlcVcsRuntimeGrant.update({ where: { id: current.id }, data: { redeemedAt: new Date() } });
-      return current;
-    });
-    const credential = await this.requireConnectedCredential(grant.workspaceId, 'GITHUB');
-    if (credential.revision !== grant.credentialRevision) throw new AppError('Runtime grant credential revision is stale', 409);
-    return { password: credential.token };
   }
 
   async inspectPullRequest(repoId: string, number: number) {
@@ -962,12 +700,7 @@ export class SdlcVcsService implements SdlcVcs {
       const repoIds = await this.repositoryIdsForProvider(tx, input.workspaceId, input.provider);
       await tx.repo.updateMany({
         where: { id: { in: repoIds } },
-        data: {
-          accessCheckStatus: 'STALE',
-          accessErrorCode: input.error.code,
-          accessErrorMessage:
-            'The workspace GitHub key expired or was revoked. Public access is refreshing automatically.',
-        },
+        data: { accessCapabilities: [] },
       });
     });
   }
@@ -1007,25 +740,6 @@ export class SdlcVcsService implements SdlcVcs {
       );
     }
     return counts;
-  }
-
-  private repositoryCredentialErrorMessage(error: VcsProviderError, owner: string): string {
-    if (error.code === 'CREDENTIAL_DISCONNECTED') {
-      return 'The workspace GitHub key is disconnected. Public read access remains available; connect a key to enable Start Work.';
-    }
-    if (error.code === 'GITHUB_CREDENTIAL_INVALID') {
-      return 'The workspace GitHub key expired or was revoked. Public read access remains available; replace the key to restore Start Work.';
-    }
-    if (error.code === 'GITHUB_RESOURCE_OWNER_MISMATCH') {
-      return `The workspace key is valid, but it is not issued for ${owner}. Replace it with a fine-grained key for this repository owner to enable Start Work.`;
-    }
-    if (
-      error.code === 'GITHUB_ORG_APPROVAL_OR_PERMISSION_REQUIRED' ||
-      error.code === 'GITHUB_REPOSITORY_NOT_FOUND'
-    ) {
-      return 'The workspace key is valid, but it lacks access to this repository. Grant repository Contents, Pull requests, and Workflows write permissions to enable Start Work.';
-    }
-    return `${error.message}. Public read access remains available; Start Work is unavailable.`;
   }
 
   private adapter(provider: VcsProvider): VcsProviderAdapter {
@@ -1102,15 +816,15 @@ export class SdlcVcsService implements SdlcVcs {
     return result;
   }
 
-  private unavailableCapabilities(error: VcsProviderError): CapabilityEvidence[] {
-    return (['READ_REPOSITORY', 'PUSH_BRANCH', 'CREATE_PULL_REQUEST'] as const).map(
-      (capability) => ({
-        capability,
-        state: 'UNAVAILABLE',
-        source: 'access-check',
-        detail: error.message,
-      })
-    );
+  private credentialState(credential: StoredSdlcVcsCredential | null): string | null {
+    if (!credential) return null;
+    return [
+      credential.id,
+      credential.revision,
+      credential.status,
+      credential.validationStatus,
+      credential.updatedAt,
+    ].join(':');
   }
 
   private baseBranch(value: Prisma.JsonValue): string | undefined {
@@ -1155,9 +869,10 @@ export class SdlcVcsService implements SdlcVcs {
   private accessCheckAudit(
     input: { workspaceId: string; userId: string },
     repoId: string,
-    outcome: string
+    outcome: string,
+    client: PrismaClient | Prisma.TransactionClient = this.prisma
   ) {
-    return this.prisma.aCLAuditLog.create({
+    return client.aCLAuditLog.create({
       data: {
         workspaceId: input.workspaceId,
         actorUserId: input.userId,

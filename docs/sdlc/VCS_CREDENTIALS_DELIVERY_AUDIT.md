@@ -12,7 +12,7 @@ Date: 2026-08-05
 | Provider seam | `SdlcVcs` and `VcsProviderAdapter`; GitHub.com parsing, validation, repository/PR inspection, Git auth, draft PR, remote commit and PR URL checks remain inside adapter/module |
 | Workspace/project UI | Repository credentials settings; `Boards → Repos → Release`; list/empty/loading/error/check/retry/remediation states |
 | Progressive gate | Durable access worker, anonymous public fallback, manual baseline Next, approval-gated artifacts, capability-gated Start Work, identical backend checks |
-| Runtime | Backend-only one-use grants, strict `sdlc-agent` and sandbox/public-key-bound encrypted bootstrap nested under repository setup, sandbox-only PAT-account lookup and commit attribution, restrictive randomized helper with run-finally cleanup and cached-session refresh, public credential-free path, convention-derived branch, narrow backend-owned draft-PR tool |
+| Runtime | Request-time execution/capability validation, strict `sdlc-agent` and sandbox/public-key-bound encrypted bootstrap nested under repository setup, sandbox-only PAT-account lookup and commit attribution, restrictive randomized helper with run-finally cleanup and cached-session refresh, public credential-free path, convention-derived branch, narrow backend-owned draft-PR tool |
 | Failure/security | Provider error codes, stale capability on runtime auth failure, PAT/authenticated-URL redaction, secret-path guards, no PAT in durable context |
 | Rollout | Available to all workspaces; role/repository authorization and operations/rollback runbook |
 

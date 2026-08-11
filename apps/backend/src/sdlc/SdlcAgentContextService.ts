@@ -33,8 +33,6 @@ export interface SdlcAgentContext {
   repository: { id: string; name: string; url: string; baseBranch: string };
   permissions: { repositoryRole: 'ADMIN' | 'MEMBER'; writeRequested: boolean };
   gates: {
-    accessStatus: string;
-    accessCredentialRevision: number | null;
     capabilities: unknown[];
     allBaselinesApproved: boolean;
   };
@@ -77,8 +75,6 @@ export class SdlcAgentContextService {
         baseBranch: true,
         projectId: true,
         channelId: true,
-        accessCheckStatus: true,
-        accessCredentialRevision: true,
         accessCapabilities: true,
         channel: {
           select: {
@@ -117,8 +113,6 @@ export class SdlcAgentContextService {
         writeRequested: input.writeRequested === true,
       },
       gates: {
-        accessStatus: repo.accessCheckStatus,
-        accessCredentialRevision: repo.accessCredentialRevision,
         capabilities: Array.isArray(repo.accessCapabilities) ? repo.accessCapabilities : [],
         allBaselinesApproved: allBaselinesApproved(baselines),
       },

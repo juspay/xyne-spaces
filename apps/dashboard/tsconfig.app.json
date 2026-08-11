@@ -45,12 +45,10 @@
     "noUncheckedSideEffectImports": true,
     "forceConsistentCasingInFileNames": true,
     "noEmitOnError": true,
-    
+
     /* Decorator support */
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    
-    
+    "emitDecoratorMetadata": true
   },
-  "include": ["src"]
+  "include": ["src", "tests"]
 }
