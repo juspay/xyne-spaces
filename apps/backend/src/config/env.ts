@@ -90,6 +90,8 @@ const envSchema = Joi.object({
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+
+  DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
@@ -574,6 +576,7 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
