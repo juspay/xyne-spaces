@@ -242,12 +242,22 @@ const CalendarCallPopup = ({
   }, [call.participants, previewParticipantUserIds]);
   const participants = useMemo(() => {
     const merged = [...previewParticipants];
-    const seen = new Set(merged.map(participant => participant.userId));
+    const indicesByUserId = new Map(
+      merged.map((participant, index) => [participant.userId, index] as const),
+    );
 
     for (const participant of fullParticipants ?? []) {
-      if (participant.userId && !seen.has(participant.userId)) {
+      if (!participant.userId) continue;
+
+      const existingIndex = indicesByUserId.get(participant.userId);
+      if (existingIndex !== undefined) {
+        merged[existingIndex] = {
+          ...merged[existingIndex],
+          ...participant,
+        };
+      } else {
         merged.push(participant);
-        seen.add(participant.userId);
+        indicesByUserId.set(participant.userId, merged.length - 1);
       }
     }
 
@@ -567,7 +577,7 @@ const CalendarCallPopup = ({
       ? previewParticipantUserIds.slice(0, MAX_AVATARS_TO_SHOW)
       : sortedParticipants.slice(0, MAX_AVATARS_TO_SHOW).map(p => p.userId);
   const previewParticipantCount =
-    call.participantCount ?? call.participants?.length ?? previewParticipantUserIds.length;
+    call.participantCount ?? (call.participants?.length || previewParticipantUserIds.length);
 
   // Duration for ended calls
   const callDuration = isEnded ? formatCallDuration(call.startedAt, call.endedAt) : '';
