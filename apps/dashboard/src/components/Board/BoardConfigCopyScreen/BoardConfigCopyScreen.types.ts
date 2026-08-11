@@ -58,42 +58,86 @@ export interface PlanCopyResult {
   requiresExplicit?: string[];
 }
 
-export interface ExecuteCopyStagesSummary {
-  batches: number;
-  processed: number;
-  updated: number;
-  skipped: number;
-  errors: number;
-  failedTicketIds: string[];
-  newStageCount: number;
-  deletedOldStageCount: number;
+// ─── Prepared mutation payloads ───────────────────────────────────────────
+// `/prepare` does only what a browser can't (the pre-copy snapshot and the custom-fields
+// form clone) and hands these back. The screen passes them straight into the SAME Zero
+// mutators the board editor uses, so copying a configuration commits through exactly the
+// same path as editing one by hand. Mirrors apps/backend/src/services/boardConfigCopyService.ts.
+
+export interface PreparedStage {
+  id: string;
+  name: string;
+  eta?: number;
+  sequenceNumber: number;
+  defaultTicketStatusV2: string;
+  requestApprovalOnEntry: boolean;
+  prStatuses: string[];
+  approvers: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+  formId?: string;
 }
 
-export interface ExecuteCopySummary {
-  customFieldsCopied: boolean;
-  rolesCopied: boolean;
+export interface PreparedBoardUpdate {
+  boardId: string;
+  boardType: string;
+  // Complete replacement blob — `board.update` overwrites metadata rather than merging.
+  metadata: Record<string, unknown>;
+  // Absent when stages weren't selected. When present this is the board's complete desired
+  // stage set: `board.update` upserts these and deletes every stage not listed, which is
+  // what retires the target's old stages.
+  stages?: PreparedStage[];
+  prStatusMappingIds?: Record<string, string>;
+}
+
+export interface PreparedBoardFormMapping {
+  contextId: string;
+  contextType: string;
+  entityType: string;
+  formId: string;
+  mappingId: string;
+}
+
+export interface PreparedTransition {
+  id: string;
+  fromStageId: string | null;
+  toStageId: string;
+  formId?: string;
+  requiresApproval: boolean;
+  bypassApprovalForAutomation: boolean;
+  requestApprovalOnEntry: boolean;
+  visitSlaMode?: string;
+  fixedEtaHours?: number | null;
+  onReenter?: string;
+  approvers: Array<{ id: string; approverId: string; approverType: string }>;
+}
+
+export interface PrepareCopyResult {
+  dryRun: boolean;
   // Object-storage path of the pre-copy backup of the target board, kept for 7 days.
   snapshotPath?: string;
-  stages?: ExecuteCopyStagesSummary;
+  customFieldsCopied: boolean;
+  rolesCopied: boolean;
+  newStageCount: number;
+  deletedOldStageCount: number;
+  ticketsToMigrate: number;
   warnings: string[];
+  boardUpdate: PreparedBoardUpdate;
+  boardFormMapping: PreparedBoardFormMapping | null;
+  transitions: PreparedTransition[] | null;
+  // True when per-ticket work remains and `/start-ticket-migration` should be called
+  // after the configuration mutations land.
+  hasPendingMigration: boolean;
 }
 
-export interface ExecuteCopyResponse {
-  jobId?: string;
-  summary?: ExecuteCopySummary;
-}
-
-export interface JobStatusProgress {
-  processed: number;
-  total: number;
-  batches: number;
-}
-
-export type JobState = 'waiting' | 'active' | 'completed' | 'failed' | 'delayed' | 'unknown';
-
-export interface JobStatusResponse {
-  state: JobState;
-  progress?: JobStatusProgress;
-  result?: ExecuteCopySummary;
-  failedReason?: string;
+/**
+ * What the result step renders — the config half returned by /prepare, applied through the
+ * Zero mutators. There is no ticket-migration result: that job runs in the background with
+ * no status endpoint to report through, by design (see BoardConfigCopyScreen.tsx).
+ */
+export interface CopyResultSummary {
+  customFieldsCopied: boolean;
+  rolesCopied: boolean;
+  snapshotPath?: string;
+  newStageCount: number;
+  deletedOldStageCount: number;
+  warnings: string[];
 }

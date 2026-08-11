@@ -1,8 +1,10 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { ArrowLeft, X } from 'lucide-react';
-import { BoardType } from '@xyne/shared';
+import { BoardType, FormContextType, FormEntityType, PRStatusEvent } from '@xyne/shared';
 import { toast } from 'sonner';
+import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
+import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { Button } from '../../../components/ui/Button';
@@ -15,10 +17,9 @@ import { StageRemapTable } from './StageRemapTable';
 import type {
   ApiEnvelope,
   CopyCategorySelection,
-  ExecuteCopyResponse,
-  ExecuteCopySummary,
-  JobStatusResponse,
+  CopyResultSummary,
   PlanCopyResult,
+  PrepareCopyResult,
 } from './BoardConfigCopyScreen.types';
 
 interface BoardConfigCopyScreenProps {
@@ -30,9 +31,7 @@ interface BoardConfigCopyScreenProps {
   onDone?: () => void;
 }
 
-type Step = 'select' | 'remap' | 'progress' | 'result';
-
-const POLL_INTERVAL_MS = 2000;
+type Step = 'select' | 'remap' | 'result';
 
 const extractErrorMessage = (error: unknown, fallback: string): string => {
   const withResponse = error as {
@@ -56,6 +55,7 @@ const BoardConfigCopyScreen = ({
   onDone,
 }: BoardConfigCopyScreenProps): ReactElement | null => {
   const { confirm, ConfirmDialog } = useConfirmDialog();
+  const zero = useZero();
 
   const [projectBoards] = useCachedQuery(
     queries.boardsListByProject({ projectId: projectId || '' }),
@@ -79,21 +79,11 @@ const BoardConfigCopyScreen = ({
   const [remapOverrides, setRemapOverrides] = useState<Record<string, string>>({});
 
   const [executing, setExecuting] = useState(false);
-  const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
-  const [summary, setSummary] = useState<ExecuteCopySummary | null>(null);
+  const [summary, setSummary] = useState<CopyResultSummary | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
-  const [previousJobStatus, setPreviousJobStatus] = useState<JobStatusResponse | null>(null);
-
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => stopPolling, [stopPolling]);
+  // Whether the just-started ticket migration is still running in the background — there is
+  // no status/progress endpoint to poll, so this is shown once and never updated.
+  const [migrationPending, setMigrationPending] = useState(false);
 
   const sourceOptions: SelectorOption[] = useMemo(
     () =>
@@ -104,7 +94,6 @@ const BoardConfigCopyScreen = ({
   );
 
   const resetForClose = (): void => {
-    stopPolling();
     setStep('select');
     setSourceBoardId(null);
     setCategories({ customFields: true, roles: true, stages: true });
@@ -112,10 +101,9 @@ const BoardConfigCopyScreen = ({
     setPlanError(null);
     setRemapOverrides({});
     setExecuting(false);
-    setJobStatus(null);
     setSummary(null);
     setResultError(null);
-    setPreviousJobStatus(null);
+    setMigrationPending(false);
   };
 
   const handleClose = (): void => {
@@ -214,40 +202,20 @@ const BoardConfigCopyScreen = ({
     [visibleRemapRows, remapOverrides],
   );
 
-  const startPolling = useCallback(
-    (id: string) => {
-      stopPolling();
-      const poll = async (): Promise<void> => {
-        try {
-          const response = await apiInstance.get<ApiEnvelope<JobStatusResponse>>(
-            `/admin/board-config-copy/status/${id}`,
-          );
-          const status = response.data.data;
-          if (!status) throw new Error(response.data.error ?? 'Failed to fetch job status');
-          setJobStatus(status);
-          if (status.state === 'completed') {
-            stopPolling();
-            setSummary(status.result ?? null);
-            setStep('result');
-            toast.success('Board configuration copy completed');
-          } else if (status.state === 'failed') {
-            stopPolling();
-            setSummary(null);
-            setResultError(status.failedReason ?? 'The copy job failed');
-            setStep('result');
-            toast.error('Board configuration copy failed');
-          }
-        } catch (error) {
-          stopPolling();
-          setSummary(null);
-          setResultError(extractErrorMessage(error, 'Lost track of the copy job status'));
-          setStep('result');
-        }
-      };
-      pollRef.current = setInterval(() => void poll(), POLL_INTERVAL_MS);
-    },
-    [stopPolling],
-  );
+  /**
+   * Awaits a Zero mutator's authoritative server result. Zero resolves (never rejects) on
+   * application errors, so a bare `void zero.mutate(...)` would silently roll the
+   * optimistic write back and let the copy continue on a board that was never updated.
+   */
+  const commitMutation = async (
+    mutation: { server: Promise<{ type?: string; error?: { message?: string } } | undefined> },
+    failureMessage: string,
+  ): Promise<void> => {
+    const res = await mutation.server;
+    if (res?.type === 'error') {
+      throw new Error(res.error?.message ?? failureMessage);
+    }
+  };
 
   const runExecute = async (overrides?: Record<string, string>): Promise<void> => {
     const confirmed = await confirm({
@@ -261,12 +229,10 @@ const BoardConfigCopyScreen = ({
 
     setExecuting(true);
     setResultError(null);
-    // Clear any stale summary/job-status carried over from viewing a PRIOR run's result
-    // within this same still-mounted session (e.g. via the "View details" banner) — a
-    // fresh run must never render leftover numbers from a different job.
+    // Clear any stale summary carried over from a PRIOR run within this same still-mounted
+    // session — a fresh run must never render leftover numbers from a different copy.
     setSummary(null);
-    setJobStatus(null);
-    setPreviousJobStatus(null);
+    setMigrationPending(false);
     try {
       const stageRemapOverrides = categories.stages
         ? Object.entries(overrides ?? remapOverrides).map(([oldStageId, newStageId]) => ({
@@ -275,8 +241,11 @@ const BoardConfigCopyScreen = ({
           }))
         : undefined;
 
-      const response = await apiInstance.post<ApiEnvelope<ExecuteCopyResponse>>(
-        '/admin/board-config-copy/execute',
+      // 1. Server-only half: validation, pre-copy snapshot, and the custom-fields form
+      //    clone. Deliberately writes no board configuration — it just hands back the
+      //    arguments for the mutations below.
+      const response = await apiInstance.post<ApiEnvelope<PrepareCopyResult>>(
+        '/admin/board-config-copy/prepare',
         {
           sourceBoardId,
           targetBoardId,
@@ -285,22 +254,86 @@ const BoardConfigCopyScreen = ({
           dryRun: false,
         },
       );
+      const prepared = response.data.data;
+      if (!prepared) throw new Error(response.data.error ?? 'Copy could not be prepared');
 
-      const result = response.data.data;
-      if (result?.jobId) {
-        setStep('progress');
-        startPolling(result.jobId);
-      } else if (result?.summary) {
-        setSummary(result.summary);
-        setStep('result');
-        toast.success('Board configuration copied');
-      } else {
-        throw new Error(response.data.error ?? 'Copy did not return a result');
+      // 2. Commit the configuration through the ordinary board mutators — the same path a
+      //    hand-edited board save takes. `board.update` carries the whole change: it
+      //    upserts the copied stages, deletes every target stage absent from that list
+      //    (with their approvers/PR-status/form mappings), and replaces board metadata and
+      //    type in one atomic mutation.
+      await commitMutation(
+        zero.mutate(
+          mutators.board.update({
+            ...prepared.boardUpdate,
+            boardType: prepared.boardUpdate.boardType as BoardType,
+            stages: prepared.boardUpdate.stages?.map(stage => ({
+              ...stage,
+              prStatuses: stage.prStatuses as PRStatusEvent[],
+            })),
+            timestamp: Date.now(),
+          }),
+        ),
+        'Failed to apply the copied board configuration',
+      );
+
+      if (prepared.boardFormMapping) {
+        await commitMutation(
+          zero.mutate(
+            mutators.formContextMapping.upsert({
+              ...prepared.boardFormMapping,
+              contextType: prepared.boardFormMapping.contextType as FormContextType,
+              entityType: prepared.boardFormMapping.entityType as FormEntityType,
+            }),
+          ),
+          'Failed to bind the copied custom fields to this board',
+        );
       }
+
+      if (prepared.transitions) {
+        await commitMutation(
+          zero.mutate(
+            mutators.nonLinear.syncTransitions({
+              boardId: targetBoardId,
+              transitions: prepared.transitions,
+              now: Date.now(),
+            }),
+          ),
+          'Failed to copy stage transitions',
+        );
+      }
+
+      const configSummary: CopyResultSummary = {
+        customFieldsCopied: prepared.customFieldsCopied,
+        rolesCopied: prepared.rolesCopied,
+        newStageCount: prepared.newStageCount,
+        deletedOldStageCount: prepared.deletedOldStageCount,
+        warnings: prepared.warnings,
+        ...(prepared.snapshotPath ? { snapshotPath: prepared.snapshotPath } : {}),
+      };
+
+      // 3. Hand the remaining per-ticket work (stage remap, custom-field value repointing)
+      //    to the background job and move on — there is no status endpoint to watch it
+      //    with, so this is fire-and-forget from here. Its plan was stashed server-side by
+      //    /prepare, since the old stages are gone by now and can't be re-derived.
+      setSummary(configSummary);
+      if (prepared.hasPendingMigration) {
+        const migrationResponse = await apiInstance.post<ApiEnvelope<{ jobId: string }>>(
+          '/admin/board-config-copy/start-ticket-migration',
+          { targetBoardId },
+        );
+        if (!migrationResponse.data.data?.jobId) {
+          throw new Error(migrationResponse.data.error ?? 'Ticket migration did not start');
+        }
+        setMigrationPending(true);
+      }
+      setStep('result');
+      toast.success('Board configuration copied');
     } catch (error) {
       const message = extractErrorMessage(error, 'Failed to copy board configuration');
       toast.error('Copy failed', { description: message, duration: 5000 });
       setResultError(message);
+      setStep('result');
     } finally {
       setExecuting(false);
     }
@@ -314,32 +347,6 @@ const BoardConfigCopyScreen = ({
     await runExecute(remapOverrides);
   };
 
-  const handleCheckStatusOnMount = useCallback(async () => {
-    try {
-      const response = await apiInstance.get<ApiEnvelope<JobStatusResponse>>(
-        `/admin/board-config-copy/status/${targetBoardId}`,
-      );
-      const status = response.data.data;
-      if (!status) return;
-      if (status.state === 'active' || status.state === 'waiting') {
-        setJobStatus(status);
-        setStep('progress');
-        startPolling(targetBoardId);
-      } else if (status.state === 'completed' || status.state === 'failed') {
-        setPreviousJobStatus(status);
-      }
-    } catch {
-      // No prior job for this board — nothing to recover, stay on the select step.
-    }
-  }, [targetBoardId, startPolling]);
-
-  useEffect(() => {
-    if (isOpen) {
-      void handleCheckStatusOnMount();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
-
   if (!isOpen) return null;
 
   return (
@@ -347,7 +354,7 @@ const BoardConfigCopyScreen = ({
       <div className='bg-background flex flex-col w-[90vw] max-w-3xl h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
-            {(step === 'remap' || (step === 'result' && previousJobStatus)) && (
+            {step === 'remap' && (
               <Button variant='ghost' size='sm' onClick={() => setStep('select')}>
                 <ArrowLeft size={15} /> Back
               </Button>
@@ -365,45 +372,6 @@ const BoardConfigCopyScreen = ({
         <div className='flex-1 overflow-y-auto p-4 space-y-4'>
           {step === 'select' && (
             <>
-              {previousJobStatus && (
-                <div className='flex items-start justify-between gap-3 text-xs bg-muted/40 border border-border rounded-md px-3 py-2'>
-                  <span className='text-muted-foreground'>
-                    {previousJobStatus.state === 'completed'
-                      ? 'A previous copy into this board completed.'
-                      : `A previous copy into this board failed${previousJobStatus.failedReason ? `: ${previousJobStatus.failedReason}` : '.'}`}
-                  </span>
-                  <div className='flex items-center gap-3 shrink-0'>
-                    <button
-                      type='button'
-                      className='text-primary hover:underline'
-                      onClick={() => {
-                        setSummary(previousJobStatus.result ?? null);
-                        setResultError(
-                          previousJobStatus.state === 'failed'
-                            ? (previousJobStatus.failedReason ?? 'The copy job failed')
-                            : null,
-                        );
-                        setStep('result');
-                      }}
-                      data-track-category='BOARD_CONFIG_COPY'
-                      data-track-name='VIEW_PREVIOUS_JOB_RESULT'
-                    >
-                      View details
-                    </button>
-                    <button
-                      type='button'
-                      aria-label='Dismiss'
-                      className='text-muted-foreground hover:text-foreground'
-                      onClick={() => setPreviousJobStatus(null)}
-                      data-track-category='BOARD_CONFIG_COPY'
-                      data-track-name='DISMISS_PREVIOUS_JOB_BANNER'
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <div>
                 <p className='text-sm font-medium text-foreground mb-1.5 block'>
                   Copy configuration from
@@ -489,39 +457,6 @@ const BoardConfigCopyScreen = ({
             </>
           )}
 
-          {step === 'progress' && (
-            <div className='space-y-3'>
-              <p className='text-sm text-foreground'>Copying board configuration…</p>
-              {jobStatus?.progress && (
-                <div className='space-y-1'>
-                  <div className='w-full h-2 rounded-full bg-muted overflow-hidden'>
-                    <div
-                      className='h-full bg-[#185FA5] transition-all'
-                      style={{
-                        width: `${
-                          jobStatus.progress.total > 0
-                            ? Math.min(
-                                100,
-                                (jobStatus.progress.processed / jobStatus.progress.total) * 100,
-                              )
-                            : 0
-                        }%`,
-                      }}
-                    />
-                  </div>
-                  <p className='text-xs text-muted-foreground'>
-                    {jobStatus.progress.processed} / {jobStatus.progress.total} tickets (
-                    {jobStatus.progress.batches} batches)
-                  </p>
-                </div>
-              )}
-              <p className='text-xs text-muted-foreground'>
-                This can take a few minutes for large boards — you can close this window and check
-                back later; the copy keeps running in the background.
-              </p>
-            </div>
-          )}
-
           {step === 'result' && (
             <div className='space-y-3'>
               {resultError && <p className='text-sm text-destructive'>{resultError}</p>}
@@ -531,29 +466,16 @@ const BoardConfigCopyScreen = ({
                     Custom fields copied: {summary.customFieldsCopied ? 'yes' : 'no'} · Roles
                     copied: {summary.rolesCopied ? 'yes' : 'no'}
                   </p>
-                  {summary.stages && (
+                  {summary.newStageCount > 0 && (
                     <div className='border border-border rounded-md p-3 space-y-1'>
-                      <p>Batches: {summary.stages.batches}</p>
-                      <p>Processed: {summary.stages.processed}</p>
-                      <p>Updated: {summary.stages.updated}</p>
-                      <p>Skipped: {summary.stages.skipped}</p>
-                      <p>Errors: {summary.stages.errors}</p>
-                      <p>New stages: {summary.stages.newStageCount}</p>
-                      <p>Old stages removed: {summary.stages.deletedOldStageCount}</p>
-                      {summary.stages.failedTicketIds.length > 0 && (
-                        <Button
-                          variant='secondary'
-                          size='sm'
-                          onClick={() =>
-                            void copyTextToClipboard(
-                              summary.stages!.failedTicketIds.join('\n'),
-                            ).then(() => toast.success('Failed ticket IDs copied to clipboard'))
-                          }
-                        >
-                          Copy {summary.stages.failedTicketIds.length} failed ticket ID(s)
-                        </Button>
-                      )}
+                      <p>New stages: {summary.newStageCount}</p>
+                      <p>Old stages removed: {summary.deletedOldStageCount}</p>
                     </div>
+                  )}
+                  {migrationPending && (
+                    <p className='text-xs text-muted-foreground bg-muted/40 border border-border rounded-md px-3 py-2'>
+                      Existing tickets are being moved onto the new stages in the background.
+                    </p>
                   )}
                   {summary.snapshotPath && (
                     <div className='border border-border rounded-md px-3 py-2 space-y-1'>
@@ -599,7 +521,7 @@ const BoardConfigCopyScreen = ({
         </div>
 
         <footer className='flex items-center justify-end gap-2 px-4 py-3 border-t border-border flex-shrink-0'>
-          {step === 'result' || step === 'progress' ? (
+          {step === 'result' ? (
             <Button
               variant='secondary'
               onClick={() => {

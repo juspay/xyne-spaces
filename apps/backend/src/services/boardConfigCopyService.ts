@@ -1,8 +1,8 @@
-import { randomUUID } from 'crypto';
-import { Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
 import { BoardType, TicketStatusV2, FormContextType, FormEntityType, ApproverType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { redisService } from '@/services/redisService';
 import { boardConfigCopySnapshotService } from '@/services/boardConfigCopySnapshotService';
 import { calculateETADeadline, recomputeOverallTicketEta } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -10,12 +10,19 @@ import { logger } from '@/utils/logger';
 import {
   boardConfigCopyQueue,
   BoardConfigCopyJobData,
-  BoardConfigCopyStageInput,
-  BoardConfigCopyTransitionInput,
-  BoardConfigCopySummary,
+  BoardConfigCopyTicketRemap,
+  BoardConfigCopyFieldRepoint,
 } from '@/queues/boardConfigCopyQueue';
 
 const TAG = '[BoardConfigCopy]';
+
+// How long a prepared copy stays claimable. The plan is stashed server-side between
+// `prepareCopy` and `startTicketMigration` rather than round-tripped through the client:
+// by the time migration starts the old stages are already deleted, so this payload is the
+// only remaining record of where each ticket should land — it must not be client-forgeable.
+const PENDING_MIGRATION_TTL_SECONDS = 3600;
+const pendingMigrationKey = (targetBoardId: string): string =>
+  `board-config-copy:pending-migration:${targetBoardId}`;
 
 // The only categories every board is guaranteed to have at least one stage of — enforced
 // by mutators.ts's board.update validation ("Board must have at least one TODO, one
@@ -44,7 +51,7 @@ export interface CopyRequestInput {
   categories: CopyCategorySelection;
 }
 
-export interface ExecuteCopyInput extends CopyRequestInput {
+export interface PrepareCopyInput extends CopyRequestInput {
   stageRemapOverrides?: StageRemapOverride[];
   dryRun: boolean;
 }
@@ -97,6 +104,83 @@ export interface PlanCopyResult {
   oldStages?: OldStageInfo[];
   suggestedMapping?: Record<string, string>; // oldStageId -> sourceStageId
   requiresExplicit?: string[]; // oldStageIds with tickets that still need an explicit mapping
+}
+
+// ─── Prepared client-side mutation payloads ───────────────────────────────
+// Everything below is handed to the dashboard verbatim and passed straight into the SAME
+// Zero mutators the board editor uses (`board.update`, `formContextMapping.upsert`,
+// `nonLinear.syncTransitions`). Board configuration is not written server-side at all —
+// only the two things a browser genuinely cannot do (the object-storage snapshot and the
+// Prisma-only form clone) happen here.
+
+export interface PreparedStage {
+  id: string;
+  name: string;
+  eta?: number;
+  sequenceNumber: number;
+  defaultTicketStatusV2: string;
+  requestApprovalOnEntry: boolean;
+  prStatuses: string[];
+  approvers: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+  formId?: string;
+}
+
+export interface PreparedBoardUpdate {
+  boardId: string;
+  boardType: string;
+  /**
+   * The COMPLETE metadata blob to persist — `board.update` replaces `metadata` wholesale
+   * rather than merging, so this is the target's existing metadata with the copied keys
+   * already layered on top (and custom-field ids remapped onto the cloned form).
+   */
+  metadata: Record<string, unknown>;
+  /**
+   * Present only when stages are being copied. `board.update` treats this as the board's
+   * complete desired stage set: stages here are upserted, and any stage on the board that
+   * is absent is deleted along with its approvers/PR-status/form mappings. That single
+   * property is what replaces the old worker's separate insert and delete phases.
+   */
+  stages?: PreparedStage[];
+  prStatusMappingIds?: Record<string, string>;
+}
+
+export interface PreparedBoardFormMapping {
+  contextId: string;
+  contextType: string;
+  entityType: string;
+  formId: string;
+  mappingId: string;
+}
+
+export interface PreparedTransition {
+  id: string;
+  fromStageId: string | null;
+  toStageId: string;
+  formId?: string;
+  requiresApproval: boolean;
+  bypassApprovalForAutomation: boolean;
+  requestApprovalOnEntry: boolean;
+  visitSlaMode?: string;
+  fixedEtaHours?: number | null;
+  onReenter?: string;
+  approvers: Array<{ id: string; approverId: string; approverType: string }>;
+}
+
+export interface PrepareCopyResult {
+  dryRun: boolean;
+  snapshotPath?: string;
+  customFieldsCopied: boolean;
+  rolesCopied: boolean;
+  newStageCount: number;
+  deletedOldStageCount: number;
+  /** Tickets the follow-up migration job will need to move; 0 means no job is needed. */
+  ticketsToMigrate: number;
+  warnings: string[];
+  boardUpdate: PreparedBoardUpdate;
+  boardFormMapping: PreparedBoardFormMapping | null;
+  transitions: PreparedTransition[] | null;
+  /** True when a prepared migration plan was stashed and `startTicketMigration` should be called. */
+  hasPendingMigration: boolean;
 }
 
 export class BoardConfigCopyValidationError extends Error {
@@ -245,6 +329,19 @@ export class BoardConfigCopyService {
     }));
   }
 
+  // ─── Deterministic id derivation ────────────────────────────────────────
+
+  /**
+   * Stable, content-derived id — same inputs always produce the same output. The new
+   * stage/transition ids are derived rather than random so that re-running a prepare for
+   * the same source/target pair converges on the same rows (`board.update` upserts by id)
+   * instead of minting a duplicate stage set.
+   */
+  private deriveDeterministicId(...parts: string[]): string {
+    const hash = createHash('sha256').update(parts.join(':')).digest('hex');
+    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+  }
+
   // ─── Remap plan resolution ──────────────────────────────────────────────
 
   private computeSuggestedMapping(
@@ -359,7 +456,7 @@ export class BoardConfigCopyService {
     return { ...result, newStages, oldStages, suggestedMapping, requiresExplicit };
   }
 
-  // ─── Custom fields & roles (fast, synchronous) ─────────────────────────
+  // ─── Custom-field helpers ───────────────────────────────────────────────
 
   private parseFieldOptions(raw: string): Array<{ id: string; value: string }> | undefined {
     try {
@@ -405,226 +502,124 @@ export class BoardConfigCopyService {
   }
 
   /**
-   * Public (not private) and id-keyed rather than board-object-keyed: called both from
-   * `executeCopy`'s synchronous no-stages path and from the worker's phase 0, so it fetches
-   * its own board rows instead of trusting a caller-supplied snapshot that may be stale by
-   * the time an async job actually runs.
+   * Clones the source board's ticket custom-fields form. Stays on Prisma (and stays
+   * server-side) because `formsRepository.createWithFields` owns global-field dedup, branch
+   * validation and sequence allocation that several other features depend on — reproducing
+   * it as a Zero mutator would mean maintaining a second copy of that logic.
+   *
+   * Creates the new Form only; binding it to the target board is left to the caller's
+   * `formContextMapping.upsert` mutation, so the clone is inert until the client commits.
    */
-  async copyCustomFieldsAndRoles(
-    sourceBoardId: string,
+  private async cloneSourceCustomFieldsForm(
+    sourceBoard: { id: string; projectId: string; workspaceId: string },
     targetBoardId: string,
-    categories: CopyCategorySelection,
     actorUserId: string,
-  ): Promise<{ customFieldsCopied: boolean; rolesCopied: boolean; customFieldWarnings: string[] }> {
-    const [sourceBoard, targetBoard] = await Promise.all([
-      db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, workspaceId: true } }),
-      db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, metadata: true } }),
-    ]);
-    if (!sourceBoard || !targetBoard) {
-      return { customFieldsCopied: false, rolesCopied: false, customFieldWarnings: [] };
-    }
-
-    const targetMetadata = { ...(targetBoard.metadata as Record<string, unknown> | null) };
-    let customFieldsCopied = false;
-    let rolesCopied = false;
-    const customFieldWarnings: string[] = [];
-
-    // Cloning the source form (if any) happens OUTSIDE the transaction below on purpose:
-    // formsRepository.createWithFields runs its own db.$transaction internally, and Prisma
-    // doesn't nest/join $transaction calls made on the same client — it's a second,
-    // independent transaction that commits as soon as createWithFields returns, regardless
-    // of what happens afterward. Pretending it was part of the outer transaction was
-    // misleading; instead we create it first and explicitly clean it up in the catch below
-    // if the rest of the operation fails.
-    let clonedFormId: string | null = null;
-    const oldToNewFieldId = new Map<string, string>();
-
-    // Fields present on BOTH the target's old form and the new cloned form (matched by
-    // normalized name, since that's the same identity rule assertNoNameCollisions itself
-    // uses) — their ticket values must be repointed onto the new form/field afterward so
-    // they stay editable instead of becoming stuck "prefill" rows that collide on save
-    // (see boardFormEntityValues.ts's formId-agnostic fallback + formEntityValue.createV2's
-    // insert-only path). Populated below, consumed once the transaction below commits.
-    // Fields unique to the target board are deliberately left out of this map — their old
-    // Form/FormFields rows and value rows are untouched and shown read-only on ticket detail.
+  ): Promise<{
+    clonedFormId: string | null;
+    sourceOldToNewFieldId: Map<string, string>;
+    targetOldFormId: string | null;
+    fieldRepoints: BoardConfigCopyFieldRepoint[];
+    warnings: string[];
+  }> {
+    const warnings: string[] = [];
+    const sourceOldToNewFieldId = new Map<string, string>();
+    const fieldRepoints: BoardConfigCopyFieldRepoint[] = [];
     let targetOldFormId: string | null = null;
-    const targetOldToNewFieldId = new Map<string, string>();
 
-    if (categories.customFields) {
-      const sourceMapping = await db.formContextMapping.findFirst({
-        where: { contextId: sourceBoard.id, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
-      });
+    const sourceMapping = await db.formContextMapping.findFirst({
+      where: { contextId: sourceBoard.id, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
+    });
+    if (!sourceMapping) return { clonedFormId: null, sourceOldToNewFieldId, targetOldFormId, fieldRepoints, warnings };
 
-      if (sourceMapping) {
-        const sourceForm = await repositories.forms.findFormWithFields(sourceMapping.formId);
-        if (sourceForm) {
-          const newForm = await repositories.forms.createWithFields({
-            formName: `${sourceForm.formName} Copy`,
-            ...(sourceForm.formDescription ? { formDescription: sourceForm.formDescription } : {}),
-            contextType: FormContextType.BOARD,
-            entityType: FormEntityType.TICKET,
-            workspaceId: sourceBoard.workspaceId,
-            createdBy: actorUserId,
-            projectId: sourceBoard.projectId,
-            fields: sourceForm.fields.map(f => {
-              const parsedOptions = f.fieldOptions ? this.parseFieldOptions(f.fieldOptions) : undefined;
-              return {
-                fieldName: f.fieldName,
-                fieldType: f.fieldType,
-                ...(parsedOptions !== undefined ? { fieldOptions: parsedOptions } : {}),
-                isOptional: f.isOptional,
-                ...(f.parentOptionId !== undefined ? { parentOptionId: f.parentOptionId } : {}),
-              };
-            }),
-          });
-          clonedFormId = newForm.id;
+    const sourceForm = await repositories.forms.findFormWithFields(sourceMapping.formId);
+    if (!sourceForm) return { clonedFormId: null, sourceOldToNewFieldId, targetOldFormId, fieldRepoints, warnings };
 
-          // createWithFields is never given an explicit fieldId, so a cloned field lands on
-          // whichever GlobalField already exists for (projectId, fieldName, fieldType) —
-          // normally the SAME id the source used (same project), but a fresh id when the
-          // source field predates the global-field system (a "legacy" field). Resolve the
-          // real mapping from what was actually created, rather than assuming ids survived.
-          const newFormWithFields = await repositories.forms.findFormWithFields(newForm.id);
-          if (newFormWithFields) {
-            for (const oldField of sourceForm.fields) {
-              const match = newFormWithFields.fields.find(
-                nf => nf.fieldName === oldField.fieldName && nf.fieldType === oldField.fieldType,
-              );
-              if (match) oldToNewFieldId.set(oldField.id, match.id);
-            }
+    const newForm = await repositories.forms.createWithFields({
+      formName: `${sourceForm.formName} Copy`,
+      ...(sourceForm.formDescription ? { formDescription: sourceForm.formDescription } : {}),
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+      workspaceId: sourceBoard.workspaceId,
+      createdBy: actorUserId,
+      projectId: sourceBoard.projectId,
+      fields: sourceForm.fields.map(f => {
+        const parsedOptions = f.fieldOptions ? this.parseFieldOptions(f.fieldOptions) : undefined;
+        return {
+          fieldName: f.fieldName,
+          fieldType: f.fieldType,
+          ...(parsedOptions !== undefined ? { fieldOptions: parsedOptions } : {}),
+          isOptional: f.isOptional,
+          ...(f.parentOptionId !== undefined ? { parentOptionId: f.parentOptionId } : {}),
+        };
+      }),
+    });
 
-            // Match the target's OLD form (about to be unbound) against the same new form,
-            // by normalized name — this is what lets a field that exists on both boards
-            // keep its ticket values editable after the swap.
-            const targetMapping = await db.formContextMapping.findFirst({
-              where: { contextId: targetBoard.id, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
-            });
-            if (targetMapping) {
-              const targetOldForm = await repositories.forms.findFormWithFields(targetMapping.formId);
-              if (targetOldForm) {
-                targetOldFormId = targetOldForm.id;
-                for (const oldField of targetOldForm.fields) {
-                  const normalizedName = oldField.fieldName.trim().toLowerCase();
-                  const match = newFormWithFields.fields.find(
-                    nf => nf.fieldName.trim().toLowerCase() === normalizedName,
-                  );
-                  if (!match) continue; // unique to the target — left as-is, shown read-only
-                  if (match.fieldType !== oldField.fieldType) {
-                    customFieldWarnings.push(
-                      `Field "${oldField.fieldName}" exists on both boards with different types — its existing ticket values were left as-is rather than risk showing a value of the wrong type.`,
-                    );
-                    continue;
-                  }
-                  targetOldToNewFieldId.set(oldField.id, match.id);
-                }
-              }
-            }
-          }
-        }
-      }
+    // createWithFields is never given an explicit fieldId, so a cloned field lands on
+    // whichever GlobalField already exists for (projectId, fieldName, fieldType) —
+    // normally the SAME id the source used (same project), but a fresh id when the
+    // source field predates the global-field system (a "legacy" field). Resolve the
+    // real mapping from what was actually created, rather than assuming ids survived.
+    const newFormWithFields = await repositories.forms.findFormWithFields(newForm.id);
+    if (!newFormWithFields) {
+      return { clonedFormId: newForm.id, sourceOldToNewFieldId, targetOldFormId, fieldRepoints, warnings };
     }
 
-    try {
-      await db.$transaction(async tx => {
-        const sourceBoardRow =
-          categories.customFields || categories.roles
-            ? await tx.board.findUnique({ where: { id: sourceBoard.id } })
-            : null;
-        const sourceMetadata = (sourceBoardRow?.metadata as Record<string, unknown> | null) ?? {};
+    for (const oldField of sourceForm.fields) {
+      const match = newFormWithFields.fields.find(
+        nf => nf.fieldName === oldField.fieldName && nf.fieldType === oldField.fieldType,
+      );
+      if (match) sourceOldToNewFieldId.set(oldField.id, match.id);
+    }
 
-        if (categories.customFields) {
-          if (clonedFormId) {
-            // FormContextMapping has @@unique([contextId, entityType]) — a stale target
-            // mapping must go before the new one can be inserted.
-            await tx.formContextMapping.deleteMany({
-              where: { contextId: targetBoard.id, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
-            });
-            await tx.formContextMapping.create({
-              data: {
-                id: randomUUID(),
-                formId: clonedFormId,
-                contextId: targetBoard.id,
-                contextType: FormContextType.BOARD,
-                entityType: FormEntityType.TICKET,
-                workspaceId: sourceBoard.workspaceId,
-              },
-            });
-            targetMetadata['customFieldsFormId'] = clonedFormId;
-          }
-
-          targetMetadata['fieldOrder'] = this.remapFieldOrder(sourceMetadata['fieldOrder'], oldToNewFieldId);
-          targetMetadata['ticketFormConfig'] = sourceMetadata['ticketFormConfig'];
-          targetMetadata['customFieldVisibility'] = this.remapFieldKeyedRecord(
-            sourceMetadata['customFieldVisibility'],
-            oldToNewFieldId,
+    // Match the target's OLD form (about to be unbound) against the same new form, by
+    // normalized name — this is what lets a field that exists on both boards keep its
+    // ticket values editable after the swap. The repointing itself is per-ticket data, so
+    // it is deferred to the migration job rather than done here.
+    const targetMapping = await db.formContextMapping.findFirst({
+      where: { contextId: targetBoardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
+    });
+    if (targetMapping) {
+      const targetOldForm = await repositories.forms.findFormWithFields(targetMapping.formId);
+      if (targetOldForm) {
+        targetOldFormId = targetOldForm.id;
+        for (const oldField of targetOldForm.fields) {
+          const normalizedName = oldField.fieldName.trim().toLowerCase();
+          const match = newFormWithFields.fields.find(
+            nf => nf.fieldName.trim().toLowerCase() === normalizedName,
           );
-          customFieldsCopied = true;
-        }
-
-        if (categories.roles) {
-          targetMetadata['assignmentRoles'] = sourceMetadata['assignmentRoles'] ?? [];
-          targetMetadata['ticketControlRoleIds'] = sourceMetadata['ticketControlRoleIds'] ?? [];
-          targetMetadata['bitbucketEventRoles'] = sourceMetadata['bitbucketEventRoles'] ?? {};
-          rolesCopied = true;
-        }
-
-        if (customFieldsCopied || rolesCopied) {
-          await tx.board.update({
-            where: { id: targetBoard.id },
-            data: {
-              metadata: targetMetadata as Prisma.InputJsonValue,
-              updatedBy: actorUserId,
-              updatedAt: new Date(),
-            },
-          });
-        }
-      });
-    } catch (error) {
-      // The form clone above already committed independently of this transaction — clean
-      // it up rather than leaving an orphaned Form/FormFields nothing references.
-      if (clonedFormId) {
-        await db.form.delete({ where: { id: clonedFormId } }).catch(cleanupError => {
-          logger.error(`${TAG} Failed to clean up orphaned form ${clonedFormId} after a failed copy`, cleanupError);
-        });
-      }
-      throw error;
-    }
-
-    // Repoint ticket values for fields shared by both boards so they remain first-class,
-    // editable rows on the new form instead of stale rows pointing at the just-unbound old
-    // one. Runs after the mapping swap has committed — each field's remap is independent
-    // and safe to skip on failure (the row just stays where it was, still recoverable).
-    if (clonedFormId && targetOldFormId && targetOldToNewFieldId.size > 0) {
-      for (const [oldFieldId, newFieldId] of targetOldToNewFieldId) {
-        try {
-          await db.formEntityValues.updateMany({
-            where: {
-              fieldId: oldFieldId,
-              formId: targetOldFormId,
-              entityType: FormEntityType.TICKET,
-              contextId: targetBoard.id,
-            },
-            data: { fieldId: newFieldId, formId: clonedFormId, updatedAt: new Date() },
-          });
-        } catch (error) {
-          logger.error(`${TAG} Failed to repoint ticket values for field ${oldFieldId} -> ${newFieldId}`, error);
-          customFieldWarnings.push(
-            'Some existing ticket values for a shared custom field could not be repointed to the new form — they may need to be re-entered.',
-          );
+          if (!match) continue; // unique to the target — left as-is, shown read-only
+          if (match.fieldType !== oldField.fieldType) {
+            warnings.push(
+              `Field "${oldField.fieldName}" exists on both boards with different types — its existing ticket values were left as-is rather than risk showing a value of the wrong type.`,
+            );
+            continue;
+          }
+          fieldRepoints.push({ oldFieldId: oldField.id, newFieldId: match.id });
         }
       }
     }
 
-    return { customFieldsCopied, rolesCopied, customFieldWarnings };
+    return { clonedFormId: newForm.id, sourceOldToNewFieldId, targetOldFormId, fieldRepoints, warnings };
   }
 
-  // ─── Execute ─────────────────────────────────────────────────────────────
+  // ─── Prepare (server-side work only; the client commits the config) ─────
 
-  async executeCopy(
-    input: ExecuteCopyInput,
+  /**
+   * Computes everything the dashboard needs to apply this copy through the ordinary Zero
+   * mutators, and performs the two steps a browser can't: writing the pre-copy snapshot and
+   * cloning the custom-fields form. Deliberately writes NO board configuration itself —
+   * stages, transitions, form binding and metadata are all committed by the client, exactly
+   * like an ordinary board edit.
+   *
+   * Any ticket-level work (stage remap, custom-field value repointing) is stashed as a
+   * pending migration plan and picked up by `startTicketMigration` once the client's
+   * mutations land.
+   */
+  async prepareCopy(
+    input: PrepareCopyInput,
     actorUserId: string,
     workspaceId: string,
-  ): Promise<{ jobId?: string; summary?: BoardConfigCopySummary }> {
+  ): Promise<PrepareCopyResult> {
     const { errors, sourceBoard, targetBoard } = await this.validateBoards(
       input.sourceBoardId,
       input.targetBoardId,
@@ -634,15 +629,229 @@ export class BoardConfigCopyService {
       throw new BoardConfigCopyValidationError(errors.length > 0 ? errors : ['Validation failed']);
     }
 
-    if (input.dryRun) {
-      return { summary: await this.buildDryRunSummary(input, targetBoard) };
+    const warnings: string[] = [];
+    const targetMetadata: Record<string, unknown> = {
+      ...((targetBoard.metadata as Record<string, unknown> | null) ?? {}),
+    };
+    const sourceMetadata = (sourceBoard.metadata as Record<string, unknown> | null) ?? {};
+
+    // ── Stage set ────────────────────────────────────────────────────────
+    let preparedStages: PreparedStage[] | undefined;
+    let prStatusMappingIds: Record<string, string> | undefined;
+    let preparedTransitions: PreparedTransition[] | null = null;
+    const ticketRemap: BoardConfigCopyTicketRemap[] = [];
+    let oldStageCount = 0;
+    let ticketsToMigrate = 0;
+
+    if (input.categories.stages) {
+      const sourceStages = await this.getSourceStagesOrdered(sourceBoard.id);
+      const newStagesPreview: NewStagePreview[] = sourceStages.map(s => ({
+        sourceStageId: s.id,
+        name: s.name,
+        defaultTicketStatusV2: s.defaultTicketStatusV2,
+        sequenceNumber: s.sequenceNumber,
+      }));
+      const oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
+      oldStageCount = oldStages.length;
+      ticketsToMigrate = oldStages.reduce((sum, s) => sum + s.ticketCount, 0);
+
+      const { mapping, requiresExplicit, invalidCategoryOverrides } = this.resolveRemapPlan(
+        oldStages,
+        newStagesPreview,
+        input.stageRemapOverrides ?? [],
+      );
+
+      if (invalidCategoryOverrides.length > 0) {
+        throw new BoardConfigCopyValidationError(
+          [
+            'Some stage mappings target a stage with a different status than the tickets being moved — ' +
+              'a ticket can only be remapped to a new stage of the same status.',
+          ],
+          invalidCategoryOverrides,
+        );
+      }
+      if (requiresExplicit.length > 0) {
+        throw new BoardConfigCopyValidationError(
+          ['Some old stages with tickets still need an explicit target stage'],
+          requiresExplicit,
+        );
+      }
+
+      const sourceStageIdToNewStageId = new Map(
+        sourceStages.map(s => [s.id, this.deriveDeterministicId('board-config-copy-stage', targetBoard.id, s.id)]),
+      );
+
+      preparedStages = sourceStages.map(s => ({
+        id: sourceStageIdToNewStageId.get(s.id)!,
+        name: s.name,
+        ...(s.eta !== null ? { eta: s.eta } : {}),
+        sequenceNumber: s.sequenceNumber,
+        defaultTicketStatusV2: s.defaultTicketStatusV2,
+        requestApprovalOnEntry: s.requestApprovalOnEntry,
+        prStatuses: s.prStatuses,
+        approvers: s.approvers,
+        ...(s.formId ? { formId: s.formId } : {}),
+      }));
+
+      // board.update requires a caller-supplied id for every PR-status mapping it inserts,
+      // keyed "<sequenceNumber>-<prStatus>".
+      prStatusMappingIds = {};
+      for (const stage of preparedStages) {
+        for (const prStatus of stage.prStatuses) {
+          prStatusMappingIds[`${stage.sequenceNumber}-${prStatus}`] = this.deriveDeterministicId(
+            'board-config-copy-pr-mapping',
+            stage.id,
+            prStatus,
+          );
+        }
+      }
+
+      if (sourceBoard.boardType === BoardType.NON_LINEAR) {
+        const sourceTransitions = await this.getSourceTransitions(sourceBoard.id);
+        preparedTransitions = sourceTransitions.map(t => {
+          const fromStageId = t.fromStageId ? (sourceStageIdToNewStageId.get(t.fromStageId) ?? null) : null;
+          const toStageId = sourceStageIdToNewStageId.get(t.toStageId)!;
+          return {
+            id: this.deriveDeterministicId(
+              'board-config-copy-transition',
+              targetBoard.id,
+              fromStageId ?? 'ROOT',
+              toStageId,
+            ),
+            fromStageId,
+            toStageId,
+            ...(t.formId ? { formId: t.formId } : {}),
+            requiresApproval: t.requiresApproval,
+            bypassApprovalForAutomation: t.bypassApprovalForAutomation,
+            requestApprovalOnEntry: t.requestApprovalOnEntry,
+            ...(t.visitSlaMode ? { visitSlaMode: t.visitSlaMode } : {}),
+            ...(t.fixedEtaHours !== undefined && t.fixedEtaHours !== null ? { fixedEtaHours: t.fixedEtaHours } : {}),
+            ...(t.onReenter ? { onReenter: t.onReenter } : {}),
+            approvers: t.approvers.map(a => ({
+              id: this.deriveDeterministicId('board-config-copy-approver', toStageId, a.approverId, a.approverType),
+              approverId: a.approverId,
+              approverType: a.approverType,
+            })),
+          };
+        });
+      }
+
+      // Every old stage's landing target, resolved now. The old Stage rows are deleted the
+      // moment the client's board.update lands, so this is the only surviving record of
+      // where each ticket belongs — including a same-category fallback for stages that were
+      // empty at prepare time but could receive a ticket in the meantime.
+      const futureStagesEtaHoursByNewStageId: Record<string, number> = {};
+      if (sourceBoard.boardType !== BoardType.NON_LINEAR) {
+        for (const stage of preparedStages) {
+          futureStagesEtaHoursByNewStageId[stage.id] = preparedStages
+            .filter(s => s.sequenceNumber > stage.sequenceNumber)
+            .reduce((sum, s) => sum + (s.eta ?? 0), 0);
+        }
+      } else {
+        for (const stage of preparedStages) futureStagesEtaHoursByNewStageId[stage.id] = 0;
+      }
+
+      const orderedNewStages = [...preparedStages].sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+      const newStageNames = new Set(preparedStages.map(s => s.name));
+
+      for (const old of oldStages) {
+        // A name the new stage set still provides needs no migration — the ticket's
+        // stageName text already resolves to the freshly-upserted stage.
+        if (newStageNames.has(old.name)) continue;
+
+        const mappedSourceStageId = mapping.get(old.id);
+        const target = mappedSourceStageId
+          ? preparedStages.find(s => s.id === sourceStageIdToNewStageId.get(mappedSourceStageId))
+          : (orderedNewStages.find(s => s.defaultTicketStatusV2 === old.defaultTicketStatusV2) ??
+            orderedNewStages[0]);
+        if (!target) continue;
+
+        ticketRemap.push({
+          oldStageId: old.id,
+          oldStageName: old.name,
+          newStageId: target.id,
+          newStageName: target.name,
+          newStageEta: target.eta ?? null,
+          newStageStatusV2: target.defaultTicketStatusV2,
+          futureStagesEtaHours: futureStagesEtaHoursByNewStageId[target.id] ?? 0,
+        });
+      }
     }
 
-    // Snapshot first — before a single row is touched — so there is always a restore point
-    // for a copy that turns out to be wrong. Deliberately fail-closed: if the snapshot
-    // can't be written we abort while the board is still untouched, rather than run a
-    // destructive, irreversible operation with no undo.
-    let snapshotPath: string;
+    // ── Custom fields & roles → board metadata ───────────────────────────
+    let clonedFormId: string | null = null;
+    let targetOldFormId: string | null = null;
+    let fieldRepoints: BoardConfigCopyFieldRepoint[] = [];
+    let customFieldsCopied = false;
+    let rolesCopied = false;
+
+    if (input.categories.customFields && !input.dryRun) {
+      const clone = await this.cloneSourceCustomFieldsForm(
+        { id: sourceBoard.id, projectId: sourceBoard.projectId, workspaceId: sourceBoard.workspaceId },
+        targetBoard.id,
+        actorUserId,
+      );
+      clonedFormId = clone.clonedFormId;
+      targetOldFormId = clone.targetOldFormId;
+      fieldRepoints = clone.fieldRepoints;
+      warnings.push(...clone.warnings);
+
+      if (clonedFormId) targetMetadata['customFieldsFormId'] = clonedFormId;
+      targetMetadata['fieldOrder'] = this.remapFieldOrder(sourceMetadata['fieldOrder'], clone.sourceOldToNewFieldId);
+      targetMetadata['ticketFormConfig'] = sourceMetadata['ticketFormConfig'];
+      targetMetadata['customFieldVisibility'] = this.remapFieldKeyedRecord(
+        sourceMetadata['customFieldVisibility'],
+        clone.sourceOldToNewFieldId,
+      );
+      customFieldsCopied = true;
+    } else if (input.categories.customFields) {
+      customFieldsCopied = true; // dry run — reported, not performed
+    }
+
+    if (input.categories.roles) {
+      targetMetadata['assignmentRoles'] = sourceMetadata['assignmentRoles'] ?? [];
+      targetMetadata['ticketControlRoleIds'] = sourceMetadata['ticketControlRoleIds'] ?? [];
+      targetMetadata['bitbucketEventRoles'] = sourceMetadata['bitbucketEventRoles'] ?? {};
+      rolesCopied = true;
+    }
+
+    const boardUpdate: PreparedBoardUpdate = {
+      boardId: targetBoard.id,
+      boardType: sourceBoard.boardType,
+      metadata: targetMetadata,
+      ...(preparedStages ? { stages: preparedStages, prStatusMappingIds } : {}),
+    };
+
+    const boardFormMapping: PreparedBoardFormMapping | null = clonedFormId
+      ? {
+          contextId: targetBoard.id,
+          contextType: FormContextType.BOARD,
+          entityType: FormEntityType.TICKET,
+          formId: clonedFormId,
+          mappingId: this.deriveDeterministicId('board-config-copy-form-mapping', targetBoard.id, clonedFormId),
+        }
+      : null;
+
+    const result: PrepareCopyResult = {
+      dryRun: input.dryRun,
+      customFieldsCopied,
+      rolesCopied,
+      newStageCount: preparedStages?.length ?? 0,
+      deletedOldStageCount: preparedStages ? oldStageCount : 0,
+      ticketsToMigrate,
+      warnings,
+      boardUpdate,
+      boardFormMapping,
+      transitions: preparedTransitions,
+      hasPendingMigration: false,
+    };
+
+    if (input.dryRun) {
+      return result;
+    }
+
+    // Snapshot before handing anything back — the client is about to mutate the board, so
+    // there must already be a restore point. Fail closed: no snapshot, no copy.
     try {
       const snapshot = await boardConfigCopySnapshotService.captureSnapshot({
         targetBoardId: targetBoard.id,
@@ -650,360 +859,68 @@ export class BoardConfigCopyService {
         workspaceId,
         actorUserId,
       });
-      snapshotPath = snapshot.path;
+      result.snapshotPath = snapshot.path;
     } catch (error) {
       logger.error(`${TAG} Snapshot failed for board ${targetBoard.id} — aborting before any change`, error);
+      // The form clone committed independently; drop it rather than leave it orphaned.
+      if (clonedFormId) {
+        await db.form.delete({ where: { id: clonedFormId } }).catch(cleanupError => {
+          logger.error(`${TAG} Failed to clean up orphaned form ${clonedFormId} after a failed snapshot`, cleanupError);
+        });
+      }
       throw new BoardConfigCopyValidationError([
         'Could not back up the target board before copying, so nothing was changed. Please retry.',
       ]);
     }
     void boardConfigCopySnapshotService.sweepExpiredSnapshots();
 
-    // No async leg for this path — customFields/roles copy is the entire operation, so it
-    // runs synchronously here and the request/response IS the transaction boundary.
-    if (!input.categories.stages) {
-      const { customFieldsCopied, rolesCopied, customFieldWarnings } = await this.copyCustomFieldsAndRoles(
-        sourceBoard.id,
-        targetBoard.id,
-        input.categories,
+    const needsMigration = ticketRemap.length > 0 || fieldRepoints.length > 0;
+    if (needsMigration) {
+      const jobData: BoardConfigCopyJobData = {
+        targetBoardId: targetBoard.id,
+        workspaceId,
         actorUserId,
-      );
-      return {
-        summary: {
-          customFieldsCopied,
-          rolesCopied,
-          snapshotPath,
-          stages: { batches: 0, processed: 0, updated: 0, skipped: 0, errors: 0, failedTicketIds: [], newStageCount: 0, deletedOldStageCount: 0 },
-          warnings: customFieldWarnings,
-        },
+        ticketRemap,
+        fieldRepoints,
+        targetOldFormId,
+        clonedFormId,
+        snapshotPath: result.snapshotPath!,
       };
-    }
-
-    // When stages ARE selected, customFields/roles are deliberately NOT copied here —
-    // they're deferred to phase 0 of the worker job below, so one job owns the entire
-    // mutation sequence. Previously this ran synchronously and committed before the stage
-    // job was even enqueued: if the stage job later failed, the board was left with new
-    // fields/roles bound but old stages intact — a half-migrated state with no job record
-    // reflecting it. Folding this into the job means a failure anywhere in the sequence
-    // (including here) surfaces as a single failed job, and nothing runs before it that
-    // could itself be left dangling if the job never got created.
-
-    const sourceStages = await this.getSourceStagesOrdered(sourceBoard.id);
-    const sourceTransitions =
-      sourceBoard.boardType === BoardType.NON_LINEAR ? await this.getSourceTransitions(sourceBoard.id) : [];
-    const newStagesPreview: NewStagePreview[] = sourceStages.map(s => ({
-      sourceStageId: s.id,
-      name: s.name,
-      defaultTicketStatusV2: s.defaultTicketStatusV2,
-      sequenceNumber: s.sequenceNumber,
-    }));
-    const oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
-
-    const { mapping, requiresExplicit, invalidCategoryOverrides } = this.resolveRemapPlan(
-      oldStages,
-      newStagesPreview,
-      input.stageRemapOverrides ?? [],
-    );
-
-    if (invalidCategoryOverrides.length > 0) {
-      throw new BoardConfigCopyValidationError(
-        [
-          'Some stage mappings target a stage with a different status than the tickets being moved — ' +
-            'a ticket can only be remapped to a new stage of the same status.',
-        ],
-        invalidCategoryOverrides,
+      await redisService.set(
+        pendingMigrationKey(targetBoard.id),
+        JSON.stringify(jobData),
+        PENDING_MIGRATION_TTL_SECONDS,
       );
+      result.hasPendingMigration = true;
     }
 
-    if (requiresExplicit.length > 0) {
-      throw new BoardConfigCopyValidationError(
-        ['Some old stages with tickets still need an explicit target stage'],
-        requiresExplicit,
-      );
+    return result;
+  }
+
+  /**
+   * Enqueues the ticket-migration job the client's just-committed config left pending.
+   * Reads the plan from the server-side stash rather than the request body: by now the old
+   * stages are gone, so a caller-supplied remap could silently send tickets anywhere.
+   */
+  async startTicketMigration(targetBoardId: string, workspaceId: string): Promise<{ jobId: string } | null> {
+    const raw = await redisService.get(pendingMigrationKey(targetBoardId));
+    if (!raw) return null;
+
+    const jobData = JSON.parse(raw) as BoardConfigCopyJobData;
+    if (jobData.workspaceId !== workspaceId || jobData.targetBoardId !== targetBoardId) {
+      logger.warn(`${TAG} Refusing to start migration — stashed plan does not match caller's workspace/board`);
+      return null;
     }
-
-    // Mint fresh ids for every new stage/transition up front so the job payload is
-    // fully self-contained and phase 1 (insert) can safely `upsert` on retry.
-    const sourceStageIdToNewStageId = new Map(sourceStages.map(s => [s.id, randomUUID()]));
-
-    const newStages: BoardConfigCopyStageInput[] = sourceStages.map(s => ({
-      id: sourceStageIdToNewStageId.get(s.id)!,
-      name: s.name,
-      eta: s.eta,
-      sequenceNumber: s.sequenceNumber,
-      defaultTicketStatusV2: s.defaultTicketStatusV2,
-      requestApprovalOnEntry: s.requestApprovalOnEntry,
-      prStatuses: s.prStatuses,
-      approvers: s.approvers,
-      ...(s.formId ? { formId: s.formId } : {}),
-    }));
-
-    const newTransitions: BoardConfigCopyTransitionInput[] = sourceTransitions.map(t => ({
-      id: randomUUID(),
-      fromStageId: t.fromStageId ? (sourceStageIdToNewStageId.get(t.fromStageId) ?? null) : null,
-      toStageId: sourceStageIdToNewStageId.get(t.toStageId)!,
-      ...(t.formId ? { formId: t.formId } : {}),
-      requiresApproval: t.requiresApproval,
-      bypassApprovalForAutomation: t.bypassApprovalForAutomation,
-      requestApprovalOnEntry: t.requestApprovalOnEntry,
-      ...(t.visitSlaMode ? { visitSlaMode: t.visitSlaMode } : {}),
-      ...(t.fixedEtaHours !== undefined && t.fixedEtaHours !== null ? { fixedEtaHours: t.fixedEtaHours } : {}),
-      ...(t.onReenter ? { onReenter: t.onReenter } : {}),
-      approvers: t.approvers,
-    }));
-
-    const newStageById = new Map(newStages.map(s => [s.id, s]));
-    const futureStagesEtaHoursByNewStageId: Record<string, number> = {};
-    if (sourceBoard.boardType !== BoardType.NON_LINEAR) {
-      for (const stage of newStages) {
-        futureStagesEtaHoursByNewStageId[stage.id] = newStages
-          .filter(s => s.sequenceNumber > stage.sequenceNumber)
-          .reduce((sum, s) => sum + (s.eta ?? 0), 0);
-      }
-    } else {
-      for (const stage of newStages) futureStagesEtaHoursByNewStageId[stage.id] = 0;
-    }
-
-    const ticketRemapByOldStageId: BoardConfigCopyJobData['ticketRemapByOldStageId'] = {};
-    for (const [oldStageId, sourceStageId] of mapping.entries()) {
-      const newStageId = sourceStageIdToNewStageId.get(sourceStageId);
-      const newStage = newStageId ? newStageById.get(newStageId) : undefined;
-      if (!newStageId || !newStage) continue;
-      ticketRemapByOldStageId[oldStageId] = {
-        newStageId,
-        newStageName: newStage.name,
-        newStageEta: newStage.eta,
-        newStageStatusV2: newStage.defaultTicketStatusV2,
-        futureStagesEtaHours: futureStagesEtaHoursByNewStageId[newStageId] ?? 0,
-      };
-    }
-
-    const jobData: BoardConfigCopyJobData = {
-      targetBoardId: targetBoard.id,
-      sourceBoardId: sourceBoard.id,
-      actorUserId,
-      workspaceId,
-      newBoardType: sourceBoard.boardType,
-      newStages,
-      newTransitions,
-      // All old stages get deleted regardless of ticket count — only the ones with
-      // tickets need an entry in ticketRemapByOldStageId.
-      oldStages: oldStages.map(o => ({
-        id: o.id,
-        name: o.name,
-        defaultTicketStatusV2: o.defaultTicketStatusV2,
-      })),
-      ticketRemapByOldStageId,
-      futureStagesEtaHoursByNewStageId,
-      copyCustomFields: input.categories.customFields,
-      copyRoles: input.categories.roles,
-      snapshotPath,
-    };
 
     const { enqueued, reason } = await boardConfigCopyQueue.addJob(jobData);
     if (!enqueued) {
-      throw new BoardConfigCopyConflictError(reason ?? 'A copy is already in progress for this board');
+      throw new BoardConfigCopyConflictError(reason ?? 'A migration is already in progress for this board');
     }
-
-    return { jobId: targetBoard.id };
+    await redisService.del(pendingMigrationKey(targetBoardId));
+    return { jobId: targetBoardId };
   }
 
-  private async buildDryRunSummary(
-    input: ExecuteCopyInput,
-    targetBoard: { id: string },
-  ): Promise<BoardConfigCopySummary> {
-    const warnings: string[] = [];
-    let ticketCount = 0;
-    if (input.categories.stages) {
-      const oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
-      ticketCount = oldStages.reduce((sum, s) => sum + s.ticketCount, 0);
-    }
-    return {
-      customFieldsCopied: input.categories.customFields,
-      rolesCopied: input.categories.roles,
-      stages: {
-        batches: Math.ceil(ticketCount / 50),
-        processed: ticketCount,
-        updated: ticketCount,
-        skipped: 0,
-        errors: 0,
-        failedTicketIds: [],
-        newStageCount: 0,
-        deletedOldStageCount: 0,
-      },
-      warnings,
-    };
-  }
-
-  // ─── Worker-facing phases ────────────────────────────────────────────────
-
-  async insertNewStagesPhase(job: BoardConfigCopyJobData): Promise<void> {
-    await db.$transaction(async tx => {
-      for (const stage of job.newStages) {
-        await tx.stage.upsert({
-          where: { id: stage.id },
-          create: {
-            id: stage.id,
-            workspaceId: job.workspaceId,
-            name: stage.name,
-            eta: stage.eta,
-            boardId: job.targetBoardId,
-            sequenceNumber: stage.sequenceNumber,
-            createdBy: job.actorUserId,
-            updatedBy: job.actorUserId,
-            defaultTicketStatusV2: stage.defaultTicketStatusV2,
-            requestApprovalOnEntry: stage.requestApprovalOnEntry,
-          },
-          update: {
-            name: stage.name,
-            eta: stage.eta,
-            sequenceNumber: stage.sequenceNumber,
-            defaultTicketStatusV2: stage.defaultTicketStatusV2,
-            requestApprovalOnEntry: stage.requestApprovalOnEntry,
-            updatedBy: job.actorUserId,
-          },
-        });
-
-        for (const prStatus of stage.prStatuses) {
-          await tx.stagePRStatusMapping.upsert({
-            where: { stageId_prStatus: { stageId: stage.id, prStatus } },
-            create: { id: randomUUID(), stageId: stage.id, prStatus, workspaceId: job.workspaceId },
-            update: {},
-          });
-        }
-
-        if (stage.formId) {
-          await tx.formContextMapping.upsert({
-            where: {
-              contextId_contextType_formId: {
-                contextId: stage.id,
-                contextType: FormContextType.STAGE,
-                formId: stage.formId,
-              },
-            },
-            create: {
-              id: randomUUID(),
-              formId: stage.formId,
-              contextId: stage.id,
-              contextType: FormContextType.STAGE,
-              entityType: FormEntityType.TICKET,
-              workspaceId: job.workspaceId,
-            },
-            update: {},
-          });
-        }
-
-        for (const approver of stage.approvers) {
-          if (approver.approverType === 'ROLE') {
-            await tx.stageApprovers.upsert({
-              where: {
-                stageId_roleId_approverType: {
-                  stageId: stage.id,
-                  roleId: approver.approverId,
-                  approverType: approver.approverType,
-                },
-              },
-              create: {
-                id: randomUUID(),
-                stageId: stage.id,
-                approverType: approver.approverType,
-                roleId: approver.approverId,
-                workspaceId: job.workspaceId,
-              },
-              update: {},
-            });
-          } else {
-            await tx.stageApprovers.upsert({
-              where: {
-                stageId_userId_approverType: {
-                  stageId: stage.id,
-                  userId: approver.approverId,
-                  approverType: approver.approverType,
-                },
-              },
-              create: {
-                id: randomUUID(),
-                stageId: stage.id,
-                approverType: approver.approverType,
-                userId: approver.approverId,
-                workspaceId: job.workspaceId,
-              },
-              update: {},
-            });
-          }
-        }
-      }
-
-      for (const transition of job.newTransitions) {
-        await tx.stageTransition.upsert({
-          where: { id: transition.id },
-          create: {
-            id: transition.id,
-            workspaceId: job.workspaceId,
-            boardId: job.targetBoardId,
-            fromStageId: transition.fromStageId,
-            toStageId: transition.toStageId,
-            formId: transition.formId,
-            requiresApproval: transition.requiresApproval,
-            bypassApprovalForAutomation: transition.bypassApprovalForAutomation,
-            requestApprovalOnEntry: transition.requestApprovalOnEntry,
-            visitSlaMode: transition.visitSlaMode,
-            fixedEtaHours: transition.fixedEtaHours,
-            onReenter: transition.onReenter,
-            createdAt: new Date(),
-          },
-          update: {
-            requiresApproval: transition.requiresApproval,
-            bypassApprovalForAutomation: transition.bypassApprovalForAutomation,
-            requestApprovalOnEntry: transition.requestApprovalOnEntry,
-            visitSlaMode: transition.visitSlaMode,
-            fixedEtaHours: transition.fixedEtaHours,
-            onReenter: transition.onReenter,
-          },
-        });
-
-        for (const approver of transition.approvers) {
-          if (approver.approverType === 'ROLE') {
-            await tx.stageApprovers.upsert({
-              where: {
-                transitionId_roleId_approverType: {
-                  transitionId: transition.id,
-                  roleId: approver.approverId,
-                  approverType: approver.approverType,
-                },
-              },
-              create: {
-                id: randomUUID(),
-                transitionId: transition.id,
-                approverType: approver.approverType,
-                roleId: approver.approverId,
-                workspaceId: job.workspaceId,
-              },
-              update: {},
-            });
-          } else {
-            await tx.stageApprovers.upsert({
-              where: {
-                transitionId_userId_approverType: {
-                  transitionId: transition.id,
-                  userId: approver.approverId,
-                  approverType: approver.approverType,
-                },
-              },
-              create: {
-                id: randomUUID(),
-                transitionId: transition.id,
-                approverType: approver.approverType,
-                userId: approver.approverId,
-                workspaceId: job.workspaceId,
-              },
-              update: {},
-            });
-          }
-        }
-      }
-    });
-  }
+  // ─── Worker-facing: per-ticket work only ─────────────────────────────────
 
   async findTicketsOnOldStages(
     targetBoardId: string,
@@ -1109,78 +1026,48 @@ export class BoardConfigCopyService {
     });
   }
 
-  async countTicketsOnOldStages(targetBoardId: string, oldStageNames: string[]): Promise<number> {
-    if (oldStageNames.length === 0) return 0;
-    return db.ticket.count({ where: { boardId: targetBoardId, stageName: { in: oldStageNames } } });
-  }
-
   /**
-   * Flips the target board's type and — only if no ticket still sits on an old stage —
-   * deletes the old stages. The "is it safe?" count runs inside the very transaction that
-   * does the deleting, so a ticket that lands on an old stage concurrently either commits
-   * before the count (we see it and back off) or after the delete (the worker's follow-up
-   * sweep catches it). Returns `deleted: false` instead of throwing: leaving an old stage
-   * behind is harmless clutter, whereas deleting one out from under a ticket is corruption.
+   * Repoints existing ticket custom-field values from the target board's old form onto the
+   * cloned one, for fields both boards share — otherwise they'd become stale rows against
+   * an unbound form, surfacing as un-editable "prefill" values that collide on save.
+   *
+   * Per-ticket data (one row per ticket per field), so it belongs to the migration job
+   * rather than the client's config mutation — but it's a bulk UPDATE per field, not a
+   * per-ticket round trip. Each field is independent: a failure is logged and skipped, and
+   * the untouched rows stay exactly where they were.
    */
-  async deleteOldStagesPhase(
+  async repointFormEntityValues(
     targetBoardId: string,
-    oldStageIds: string[],
-    oldStageNames: string[],
-    newBoardType: string,
+    targetOldFormId: string,
+    clonedFormId: string,
+    fieldRepoints: BoardConfigCopyFieldRepoint[],
     actorUserId: string,
-  ): Promise<{ deleted: boolean; remaining: number }> {
-    if (oldStageIds.length === 0) {
-      await db.board.update({ where: { id: targetBoardId }, data: { boardType: newBoardType, updatedBy: actorUserId, updatedAt: new Date() } });
-      return { deleted: true, remaining: 0 };
+  ): Promise<{ repointed: number; warnings: string[] }> {
+    const warnings: string[] = [];
+    let repointed = 0;
+
+    for (const { oldFieldId, newFieldId } of fieldRepoints) {
+      try {
+        const { count } = await db.formEntityValues.updateMany({
+          where: {
+            fieldId: oldFieldId,
+            formId: targetOldFormId,
+            entityType: FormEntityType.TICKET,
+            contextId: targetBoardId,
+          },
+          data: { fieldId: newFieldId, formId: clonedFormId, updatedAt: new Date() },
+        });
+        repointed += count;
+      } catch (error) {
+        logger.error(`${TAG} Failed to repoint ticket values for field ${oldFieldId} -> ${newFieldId}`, error);
+        warnings.push(
+          'Some existing ticket values for a shared custom field could not be repointed to the new form — they may need to be re-entered.',
+        );
+      }
     }
 
-    return db.$transaction(async tx => {
-      const remaining =
-        oldStageNames.length > 0
-          ? await tx.ticket.count({ where: { boardId: targetBoardId, stageName: { in: oldStageNames } } })
-          : 0;
-
-      // The board type flips either way — the copied stage set is already live on this
-      // board, so the board must describe itself correctly even if the old stages survive.
-      await tx.board.update({
-        where: { id: targetBoardId },
-        data: { boardType: newBoardType, updatedBy: actorUserId, updatedAt: new Date() },
-      });
-
-      if (remaining > 0) {
-        logger.warn(
-          `${TAG} Skipping old-stage delete on board ${targetBoardId} — ${remaining} ticket(s) still on an old stage`,
-        );
-        return { deleted: false, remaining };
-      }
-
-      await tx.stageApprovers.deleteMany({ where: { stageId: { in: oldStageIds } } });
-      await tx.stagePRStatusMapping.deleteMany({ where: { stageId: { in: oldStageIds } } });
-      await tx.formContextMapping.deleteMany({ where: { contextId: { in: oldStageIds }, contextType: FormContextType.STAGE } });
-
-      // Scoped to transitions that reference an OLD stage id — phase 1 (insertNewStagesPhase)
-      // already inserted the copied transitions under the same boardId, referencing only NEW
-      // stage ids, so an unfiltered `where: { boardId }` here would delete those too.
-      const oldTransitions = await tx.stageTransition.findMany({
-        where: {
-          boardId: targetBoardId,
-          OR: [{ fromStageId: { in: oldStageIds } }, { toStageId: { in: oldStageIds } }],
-        },
-        select: { id: true },
-      });
-      const oldTransitionIds = oldTransitions.map(t => t.id);
-      if (oldTransitionIds.length > 0) {
-        await tx.stageApprovers.deleteMany({ where: { transitionId: { in: oldTransitionIds } } });
-        await tx.stageTransition.deleteMany({ where: { id: { in: oldTransitionIds } } });
-      }
-
-      await tx.stage.deleteMany({ where: { id: { in: oldStageIds } } });
-
-      logger.info(
-        `${TAG} Deleted ${oldStageIds.length} old stages on board ${targetBoardId}, boardType now ${newBoardType}`,
-      );
-      return { deleted: true, remaining: 0 };
-    });
+    logger.info(`${TAG} Repointed ${repointed} custom-field value(s) on board ${targetBoardId} for ${actorUserId}`);
+    return { repointed, warnings };
   }
 }
 

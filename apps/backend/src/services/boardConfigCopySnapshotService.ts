@@ -17,7 +17,12 @@ export const SNAPSHOT_PREFIX = 'board-config-copy-snapshots';
 export const SNAPSHOT_RETENTION_DAYS = 7;
 
 const SNAPSHOT_FORMAT_VERSION = 1;
-const TICKET_BATCH_SIZE = 1000;
+const TICKET_BATCH_SIZE = 50;
+// Mirrors boardConfigCopyWorker.ts's batch delay — spreads DB load out for large boards
+// instead of firing every batch back-to-back.
+const DELAY_MS = 1000;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 interface CaptureSnapshotParams {
   targetBoardId: string;
@@ -154,6 +159,8 @@ class BoardConfigCopySnapshotService {
       const nextCursor = tickets[tickets.length - 1]?.id ?? null;
       if (!nextCursor) break;
       cursor = nextCursor;
+
+      if (DELAY_MS > 0) await sleep(DELAY_MS);
     }
 
     return count;
@@ -196,6 +203,8 @@ class BoardConfigCopySnapshotService {
       const nextCursor = rows[rows.length - 1]?.id ?? null;
       if (!nextCursor) break;
       cursor = nextCursor;
+
+      if (DELAY_MS > 0) await sleep(DELAY_MS);
     }
   }
 

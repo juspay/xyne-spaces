@@ -2,42 +2,15 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 
-export interface BoardConfigCopyStageInput {
-  id: string; // pre-minted target stage id
-  name: string;
-  eta: number | null;
-  sequenceNumber: number;
-  defaultTicketStatusV2: string;
-  requestApprovalOnEntry: boolean;
-  prStatuses: string[];
-  approvers: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
-  formId?: string;
-}
-
-export interface BoardConfigCopyTransitionInput {
-  id: string; // pre-minted target transition id
-  fromStageId: string | null; // already remapped to a target stage id, or null for global entry
-  toStageId: string; // already remapped to a target stage id
-  formId?: string;
-  requiresApproval: boolean;
-  bypassApprovalForAutomation: boolean;
-  requestApprovalOnEntry: boolean;
-  visitSlaMode?: string;
-  fixedEtaHours?: number | null;
-  onReenter?: string;
-  approvers: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
-}
-
-export interface BoardConfigCopyOldStage {
-  id: string;
-  name: string;
-  // Carried so the worker's straggler-repair pass can pick a same-category landing stage
-  // for a ticket that appears on an old stage which was empty at plan time (and therefore
-  // has no entry in ticketRemapByOldStageId).
-  defaultTicketStatusV2: string;
-}
-
-export interface BoardConfigCopyTicketRemapTarget {
+/**
+ * Where the tickets sitting on one retired stage should land. Fully resolved at prepare
+ * time and carried in the job payload because the old Stage row no longer exists by the
+ * time this job runs — the client's `board.update` deleted it as part of committing the
+ * new configuration, so nothing can be re-derived from the board itself.
+ */
+export interface BoardConfigCopyTicketRemap {
+  oldStageId: string;
+  oldStageName: string;
   newStageId: string;
   newStageName: string;
   newStageEta: number | null;
@@ -45,49 +18,40 @@ export interface BoardConfigCopyTicketRemapTarget {
   futureStagesEtaHours: number;
 }
 
+/** A custom field present on both boards, whose existing ticket values must follow the new form. */
+export interface BoardConfigCopyFieldRepoint {
+  oldFieldId: string;
+  newFieldId: string;
+}
+
+/**
+ * Ticket-level work only. Board configuration (stages, transitions, form binding, roles,
+ * metadata) is committed by the dashboard through the ordinary Zero mutators before this
+ * job is ever enqueued — see boardConfigCopyService.prepareCopy. Everything here is work
+ * whose cost scales with the number of tickets on the board.
+ */
 export interface BoardConfigCopyJobData {
   targetBoardId: string;
-  sourceBoardId: string;
-  actorUserId: string;
   workspaceId: string;
-  newBoardType: string;
-  newStages: BoardConfigCopyStageInput[];
-  newTransitions: BoardConfigCopyTransitionInput[];
-  oldStages: BoardConfigCopyOldStage[];
-  // keyed by oldStageId
-  ticketRemapByOldStageId: Record<string, BoardConfigCopyTicketRemapTarget>;
-  // keyed by new stage id — lets the worker synthesise a landing target for an old stage
-  // that had no tickets at plan time, without re-deriving the board-type-specific formula.
-  futureStagesEtaHoursByNewStageId: Record<string, number>;
-  // Whether phase 0 of the worker should copy customFields/roles before touching any
-  // stage. Deliberately NOT pre-computed booleans of "was it copied" — that copy now
-  // happens inside the job itself (see boardConfigCopyWorker's phase 0), so this job owns
-  // the entire mutation sequence for a stages-included run instead of committing
-  // customFields/roles synchronously before the job even exists.
-  copyCustomFields: boolean;
-  copyRoles: boolean;
-  // Object-storage path of the pre-copy snapshot. Required, not optional: executeCopy
-  // aborts before mutating anything if the snapshot can't be written, so a job can never
-  // legitimately exist without one.
+  actorUserId: string;
+  ticketRemap: BoardConfigCopyTicketRemap[];
+  fieldRepoints: BoardConfigCopyFieldRepoint[];
+  // Both null when custom fields weren't part of this copy; required together otherwise.
+  targetOldFormId: string | null;
+  clonedFormId: string | null;
+  // Object-storage path of the pre-copy snapshot, carried so the job result can surface it.
   snapshotPath: string;
 }
 
 export interface BoardConfigCopySummary {
-  customFieldsCopied: boolean;
-  rolesCopied: boolean;
-  // Always set for a real run. Absent only on a dry run, which writes nothing and so has
-  // nothing to back up.
+  batches: number;
+  processed: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  failedTicketIds: string[];
+  fieldValuesRepointed: number;
   snapshotPath?: string;
-  stages: {
-    batches: number;
-    processed: number;
-    updated: number;
-    skipped: number;
-    errors: number;
-    failedTicketIds: string[];
-    newStageCount: number;
-    deletedOldStageCount: number;
-  };
   warnings: string[];
 }
 

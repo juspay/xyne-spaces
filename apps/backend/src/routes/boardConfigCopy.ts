@@ -15,19 +15,25 @@ const adminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 router.post('/plan', authMiddleware.authenticate, adminAuth, BoardConfigCopyController.plan);
 
 /**
- * @route POST /api/admin/board-config-copy/execute
- * @desc Copy custom fields/settings, roles, and/or stages from sourceBoardId onto
- *       targetBoardId. When categories.stages is set and the operation isn't a dry run,
- *       enqueues a background job (jobId === targetBoardId) and returns 202 immediately.
+ * @route POST /api/admin/board-config-copy/prepare
+ * @desc Perform the server-only half of a copy (validation, pre-copy snapshot, custom-fields
+ *       form clone) and return the arguments the dashboard passes to the ordinary Zero
+ *       mutators to commit the configuration. Writes no board configuration itself.
  * @access TICKET-MIGRATION Admin only
  */
-router.post('/execute', authMiddleware.authenticate, adminAuth, BoardConfigCopyController.execute);
+router.post('/prepare', authMiddleware.authenticate, adminAuth, BoardConfigCopyController.prepare);
 
 /**
- * @route GET /api/admin/board-config-copy/status/:jobId
- * @desc Poll the status/progress/result of a previously enqueued copy job.
+ * @route POST /api/admin/board-config-copy/start-ticket-migration
+ * @desc Enqueue the per-ticket migration a prepared copy left pending, after the client has
+ *       committed the configuration. Returns 202 with jobId (=== targetBoardId).
  * @access TICKET-MIGRATION Admin only
  */
-router.get('/status/:jobId', authMiddleware.authenticate, adminAuth, BoardConfigCopyController.status);
+router.post(
+  '/start-ticket-migration',
+  authMiddleware.authenticate,
+  adminAuth,
+  BoardConfigCopyController.startTicketMigration,
+);
 
 export default router;

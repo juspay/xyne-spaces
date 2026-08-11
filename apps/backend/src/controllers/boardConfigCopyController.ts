@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
-import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
 import {
   boardConfigCopyService,
   BoardConfigCopyValidationError,
@@ -25,7 +24,7 @@ const planSchema = z
   })
   .strict();
 
-const executeSchema = z
+const prepareSchema = z
   .object({
     sourceBoardId: z.string().min(1),
     targetBoardId: z.string().min(1),
@@ -36,6 +35,8 @@ const executeSchema = z
     dryRun: z.boolean().optional().default(false),
   })
   .strict();
+
+const startMigrationSchema = z.object({ targetBoardId: z.string().min(1) }).strict();
 
 export class BoardConfigCopyController {
   static async plan(req: Request, res: Response<ApiResponse>): Promise<void> {
@@ -64,8 +65,14 @@ export class BoardConfigCopyController {
     }
   }
 
-  static async execute(req: Request, res: Response<ApiResponse>): Promise<void> {
-    const parsed = executeSchema.safeParse(req.body);
+  /**
+   * Does the server-only half of a copy — validation, the pre-copy snapshot, and the
+   * custom-fields form clone — then hands back the exact arguments the dashboard feeds
+   * into the ordinary Zero mutators to commit the configuration itself. Writes no board
+   * configuration; the client owns that, the same way it owns an ordinary board edit.
+   */
+  static async prepare(req: Request, res: Response<ApiResponse>): Promise<void> {
+    const parsed = prepareSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, error: 'Invalid request body', data: parsed.error.flatten(), timestamp: new Date().toISOString() });
       return;
@@ -79,22 +86,11 @@ export class BoardConfigCopyController {
     }
 
     try {
-      const result = await boardConfigCopyService.executeCopy(parsed.data, actorUserId, workspaceId);
-
-      if (result.jobId) {
-        res.status(202).json({
-          success: true,
-          message: 'Board config copy started',
-          data: { jobId: result.jobId },
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
+      const result = await boardConfigCopyService.prepareCopy(parsed.data, actorUserId, workspaceId);
       res.status(200).json({
         success: true,
-        message: parsed.data.dryRun ? 'Dry run completed' : 'Board config copy completed',
-        data: { summary: result.summary },
+        message: parsed.data.dryRun ? 'Dry run completed' : 'Board config copy prepared',
+        data: result,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -107,19 +103,21 @@ export class BoardConfigCopyController {
         });
         return;
       }
-      if (error instanceof BoardConfigCopyConflictError) {
-        res.status(409).json({ success: false, error: error.message, timestamp: new Date().toISOString() });
-        return;
-      }
-      logger.error(`${TAG} execute failed`, error);
-      res.status(500).json({ success: false, error: 'Failed to execute board config copy', timestamp: new Date().toISOString() });
+      logger.error(`${TAG} prepare failed`, error);
+      res.status(500).json({ success: false, error: 'Failed to prepare board config copy', timestamp: new Date().toISOString() });
     }
   }
 
-  static async status(req: Request, res: Response<ApiResponse>): Promise<void> {
-    const jobId = req.params['jobId'];
-    if (!jobId) {
-      res.status(400).json({ success: false, error: 'jobId is required', timestamp: new Date().toISOString() });
+  /**
+   * Enqueues the ticket migration left pending by a prepared copy, once the client has
+   * committed the configuration. The remap plan comes from the server-side stash, never
+   * the request body — by now the old stages are deleted, so a forged plan could silently
+   * scatter every ticket on the board.
+   */
+  static async startTicketMigration(req: Request, res: Response<ApiResponse>): Promise<void> {
+    const parsed = startMigrationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'Invalid request body', data: parsed.error.flatten(), timestamp: new Date().toISOString() });
       return;
     }
 
@@ -130,31 +128,28 @@ export class BoardConfigCopyController {
     }
 
     try {
-      const queue = boardConfigCopyQueue.getQueue();
-      const job = await queue.getJob(jobId);
-      // jobId is the target board id, guessable/enumerable by any TICKET-MIGRATION admin —
-      // authorize() only checks resource-level access, not workspace, so this job must be
-      // scoped to the caller's own workspace explicitly. Respond 404 (not 403) so a caller
-      // in another workspace can't distinguish "no job" from "job exists, not yours".
-      if (!job || job.data.workspaceId !== workspaceId) {
-        res.status(404).json({ success: false, error: 'Job not found', timestamp: new Date().toISOString() });
+      const result = await boardConfigCopyService.startTicketMigration(parsed.data.targetBoardId, workspaceId);
+      if (!result) {
+        res.status(404).json({
+          success: false,
+          error: 'No prepared migration found for this board — it may have already started or expired.',
+          timestamp: new Date().toISOString(),
+        });
         return;
       }
-
-      const state = await job.getState();
-      res.status(200).json({
+      res.status(202).json({
         success: true,
-        data: {
-          state,
-          progress: job.progress(),
-          result: job.returnvalue,
-          failedReason: job.failedReason,
-        },
+        message: 'Ticket migration started',
+        data: { jobId: result.jobId },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      logger.error(`${TAG} status failed`, error);
-      res.status(500).json({ success: false, error: 'Failed to fetch job status', timestamp: new Date().toISOString() });
+      if (error instanceof BoardConfigCopyConflictError) {
+        res.status(409).json({ success: false, error: error.message, timestamp: new Date().toISOString() });
+        return;
+      }
+      logger.error(`${TAG} startTicketMigration failed`, error);
+      res.status(500).json({ success: false, error: 'Failed to start ticket migration', timestamp: new Date().toISOString() });
     }
   }
 }
