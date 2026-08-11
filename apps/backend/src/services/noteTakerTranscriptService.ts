@@ -266,9 +266,19 @@ class NoteTakerTranscriptService {
       summaryTemplateId?: string | null;
     } = {};
     if (metadataChanges.length > 0) {
+      // Re-read the LATEST metadata from the DB rather than trusting the
+      // in-memory `call` snapshot captured at the start of processTranscript.
+      // The detailed-summary streaming writer persists `detailedSummaryCanvasId`
+      // onto Call.metadata mid-processing; merging onto the stale snapshot and
+      // overwriting the whole JSON column here would clobber it, leaving the
+      // summary canvas visible in the UI but unshareable — the share endpoint
+      // then throws 409 "Detailed summary canvas is not ready yet". Sourcing the
+      // base from a fresh read preserves any key written after the snapshot.
+      const latest = await repositories.calls.findByExternalId(call.externalId);
+      const baseMetadata = latest?.metadata ?? call.metadata;
       const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
+        baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
+          ? (baseMetadata as Record<string, unknown>)
           : {};
       data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
     }
