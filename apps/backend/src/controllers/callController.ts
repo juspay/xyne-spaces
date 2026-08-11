@@ -423,6 +423,16 @@ export class CallController {
           title: 'Untitled Notes',
         });
 
+        stage = 'bot_user_lookup';
+        const xyneAutomaticBot = await this.getOrCreateBotUser(req.user!.workspaceId!);
+        stage = 'dm_channel_resolution';
+        const headlessChannelId = await repositories.channels.findOrCreateDMChannel(
+          userId,
+          [xyneAutomaticBot.id],
+          repositories.channelParticipants,
+          req.user!.workspaceId!
+        );
+
         const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
         const roomMetadata = JSON.stringify({
           callType: 'HEADLESS',
@@ -430,6 +440,7 @@ export class CallController {
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
+          channelId: headlessChannelId,
         });
 
         stage = 'livekit_room_creation';
@@ -463,7 +474,7 @@ export class CallController {
           externalId: callExternalId,
           callId: callExternalId,
           roomLink,
-          channelId: null,
+          channelId: headlessChannelId,
           notesCanvasId,
         });
         return;
