@@ -23,7 +23,7 @@ router.post(
   '/pull-requests',
   route(async (req, res) => {
     const input = createSdlcPullRequestSchema.parse(req.body);
-    const pullRequest = await sdlcVcs.createDraftPullRequestFromGrant(input);
+    const pullRequest = await sdlcVcs.createDraftPullRequest(input);
     res.status(201).json({ success: true, pullRequest });
   }),
 );

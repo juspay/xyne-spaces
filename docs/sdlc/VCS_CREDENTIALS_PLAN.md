@@ -105,12 +105,11 @@ Provider-neutral ability used by SDLC gates:
 
 `PUSH_DEFAULT_BRANCH` and `MERGE_PULL_REQUEST` are deliberately not capabilities exposed to SDLC.
 
-### 4.5 Runtime grant
+### 4.5 Runtime credential envelope
 
-An opaque, short-lived, one-use reference authorizing encrypted delivery of the current workspace
-credential for one repository and one SDLC execution. The sandbox generates an ephemeral X25519 keypair;
+The sandbox generates an ephemeral X25519 keypair;
 trusted Claw receives only its public-key stdout through Kata and carries that key to the backend. The backend
-never reads the pod directly. It returns an authenticated envelope bound to the `sdlc-agent` slug, operation,
+never reads the pod directly. After validating current execution scope and repository capabilities, it returns an authenticated envelope bound to the `sdlc-agent` slug, operation,
 execution, session, sandbox, credential revision, and expiry. Only the sandbox holds the private key and
 decrypts the original PAT.
 
@@ -160,7 +159,7 @@ Connected state shows only metadata:
 
 Replacement validates the new token before atomically replacing the old ciphertext. The old token is
 never returned. Disconnect requires confirmation, clears stored ciphertext, increments credential
-revision, and marks repository access checks stale.
+revision, and atomically clears affected repository capabilities before rechecking.
 
 ### 6.2 Project Repos tab
 
@@ -250,7 +249,7 @@ interface SdlcVcs {
   disconnectCredential(input: DisconnectVcsCredentialInput): Promise<void>;
   checkRepository(input: CheckRepositoryAccessInput): Promise<RepositoryAccessResult>;
   requireCapabilities(input: RequireRepositoryCapabilitiesInput): Promise<RepositoryAccessResult>;
-  issueRuntimeGrant(input: IssueVcsRuntimeGrantInput): Promise<VcsRuntimeGrant>;
+  bootstrapSandboxCredential(input: BootstrapSandboxCredentialInput): Promise<SandboxCredentialEnvelope>;
   createDraftPullRequest(input: CreateDraftPullRequestInput): Promise<PullRequestResult>;
 }
 ```
@@ -288,28 +287,21 @@ Neither ciphertext nor plaintext is part of Zero/shared dashboard schemas.
 
 ### 9.2 `Repo` extensions
 
-- `vcsAccessStatus`: `NOT_CHECKED | CHECKING | READY | BLOCKED | STALE`
-- `vcsCapabilities` (normalized JSON with confidence/reason per capability)
-- `vcsIdentityLogin`
-- `vcsCredentialRevision`
-- `vcsCheckedAt`
-- `vcsCheckErrorCode`
-- `vcsCheckErrorMessage`
+- `accessCapabilities` (normalized JSON with confidence/reason per capability)
 
-These fields store no secrets. Provider and owner/name come from `canonicalUrl`, the target branch is
-existing `baseBranch`, and cached visibility stays inside the access-check result. Safe access state is
-mirrored into shared/Zero read models for UI state.
+This field stores no secrets. Provider and owner/name come from `canonicalUrl`, target branch is existing
+`baseBranch`, and transient status/error/evidence stays in the Redis access-check job result.
 
 ### 9.3 Durable state rules
 
 - only one check may be active per repository;
-- a credential revision mismatch makes prior check results stale;
-- credential replacement/disconnect marks every GitHub repository in the workspace stale;
+- credential replacement/disconnect atomically clears every affected repository's capabilities;
 - read capability is required before baseline setup can start;
 - all-five approval remains independently durable;
 - artifacts require read check ready plus all-five approval;
 - Start Work requires read check ready, all-five approval, push capability, and PR capability;
-- Redis may coordinate a running check but never becomes source of truth.
+- Redis owns transient job status, start time, retries, errors, and diagnostic evidence; `Repo.accessCapabilities`
+  is the durable authorization input.
 
 ## 10. Credential security and lifecycle
 
@@ -321,12 +313,11 @@ mirrored into shared/Zero read models for UI state.
   agent prompts, debug bundles, Redis progress, or Zero.
 - Apply secret redaction at every sandbox command/result boundary; keep GitHub fine-grained PAT
   patterns current.
-- Use constant-time comparisons for internal grant secrets where applicable.
 - Record metadata-only audit events: actor, workspace, provider, action, validation outcome, identity,
   and timestamp.
 - Validate before credential replacement; failed replacement leaves the old credential active.
-- Runtime grants bind execution ID, workspace ID, repository ID, provider, operation, and expiry.
-- Runtime retrieval is S2S-only and rejected when execution state/session/repository does not match.
+- Runtime retrieval is S2S-only, validates current capabilities, and is rejected when execution state/session/repository does not match.
+- Encrypted credential envelopes bind execution ID, workspace ID, repository ID, operation, sandbox, credential revision, and expiry.
 - Sandbox credential helper files use restrictive permissions and are scrubbed in run-finally cleanup on
   success, failure, cancellation, or timeout, and again when the sandbox is released. Reusing a cached sandbox
   requires a fresh ephemeral key and envelope before authenticated Git operations.
@@ -342,7 +333,7 @@ Eliminating this exposure is a v2 decision.
 
 ## 11. Access-check algorithm
 
-1. Lock repository access check and persist `CHECKING`.
+1. Enqueue one Redis job keyed by repository ID; Bull prevents duplicate active jobs and owns retries.
 2. Resolve the provider adapter from canonical repository URL.
 3. Load the current workspace credential metadata and decrypt only inside `SdlcVcs` when present.
 4. Validate GitHub.com host and exact owner/repository shape.
@@ -353,8 +344,9 @@ Eliminating this exposure is a v2 decision.
 8. Run a credential-safe `git ls-remote` probe through the same HTTPS authentication path that clone
    uses. Never embed credentials in persisted URLs.
 9. Derive normalized capability evidence without performing writes.
-10. Persist `READY` with capability evidence or `BLOCKED` with stable error code/message.
-11. Publish progress; unlock **Next: Generate baseline** only when read is proven.
+10. Lock and re-read the current credential before persisting; retry if it changed during inspection.
+11. Persist capability evidence on success. Clear capabilities on failure. Keep status/error/evidence in job result.
+12. Publish progress; unlock **Next: Generate baseline** only when read is proven.
 
 Stable error examples:
 
@@ -375,13 +367,12 @@ Stable error examples:
 ### 12.1 Baseline/private clone
 
 1. `SdlcHub` verifies repository read access is `READY`.
-2. Durable SDLC context records exact execution/repository/session scope; grant IDs remain backend-only.
+2. Durable SDLC context records exact execution/repository/session scope.
 3. The agent calls only `sandbox-repo-setup`. Inside that trusted implementation, Claw confirms Node.js 20+,
    asks the sandbox through Kata to generate an ephemeral X25519 keypair, captures only public-key stdout, and
    calls the narrow backend S2S bootstrap endpoint. Script upload/execution are internal Kata SDK operations,
    not separate model-controlled tools.
-4. Backend validates active durable scope, creates a fresh one-use grant, redeems it once, and rejects replay
-   of the same sandbox and ephemeral-public-key binding. The Claw profile, durable execution, bootstrap request,
+4. Backend validates active durable scope and current repository capabilities, then encrypts the credential directly to the sandbox public key. The Claw profile, durable execution, bootstrap request,
    and encrypted AAD must all bind the literal `sdlc-agent` slug.
 5. The sandbox decrypts the AES-256-GCM envelope locally, writes a restrictive randomized Git credential
    helper, calls GitHub `/user` with the in-memory PAT, and installs a sandbox-local hook that makes the PAT
@@ -397,7 +388,7 @@ Public repositories without a credential skip the grant and clone anonymously.
 
 1. `SdlcHub.startWork` requires read, approvals, push, and PR gates.
 2. Agent reads approved Code & Lint Standards and creates a safe non-default feature branch following those conventions.
-3. Durable SDLC context contains exact repository/base/execution/session scope; grant IDs stay backend-only.
+3. Durable SDLC context contains exact repository/base/execution/session scope.
 4. Prompt instructs clone/edit/check/commit/push only the returned work branch; never merge, force-push, or
    push the base/default branch.
 5. Sandbox bootstrap obtains a fresh bound envelope and performs direct GitHub HTTPS push.
@@ -405,7 +396,7 @@ Public repositories without a credential skip the grant and clone anonymously.
    workspace credential.
 7. Callback validation verifies provider, repository owner/name, base branch, head branch, and real PR
    URL before linking and moving the Ticket to In Review.
-8. A runtime 401/403 marks capability stale/blocked and gives an administrator revalidation action.
+8. A runtime 401/403 removes the failed capability and gives an administrator revalidation action.
 
 The narrow PR tool avoids syncing the workspace token into Claw's unrelated global/user MCP
 credential stores.
@@ -461,8 +452,8 @@ Rules:
 
 ### Claw auth/runtime/shared sandbox
 
-- S2S-only sandbox bootstrap using durable binding; no runtime grant ID forwarding;
-- runtime grants and secret-bearing fields stripped from durable context, prompts, debug, and logs;
+- S2S-only sandbox bootstrap using durable binding and request-time capability validation;
+- secret-bearing fields stripped from durable context, prompts, debug, and logs;
 - dynamic authenticated private clone/fetch/push path;
 - Node crypto preflight, sandbox ephemeral keys, encrypted envelope bootstrap, and randomized helper lifecycle;
 - provider-neutral SDLC repository metadata;
@@ -537,7 +528,7 @@ Suggested small, reviewable sequence:
 4. repository access-check state/worker/read model;
 5. Project Repos tab and attachment integration;
 6. SDLC progressive gates and manual baseline Next action;
-7. runtime grant/private clone integration;
+7. runtime credential-envelope/private clone integration;
 8. feature-branch push and narrow draft-PR tool;
 9. legacy rollout handling, audit, redaction, and live smoke;
 10. documentation evidence and final acceptance audit.

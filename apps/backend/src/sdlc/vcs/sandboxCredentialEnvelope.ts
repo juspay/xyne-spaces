@@ -9,7 +9,6 @@ import {
 } from 'crypto';
 
 export interface SandboxCredentialBinding {
-  grantId: string;
   agentSlug: 'sdlc-agent';
   workspaceId: string;
   repoId: string;

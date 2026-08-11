@@ -31,7 +31,7 @@
     "test:zero-fallback": "pnpm exec tsx tests/verify-zero-fallback.ts 2>&1 | sed -n '/Summary/,/procedure/p'",
     "lint": "eslint 'src/**/*.ts'",
     "lint:fix": "eslint 'src/**/*.ts' --fix",
-    "format": "prettier --write src/**/*.ts",
+    "format": "prettier --write '{src,tests}/**/*.ts'",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",

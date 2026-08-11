@@ -55,6 +55,7 @@ export function resolveSdlcDiscussionContext(input: {
   selectedCanvasId: string | null;
   selectedWikiPage: { canvasId: string; title: string } | null;
   selectedTicketId: string | null;
+  selectedConversationId: string | null;
   ticketIds: readonly string[];
   canvases: readonly CanvasSummary[];
   links: readonly LinkSummary[];
@@ -73,14 +74,28 @@ export function resolveSdlcDiscussionContext(input: {
     const owner = resolveCanvasDiscussionOwner(input.selectedCanvasId, input.canvases, input.links);
     return owner ? { owner, surface: { type: 'CANVAS', id: input.selectedCanvasId } } : null;
   }
-  if (!input.selectedTicketId || !input.ticketIds.includes(input.selectedTicketId)) return null;
-  const sourceLink = input.links.find(
-    link => link.relationType === 'TICKET' && link.targetId === input.selectedTicketId,
+  if (input.selectedTicketId) {
+    if (!input.ticketIds.includes(input.selectedTicketId)) return null;
+    const sourceLink = input.links.find(
+      link => link.relationType === 'TICKET' && link.targetId === input.selectedTicketId,
+    );
+    const owner = sourceLink
+      ? resolveCanvasDiscussionOwner(sourceLink.sourceId, input.canvases, input.links)
+      : null;
+    return owner ? { owner, surface: { type: 'TICKET', id: input.selectedTicketId } } : null;
+  }
+  if (!input.selectedConversationId) return null;
+  const discussionLink = input.links.find(
+    link =>
+      link.sourceType === 'CANVAS' &&
+      link.targetType === 'CONVERSATION' &&
+      link.targetId === input.selectedConversationId &&
+      link.relationType === 'DISCUSSION',
   );
-  const owner = sourceLink
-    ? resolveCanvasDiscussionOwner(sourceLink.sourceId, input.canvases, input.links)
+  const owner = discussionLink
+    ? resolveCanvasDiscussionOwner(discussionLink.sourceId, input.canvases, input.links)
     : null;
-  return owner ? { owner, surface: { type: 'TICKET', id: input.selectedTicketId } } : null;
+  return owner ? { owner, surface: { type: 'CANVAS', id: owner.canvasId } } : null;
 }
 
 export const discussionConversationIds = (

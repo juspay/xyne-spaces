@@ -99,15 +99,9 @@ export interface VcsProviderAdapter {
   validatePullRequestUrl(repository: ParsedRepository, url: string): boolean;
 }
 
-export interface RuntimeGrant {
-  grantId: string;
-  expiresAt: string;
-}
-
 export interface RepositoryAccessCheckResult {
   queued: boolean;
   status: string;
-  checkedAt: string | null;
 }
 
 export interface SdlcVcs {
@@ -134,14 +128,7 @@ export interface SdlcVcs {
     repoId: string,
     capabilities: VcsCapability[]
   ): Promise<void>;
-  issueRuntimeGrant(input: {
-    actor: SdlcActor;
-    repoId: string;
-    executionId: string;
-    sessionId: string;
-    operation: 'CLONE' | 'PUSH' | 'CREATE_PULL_REQUEST';
-  }): Promise<RuntimeGrant>;
-  createDraftPullRequestFromGrant(
+  createDraftPullRequest(
     input: {
       executionId: string;
       sessionId: string;

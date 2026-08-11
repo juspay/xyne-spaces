@@ -80,7 +80,7 @@ to v2.
 | Manage repository members                 | Yes                   | No                    | No         |
 | Start/retry/cancel/restart baseline setup | Yes                   | No                    | No         |
 | Edit/approve baseline canvases            | Yes                   | View only             | No         |
-| Create/edit PRDs and Tech Docs            | Yes                   | Yes                   | No         |
+| Create PRDs and Tech Docs; edit own       | Yes                   | Yes                   | No         |
 | Create/link/start Tickets                 | Yes                   | Yes                   | No         |
 | Use repository AI chat                    | Yes                   | Yes                   | No         |
 | Read/create/reply to SDLC conversations   | Yes                   | Yes                   | No         |
@@ -88,6 +88,11 @@ to v2.
 | Read linked context                       | Subject to source ACL | Subject to source ACL | No         |
 
 The hidden repository channel is an authorization boundary. It must not appear in normal Chat navigation, but its conversations store SDLC AI history. Source-level ACLs still apply when linked or retrieved content comes from elsewhere.
+
+Every newly created SDLC canvas grants the hidden repository Channel `VIEWER` access. The creator retains edit
+access through canvas ownership; other repository members receive view-only access unless separately granted a
+stronger direct role. This default applies to baseline, PRD, Tech Doc, and imported Wiki canvases. Existing canvas
+participant rows are not backfilled.
 
 The token is never returned to any user after save. Project-authorized users may attach private repositories using the shared capability, but cannot read the credential.
 
@@ -209,7 +214,8 @@ requirements, and the real push/PR call is final proof.
 
 Public repositories may pass read access anonymously when no valid credential exists. Private
 repositories remain blocked without credentialed read access. A successful read check enables
-**Next: Generate baseline** for repository admins. Results become stale after credential revision.
+**Next: Generate baseline** for repository admins. Credential replacement or disconnect atomically
+clears stored capabilities before a new check runs.
 
 ## 8. Baseline setup
 
@@ -231,8 +237,8 @@ setup execution may run at a time.
 - use Redis only for live progress, locks, and resume cache;
 - on retry, preserve completed documents and resume at the first missing/failed document;
 - reject non-GitHub.com, credential-bearing, malformed, or unsafe repository URLs;
-- retrieve private clone credentials only through a sandbox bootstrap endpoint that creates and redeems an
-  `sdlc-agent`/execution/repository/session-bound one-use runtime grant internally; the agent sees one
+- retrieve private clone credentials only through a sandbox bootstrap endpoint that validates current
+  `sdlc-agent`/execution/repository/session scope and encrypts directly to the sandbox public key; the agent sees one
   `sandbox-repo-setup` call while trusted Claw performs key/script Kata operations beneath that tool;
 - fetch the PAT account identity only inside the sandbox after decryption and use its ID-based GitHub noreply
   address for both commit author and committer; do not persist or forward the derived commit name/email through backend/Claw;
@@ -244,6 +250,12 @@ backend derives its folder, visibility, membership, and metadata; the model cann
 or create a placeholder. A durable callback advances the next baseline step only after the expected canvas
 exists. The worker periodically reconciles stale executions against Claw's authoritative run record, so a
 lost callback still reaches a terminal state.
+
+All access-check, setup, artifact, and work dispatches use one `sdlc` Bull queue. Consumption and reconciliation
+run only when `ENABLE_SDLC_WORKER=true`. Redis admission permits cap actual in-flight operations at nine globally
+and three per repository by default, with repository round-robin admission. Queue history initially uses
+count-based retention (100 completed and 500 failed jobs); production-scale time-based retention remains a
+follow-up.
 
 ### 8.3 Required baseline canvases
 
@@ -417,12 +429,17 @@ repository Channel. It includes all matching activity types and preserves the gl
 display, but creates no SDLC-specific Activity rows, changes no read state, and provides no hidden-Channel Chat
 navigation.
 
+Global Activity navigation recognizes hidden SDLC Channel metadata. Message activity opens the linked SDLC
+conversation and exact message; Canvas and Ticket activity opens the matching SDLC section and entity; other
+matching activity opens repository Overview. Invalid or stale discussion links remain in SDLC Overview and never
+fall back to normal Chat. Non-SDLC Activity navigation is unchanged.
+
 ## 13. Start Work
 
 ### 13.1 Preconditions
 
 - caller is repository member;
-- latest repository access check is ready for the current credential revision;
+- repository has stored capability evidence from a successful check;
 - all five baseline canvases are approved;
 - PRD/Tech Doc/Ticket belongs to this repository chain;
 - repository has `READ_REPOSITORY`, `PUSH_BRANCH`, and `CREATE_PULL_REQUEST` capability;
@@ -432,7 +449,7 @@ navigation.
 
 The existing Claw `ask-ai` agent receives one platform-verified SDLC context wrapper on every start,
 resume, retry, handoff, and post-compaction continuation. It contains durable IDs, repository/base branch,
-permissions, gates, and execution/artifact scope, but never secrets or runtime grants. It also receives:
+permissions, gates, and execution/artifact scope, but never secrets. It also receives:
 
 - approved baseline memory;
 - current linked artifact chain;
@@ -485,8 +502,8 @@ Order to Done without requiring each attached repository to install a webhook.
 - `channelId` — hidden SDLC Channel; v1 creates one per repository, while persistence permits multiple repositories per Channel for v2;
 - `canonicalUrl` — workspace canonical identity;
 - `sdlcSetupExecutionId` — current/latest setup Workflow Execution.
-- access-check status, normalized capabilities/evidence (including cached visibility), credential revision,
-  checked time, and actionable error metadata.
+- normalized `accessCapabilities`; transient check status, timestamps, retries, errors, and evidence remain
+  in Redis job metadata.
 
 ### 14.2 Project extension
 
@@ -542,7 +559,7 @@ interface SdlcHub {
 Routes, Zero mutators, jobs, and AI tools are thin adapters. Canonicalization, ACL checks, setup idempotency, cardinality, approval gates, and board-stage rules remain inside the module.
 
 Credential/provider complexity lives behind a separate deep `SdlcVcs` module. `SdlcHub` calls its small
-interface for credential configuration, access checks, capability gates, runtime grants, draft PR creation,
+interface for credential configuration, access checks, capability gates, runtime credential delivery, draft PR creation,
 and PR validation. `GitHubVcsAdapter` is the v1 provider adapter. See
 [VCS_CREDENTIALS_PLAN.md](./VCS_CREDENTIALS_PLAN.md).
 

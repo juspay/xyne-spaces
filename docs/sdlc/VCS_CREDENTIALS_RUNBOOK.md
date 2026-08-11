@@ -2,7 +2,7 @@
 
 Status: implementation handoff
 Scope: GitHub.com fine-grained PAT v1
-Last updated: 2026-08-09
+Last updated: 2026-08-11
 
 This runbook operates the design in [VCS_CREDENTIALS_PLAN.md](./VCS_CREDENTIALS_PLAN.md). It never asks
 an operator to copy a token into logs, tickets, chat, or commands.
@@ -31,6 +31,27 @@ Expected: the credential surface loads without workspace metadata configuration.
 
 S2. Watch access-check/runtime error codes during rollout.
 Expected: credential and provider failures remain isolated by workspace and repository.
+
+### 2.1 SDLC worker deployment
+
+The API always produces into the single Bull queue named `sdlc`. Only the dedicated worker deployment may
+consume it. Configure that deployment with:
+
+```env
+ENABLE_SDLC_WORKER=true
+SDLC_GLOBAL_ACTIVE_LIMIT=9
+SDLC_REPO_ACTIVE_LIMIT=3
+```
+
+Keep `ENABLE_SDLC_WORKER=false` on every other worker deployment. Restart backend and worker processes after
+changing these environment values. The Redis admission controller limits actual in-flight SDLC operations—not
+only webhook dispatches—to nine globally and three per repository. Pending repositories receive permits in
+round-robin order, so one repository backlog cannot starve another.
+
+Bull currently retains the newest 100 completed queue jobs and 500 failed queue jobs. This is count-based, not
+time-based. Admission permits are deleted at terminal completion/failure/cancellation; abandoned permits expire
+after 15 minutes and are repaired by reconciliation. Time-based terminal-job cleanup is deferred and recorded in
+the v2 decisions/backlog.
 
 ## 3. Configure or rotate
 
@@ -129,3 +150,19 @@ not destructively migrated.
 - One credential supports one GitHub resource owner per workspace.
 - GitHub Enterprise, GitLab, Bitbucket SDLC adapter, forks, brokered Git, and trusted backend push are deferred in
   [DECISIONS_NEEDED_FOR_V2.md](./DECISIONS_NEEDED_FOR_V2.md).
+
+## 9. Local SDLC cleanup
+
+Preview SDLC state that would be removed:
+
+```bash
+pnpm sdlc:cleanup
+```
+
+Delete it after reviewing counts:
+
+```bash
+pnpm sdlc:cleanup -- --yes
+```
+
+Cleanup is hard-blocked unless both database hosts are loopback and the Spaces backend runs in development/test mode. It removes all local SDLC repository hubs, generated boards, Tickets, Canvases, conversations, workflow executions, Claw run history, and SDLC Redis queue/admission state. It preserves workspace registration, users, Projects, agent configuration, and workspace GitHub credentials.

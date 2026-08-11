@@ -3157,14 +3157,7 @@ model Repo {
   projectId            String?
   channelId            String?
   sdlcSetupExecutionId String? @unique
-  accessCheckStatus    String             @default("NOT_CHECKED")
   accessCapabilities   Json?
-  accessEvidence       Json?
-  accessCredentialRevision Int?
-  accessCheckedAt      DateTime?
-  accessCheckStartedAt DateTime?
-  accessErrorCode      String?
-  accessErrorMessage   String?
 
   project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: Cascade)
@@ -3178,31 +3171,6 @@ model Repo {
   @@index([workspaceId, projectId])
   @@map("repos")
   @@schema("public")
-}
-
-// One-use opaque handle. Contains binding metadata only; never contains VCS secrets.
-model SdlcVcsRuntimeGrant {
-  id                 String    @id
-  workspaceId        String
-  repoId             String
-  provider           String
-  operation          String
-  credentialRevision Int
-  executionId        String
-  sessionId          String
-  expiresAt          DateTime
-  redeemedAt         DateTime?
-  sandboxId          String?
-  sandboxPublicKeyHash String?
-  envelopeIssuedAt   DateTime?
-  createdAt          DateTime  @default(now())
-
-  @@index([workspaceId, repoId])
-  @@index([executionId, sessionId])
-  @@index([expiresAt])
-  @@unique([executionId, sessionId, repoId, operation, sandboxId, sandboxPublicKeyHash], map: "sdlc_vcs_grant_sandbox_binding_key")
-  @@map("sdlc_vcs_runtime_grants")
-  @@schema("workflow")
 }
 
 // Generic, repository-scoped trace and evidence links for the SDLC hub.

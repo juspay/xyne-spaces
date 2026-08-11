@@ -10,6 +10,7 @@ import {
   startSdlcWorkSchema,
 } from '@xyne/shared';
 import { AppError } from '@/middleware/errorHandler';
+import { sdlcQueue } from '@/queues/sdlcQueue';
 import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { DatabaseClient } from '@/database/client';
@@ -101,17 +102,20 @@ router.get(
         url: true,
         canonicalUrl: true,
         baseBranch: true,
-        accessCheckStatus: true,
         accessCapabilities: true,
-        accessEvidence: true,
-        accessCheckedAt: true,
-        accessErrorCode: true,
-        accessErrorMessage: true,
         sdlcSetupExecutionId: true,
         setupExecution: { select: { id: true, status: true, context: true, updatedAt: true } },
       },
       orderBy: { name: 'asc' },
     });
+    const accessStates = new Map(
+      await Promise.all(
+        repositories.map(async (repository) => [
+          repository.id,
+          await sdlcQueue.accessCheckState(repository.id),
+        ] as const)
+      )
+    );
     res.status(200).json({
       success: true,
       repositories: repositories.map((repository) => {
@@ -119,14 +123,28 @@ router.get(
           'GITHUB',
           repository.canonicalUrl || repository.url
         );
-        const evidence =
-          repository.accessEvidence &&
-          typeof repository.accessEvidence === 'object' &&
-          !Array.isArray(repository.accessEvidence)
-            ? (repository.accessEvidence as Record<string, unknown>)
+        const accessState = accessStates.get(repository.id);
+        const result =
+          accessState?.result &&
+          typeof accessState.result === 'object' &&
+          !Array.isArray(accessState.result)
+            ? (accessState.result as Record<string, unknown>)
             : {};
+        const evidence =
+          result['evidence'] &&
+          typeof result['evidence'] === 'object' &&
+          !Array.isArray(result['evidence'])
+            ? (result['evidence'] as Record<string, unknown>)
+            : {};
+        const hasCapabilities = Array.isArray(repository.accessCapabilities) &&
+          repository.accessCapabilities.length > 0;
         return {
           ...repository,
+          accessJobStatus:
+            accessState?.status === 'NOT_CHECKED' && hasCapabilities
+              ? 'READY'
+              : accessState?.status ?? (hasCapabilities ? 'READY' : 'NOT_CHECKED'),
+          accessJobErrorMessage: accessState?.errorMessage ?? null,
           provider: parsed.provider,
           visibility:
             typeof evidence.repositoryVisibility === 'string'

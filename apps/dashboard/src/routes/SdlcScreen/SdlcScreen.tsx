@@ -62,7 +62,6 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { SdlcTicketsBoard } from './SdlcTicketsBoard';
 import { artifactCta } from './artifactCtaPolicy';
 import { baselineApprovalAction } from './baselinePolicy';
-import { shouldRequestAutomaticAccessCheck } from './accessCheckClientPolicy';
 import { SdlcWikiSection, SdlcWikiSidebarTree, type SdlcWikiPage } from './SdlcWikiSection';
 import { SdlcConversationPanel } from './SdlcConversationPanel';
 import { SdlcAssistantPanel } from './SdlcAssistantPanel';
@@ -81,6 +80,7 @@ import {
   sdlcChatNavigationSearch,
   sdlcRightPanelIds,
   sdlcRightPanelMode,
+  shouldCloseInvalidSdlcConversationDeepLink,
   shouldStartFreshSdlcAssistant,
   shouldShowSdlcRelatedLink,
   type SdlcChatTab,
@@ -228,9 +228,12 @@ export default function SdlcScreen(): ReactElement {
   const auth = useAuthContextValues();
   const section = SECTIONS.some(item => item.id === routeSection) ? routeSection! : 'overview';
   const [repos] = useCachedQuery(queries.getSdlcRepos());
-  const [repo] = useCachedQuery(queries.getSdlcRepoById({ repoId: repoId || '' }), {
-    enabled: Boolean(repoId),
-  });
+  const [repo, repoQueryDetails] = useCachedQuery(
+    queries.getSdlcRepoById({ repoId: repoId || '' }),
+    {
+      enabled: Boolean(repoId),
+    },
+  );
   const sdlcBoardId = repo && !(repo instanceof Error) ? (repo.project?.sdlcBoard?.id ?? '') : '';
   const [sdlcBoardDetail] = useCachedQuery(queries.boardDetailById({ boardId: sdlcBoardId }), {
     enabled: Boolean(sdlcBoardId),
@@ -404,12 +407,48 @@ export default function SdlcScreen(): ReactElement {
         selectedCanvasId: selectedCanvas?.id ?? null,
         selectedWikiPage: selectedWikiPage ?? null,
         selectedTicketId,
+        selectedConversationId: selectedDiscussionConversationId,
         ticketIds: tickets.map(ticket => ticket.id),
         canvases,
         links,
       }),
-    [canvases, links, selectedCanvas?.id, selectedTicketId, selectedWikiPage, tickets],
+    [
+      canvases,
+      links,
+      selectedCanvas?.id,
+      selectedDiscussionConversationId,
+      selectedTicketId,
+      selectedWikiPage,
+      tickets,
+    ],
   );
+
+  useEffect(() => {
+    if (
+      !shouldCloseInvalidSdlcConversationDeepLink({
+        repoQueryComplete: repoQueryDetails.type === 'complete',
+        discussionOpen,
+        selectedConversationId: selectedDiscussionConversationId,
+        discussionContextResolved: Boolean(discussionContext),
+      })
+    ) {
+      return;
+    }
+    const next = new URLSearchParams(location.search);
+    next.delete('discussion');
+    next.delete('chat');
+    next.delete('conversation');
+    const search = next.toString();
+    void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
+  }, [
+    discussionContext,
+    discussionOpen,
+    location.pathname,
+    location.search,
+    navigate,
+    repoQueryDetails.type,
+    selectedDiscussionConversationId,
+  ]);
   const discussionOwner = discussionContext?.owner ?? null;
   const discussionSurface = discussionContext?.surface ?? null;
   const discussionConversationIds = useMemo(
@@ -507,12 +546,7 @@ export default function SdlcScreen(): ReactElement {
   const approvedCount = baseline.filter(
     canvas => typeof metadataOf(canvas.metadata)['approvedAt'] === 'string',
   ).length;
-  const accessStatus = repo && !(repo instanceof Error) ? repo.accessCheckStatus : 'NOT_CHECKED';
   const accessRepoId = repo && !(repo instanceof Error) ? repo.id : '';
-  const accessErrorCode = repo && !(repo instanceof Error) ? repo.accessErrorCode : null;
-  const accessCredentialRevision =
-    repo && !(repo instanceof Error) ? repo.accessCredentialRevision : null;
-  const accessCheckStartedAt = repo && !(repo instanceof Error) ? repo.accessCheckStartedAt : null;
   const accessCapabilities =
     repo && !(repo instanceof Error) && Array.isArray(repo.accessCapabilities)
       ? (repo.accessCapabilities as Array<{ capability?: string; state?: string; detail?: string }>)
@@ -521,13 +555,12 @@ export default function SdlcScreen(): ReactElement {
     accessCapabilities.some(
       item => item.capability === capability && states.includes(item.state || ''),
     );
-  const readReady = accessStatus === 'READY' && capabilityReady('READ_REPOSITORY', ['PROVEN']);
+  const readReady = capabilityReady('READ_REPOSITORY', ['PROVEN']);
   const artifactsUnlocked = readReady && approvedCount === 5;
   const writeReady =
     capabilityReady('PUSH_BRANCH', ['PROVEN', 'INFERRED']) &&
     capabilityReady('CREATE_PULL_REQUEST', ['PROVEN', 'INFERRED']);
-  const accessChecking = ['QUEUED', 'CHECKING'].includes(accessStatus);
-  const showAccessWarning = !accessChecking && (!readReady || !writeReady);
+  const showAccessWarning = !readReady || !writeReady;
   const accessWarning = readReady
     ? {
         title: 'GitHub access needed to ship code',
@@ -540,28 +573,14 @@ export default function SdlcScreen(): ReactElement {
       };
 
   useEffect(() => {
-    if (!accessRepoId) return;
-    if (
-      !shouldRequestAutomaticAccessCheck({
-        status: accessStatus,
-        errorCode: accessErrorCode,
-      })
-    ) {
-      return;
-    }
-    const fingerprint = [
-      accessRepoId,
-      accessStatus,
-      accessErrorCode ?? '',
-      accessCredentialRevision ?? '',
-      accessCheckStartedAt ?? '',
-    ].join(':');
+    if (!accessRepoId || accessCapabilities.length > 0) return;
+    const fingerprint = accessRepoId;
     if (automaticAccessChecksRef.current.has(fingerprint)) return;
     automaticAccessChecksRef.current.add(fingerprint);
     void apiInstance
       .post(`/sdlc/repositories/${accessRepoId}/access-check`, { force: false })
       .catch(() => undefined);
-  }, [accessCheckStartedAt, accessCredentialRevision, accessErrorCode, accessRepoId, accessStatus]);
+  }, [accessCapabilities.length, accessRepoId]);
   const isAdmin = Boolean(
     repo &&
     !(repo instanceof Error) &&

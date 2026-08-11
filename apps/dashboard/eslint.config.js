@@ -106,9 +106,9 @@ export default tseslint.config(
     },
   },
 
-  // TypeScript specific configuration for src files
+  // TypeScript specific configuration for source and test files
   {
-    files: ["src/**/*.ts", "src/**/*.tsx"],
+    files: ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx"],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {

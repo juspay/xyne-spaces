@@ -2514,7 +2514,6 @@ export function createMutators(
             });
           }
 
-          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -10568,7 +10567,6 @@ export function createMutators(
             baseBranch,
             prefix,
             createdBy: authData.sub,
-            accessCheckStatus: 'NOT_CHECKED',
           });
         },
       ),
