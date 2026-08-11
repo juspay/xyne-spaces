@@ -61,7 +61,6 @@ import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
-import { SelectionAskAI } from '../SelectionAskAI';
 import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
 import { useCanvasTableFilters } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -566,8 +565,13 @@ export const CollaborativeCanvasEditor = forwardRef<
     }, []);
 
     const canvasFormattingToolbar = useMemo(
-      () => createCanvasFormattingToolbar(openCommentsForCurrentBlock),
-      [openCommentsForCurrentBlock],
+      () =>
+        createCanvasFormattingToolbar(openCommentsForCurrentBlock, {
+          ...(canvasId && { canvasId }),
+          ...(title && { canvasTitle: title }),
+          canComment: editable && !isReadOnly,
+        }),
+      [canvasId, editable, isReadOnly, openCommentsForCurrentBlock, title],
     );
 
     useEffect((): (() => void) | void => {
@@ -741,13 +745,6 @@ export const CollaborativeCanvasEditor = forwardRef<
             onClose={() => setIsSearchOpen(false)}
           />
         )}
-
-        {/* Selection Ask AI Button */}
-        <SelectionAskAI
-          {...(title && { canvasTitle: title })}
-          {...(canvasId && { canvasId })}
-          containerRef={containerRef}
-        />
 
         {/* Copy button overlay for code blocks */}
         <CanvasCodeCopyButton containerRef={containerRef} />
