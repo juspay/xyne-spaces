@@ -10,6 +10,7 @@ import './adapters/slack-desk';
 import './adapters/microsoft';
 import './adapters/google';
 import './adapters/ozonetel';
+import './adapters/social-media/instagram';
 
 
 // Export public API

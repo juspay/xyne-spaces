@@ -180,6 +180,8 @@ import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailCompo
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
+import SocialMediaComposer from '../../components/xyne-desk/SocialMediaComposer/SocialMediaComposer';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -308,12 +310,14 @@ interface PersistedComposeInstance {
   savedAt?: number;
 }
 
-/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
- *  desks can only reply into a thread that already exists externally. */
+/** Desk types with no "new message" concept: calls aren't composed, Slack/app
+ *  desks can only reply into an existing thread, and social media DMs originate
+ *  from the customer side only. */
 const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
   ChannelType.CALL,
   ChannelType.SLACK,
   ChannelType.APP,
+  ChannelType.SOCIAL_MEDIA,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -1281,6 +1285,41 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
+
+    const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaError = searchParams.get('socialMediaError');
+    if (socialMediaOAuth === 'success') {
+      toast.success('Instagram account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError) {
+      // mismatch error carries the expected handle: "instagram_account_mismatch:@xyne.spaces"
+      const [errorCode, errorPayload] = socialMediaError.split(':');
+      const mismatchMessage = errorPayload
+        ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`
+        : 'Instagram account mismatch — please make sure the correct account is active in your browser and try reconnecting.';
+      const socialMediaErrorMessages: Record<string, string> = {
+        instagram_account_mismatch: mismatchMessage,
+        instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
+        instagram_account_already_connected: 'This Instagram account is already connected to another channel.',
+        instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
+      };
+      toast.error(socialMediaErrorMessages[errorCode ?? ''] ?? 'Instagram connection error. Please try again.');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1658,14 +1697,15 @@ const SupportScreen = (): ReactElement => {
       connector?: 'google' | 'microsoft' | null;
       channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      platform?: 'web' | 'electron';
     },
   ) => {
-    const { connector, deskType, callSource, dlEmail, slackChannelId, installedAppId, ...rest } =
+    const { connector, deskType, callSource, dlEmail, slackChannelId, installedAppId, platform: formPlatform, ...rest } =
       data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
@@ -1728,6 +1768,34 @@ const SupportScreen = (): ReactElement => {
         channelType: 'EMAIL',
         emailDeskOpts: { deskType: DeskType.DL, dlEmail },
       });
+      return;
+    }
+
+    if (deskType === 'SOCIAL_MEDIA') {
+      const isElectron = typeof window.electronAPI?.openExternal === 'function';
+      void (async () => {
+        try {
+          const res = await apiInstance.post<{ authUrl: string }>(
+            '/integrations/social-media/instagram/oauth/start',
+            {
+              name: rest.name,
+              projectId: rest.projectId,
+              visibility: rest.visibility,
+              ...(rest.boardId && { boardId: rest.boardId }),
+              ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+              platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
+            },
+          );
+          setShowCreateChannelModal(false);
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(res.data.authUrl);
+          } else {
+            window.location.href = res.data.authUrl;
+          }
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to start Instagram authorization');
+        }
+      })();
       return;
     }
 
@@ -1935,9 +2003,14 @@ const SupportScreen = (): ReactElement => {
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
           : c.type === ChannelType.CALL
+          ? {
+              label: 'Call',
+              className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+            }
+          : c.type === ChannelType.SOCIAL_MEDIA
             ? {
-                label: 'Call',
-                className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                label: 'Instagram',
+                className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
               }
             : {
                 label: 'Mailbox',
@@ -4381,7 +4454,8 @@ export const SupportTicketDetail = ({
                   </Tooltip>
                   {emails.length > 0 &&
                     channel?.type !== ChannelType.SLACK &&
-                    channel?.type !== ChannelType.APP && (
+                    channel?.type !== ChannelType.APP &&
+                    channel?.type !== ChannelType.SOCIAL_MEDIA && (
                       <>
                         <div className='w-px h-4 bg-border' />
                         <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
@@ -4714,7 +4788,9 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+                  {channel?.type === ChannelType.SLACK ||
+                  channel?.type === ChannelType.APP ||
+                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread
                       emails={emails}
                       ticketId={ticket?.id}
@@ -4765,7 +4841,11 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                conversationId ? (
+                  <SocialMediaComposer conversationId={conversationId} />
+                ) : null
+              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
@@ -5066,7 +5146,18 @@ export const SupportTicketDetail = ({
                       className='flex-1 overflow-auto data-[state=inactive]:hidden'
                     >
                       {ticket?.id ? (
-                        <TicketDetails ticketId={ticket.id} />
+                        <>
+                          <TicketDetails ticketId={ticket.id} />
+                          {channel?.type === ChannelType.SOCIAL_MEDIA && channelId && conversationId && (
+                            <InstagramCustomerHistory
+                              channelId={channelId}
+                              conversationId={conversationId}
+                              onTicketClick={xyneId => {
+                                void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                              }}
+                            />
+                          )}
+                        </>
                       ) : (
                         <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
                           <FileText size={48} className='mb-2 text-muted-foreground' />

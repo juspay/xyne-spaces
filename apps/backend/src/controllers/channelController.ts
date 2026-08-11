@@ -1501,6 +1501,8 @@ export class ChannelController {
         );
       } else if (source?.sourceType === 'slack-desk') {
         connectedLabel = extractSlackChannelId(source.name);
+      } else if (source?.sourceType === 'instagram') {
+        connectedLabel = source.displayName ?? null;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];

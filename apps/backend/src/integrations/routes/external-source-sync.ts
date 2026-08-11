@@ -3,7 +3,7 @@
  * Public endpoints for syncing data from external sources
  */
 
-import express, { Router, Request, Response } from 'express';
+import express, { Router, Request, Response, NextFunction } from 'express';
 import { DeskType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authenticate } from '../core/authenticate';
@@ -19,6 +19,8 @@ import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { decrypt } from '@/services/encryptionService';
+import { metaGraphClient } from '@/integrations/adapters/social-media/instagram/metaGraphClient';
 
 const router = Router();
 
@@ -40,9 +42,111 @@ router.use(webhookLimiter);
  * Returns "OK" without authentication - used by external services to verify endpoint
  * Matches Haskell implementation: webhookGetHandler _ _ = pure "OK"
  */
-router.get('/:sourceName/ingest', (_req, res: Response) => {
-  return res.status(200).send('OK');
-});
+router.get(
+  '/:sourceName/ingest',
+  (req, res, next) => {
+    // Run adapterResolver so isTestQueryParam fires for webhook verifications (e.g. Meta hub.challenge).
+    // If the platform isn't registered (other integrations, health probes), fall through to the 200 OK handler.
+    adapterResolver(req, res, () => next());
+  },
+  (_req, res: Response) => {
+    return res.status(200).send('OK');
+  },
+);
+
+/**
+ * Generic Instagram webhook endpoint
+ * POST /api/external-source-sync/instagram/ingest
+ *
+ * Meta's app-level webhook sends ALL Instagram DM events to a SINGLE URL.
+ * adapterResolver resolves to the Instagram adapter by platform name.
+ * authenticate calls adapter.getSourceNameFromDB(body) → "instagram-<igUserId>"
+ * then looks up the right ExternalSource and handles HMAC — same as per-source flow.
+ */
+// Resolve the correct ExternalSource for Instagram message_edit.num_edit=0 events.
+// These fire from the SENDER's subscription (entry[0].id = sender), not the recipient's.
+// We call getMessage(mid) with each active IG token to find the actual recipient, then
+// inject _resolvedRecipientId into the entry so getSourceNameFromDB returns the right name.
+async function resolveMessageEditRecipient(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const body = req.body as Record<string, unknown>;
+  const entry = (body?.entry as Array<Record<string, unknown>>)?.[0];
+  const messaging = (entry?.messaging as Array<Record<string, unknown>>)?.[0];
+  const edit = messaging?.message_edit as Record<string, unknown> | undefined;
+  const mid = edit?.mid as string | undefined;
+  const numEdit = edit?.num_edit as number | undefined;
+
+  if (mid !== undefined && numEdit === 0) {
+    try {
+      const sources = await db.externalSource.findMany({
+        where: { sourceType: 'instagram', isActive: true },
+        select: { credentials: true, externalIdentifier: true },
+      });
+      for (const src of sources) {
+        if (!src.credentials || !src.externalIdentifier) continue;
+        try {
+          const creds = JSON.parse(decrypt(src.credentials)) as { accessToken: string };
+          const fetched = await metaGraphClient.getMessage(creds.accessToken, mid);
+          const recipientId = fetched?.to?.data?.[0]?.id;
+          if (recipientId === src.externalIdentifier) {
+            entry._resolvedRecipientId = recipientId;
+            logger.info('[IG ingest] Resolved message_edit recipient via getMessage', { mid, recipientId });
+            break;
+          }
+        } catch { /* token invalid or wrong account — try next */ }
+      }
+      if (!entry._resolvedRecipientId) {
+        logger.warn('[IG ingest] Could not resolve recipient for message_edit', { mid });
+      }
+    } catch (err) {
+      logger.warn('[IG ingest] Error during message_edit recipient resolution', { error: err });
+    }
+  }
+  next();
+}
+
+router.post(
+  '/instagram/ingest',
+  (req, _res, next) => { req.params.sourceName = 'instagram'; next(); },
+  resolveMessageEditRecipient,
+  adapterResolver,
+  authenticate,
+  async (req: Request, res: Response) => {
+    const startTime = Date.now();
+    try {
+      const rawBodyReq = req as RawBodyRequest;
+      const { sourceName, adapter, source } = rawBodyReq;
+
+      if (!adapter || !sourceName) {
+        return res.status(500).json({ error: 'Adapter or sourceName missing' });
+      }
+
+      let ingestWorkspaceId: string | null = source?.workspaceId ?? null;
+      if (!ingestWorkspaceId && source?.channelId) {
+        const channel = await db.channel.findUnique({
+          where: { id: source.channelId },
+          select: { workspaceId: true },
+        });
+        ingestWorkspaceId = channel?.workspaceId ?? null;
+      }
+      if (!ingestWorkspaceId) {
+        logger.error('[Instagram] ingest with no resolvable workspaceId', { sourceName });
+        throw new Error(`No resolvable workspaceId for source ${sourceName}`);
+      }
+
+      const results = await runAsServiceActor('external-source-ingest', ingestWorkspaceId,
+        () => externalSourceCore.ingest(adapter, sourceName, req.body, source),
+      );
+
+      logger.info(`[Instagram] Generic webhook processed in ${Date.now() - startTime}ms`, {
+        sourceName, resultCount: results.length,
+      });
+      return res.status(200).json(results);
+    } catch (error) {
+      logger.error('[Instagram] Generic webhook error:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
 
 /**
  * External source sync endpoint

@@ -14,6 +14,7 @@ import {
   MessageSquareMore,
   Smartphone,
   Phone,
+  Instagram,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -87,6 +88,12 @@ const DESK_SOURCES: ReadonlyArray<{
     description: 'Create a call-first desk that can be used in workspace Ozonetel routing',
     icon: Phone,
   },
+  {
+    value: DeskType.SOCIAL_MEDIA,
+    label: 'Instagram',
+    description: 'Connect an Instagram Business account to receive and reply to DMs',
+    icon: Instagram,
+  },
 ];
 
 interface EligibleApp {
@@ -107,6 +114,7 @@ interface AddChannelFormProps {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      platform?: 'web' | 'electron';
     },
   ) => void;
   onCancel: () => void;
@@ -289,6 +297,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             deskType: DeskType.CALL,
             callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          const isElectron = typeof window.electronAPI?.openExternal === 'function';
+          onSubmit?.({
+            ...value,
+            connector: null,
+            deskType: DeskType.SOCIAL_MEDIA,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+            platform: isElectron ? 'electron' : 'web',
           });
         } else {
           onSubmit?.({

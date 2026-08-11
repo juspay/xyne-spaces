@@ -57,6 +57,7 @@ import slackDeskRoutes from '@/integrations/routes/slack-desk';
 import appDeskRoutes from '@/integrations/routes/app-desk';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
+import socialMediaRoutes from '@/integrations/routes/social-media';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
@@ -294,6 +295,7 @@ export class App {
     this.app.use('/api/integrations/workspace-desk', workspaceDeskRoutes);
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
     this.app.use('/api/integrations/app-desk', appDeskRoutes);
+    this.app.use('/api/integrations/social-media', socialMediaRoutes);
     this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 

@@ -5,6 +5,7 @@ import { BaseTransformer } from './baseTransformer';
 import { BasePostprocessor } from './basePostprocessor';
 import { BaseRefetch } from './baseRefetch';
 import { BaseMailReplySender } from './baseMailReplySender';
+import { BaseInteractionReplySender } from './baseInteractionReplySender';
 import { adapterRegistry } from './adapterRegistry';
 
 /**
@@ -20,6 +21,7 @@ export class AdapterFactory {
     postprocessor?: BasePostprocessor,
     refetcher?: BaseRefetch,
     mailReplySender?: BaseMailReplySender,
+    interactionReplySender?: BaseInteractionReplySender,
   ): ExternalSourceAdapter {
     const adapter: ExternalSourceAdapter = {
       name: platform,
@@ -35,6 +37,7 @@ export class AdapterFactory {
       refetch: refetcher?.refetch.bind(refetcher),
       sendMailReply: mailReplySender?.sendReply.bind(mailReplySender),
       sendMailNew: mailReplySender?.sendNew.bind(mailReplySender),
+      sendInteractionReply: interactionReplySender?.sendReply.bind(interactionReplySender),
     };
 
     adapterRegistry.register(platform, adapter);

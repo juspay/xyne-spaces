@@ -104,15 +104,18 @@ export class ExternalSourceCore {
       }
 
       // 2. Transform to normalized format
-      const parseResult = await adapter.transform(payload);
+      const parseResult = await adapter.transform(payload, source);
 
       if (!parseResult.success || !parseResult.data) {
         throw new Error(`Transform failed: ${parseResult.error}`);
       }
 
-      // 3. Sync to database (sourceName already resolved in authenticate.ts)
-      const results = await this.sync(adapter, sourceName, parseResult.data, source);
-      allResults.push(...results);
+      // 3. Sync to database — transform may return one or many NormalizedData items
+      const dataItems = Array.isArray(parseResult.data) ? parseResult.data : [parseResult.data];
+      for (const dataItem of dataItems) {
+        const results = await this.sync(adapter, sourceName, dataItem, source);
+        allResults.push(...results);
+      }
     }
 
     return allResults;

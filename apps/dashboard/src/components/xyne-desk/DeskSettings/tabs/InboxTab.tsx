@@ -13,6 +13,7 @@ import Avatar from '../../../ui/Avatar/Avatar';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
+import { InstagramDeskIntegrationCard } from '../../DeskIntegrationCard/InstagramDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
 import { useUsers } from '../../../../hooks/useUsers';
@@ -52,6 +53,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isEmail,
     isSlack,
     isApp,
+    isSocialMedia,
     ownerId,
     setOwner,
     sendAsAlias,
@@ -112,6 +114,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isApp && <AppDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocialMedia && <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>

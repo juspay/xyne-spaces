@@ -87,12 +87,12 @@ const envSchema = Joi.object({
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
-  ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
+  ENABLE_AUTOMATION_WORKER: Joi.boolean().default(true),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
-  ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
-  ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(true),
+  ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(true),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
-  ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
+  ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(true),
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
@@ -117,6 +117,12 @@ const envSchema = Joi.object({
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
+  META_APP_ID: Joi.string().allow('').default(''), // Meta (Facebook/Instagram) App ID
+  META_APP_SECRET: Joi.string().allow('').default(''), // Meta App Secret for webhook HMAC verification
+  META_WEBHOOK_VERIFY_TOKEN: Joi.string().allow('').default(''), // Meta webhook hub.verify_token
+  META_IG_APP_ID: Joi.string().allow('').default(''), // Instagram App ID (for Instagram Login OAuth)
+  META_IG_APP_SECRET: Joi.string().allow('').default(''), // Instagram App Secret (for Instagram Login OAuth)
+  META_IG_REDIRECT_URI: Joi.string().allow('').default(''), // Override redirect URI for Instagram OAuth (e.g. ngrok URL in local dev)
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -195,7 +201,7 @@ const envSchema = Joi.object({
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
-  ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(true),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
@@ -607,6 +613,12 @@ export const config = {
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
+  META_APP_ID: envVars.META_APP_ID as string,
+  META_APP_SECRET: envVars.META_APP_SECRET as string,
+  META_WEBHOOK_VERIFY_TOKEN: envVars.META_WEBHOOK_VERIFY_TOKEN as string,
+  META_IG_APP_ID: envVars.META_IG_APP_ID as string,
+  META_IG_APP_SECRET: envVars.META_IG_APP_SECRET as string,
+  META_IG_REDIRECT_URI: envVars.META_IG_REDIRECT_URI as string,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')

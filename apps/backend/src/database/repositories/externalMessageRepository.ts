@@ -111,6 +111,22 @@ export class ExternalMessageRepository {
   }
 
   /**
+   * Find the latest ExternalMessage for a source whose externalThreadId
+   * starts with the given prefix (e.g. IGSID or "IGSID:"). Used by the
+   * Instagram 24-hour messaging-window check to find the active thread.
+   */
+  async findLatestForIgsid(externalSourceId: string, igsid: string) {
+    return await this.db.externalMessage.findFirst({
+      where: {
+        externalSourceId,
+        externalThreadId: { startsWith: igsid },
+        direction: 'INCOMING',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
    * Find external messages for a source
    */
   async findBySource(externalSourceId: string, limit: number = 100) {
