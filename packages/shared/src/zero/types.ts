@@ -706,6 +706,7 @@ export enum ChannelType {
   SLACK = 'SLACK',
   APP = 'APP',
   CALL = 'CALL',
+  SOCIAL_MEDIA = 'SOCIAL_MEDIA',
 }
 
 // @ts-ignore TS1294
@@ -715,6 +716,7 @@ export enum DeskType {
   SLACK = 'SLACK',
   APP = 'APP',
   CALL = 'CALL',
+  SOCIAL_MEDIA = 'SOCIAL_MEDIA',
 }
 
 // @ts-ignore TS1294
@@ -1179,4 +1181,3 @@ export enum BaseTicketType {
   DESK = 'DESK',
   Epic = 'Epic',
 }
-

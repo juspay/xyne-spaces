@@ -14,13 +14,23 @@ export interface EmailFetchJobData {
   isDlMemberSync?: boolean;
 }
 
+export interface SocialMediaFetchJobData {
+  sourceIds: string[];
+  channelId: string;
+  requesterUserId: string;
+  workspaceId: string;
+}
+
 export interface CursorCatchupJobData {
   sourceId: string;
   watchHistoryId: string;
   requesterUserId?: string;
 }
 
-export type EmailFetchQueueJobData = EmailFetchJobData | CursorCatchupJobData;
+export type EmailFetchQueueJobData =
+  | EmailFetchJobData
+  | SocialMediaFetchJobData
+  | CursorCatchupJobData;
 
 class EmailFetchQueue {
   private queue: Bull.Queue<EmailFetchQueueJobData> | null = null;
@@ -65,8 +75,9 @@ class EmailFetchQueue {
     if (!this.queue) return;
 
     this.queue.on('failed', (job, err) => {
+      const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
-        `[EMAIL-FETCH-QUEUE] Job ${job.id} failed — source ${job.data.sourceId}:`,
+        `[EMAIL-FETCH-QUEUE] Job ${job.id} failed — source ${source}:`,
         err,
       );
     });
