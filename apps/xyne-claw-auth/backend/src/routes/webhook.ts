@@ -4976,7 +4976,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // Clear the ephemeral agent progress signal — dashboard drops the spinner.
   // Only fires in the ephemeral path; the placeholder path clears naturally
   // when we edit the "⏳" message with the final result below.
-  if (USE_EPHEMERAL_PROGRESS) {
+  // Same deliverability guard as the per-tool push in /progress: twin runs and
+  // claw-only conversations (no Spaces channelId) never posted a spinner, so
+  // clearing would only add another guaranteed-4xx call.
+  if (USE_EPHEMERAL_PROGRESS && ctx.agentSlug !== "digital-twin" && ctx.channelId) {
     spacesAppFetch("/chat/agentProgress", {
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
@@ -6459,6 +6462,19 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   }
 
   const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
+
+  // Spaces-side progress needs a real Spaces surface. Two cases produce
+  // thousands of guaranteed-4xx calls a day (prod 2026-08-11):
+  //  - digital-twin: the shared twin app user isn't a participant of most
+  //    channels its runs fire in → 403 "does not have access" per tool step.
+  //    Twin activity has its own draft/DM surface; it never needs the spinner.
+  //  - claw-only conversations (agent-chat/v3): ctx.conversationId is a
+  //    claw-auth UUID with no Spaces row → 404 "Conversation not found".
+  //    Spaces-origin runs always carry the channelId from the webhook payload,
+  //    so a missing channelId marks a conversation Spaces can't resolve.
+  // The v3 live tap above already delivered the label to claw's own UI.
+  const spacesProgressDeliverable = ctx.agentSlug !== "digital-twin" && Boolean(ctx.channelId);
+  if (!spacesProgressDeliverable) return;
 
   try {
     if (USE_EPHEMERAL_PROGRESS) {
