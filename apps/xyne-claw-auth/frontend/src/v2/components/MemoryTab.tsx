@@ -2627,6 +2627,14 @@ function UploadSessionModal({
   const acceptedMemberExts = source === "opencode" ? /\.(json)$/i : /\.(jsonl|json)$/i;
   const acceptAttr = source === "opencode" ? ".json,.zip,.gz" : ".jsonl,.json,.zip,.gz";
 
+  // Finder appends ` (1)` AFTER the original extension when a download already
+  // exists, producing names such as `rollout.jsonl (1).gz`. Strip only that
+  // duplicate suffix before checking the inner extension; otherwise a perfectly
+  // valid gzip is reported as an unsupported session.
+  function normalizeSessionFilename(name: string): string {
+    return name.replace(/\s+\(\d+\)$/u, "");
+  }
+
   /** Gzipped session files (.jsonl.gz / .json.gz — how Codex rollouts and
    *  Claude Code session archives usually arrive) are decompressed client-side
    *  with the browser-native DecompressionStream, then treated exactly like
@@ -2638,6 +2646,51 @@ function UploadSessionModal({
     return await new Response(stream).text();
   }
   const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
+
+  /**
+   * The Codex export helper produces a single `{ session_count, sessions }`
+   * JSON document. Each member contains native rollout records, so split it
+   * into the JSONL sessions the backend parser already understands instead of
+   * rejecting a valid all-sessions export as one oversized upload.
+   */
+  function expandCodexBundle(name: string, content: string): Array<{ name: string; content: string }> | null {
+    if (source !== "codex") return null;
+    try {
+      const parsed = JSON.parse(content) as { sessions?: unknown };
+      if (!Array.isArray(parsed.sessions)) return null;
+      const expanded: Array<{ name: string; content: string }> = [];
+      for (let i = 0; i < parsed.sessions.length; i++) {
+        const session = parsed.sessions[i] as { session_file?: unknown; relative_path?: unknown; records?: unknown };
+        if (!Array.isArray(session?.records)) continue;
+        const sessionName = typeof session.relative_path === "string"
+          ? session.relative_path.split(/[\\/]/).pop()
+          : typeof session.session_file === "string"
+            ? session.session_file.split(/[\\/]/).pop()
+            : undefined;
+        expanded.push({
+          name: normalizeSessionFilename(sessionName || `${name}-session-${i + 1}.jsonl`),
+          content: session.records.map((record) => JSON.stringify(record)).join("\n"),
+        });
+      }
+      return expanded;
+    } catch {
+      return null;
+    }
+  }
+
+  function addUsableSessions(
+    name: string,
+    content: string,
+    picked: Array<{ name: string; content: string }>,
+    skip: string[],
+  ): void {
+    const candidates = expandCodexBundle(name, content) ?? [{ name, content }];
+    for (const candidate of candidates) {
+      if (candidate.content.length > MAX_SESSION_BYTES) { skip.push(`${candidate.name} (over 20MB)`); continue; }
+      if (!candidate.content.trim()) { skip.push(`${candidate.name} (empty)`); continue; }
+      picked.push(candidate);
+    }
+  }
   const [sessions, setSessions] = useState<Array<{ name: string; content: string }>>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
@@ -2664,36 +2717,32 @@ function UploadSessionModal({
             const base = entry.name.split("/").pop() ?? entry.name;
             if (entry.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
             // Gzipped member (rollout-*.jsonl.gz): decompress, keep inner name.
-            const gzInner = /\.gz$/i.test(base) ? base.replace(/\.gz$/i, "") : null;
+            const gzInner = /\.gz$/i.test(base) ? normalizeSessionFilename(base.replace(/\.gz$/i, "")) : null;
+            const normalizedBase = normalizeSessionFilename(base);
             if (gzInner !== null && !acceptedMemberExts.test(gzInner)) continue;
-            if (gzInner === null && !acceptedMemberExts.test(base)) continue;
+            if (gzInner === null && !acceptedMemberExts.test(normalizedBase)) continue;
             let content: string;
             try {
               content = gzInner !== null
                 ? await gunzipToString(await entry.async("arraybuffer"))
                 : await entry.async("string");
             } catch { skip.push(`${base} (not valid gzip)`); continue; }
-            const name = gzInner ?? base;
-            if (content.length > MAX_SESSION_BYTES) { skip.push(`${name} (over 20MB)`); continue; }
-            if (!content.trim()) { skip.push(`${name} (empty)`); continue; }
-            picked.push({ name, content });
+            const name = gzInner ?? normalizedBase;
+            addUsableSessions(name, content, picked, skip);
           }
         } else if (/\.gz$/i.test(file.name)) {
-          const inner = file.name.replace(/\.gz$/i, "");
+          const inner = normalizeSessionFilename(file.name.replace(/\.gz$/i, ""));
           if (!acceptedMemberExts.test(inner)) { skip.push(`${file.name} (unsupported type)`); continue; }
           let content: string;
           try { content = await gunzipToString(await file.arrayBuffer()); }
           catch { skip.push(`${file.name} (not valid gzip)`); continue; }
-          // Size-check the DECOMPRESSED content — the backend cap is on what we
-          // upload, and gzip on JSONL routinely expands 5-10×.
-          if (content.length > MAX_SESSION_BYTES) { skip.push(`${inner} (over 20MB)`); continue; }
-          if (!content.trim()) { skip.push(`${inner} (empty)`); continue; }
-          picked.push({ name: inner, content });
-        } else if (acceptedExts.test(file.name)) {
-          if (file.size > MAX_SESSION_BYTES) { skip.push(`${file.name} (over 20MB)`); continue; }
-          picked.push({ name: file.name, content: await file.text() });
+          // Size-check each expanded session — a Codex all-sessions export is
+          // one large JSON envelope but is uploaded as bounded JSONL members.
+          addUsableSessions(inner, content, picked, skip);
         } else {
-          skip.push(`${file.name} (unsupported type)`);
+          const name = normalizeSessionFilename(file.name);
+          if (!acceptedExts.test(name)) { skip.push(`${file.name} (unsupported type)`); continue; }
+          addUsableSessions(name, await file.text(), picked, skip);
         }
       }
       if (picked.length === 0) {
