@@ -1,8 +1,10 @@
 import {
   RoomServiceClient,
+  AgentDispatchClient,
   AccessToken,
   TrackSource,
   TwirpError,
+  type AgentDispatch,
   type ParticipantInfo,
 } from 'livekit-server-sdk';
 import { config } from '@/config/env';
@@ -88,6 +90,7 @@ function parseRoomMetadata(
 export class LiveKitService {
   private static instance: LiveKitService;
   private roomService: RoomServiceClient;
+  private agentDispatchService: AgentDispatchClient;
   private apiKey: string;
   private apiSecret: string;
   private serverUrl: string;
@@ -103,6 +106,11 @@ export class LiveKitService {
 
     // Initialize room service client
     this.roomService = new RoomServiceClient(
+      this.livekitUrl,
+      this.apiKey,
+      this.apiSecret,
+    );
+    this.agentDispatchService = new AgentDispatchClient(
       this.livekitUrl,
       this.apiKey,
       this.apiSecret,
@@ -136,6 +144,29 @@ export class LiveKitService {
       logger.error(`[${options.name}] livekit_room_creation_failed | error=${error}`);
       throw error;
     }
+  }
+
+  async dispatchAgent(
+    roomName: string,
+    agentName: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AgentDispatch> {
+    const dispatch = await this.agentDispatchService.createDispatch(roomName, agentName, {
+      ...(metadata && { metadata: JSON.stringify(metadata) }),
+    });
+    logger.info(
+      `[${roomName}] agent_dispatch_created | agent_name=${agentName}, dispatch_id=${dispatch.id}`,
+    );
+    return dispatch;
+  }
+
+  async listAgentDispatches(roomName: string): Promise<AgentDispatch[]> {
+    return this.agentDispatchService.listDispatch(roomName);
+  }
+
+  async deleteAgentDispatch(roomName: string, dispatchId: string): Promise<void> {
+    await this.agentDispatchService.deleteDispatch(dispatchId, roomName);
+    logger.info(`[${roomName}] agent_dispatch_deleted | dispatch_id=${dispatchId}`);
   }
   async muteTrack(roomName: string, identity: string, trackSid: string, muted: boolean): Promise<void> {
     try {

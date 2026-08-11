@@ -8,6 +8,8 @@ import { uploadSingle } from '@/middleware/upload';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
+import { transcriptionSwitchController } from '@/controllers/transcriptionSwitchController';
+import { authorizeTranscriptionSwitch } from '@/middleware/transcriptionSwitchAuth';
 
 const router = Router();
 
@@ -18,6 +20,11 @@ router.delete('/series/:seriesId', scheduleCallController.cancelRecurringSeries)
 router.post('/initiate', callController.initiateCall);
 router.post('/join', callController.joinCall);
 router.post('/schedule', scheduleCallController.scheduleCall);
+router.post(
+  '/:callId/transcription-agent/switch',
+  authorizeTranscriptionSwitch,
+  transcriptionSwitchController.switchAgent,
+);
 
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);

@@ -243,6 +243,12 @@ const envSchema = Joi.object({
   XYNE_API_KEY: Joi.string().allow('').default(''),
   // Transcription Agent API Key (for S2S authentication)
   TRANSCRIPTION_AGENT_API_KEY: Joi.string().default(''),
+  // Developer-only control plane for replacing the transcription agent in a live call.
+  // This is deliberately separate from TRANSCRIPTION_AGENT_API_KEY, which is used by
+  // the agent itself for backend S2S requests.
+  TRANSCRIPTION_SWITCH_API_KEY: Joi.string().allow('').default(''),
+  TRANSCRIPTION_SWITCH_ALLOWED_USER_IDS: Joi.string().allow('').default(''),
+  TRANSCRIPTION_SWITCH_ALLOWED_AGENT_NAMES: Joi.string().allow('').default(''),
   // Mettle user sync webhook API Key (for S2S authentication)
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
@@ -730,6 +736,17 @@ export const config = {
     apiKey: envVars.XYNE_API_KEY,
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
+  transcriptionSwitch: {
+    apiKey: envVars.TRANSCRIPTION_SWITCH_API_KEY as string,
+    allowedUserIds: (envVars.TRANSCRIPTION_SWITCH_ALLOWED_USER_IDS as string)
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean),
+    allowedAgentNames: (envVars.TRANSCRIPTION_SWITCH_ALLOWED_AGENT_NAMES as string)
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean),
+  },
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
   telepresenceMonitoringApiKey: envVars.TELEPRESENCE_MONITORING_API_KEY,
