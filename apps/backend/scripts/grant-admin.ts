@@ -108,6 +108,7 @@ async function grantAdmin() {
     if (!existingMapping) {
       await prisma.userGroupMapping.create({
         data: {
+          workspaceId: defaultWorkspace.id,
           userId: user.id,
           userGroupId: adminGroup.id
         }
@@ -133,6 +134,7 @@ async function grantAdmin() {
       if (!existingPermission) {
         await prisma.resourceAccess.create({
           data: {
+            workspaceId: defaultWorkspace.id,
             userId: user.id,
             resourceId: resource.id,
             accessType: AccessType.ADMIN,

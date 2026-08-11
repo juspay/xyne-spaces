@@ -94,7 +94,6 @@ import {
   isSdlcTicketMetadata,
   sdlcDiscussionSchema,
 } from '@xyne/shared';
-import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import {
   FLOW_STAGE_NAMES,
   FlowPlanSchema,

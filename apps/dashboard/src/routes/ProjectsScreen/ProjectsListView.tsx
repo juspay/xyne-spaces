@@ -6,7 +6,7 @@ import { Button, ButtonType, Modal } from '@juspay/blend-design-system';
 import { ProjectForm, ProjectCard } from '../../components/Project';
 import { apiInstance } from '../../services/clients/apiClient';
 import { queries } from '../../zero/queries';
-import { AccessType, type Project as ZeroProject } from '@xyne/shared';
+import type { Project as ZeroProject } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -26,7 +26,7 @@ const ProjectsListView = (): ReactElement => {
   const canExportTickets = permissions.some(
     permission =>
       permission.resourceName === 'TICKET-REPORTS' &&
-      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
+      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
   );
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Fetch all projects using zero

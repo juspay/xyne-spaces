@@ -1,10 +1,5 @@
 import { apiInstance } from './clients/apiClient';
-import {
-  BaseTicketType,
-  TicketPriority,
-  FormFieldType,
-  type FlowStepVisibilityOptions,
-} from '@xyne/shared';
+import { BaseTicketType, TicketPriority, type FlowStepVisibilityOptions } from '@xyne/shared';
 
 export interface CreateTicketRequest {
   title: string;

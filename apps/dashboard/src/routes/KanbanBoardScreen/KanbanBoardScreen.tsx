@@ -91,7 +91,6 @@ import {
   TicketStatusV2,
   ActivityType,
   FormContextType,
-  AccessType,
   FormEntityType,
   FormFieldType,
   ChannelType,
@@ -370,7 +369,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const canExportTickets = permissions.some(
     permission =>
       permission.resourceName === 'TICKET-REPORTS' &&
-      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
+      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
   );
   const zero = useZero();
   const { confirm, ConfirmDialog } = useConfirmDialog();

@@ -64,15 +64,14 @@ import {
   ActivityType,
   TicketReferenceRelation,
   MessageType,
-  ConversationParticipation,
   BoardType,
-} from \'@xyne/shared\';
-import type { TicketCardSummary } from \'@xyne/shared\';
-import { CommitAnalysisController } from \'./commitAnalysisController\';
-import { isReleaseTicket } from \'@xyne/shared\';
-import { mergeSdlcTicketMetadata } from \'@/sdlc/sdlcTicketMetadata\';
-import { backlogFlowGroup } from \'@/services/flowCascadeService\';
-import { AppError } from \'@/middleware/errorHandler\';
+} from '@xyne/shared';
+import type { TicketCardSummary } from '@xyne/shared';
+import { CommitAnalysisController } from './commitAnalysisController';
+import { isReleaseTicket } from '@xyne/shared';
+import { mergeSdlcTicketMetadata } from '@/sdlc/sdlcTicketMetadata';
+import { backlogFlowGroup } from '@/services/flowCascadeService';
+import { AppError } from '@/middleware/errorHandler';
 
 import { z } from 'zod';
 
@@ -900,7 +899,6 @@ export class TicketController {
             ticketType: effectiveTicketType,
             stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
-            formFieldChanges: formFieldChangesForEmit,
           }, tx);
 
           await this.messageRepository.createWithExecutionId({

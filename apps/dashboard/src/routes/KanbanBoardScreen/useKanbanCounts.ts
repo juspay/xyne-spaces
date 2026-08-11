@@ -9,12 +9,7 @@ import {
   type KanbanCountsRequest,
   type KanbanCountsViewMode,
 } from '../../services/ticketService';
-import {
-  BaseTicketType,
-  FormFieldType,
-  TicketStatusV2,
-  type FlowStepVisibilityOptions,
-} from '@xyne/shared';
+import { BaseTicketType, type FlowStepVisibilityOptions } from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import { websocketService } from '../../services/clients/socketClient';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
