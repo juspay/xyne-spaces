@@ -124,7 +124,7 @@ export const useCanvasCommentHighlights = ({
     {
       enabled: enabled && Boolean(canvasId),
     },
-  );
+  ) as unknown as [CanvasCommentHighlightThread[]];
   const openThreads = useMemo(
     () => threads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN),
     [threads],
