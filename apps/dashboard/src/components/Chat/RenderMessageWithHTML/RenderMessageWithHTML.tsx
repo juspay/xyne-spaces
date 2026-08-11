@@ -48,6 +48,7 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
+import { callLobbyService } from '../../../services/Call/callLobbyService';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -108,7 +109,6 @@ const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const navigate = useNavigate();
   const copyHref =
     parsedLink?.kind === 'call' ? resolvedHref : withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
@@ -130,7 +130,23 @@ const InternalXyneLink = ({
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
     event.preventDefault();
-    void navigate(`/call/${parsedLink.callId}`);
+    void callLobbyService
+      .resolveInternalRoute(parsedLink.callId)
+      .then(resolution => {
+        if (resolution.result === 'internal') {
+          window.location.assign(
+            `/${encodeURIComponent(resolution.workspaceId)}/call/${encodeURIComponent(parsedLink.callId!)}`,
+          );
+          return;
+        }
+
+        // Users without a valid session for the call's workspace enter through
+        // the external lobby in the same Spaces tab.
+        window.location.assign(resolvedHref);
+      })
+      .catch(() => {
+        window.location.assign(resolvedHref);
+      });
   };
 
   if (!resolvedHref || !parsedLink) {

@@ -30,6 +30,8 @@ const INTERNAL_XYNE_HOSTS = new Set([
   'app.spaces.xyne.juspay.net',
   'spaces.sandbox.xyne.juspay.net',
   'app.spaces.sandbox.xyne.juspay.net',
+  'call.xyne.juspay.net',
+  'call.sandbox.xyne.juspay.net',
   'xyne-spaces.web.app',
   'localhost',
   '127.0.0.1',

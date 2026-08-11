@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { REACTION_EMOJIS } from '../hooks/useReactions';
 import {
   Users,
@@ -38,7 +37,6 @@ import {
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
-import { callLobbyService } from '../../../services/Call/callLobbyService';
 import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
 import {
@@ -127,6 +125,7 @@ export function CallControls({
   aiController,
   localParticipantId,
   callId: callId,
+  roomLink,
   onToggleMic,
   onToggleCamera,
   onToggleScreenShare,
@@ -164,14 +163,6 @@ export function CallControls({
   const reactionPickerRef = useRef<HTMLDivElement>(null);
   const { isMobile, isMac } = usePlatform();
   const modKey = isMac ? '⌘' : 'Ctrl';
-
-  const inviteUrlQuery = useQuery({
-    queryKey: ['call-invite-url', callId],
-    queryFn: () => callLobbyService.getInviteUrl(callId),
-    staleTime: Infinity,
-    enabled: !!callId,
-  });
-  const inviteUrl = inviteUrlQuery.data;
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
@@ -327,8 +318,8 @@ export function CallControls({
   };
 
   const handleCopyInviteLink = (): void => {
-    if (!inviteUrl) return;
-    void navigator.clipboard.writeText(inviteUrl).then(() => {
+    if (!roomLink) return;
+    void navigator.clipboard.writeText(roomLink).then(() => {
       setShowCopied(true);
       setTimeout(() => setShowCopied(false), 2000);
     });
@@ -845,20 +836,20 @@ export function CallControls({
         {/* Share Link Button */}
         <button
           onClick={handleCopyInviteLink}
-          disabled={!inviteUrl}
+          disabled={!roomLink}
           className={cn(
             buttonClasses,
             'relative bg-gray-700 text-white',
-            inviteUrl ? 'hover:bg-gray-600' : 'cursor-not-allowed opacity-50',
+            roomLink ? 'hover:bg-gray-600' : 'cursor-not-allowed opacity-50',
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={
-            inviteUrl
+            roomLink
               ? 'Copy invite link — works for teammates and guests'
               : 'Preparing invite link…'
           }
           aria-label={
-            inviteUrl ? 'Copy invite link for teammates and guests' : 'Preparing invite link'
+            roomLink ? 'Copy invite link for teammates and guests' : 'Preparing invite link'
           }
           data-track-category='CALLS'
           data-track-name='SHARE_CALL_LINK'

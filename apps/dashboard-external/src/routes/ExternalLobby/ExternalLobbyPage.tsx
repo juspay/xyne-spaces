@@ -66,6 +66,20 @@ type LobbyAction =
 
 const initialState: LobbyState = { stage: 'LOADING' };
 
+function getInternalCallUrl(externalId: string, workspaceId: string): string {
+  const configuredBaseUrl = import.meta.env['VITE_INTERNAL_DASHBOARD_BASE_URL'] as
+    | string
+    | undefined;
+  const dashboardBaseUrl =
+    configuredBaseUrl?.trim() ||
+    (import.meta.env.DEV ? 'http://localhost:5173' : window.location.origin);
+
+  return new URL(
+    `/${encodeURIComponent(workspaceId)}/call/${encodeURIComponent(externalId)}`,
+    dashboardBaseUrl,
+  ).toString();
+}
+
 function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
   switch (action.type) {
     case 'SET_LOADING':
@@ -142,7 +156,7 @@ export function ExternalLobbyPage() {
     retry: false,
   });
 
-  const internalJoinAttemptRef = useRef<string | null>(null);
+  const internalRouteAttemptRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!callInfoQuery.isSuccess || state.stage !== 'LOADING') return;
@@ -152,14 +166,19 @@ export function ExternalLobbyPage() {
     } else if (result === 'ended') {
       dispatch({ type: 'SET_CALL_ENDED' });
     } else {
-      if (!externalId || internalJoinAttemptRef.current === externalId) return;
-      internalJoinAttemptRef.current = externalId;
+      if (!externalId || internalRouteAttemptRef.current === externalId) return;
+      internalRouteAttemptRef.current = externalId;
 
       let cancelled = false;
       void callLobbyService
-        .joinAsInternal(externalId)
-        .then(() => {
-          if (!cancelled) window.location.replace(result.internalCallUrl);
+        .resolveInternalRoute(externalId)
+        .then(resolution => {
+          if (cancelled) return;
+          if (resolution.result === 'internal') {
+            window.location.replace(getInternalCallUrl(externalId, resolution.workspaceId));
+            return;
+          }
+          dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
         })
         .catch(() => {
           if (!cancelled) dispatch({ type: 'SET_PRE_JOIN', callInfo: result });

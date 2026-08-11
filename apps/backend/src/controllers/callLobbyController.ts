@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { InvitationResponse } from '@xyne/shared';
-import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { repositories } from '@/database/repositories';
 import {
   livekitService,
@@ -10,7 +9,6 @@ import {
   getHostControls,
 } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { db } from '@/database/client';
 import {
   externalCallTokenService,
@@ -19,6 +17,7 @@ import {
 } from '@/services/externalCallTokenService';
 import type { CallLobbyRequest } from '@/types/express';
 import type { CallParticipantMetadata } from '@xyne/shared';
+import { callInviteRoutingService } from '@/services/callInviteRoutingService';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -46,6 +45,23 @@ function setSessionCookie(
 
 export const callLobbyController = {
   /**
+   * POST /api/call-lobby/:externalId/resolve-internal
+   *
+   * Opaque public routing probe. It only returns workspaceId after validating
+   * the exact workspace-scoped auth cookie for the call's workspace.
+   */
+  resolveInternal: async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const result = await callInviteRoutingService.resolve(req, res, req.params.externalId);
+      res.json(result);
+    } catch (err) {
+      logger.error(`[call-lobby] resolveInternal failed | error=${err}`);
+      res.status(500).json({ result: 'external' });
+    }
+  },
+
+  /**
    * GET /api/call-lobby/:externalId
    * Returns safe call metadata for the pre-join page.
    * If a valid session cookie exists, includes hasSession so frontend can skip the name form.
@@ -58,7 +74,6 @@ export const callLobbyController = {
         title: call.title,
         callType: call.callType,
         status: call.status,
-        internalCallUrl: `${config.frontendUrl}/call/${req.params.externalId}?type=${call.callType}`,
       };
 
       if (callSession) {
@@ -429,22 +444,6 @@ export const callLobbyController = {
       });
     } catch (err) {
       logger.error(`[call-lobby] getRecordingState failed | error=${err}`);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * GET /api/call-lobby/:externalId/invite-url
-   * Returns the full external call invite URL for this call.
-   * No session required — the URL is constructed from backend config.
-   */
-  getInviteUrl: async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { externalId } = req.params;
-      const url = buildCallInviteUrl(externalId);
-      res.json({ url });
-    } catch (err) {
-      logger.error(`[call-lobby] getInviteUrl failed | error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
     }
   },

@@ -7,8 +7,6 @@ export interface CallInfo {
   title: string | null;
   callType: string;
   status: string;
-  /** Authenticated dashboard route for this call. */
-  internalCallUrl: string;
   /** Present when the user has a valid session cookie — skip the lobby form */
   hasSession?: boolean;
 }
@@ -56,6 +54,10 @@ export interface ExternalJoinResponse {
   participantId: string;
 }
 
+export type InternalCallRouteResolution =
+  | { result: 'internal'; workspaceId: string }
+  | { result: 'external' };
+
 const BASE = '/call-lobby';
 
 export const callLobbyService = {
@@ -79,22 +81,19 @@ export const callLobbyService = {
   },
 
   /**
-   * Reuse the authenticated internal join flow to decide whether this browser
-   * should enter through the dashboard. Authentication, refresh, workspace, and
-   * call-access checks stay owned by the existing /calls/join route.
+   * Resolve against the auth cookie for the call's own workspace. This only
+   * chooses internal dashboard vs external lobby; /calls/join still enforces
+   * the call-specific host/invitee/channel membership rules.
    */
-  async joinAsInternal(externalId: string): Promise<void> {
-    // Use a standalone client so a 401 stays local to the public lobby instead
-    // of triggering the dashboard API client's global /auth redirect.
-    const response = await axios.post<{ success?: boolean }>(
-      `${BASE_URL}/calls/join`,
-      { callId: externalId },
+  async resolveInternalRoute(externalId: string): Promise<InternalCallRouteResolution> {
+    // Keep this public probe isolated from the dashboard client's global 401
+    // redirect behavior. Expected misses are normal external-lobby traffic.
+    const response = await axios.post<InternalCallRouteResolution>(
+      `${BASE_URL}${BASE}/${encodeURIComponent(externalId)}/resolve-internal`,
+      undefined,
       { withCredentials: true },
     );
-
-    if (!response.data.success) {
-      throw new Error('Internal call join failed');
-    }
+    return response.data;
   },
 
   /**
@@ -184,11 +183,5 @@ export const callLobbyService = {
       `${BASE}/${externalId}/recording-state`,
     );
     return response.data;
-  },
-
-  /** Get the unified call invite URL from the backend. */
-  async getInviteUrl(externalId: string): Promise<string> {
-    const response = await apiInstance.get<{ url: string }>(`${BASE}/${externalId}/invite-url`);
-    return response.data.url;
   },
 };
