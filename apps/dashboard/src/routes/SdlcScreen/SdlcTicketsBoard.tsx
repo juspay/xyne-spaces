@@ -13,7 +13,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Ticket } from '@xyne/shared';
-import { Bug, GitPullRequest, Loader2, Plus, Search, X } from 'lucide-react';
+import { Bug, GitPullRequest, Loader2, MessageCircle, Plus, Search, X } from 'lucide-react';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
 import { KanbanIcon } from '../../components/Tickets/KanbanColumns/KanbanColumns';
@@ -61,6 +61,7 @@ interface SdlcTicketsBoardProps {
   onStartWork: (ticketId: string) => void;
   onDebugRun: (execution: TicketExecution) => void;
   onOpenCanvas: (canvasId: string) => void;
+  onOpenConversations: (ticketId: string) => void;
 }
 
 function actionLabel(action: TicketAction): string {
@@ -273,6 +274,7 @@ export function SdlcTicketsBoard({
   onStartWork,
   onDebugRun,
   onOpenCanvas,
+  onOpenConversations,
 }: SdlcTicketsBoardProps): ReactElement {
   const zero = useZero();
   const [search, setSearch] = useState('');
@@ -431,16 +433,33 @@ export function SdlcTicketsBoard({
                 <div className='text-xs font-semibold text-primary'>{selectedTicket.xyneId}</div>
                 <h2 className='mt-1 truncate text-lg font-semibold'>{selectedTicket.title}</h2>
               </div>
-              <button
-                type='button'
-                onClick={() => setSelectedTicketId(null)}
-                className='rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
-                aria-label='Close Ticket details'
-                data-track-category='SdlcHub'
-                data-track-name='CloseTicketDetails'
-              >
-                <X />
-              </button>
+              <div className='flex shrink-0 items-center gap-2'>
+                {sourceCanvas ? (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => {
+                      setSelectedTicketId(null);
+                      onOpenConversations(selectedTicket.id);
+                    }}
+                    data-track-category='SdlcHub'
+                    data-track-name='OpenTicketConversations'
+                  >
+                    <MessageCircle />
+                    Conversations
+                  </Button>
+                ) : null}
+                <button
+                  type='button'
+                  onClick={() => setSelectedTicketId(null)}
+                  className='rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
+                  aria-label='Close Ticket details'
+                  data-track-category='SdlcHub'
+                  data-track-name='CloseTicketDetails'
+                >
+                  <X />
+                </button>
+              </div>
             </div>
             <div className='space-y-2 border-b bg-muted/30 px-5 py-4'>
               <ContextRow label='Source'>

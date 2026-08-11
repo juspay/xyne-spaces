@@ -441,6 +441,127 @@ hash. Run-finally cleanup removes helper/key material on success, failure, cance
 sandbox reuse first scrubs old material and performs a fresh key/envelope bootstrap. Configured live-sandbox compaction/recreation/push acceptance remains an operational
 rollout check because no Kata sandbox was provisioned during this cleanup.
 
+## T22 — SDLC human conversations and Activity projection
+
+- [x] T22.1 Lock desktop v1 ownership, UX, ACL, reuse, non-goals, failure behavior, and acceptance walkthrough.
+      Pipeline means one PRD-rooted chain; Wiki and Repo Knowledge use direct Canvas owners. Keep Ask AI unchanged.
+- [x] T22.2 Add `DISCUSSION` to shared SDLC relation contracts without adding a database enum/table. Define the
+      canonical link direction as owner Canvas → Conversation and enforce one discussion owner per conversation.
+- [x] T22.3 Add authorized owner resolution for PRD, Tech Doc, Ticket, linked Pull Request, Wiki, and Repo
+      Knowledge selections. Return no owner for Overview, lists, or unlinked Ticket/Pull Request selections.
+- [x] T22.4 Add repository-member-scoped reads for owner discussion links and linked normal Conversation rows.
+      Validate every result belongs to the repository's hidden Channel; preserve Chat ordering and pagination.
+- [x] T22.5 Create the initial Message, normal Conversation, participant state, and `DISCUSSION` link atomically
+      through existing conversation domain logic. Make retries duplicate-safe and preserve normal Chat side effects.
+- [x] T22.6 Mirror required Zero query/mutator surfaces in backend and dashboard, including optimistic behavior,
+      without fetching or exposing unrelated hidden-Channel conversations.
+- [x] T22.7 Integrate a mutually exclusive SDLC right-panel owner alongside current Assistant/debugger ownership.
+      Add **Conversations** beside **Assistant** only when a concrete owner resolves; leave Assistant behavior
+      unchanged.
+- [x] T22.8 Build the single-column list → thread → Back flow by reusing Chat list rows, message rendering,
+      composer, attachments, mentions, reactions, unread/notification state, editing, deletion, loading, empty,
+      offline, retry, and error behavior. Add no titles, labels, colors, or SDLC-only message features.
+- [x] T22.9 Encode selected conversation in the SDLC URL. Preserve refresh and Back/Forward behavior; clear or
+      reject IDs outside the resolved owner/repository Channel without leaking metadata.
+- [x] T22.10 Clean `DISCUSSION` links when normal conversation deletion occurs and audit owner deletion for stale
+      links without relying on database cascades.
+- [x] T22.11 Add Overview's view-only current-user Activity projection filtered by the hidden repository Channel.
+      Reuse all existing activity types, ordering, pagination, and read/unread display; do not create events, mutate
+      read state, or navigate into hidden Chat.
+- [x] T22.12 Add existing-style instrumentation for panel open/close, owner kind, new conversation, and thread
+      selection without recording message content.
+- [ ] T22.13 Verify shared/backend/dashboard builds, targeted lint/typecheck, enum coverage, and the manual
+      acceptance walkthrough in `CONVERSATIONS_PLAN.md`. Confirm Chat/global Wiki/global Pull Request/mobile,
+      existing Ask AI, and non-SDLC repositories remain unchanged.
+
+Evidence: [CONVERSATIONS_PLAN.md](./CONVERSATIONS_PLAN.md), shared contracts, atomic conversation mutators,
+mirrored Zero surfaces, SDLC panel integration, reused Chat components, Activity projection, command output, and
+the pending manual walkthrough checklist.
+
+Automated implementation verification (2026-08-09): shared build, backend/dashboard typechecks, dashboard
+production build, targeted dashboard lint (zero errors; existing warnings only), and `git diff --check` pass.
+T22.13 remains open solely for the authenticated two-member interactive walkthrough and cross-surface smoke test.
+
+## T23 — SDLC Chat shell and title-first conversation index
+
+- [x] T23.1 Lock the v1.1 UX: one **Chat** action, Conversations/AI tabs, title-first creation, topic-index list,
+      normal thread after selection, and same-Channel Related Work suppression.
+- [x] T23.2 Replace the separate top-bar Conversations/Assistant controls with one Chat entry point while retaining
+      owner-aware behavior and existing Assistant context.
+- [x] T23.3 Add a shared SDLC Chat tab contract across the local human panel and the existing global AI panel;
+      preserve URL navigation, mutual exclusion, streaming, and refresh behavior.
+- [x] T23.4 Replace root Chat rows with compact topic rows derived from each Conversation's first Message. Preserve
+      unread, author/time, reply count, pagination, loading, and empty states.
+- [x] T23.5 Replace the root message composer with an explicit required-title creation form. Send that title through
+      the existing atomic conversation mutation as the first normal Message; add no title column or backend fork.
+- [x] T23.6 Keep selected-thread rendering and composer behavior identical to normal Chat, including replies,
+      attachments, mentions, reactions, editing, deletion, and hover actions.
+- [x] T23.7 Hide same-repository-Channel Conversation links from Related Work while retaining cross-Channel
+      Conversation context links. Keep `DISCUSSION` unlinking unavailable.
+- [x] T23.8 Update instrumentation for Chat open, tab switch, title creation, and topic selection without logging
+      title/message content.
+- [ ] T23.9 Verify shared/backend/dashboard typechecks, targeted lint, production build, URL refresh/Back/Forward,
+      human↔AI switching, title validation, topic/thread flow, and Related Work filtering.
+- [x] T23.10 Remove automatic AI opening so the Chat action defaults to owner Conversations; close the AI actor only
+      after the Conversations URL transition commits, preventing the old `chat=ai` state from reopening it.
+- [x] T23.11 Place the Conversations/AI switch in the Chat title row in both panel modes.
+- [x] T23.12 Reuse one SDLC Chat header across human and AI modes so height, title, tabs, spacing, active state,
+      and close affordance cannot drift; suppress the AI toolbar's duplicate close action.
+- [x] T23.13 Refine the SDLC Chat visual hierarchy: consistent inherited panel surfaces, fewer divider rows, compact Assistant
+      chrome, icon-labelled tabs, and topic cards with creator/replier avatars.
+
+Evidence: [CONVERSATIONS_PLAN.md](./CONVERSATIONS_PLAN.md), SDLC Chat panel components, existing Assistant shell,
+normal conversation mutator, scoped Zero queries, and verification output.
+
+Automated implementation verification (2026-08-09): title/rendering and same-vs-cross-Channel policy tests pass;
+shared build, backend/dashboard typechecks, targeted dashboard lint (zero errors; existing warnings only),
+dashboard production build with an 8 GB heap, and `git diff --check` pass. T23.9 remains open for authenticated
+browser checks of URL navigation and human↔AI interaction.
+
+## T24 — Stable resizable SDLC Chat shell
+
+- [x] T24.1 Keep the SDLC content/Canvas subtree mounted while Chat opens, closes, or switches tabs.
+- [x] T24.2 Move SDLC Assistant presentation from AppRoot into the SDLC right panel while reusing the core
+      `XyneAISidebar` unchanged as the conversation implementation.
+- [x] T24.3 Reuse the core `ThreadMessages`, Chat input, message, hover-action, avatar, and Assistant modules so
+      improvements to normal Chat continue to flow into SDLC Chat.
+- [x] T24.4 Use one persisted horizontal resize group for Conversations and Assistant with the same size limits and
+      drag affordance.
+- [x] T24.5 Preserve URL tab/thread state and background Assistant streaming across tab switches.
+- [x] T24.6 Add regression coverage for stable shell selection and complete targeted typecheck/lint/build checks.
+- [x] T24.7 Preserve the open Chat panel across SDLC location changes; keep Conversations only when the destination
+      has discussion topics, clear the previous thread selection, and otherwise fall back to Assistant.
+
+Automated implementation verification (2026-08-09): stable shell policy tests, dashboard typecheck, targeted lint
+(zero errors; existing warnings only), structural core-component reuse check, `git diff --check`, and dashboard
+production build pass. Authenticated browser interaction remains covered by the open T23.9 acceptance check.
+
+## T25 — Repo Knowledge document navigator
+
+- [x] T25.1 Replace Related context with the Repo Knowledge document list while viewing a Repo Knowledge canvas.
+- [x] T25.2 Reuse the Wiki sidebar navigator, including search, selected state, keyboard focus, and compact rows.
+- [x] T25.3 Use Repo Knowledge-specific labels, empty states, accessibility text, and analytics names.
+
+## T26 — Local-change review remediation
+
+- [x] T26.1 Preserve the current SDLC Assistant session when switching back from human Conversations in the same
+      repository; start fresh only for a closed, different-agent, different-Channel, or different-repository context.
+- [x] T26.2 Validate every client-selected Canvas, Ticket, or Pull Request through its backend-resolved canonical
+      discussion owner before creating the atomic `DISCUSSION` link.
+- [x] T26.3 Resolve selected conversation URLs independently of the paginated topic list and order topic pages by
+      `lastActivityAt` so old-but-active and deep-linked threads remain valid.
+- [x] T26.4 Add conversation offline, reconnect, query-error, and retry states; replace Activity's 100-row ceiling
+      with cursor pagination.
+- [x] T26.5 Remove unused core `ChatInput` SDLC props, duplicate tab types, and unused owner props; move discussion
+      owner/surface/list derivation behind one tested SDLC discussion model interface.
+- [x] T26.6 Complete mirrored tests, typechecks, lint, builds, and a final finding-by-finding review.
+
+Automated remediation verification (2026-08-09): 10 focused policy/domain tests pass; shared, backend, and
+dashboard typechecks pass; backend and dashboard production builds pass (dashboard with the documented 8 GB
+heap); targeted dashboard lint has zero errors; new backend owner/query modules have zero lint errors; mirrored
+backend/shared query definitions and `git diff --check` pass. The legacy backend mutator still reports its existing
+lint baseline outside the changed lines.
+
 ## V2 backlog — multi-ticket Tech Doc execution
 
 Credential/provider/security v2 decisions are tracked separately in
@@ -455,6 +576,15 @@ delivery scope.
 V1 operational rule: trigger implementation from individual Ticket tickets. Tech Doc-level sequential
 orchestration is intentionally deferred.
 
+## V2 backlog — conversation and Ask AI convergence
+
+- [ ] V2C.1 Define how SDLC-owned human conversations appear in common/global Ask AI chat without weakening
+      repository membership or linked-source ACLs.
+- [ ] V2C.2 Decide whether AI history is pipeline-owned, entity-owned, user-owned, or a selectable mix before
+      changing current Assistant session behavior.
+- [ ] V2C.3 Decide global Wiki/Pull Request entry points, cross-surface deep links, and mobile behavior only after
+      desktop SDLC conversation usage is validated.
+
 ### Known delivery limitations
 
 - Local PostgreSQL/Redis and configured Claw/Kata/GitHub/S2S smoke completed against
@@ -464,7 +594,8 @@ orchestration is intentionally deferred.
 - Backend full-repository lint is red on 252 pre-existing errors; all changed SDLC backend files pass targeted lint.
 - Dashboard full lint passes with its existing warning baseline.
 - Bitbucket Server represents draft state with a `[Draft]` title prefix because its current provider adapter has no native draft flag.
-- No new automated tests were added, per the v1 delivery decision.
+- Focused policy/domain tests cover the SDLC Chat state and ownership seams; authenticated browser acceptance
+  remains tracked separately in T23.9.
 - Dashboard production build requires an 8 GB Node heap in this worktree; it completes with
   `NODE_OPTIONS=--max-old-space-size=8192` and reports only existing bundle/chunk warnings.
 - Claw-auth typecheck remains blocked by two pre-existing Express v4/v5 handler overload errors in `agent-chat.ts:570` and `agents.ts:2470`; the SDLC changes add no new compiler diagnostics.

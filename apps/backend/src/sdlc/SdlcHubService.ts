@@ -1100,6 +1100,9 @@ export class SdlcHubService implements SdlcHub {
     repoId: string,
     input: CreateSdlcLinkInput
   ): Promise<SdlcLink> {
+    if (input.relationType === 'DISCUSSION') {
+      throw new AppError('SDLC discussions must be created with their conversation', 400);
+    }
     const repo = await this.requireRepositoryRole(actor, repoId, false);
     await this.requireLinkSource(repoId, repo.channelId!, input.sourceType, input.sourceId);
     await this.requireAccessibleEntity(actor, input.targetType, input.targetId);
@@ -1118,6 +1121,16 @@ export class SdlcHubService implements SdlcHub {
 
   async unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void> {
     await this.requireRepositoryRole(actor, repoId, false);
+    const link = await this.prisma.sdlcEntityLink.findFirst({
+      where: { id: linkId, repoId, workspaceId: actor.workspaceId },
+      select: { relationType: true },
+    });
+    if (!link) {
+      throw new AppError('SDLC relationship not found', 404);
+    }
+    if (link.relationType === 'DISCUSSION') {
+      throw new AppError('Delete the conversation to remove an SDLC discussion', 400);
+    }
     const result = await this.prisma.sdlcEntityLink.deleteMany({
       where: { id: linkId, repoId, workspaceId: actor.workspaceId },
     });

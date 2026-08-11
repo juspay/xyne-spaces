@@ -96,6 +96,7 @@ import {
   createSdlcLinkSchema,
   isSdlcSurfaceMetadata,
   isSdlcTicketMetadata,
+  sdlcDiscussionSchema,
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import {
@@ -123,6 +124,7 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import { resolveSdlcDiscussionOwnerId } from '@/sdlc/sdlcDiscussionOwner';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -507,6 +509,16 @@ async function deleteConversationWithParticipants(
     participants.map(participant =>
       tx.mutate.conversation_participants.delete({ id: participant.id })
     )
+  );
+
+  const discussionLinks = await tx.run(
+    zql.sdlc_entity_links
+      .where('targetType', 'CONVERSATION')
+      .where('targetId', conversationId)
+      .where('relationType', 'DISCUSSION'),
+  );
+  await Promise.all(
+    discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
   );
 
   await tx.mutate.conversations.delete({ conversationId });
@@ -2370,8 +2382,21 @@ export function createMutators(
           messageId: z.string(),
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
+          sdlcDiscussion: sdlcDiscussionSchema.optional(),
         }),
-        async ({ tx, args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds } }) => {
+        async ({
+          tx,
+          args: {
+            channelId,
+            content,
+            type,
+            conversationId,
+            messageId,
+            timestamp,
+            attachmentIds,
+            sdlcDiscussion,
+          },
+        }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -2399,6 +2424,67 @@ export function createMutators(
             throw new Error('You need to be a participant for adding a conversations');
           }
 
+          if (sdlcDiscussion) {
+            const [repo, existingDiscussion] = await Promise.all([
+              tx.run(zql.repos.where('id', sdlcDiscussion.repoId).one()),
+              tx.run(
+                zql.sdlc_entity_links
+                  .where('repoId', sdlcDiscussion.repoId)
+                  .where('targetType', 'CONVERSATION')
+                  .where('targetId', conversationId)
+                  .where('relationType', 'DISCUSSION'),
+              ),
+            ]);
+            if (
+              !repo ||
+              repo.workspaceId !== authData.workspaceId ||
+              repo.channelId !== channelId
+            ) {
+              throw new Error('Invalid SDLC discussion owner');
+            }
+            const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
+              {
+                workspaceId: authData.workspaceId,
+                repoId: repo.id,
+                channelId,
+                surfaceType: sdlcDiscussion.surfaceType,
+                surfaceId: sdlcDiscussion.surfaceId,
+              },
+              {
+                getCanvas: async id =>
+                  (await tx.run(zql.canvases.where('id', id).one())) ?? null,
+                getTicket: async id => {
+                  const ticket = await tx.run(zql.tickets.where('id', id).one());
+                  return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
+                },
+                getPullRequest: async id =>
+                  (await tx.run(zql.pull_requests.where('id', id).one())) ?? null,
+                findLinkSource: async input => {
+                  const link = await tx.run(
+                    zql.sdlc_entity_links
+                      .where('repoId', input.repoId)
+                      .where('targetType', input.targetType)
+                      .where('targetId', input.targetId)
+                      .where('relationType', input.relationType)
+                      .one(),
+                  );
+                  if (
+                    !link ||
+                    (link.sourceType !== 'CANVAS' && link.sourceType !== 'TICKET')
+                  ) {
+                    return null;
+                  }
+                  return { sourceType: link.sourceType, sourceId: link.sourceId };
+                },
+              },
+            );
+            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerCanvasId) {
+              throw new Error('Invalid SDLC discussion owner');
+            }
+            if (existingDiscussion.length > 0) {
+              throw new Error('Conversation already has an SDLC discussion owner');
+            }
+          }
 
           await tx.mutate.conversations.insert({
             conversationId,
@@ -2413,6 +2499,22 @@ export function createMutators(
             createdAt: now,
           });
 
+          if (sdlcDiscussion) {
+            await tx.mutate.sdlc_entity_links.insert({
+              id: sdlcDiscussion.linkId,
+              workspaceId: authData.workspaceId,
+              repoId: sdlcDiscussion.repoId,
+              sourceType: 'CANVAS',
+              sourceId: sdlcDiscussion.ownerCanvasId,
+              targetType: 'CONVERSATION',
+              targetId: conversationId,
+              relationType: 'DISCUSSION',
+              createdBy: authData.sub,
+              createdAt: now,
+            });
+          }
+
+          const plainTextContent = generatePlainTextContent(content.trim());
           const message = {
             messageId,
             conversationId,
@@ -9222,6 +9324,16 @@ export function createMutators(
           if (canvas.createdBy !== authData.sub) {
             throw new Error('Only the creator can delete the canvas');
           }
+
+          const discussionLinks = await tx.run(
+            zql.sdlc_entity_links
+              .where('sourceType', 'CANVAS')
+              .where('sourceId', id)
+              .where('relationType', 'DISCUSSION'),
+          );
+          await Promise.all(
+            discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
+          );
 
           await tx.mutate.canvases.delete({ id });
         },
