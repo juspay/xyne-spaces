@@ -94,6 +94,7 @@ export function useDeskSettingsForm(
   const isEmail = channelType === ChannelType.EMAIL;
   const isSlack = channelType === ChannelType.SLACK;
   const isApp = channelType === ChannelType.APP;
+  const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const [channelParticipants] = useCachedQuery(
@@ -423,6 +424,7 @@ export function useDeskSettingsForm(
     isEmail,
     isSlack,
     isApp,
+    isSocial,
     isCall,
     isDirty,
     saving,
