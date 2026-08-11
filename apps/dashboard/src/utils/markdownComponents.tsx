@@ -17,6 +17,7 @@ import {
   parseInternalXyneLink,
 } from '../components/Chat/RenderMessageWithHTML/internalLinkUtils';
 import type { ToolInvocation } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { isMarkdownCodeBlock, markdownCodeLanguage } from './markdownCodeBlock';
 
 /**
  * Optional claw-citation context. When passed, the `a` override intercepts the
@@ -37,6 +38,15 @@ interface CodeProps extends React.HTMLAttributes<HTMLElement> {
   children?: React.ReactNode;
   // Must match react-markdown's ExtraProps exactly (with exactOptionalPropertyTypes)
   node?: Element | undefined;
+}
+
+function reactNodeText(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeText).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return reactNodeText(node.props.children);
+  }
+  return '';
 }
 
 const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
@@ -145,14 +155,9 @@ const CodeBlock = ({
   node: _node,
   ...props
 }: CodeProps & { messageId: string }): React.ReactElement => {
-  const match = /language-(\w+)/.exec(String(className ?? ''));
-  const language = match ? match[1] : '';
-
-  const codeString = Array.isArray(children)
-    ? children.join('')
-    : typeof children === 'string'
-      ? children.replace(/\n$/, '')
-      : '';
+  const language = markdownCodeLanguage(className);
+  const source = reactNodeText(children);
+  const codeString = source.replace(/\n$/, '');
 
   // ── Mermaid ──
   if (language === 'mermaid') {
@@ -182,9 +187,8 @@ const CodeBlock = ({
     );
   }
 
-  // ── Inline code — no className means no language fence ──
-  // react-markdown passes inline <code> without a language- class
-  const isBlock = Boolean(className);
+  // ── Inline code ──
+  const isBlock = isMarkdownCodeBlock(className, source);
   if (!isBlock) {
     return (
       <code

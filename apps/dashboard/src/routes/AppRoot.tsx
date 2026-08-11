@@ -46,6 +46,8 @@ import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
+import SdlcScreen from './SdlcScreen/SdlcScreen';
+import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -85,7 +87,7 @@ import {
 import WebView from '../components/WebView/WebView';
 import { useSelector } from '@xstate/react';
 import { webviewActor, setPanelRefs } from '../machines/webviewMachine';
-import { xyneAIActor, setXyneAIPanelRefs, globalXyneAIPanelRefs } from '../machines/xyneAIMachine';
+import { xyneAIActor, setXyneAIPanelRefs } from '../machines/xyneAIMachine';
 import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
 import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/ActivitySupportTicket';
@@ -179,6 +181,7 @@ import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOver
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
+import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
@@ -375,15 +378,6 @@ const AppRoot = (): ReactElement => {
     });
   }, []);
 
-  useEffect(() => {
-    if (isXyneDebuggerOpen) return;
-    const rafId = window.requestAnimationFrame(() => {
-      globalXyneAIPanelRefs.right.current?.resize(`${XYNE_AI_PANEL_DEFAULT_SIZE}%`);
-      globalXyneAIPanelRefs.left.current?.resize(`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`);
-    });
-    return () => window.cancelAnimationFrame(rafId);
-  }, [isXyneDebuggerOpen]);
-
   // Register global keyboard shortcuts
   useGlobalShortcuts({ leftPanelRef });
 
@@ -409,11 +403,26 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
+  const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
+  const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
+  const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
+  const isSdlcDebuggerOpen = useExternalDebuggerStore(state => state.target !== null);
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
 
   // Get current location to check if we're on onboarding
   const location = useLocation();
+  const sdlcRepoId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
+  const previousSdlcRepoIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previousRepoId = previousSdlcRepoIdRef.current;
+    if (previousRepoId && previousRepoId !== sdlcRepoId) {
+      useExternalDebuggerStore.getState().close();
+      setIsXyneDebuggerOpen(false);
+    }
+    previousSdlcRepoIdRef.current = sdlcRepoId;
+  }, [sdlcRepoId]);
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
@@ -593,6 +602,35 @@ const AppRoot = (): ReactElement => {
                       <EditWarningModal />
                       <Outlet />
                     </main>
+                  ) : isSdlcDebuggerOpen && !isMobile ? (
+                    <div className='flex h-screen flex-col'>
+                      <ResizableGroup
+                        orientation='horizontal'
+                        className='min-h-0 flex-1 overflow-hidden'
+                        autoSaveId='app-root-sdlc-debugger'
+                      >
+                        <Panel id='app-root-sdlc-content' defaultSize='65%' minSize='45%'>
+                          <div className='flex h-full min-w-0 overflow-hidden'>
+                            <AppSidebar />
+                            <main className='min-w-0 flex-1 overflow-auto no-scrollbar'>
+                              <EditWarningModal />
+                              <Outlet />
+                            </main>
+                          </div>
+                        </Panel>
+                        <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                          <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                        </Separator>
+                        <Panel
+                          id='app-root-sdlc-debugger'
+                          defaultSize='35%'
+                          minSize='30%'
+                          maxSize='55%'
+                        >
+                          <SdlcDebuggerPanel />
+                        </Panel>
+                      </ResizableGroup>
+                    </div>
                   ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                     // XyneAI is open on desktop - show panel layout with XyneAI
                     <div className='flex flex-col h-screen'>
@@ -607,10 +645,10 @@ const AppRoot = (): ReactElement => {
                           defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
                         >
                           <div
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            className={`flex h-full min-w-0 overflow-hidden ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                           >
                             <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
+                            <main className='min-w-0 flex-1 no-scrollbar overflow-auto'>
                               <EditWarningModal />
                               <Outlet />
                             </main>
@@ -642,6 +680,9 @@ const AppRoot = (): ReactElement => {
                               kbDocId={xyneAIKbDocId ?? ''}
                               kbDocName={xyneAIKbDocName ?? ''}
                               kbOpenNonce={xyneAIKbOpenNonce}
+                              researchContext={xyneAIResearchContext}
+                              initialQuery={xyneAIInitialQuery ?? undefined}
+                              autoSendNonce={xyneAIAutoSendNonce}
                               onDebuggerOpenChange={setIsXyneDebuggerOpen}
                             />
                           </XyneAISidebarZIndexShell>
@@ -794,6 +835,9 @@ const AppRoot = (): ReactElement => {
                         kbDocId={xyneAIKbDocId ?? ''}
                         kbDocName={xyneAIKbDocName ?? ''}
                         kbOpenNonce={xyneAIKbOpenNonce}
+                        researchContext={xyneAIResearchContext}
+                        initialQuery={xyneAIInitialQuery ?? undefined}
+                        autoSendNonce={xyneAIAutoSendNonce}
                         onDebuggerOpenChange={setIsXyneDebuggerOpen}
                         visible={false}
                       />
@@ -823,8 +867,25 @@ const AppRoot = (): ReactElement => {
                         kbDocId={xyneAIKbDocId ?? ''}
                         kbDocName={xyneAIKbDocName ?? ''}
                         kbOpenNonce={xyneAIKbOpenNonce}
+                        researchContext={xyneAIResearchContext}
+                        initialQuery={xyneAIInitialQuery ?? undefined}
+                        autoSendNonce={xyneAIAutoSendNonce}
                         onDebuggerOpenChange={setIsXyneDebuggerOpen}
                       />
+                    </Drawer>
+                  )}
+                  {isMobile && !isInPanelWebview && (
+                    <Drawer
+                      open={isSdlcDebuggerOpen}
+                      onOpenChange={open => {
+                        if (!open) useExternalDebuggerStore.getState().close();
+                      }}
+                      title='Debugger'
+                      description='Inspect this SDLC run'
+                    >
+                      <div className='h-[85vh]'>
+                        <SdlcDebuggerPanel />
+                      </div>
                     </Drawer>
                   )}
                 </EditProvider>
@@ -1309,6 +1370,18 @@ export const router = createBrowserRouter([
               {
                 path: 'listProjects/:projectId',
                 element: <ProjectDetailScreen />,
+              },
+              {
+                path: 'sdlc',
+                element: <SdlcScreen />,
+              },
+              {
+                path: 'sdlc/:repoId',
+                element: <SdlcScreen />,
+              },
+              {
+                path: 'sdlc/:repoId/:section',
+                element: <SdlcScreen />,
               },
               {
                 path: 'listProjects/:projectId/releases/:releaseTicketId',

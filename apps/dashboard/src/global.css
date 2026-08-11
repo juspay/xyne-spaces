@@ -3005,7 +3005,9 @@ img.inline-emoji,
 }
 
 /* ── XyneAI sidebar overrides — black text, blue links ── */
-.xyne-ai-markdown *:not(a):not(code):not(.mention-text):not(.mention-text *) {
+.xyne-ai-markdown *:not(a):not(code):not(.mention-text):not(.mention-text *):not(.hljs):not(
+    .hljs *
+  ) {
   color: hsl(var(--foreground)) !important;
 }
 
@@ -3712,6 +3714,59 @@ img.inline-emoji,
   .bn-block-content[data-content-type="heading"][data-level="4"] {
   font-size: 0.9375rem;
   line-height: 1.4;
+}
+
+/* Code blocks (fenced ``` ... ```) */
+.bot-markdown-content pre {
+  background-color: #f6f8fa !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 6px !important;
+  padding: 12px 14px !important;
+  margin: 8px 0 !important;
+  overflow-x: auto !important;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace !important;
+  font-size: 12.5px !important;
+  line-height: 1.5 !important;
+  color: #1f2937 !important;
+  white-space: pre !important;
+}
+
+.bot-markdown-content pre code {
+  display: block !important;
+  min-width: max-content;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  color: inherit !important;
+  white-space: inherit !important;
+}
+
+/* Inline code (single backticks) */
+.bot-markdown-content :not(pre) > code {
+  background-color: #f3f4f6 !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 4px !important;
+  padding: 1px 5px !important;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace !important;
+  font-size: 12.5px !important;
+  color: #be185d !important;
+}
+
+[data-theme="midnight"] .bot-markdown-content pre {
+  background-color: #0f172a !important;
+  border-color: #1f2937 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme="midnight"] .bot-markdown-content :not(pre) > code {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+  color: #f472b6 !important;
 }
 
 /* --- 2K: AG Grid Dark Mode Fixes --- */

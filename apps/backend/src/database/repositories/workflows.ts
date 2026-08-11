@@ -23,6 +23,7 @@ import {
   WorkflowExecutionWithState,
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
 
 function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   const tagFilter = tags && tags.length > 0
@@ -479,7 +480,10 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
 
   async findRunningExecutionIds(): Promise<string[]> {
     const executions = await this.db.workflowExecution.findMany({
-      where: { status: 'RUNNING', NOT: { workflowType: 'Automations' } },
+      where: {
+        status: 'RUNNING',
+        NOT: { workflowType: { in: [...GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES] } },
+      },
       select: { id: true },
     })
     return executions.map(e => e.id)
@@ -488,7 +492,11 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
   async resetExecutionsToPending(ids: string[]): Promise<void> {
     if (ids.length === 0) return
     await this.db.workflowExecution.updateMany({
-      where: { id: { in: ids }, status: 'RUNNING', NOT: { workflowType: 'Automations' } },
+      where: {
+        id: { in: ids },
+        status: 'RUNNING',
+        NOT: { workflowType: { in: [...GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES] } },
+      },
       data: { status: 'PENDING' },
     })
   }

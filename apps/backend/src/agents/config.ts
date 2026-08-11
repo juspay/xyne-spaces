@@ -1,16 +1,16 @@
 /**
  * Shared Agents Configuration
- * 
+ *
  * Context-aware configuration (CAC) for all agents.
  * Fetches model names and other configuration values from Superposition at runtime.
- * 
+ *
  * Usage:
  * ```typescript
  * import { AgentsConfig } from '@/agents/config';
- * 
+ *
  * // Fetch config (usually at the start of a request)
  * const config = await AgentsConfig.fetch({ email: userInfo.userEmail });
- * 
+ *
  * // Use model names
  * const modelName = config.xyneAiModelName;
  * const duplicateModel = config.ticketDuplicateModelName;
@@ -209,15 +209,15 @@ export class AgentsConfig {
   /**
    * Fetch agents configuration from Superposition (CAC)
    * Call this once per request in the controller
-   * 
+   *
    * @param context - Optional Superposition context for flag evaluation (e.g., email)
    * @returns AgentsConfig instance with all configuration values
-   * 
+   *
    * @example
    * ```typescript
    * // In controller, fetch config with context
    * const agentsConfig = await AgentsConfig.fetch({ email: userInfo.userEmail });
-   * 
+   *
    * // Pass to xyneAIStream
    * const streamGenerator = xyneAIStream({ ...request, agentsConfig });
    * ```
@@ -579,4 +579,3 @@ export class AgentsConfig {
     );
   }
 }
-

@@ -166,8 +166,9 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
 
     const manager = new DocumentManager(ysweetUrl);
 
-    // Get a client token with full authorization for write operations
-    const clientToken = await manager.getClientToken(canvasId, {
+    // Create the collaborative document when a server-side writer reaches it
+    // before any browser has opened the canvas.
+    const clientToken = await manager.getOrCreateDocAndToken(canvasId, {
       authorization: 'full',
     });
 
@@ -198,7 +199,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
     // Use ServerBlockNoteEditor.blocksToYXmlFragment to directly populate the fragment
     // This is more efficient than creating an intermediate Y.Doc and cloning elements
     const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
-    
+
     ydoc.transact(() => {
       // Clear existing content
       fragment.delete(0, fragment.length);

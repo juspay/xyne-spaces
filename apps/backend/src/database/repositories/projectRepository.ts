@@ -175,6 +175,13 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
   }
 
   async delete(id: string): Promise<Project> {
+    const attachedSdlcRepository = await this.db.repo.findFirst({
+      where: { projectId: id, channelId: { not: null } },
+      select: { id: true },
+    });
+    if (attachedSdlcRepository) {
+      throw new Error('Detach SDLC repositories before deleting their project');
+    }
     const result = await this.db.project.delete({
       where: { id }
     });

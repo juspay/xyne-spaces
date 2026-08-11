@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
 }
 
 datasource db {
@@ -478,6 +478,7 @@ model WorkflowExecution {
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
+  sdlcRepo                Repo?                  @relation("RepoSetupExecution")
 
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
@@ -1618,6 +1619,7 @@ model Project {
   updatedBy      String? // User ID (no FK constraint)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime?        @updatedAt
+  sdlcBoardId    String?          @unique
 
   // Relations
   workspace Workspace @relation(fields: [workspaceId], references: [id])
@@ -1627,6 +1629,8 @@ model Project {
   globalFields GlobalField[]
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
+  repos         Repo[]
+  sdlcBoard     Board? @relation("ProjectSdlcBoard", fields: [sdlcBoardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
@@ -1664,6 +1668,7 @@ model Board {
   ownedApplication        Application?  @relation("ApplicationBoard")
   incomingWebhooks      AppIncomingWebhook[]
   channelMappings       ChannelBoardMapping[]
+  sdlcForProject        Project? @relation("ProjectSdlcBoard")
 
   @@unique([name, projectId])
   @@index([projectId])
@@ -1776,6 +1781,7 @@ model Channel {
   canvasFolders      CanvasFolder[]
   emails             Email[]
   boardMappings      ChannelBoardMapping[]
+  sdlcRepos          Repo[] @relation("RepoSdlcChannel")
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -3141,16 +3147,85 @@ model VespaInsertionLogs {
 // Repository Configuration for IDE Integration
 model Repo {
   workspaceId String // denormalized tenant key (stamped on insert)
-  id         String @id @default(cuid())
-  name       String         // e.g., "xyne-spaces"
-  url        String         // SSH or HTTPS URL
-  baseBranch Json           // Base branches to checkout from: ["main", "develop"]
-  prefix     String         // Branch prefix: "feature"
-  createdBy  String         // User who added the repo
+  id                   String @id @default(cuid())
+  name                 String // e.g., "xyne-spaces"
+  url                  String // SSH or HTTPS URL
+  canonicalUrl         String?
+  baseBranch           Json // Base branches to checkout from: ["main", "develop"]
+  prefix               String // Branch prefix: "feature"
+  createdBy            String // User who added the repo
+  projectId            String?
+  channelId            String?
+  sdlcSetupExecutionId String? @unique
+  accessCheckStatus    String             @default("NOT_CHECKED")
+  accessCapabilities   Json?
+  accessEvidence       Json?
+  accessCredentialRevision Int?
+  accessCheckedAt      DateTime?
+  accessCheckStartedAt DateTime?
+  accessErrorCode      String?
+  accessErrorMessage   String?
+
+  project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: Cascade)
+  setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
+  sdlcEntityLinks SdlcEntityLink[]
 
   @@unique([url, createdBy]) // Same repo can be added by different users
+  @@unique([workspaceId, canonicalUrl])
   @@index([name])
+  @@index([projectId])
+  @@index([workspaceId, projectId])
   @@map("repos")
+  @@schema("public")
+}
+
+// One-use opaque handle. Contains binding metadata only; never contains VCS secrets.
+model SdlcVcsRuntimeGrant {
+  id                 String    @id
+  workspaceId        String
+  repoId             String
+  provider           String
+  operation          String
+  credentialRevision Int
+  executionId        String
+  sessionId          String
+  expiresAt          DateTime
+  redeemedAt         DateTime?
+  sandboxId          String?
+  sandboxPublicKeyHash String?
+  envelopeIssuedAt   DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@index([workspaceId, repoId])
+  @@index([executionId, sessionId])
+  @@index([expiresAt])
+  @@unique([executionId, sessionId, repoId, operation, sandboxId, sandboxPublicKeyHash], map: "sdlc_vcs_grant_sandbox_binding_key")
+  @@map("sdlc_vcs_runtime_grants")
+  @@schema("workflow")
+}
+
+// Generic, repository-scoped trace and evidence links for the SDLC hub.
+// Entity and relation kinds remain strings so v1 can grow without DB enum churn.
+model SdlcEntityLink {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  repoId       String
+  sourceType   String
+  sourceId     String
+  targetType   String
+  targetId     String
+  relationType String
+  createdBy    String
+  createdAt    DateTime @default(now())
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, sourceType, sourceId, targetType, targetId, relationType])
+  @@index([workspaceId, repoId])
+  @@index([repoId, sourceType, sourceId])
+  @@index([repoId, targetType, targetId])
+  @@map("sdlc_entity_links")
   @@schema("public")
 }
 
