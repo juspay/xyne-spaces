@@ -14,4 +14,9 @@ COPY . .
 
 RUN mkdir -p /app/reports
 
+# The Playwright base image ships a non-root "pwuser"; run as it and give it /app
+# so report/artifact writes at runtime succeed without root.
+RUN chown -R pwuser:pwuser /app
+USER pwuser
+
 CMD ["tail", "-f", "/dev/null"]
