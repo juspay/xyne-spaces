@@ -7,6 +7,7 @@ import {
   BarChart3,
   BarChart4,
   AlertCircle,
+  Check,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -20,6 +21,7 @@ import {
   Circle,
   Maximize2,
   Layers,
+  Tag,
 } from 'lucide-react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
@@ -30,6 +32,7 @@ import {
   UserSubmenu,
   UserGroupSubmenu,
 } from '../../Tickets/TicketFilters/Submenus';
+import { tagsConfigApi } from '../../../api/tagsConfigApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
 import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
 import {
@@ -87,6 +90,95 @@ export interface DeskMetricsDashboardProps {
   availableStages?: readonly DeskMetricsStageOption[];
 }
 
+/** Fetches tags for all selected channels and shows a deduplicated checklist filtered to one category. */
+const TagsInCategorySubmenu = ({
+  channelIds,
+  category,
+  selectedTags,
+  onChange,
+}: {
+  channelIds: string[];
+  category: string;
+  selectedTags: string[];
+  onChange: (tags: string[]) => void;
+}): ReactElement => {
+  const [available, setAvailable] = React.useState<string[]>([]);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    setLoading(true);
+    Promise.all(channelIds.map(id => tagsConfigApi.getAllGeneratedTags(id).catch(() => [])))
+      .then(results => {
+        // Deduplicate by "category:tag" key across all channels
+        const seen = new Set<string>();
+        const tags: string[] = [];
+        for (const items of results) {
+          for (const item of items) {
+            if (item.category !== category) continue;
+            const key = `${item.category}:${item.tag}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              tags.push(key);
+            }
+          }
+        }
+        setAvailable(tags);
+      })
+      .finally(() => setLoading(false));
+  }, [channelIds.join(','), category]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggle = (tagKey: string): void => {
+    onChange(
+      selectedTags.includes(tagKey)
+        ? selectedTags.filter(t => t !== tagKey)
+        : [...selectedTags, tagKey],
+    );
+  };
+
+  return (
+    <div className='w-64 rounded-[10px] border border-border bg-background shadow-lg'>
+      <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+        {category}
+      </div>
+      <div className='max-h-72 overflow-y-auto p-1'>
+        {loading ? (
+          <div className='p-6 text-center text-sm text-muted-foreground'>Loading…</div>
+        ) : available.length === 0 ? (
+          <div className='p-6 text-center text-sm text-muted-foreground'>No tags available</div>
+        ) : (
+          <div className='space-y-0.5'>
+            {available.map(tagKey => {
+              const tagName = tagKey.slice(category.length + 1);
+              const isSelected = selectedTags.includes(tagKey);
+              return (
+                <button
+                  key={tagKey}
+                  type='button'
+                  onClick={() => toggle(tagKey)}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
+                    isSelected
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-foreground hover:bg-muted',
+                  )}
+                >
+                  <span className='truncate'>{tagName}</span>
+                  {isSelected && <Check size={14} className='shrink-0 text-primary' />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {selectedTags.length > 0 && (
+        <div className='border-t border-border px-3 py-2 text-[11px] text-muted-foreground'>
+          {selectedTags.length} selected
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: '#ef4444',
   HIGH: '#f59e0b',
@@ -100,6 +192,27 @@ const PRIORITY_BADGE: Record<string, string> = {
   MEDIUM: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
   LOW: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
 };
+
+const renderTagLegend = ({
+  payload,
+}: {
+  payload?: Array<{ value: string; color: string; payload: { value: number } }>;
+}): ReactElement => (
+  <ul className='flex max-h-full flex-col gap-1 overflow-y-auto pl-4'>
+    {(payload ?? []).map(entry => (
+      <li key={entry.value} className='flex min-w-0 items-center gap-2 text-[11px]'>
+        <span
+          className='inline-block h-2.5 w-2.5 shrink-0 rounded-full'
+          style={{ background: entry.color }}
+        />
+        <span className='min-w-0 flex-1 truncate text-foreground'>{entry.value}</span>
+        <span className='ml-2 shrink-0 font-semibold tabular-nums text-foreground'>
+          {entry.payload.value}
+        </span>
+      </li>
+    ))}
+  </ul>
+);
 
 const PAGE_SIZE = 15;
 const HOUR_MS = 60 * 60 * 1000;
@@ -167,6 +280,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     'FRT',
     'RT',
     'CSAT',
+    'Tags',
     ...customKeys,
     'Created At',
   ];
@@ -180,6 +294,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     formatDuration(t.frtSeconds),
     formatDuration(t.rtSeconds),
     t.csatScore !== null ? `${t.csatScore.toFixed(1)}/5` : (t.csatRating ?? '—'),
+    `"${(t.tags ?? []).map(tg => `${tg.tagCategory}:${tg.tag}`).join('; ').replace(/"/g, '""')}"`,
     ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
     `"${new Date(t.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}"`,
   ]);
@@ -643,6 +758,9 @@ const MetricsTicketTable = ({
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 CSAT
               </th>
+              <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Tags
+              </th>
               {customFieldKeys.length > 0 && (
                 <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                   Custom Fields
@@ -694,6 +812,23 @@ const MetricsTicketTable = ({
                   {row.csatScore !== null
                     ? `${row.csatScore.toFixed(1)}/5`
                     : (row.csatRating ?? '—')}
+                </td>
+                <td className='px-4 py-2'>
+                  {row.tags && row.tags.length > 0 ? (
+                    <div className='flex flex-wrap gap-1'>
+                      {row.tags.map(tg => (
+                        <span
+                          key={`${tg.tagCategory}:${tg.tag}`}
+                          className='inline-flex items-center rounded-[4px] border border-desk-border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground dark:border-border'
+                          title={`${tg.tagCategory}: ${tg.tag}`}
+                        >
+                          {tg.tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className='text-xs text-muted-foreground'>—</span>
+                  )}
                 </td>
                 {customFieldKeys.length > 0 && (
                   <td className='px-4 py-2'>
@@ -801,12 +936,16 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedStageNames,
     selectedPriorities,
     selectedUserGroupIds,
+    selectedTagCategory,
+    selectedTagValues,
     selectedCustomFieldValues,
     setDateRange: persistDateRange,
     setSelectedAssigneeIds,
     setSelectedStageNames,
     setSelectedPriorities,
     setSelectedUserGroupIds,
+    setSelectedTagCategory,
+    setSelectedTagValues,
     setSelectedCustomFieldValues,
     comparedChannelIds,
     setComparedChannelIds,
@@ -842,8 +981,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee'>('priority');
-  const [expandedChart, setExpandedChart] = useState<'priority' | 'trend' | 'assignee' | null>(
+  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee' | 'tags'>('priority');
+  const [expandedChart, setExpandedChart] = useState<'priority' | 'trend' | 'assignee' | 'tags' | null>(
     null,
   );
   const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
@@ -917,6 +1056,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     (!isMultiDesk && selectedStageNames.length > 0) ||
     selectedPriorities.length > 0 ||
     selectedUserGroupIds.length > 0 ||
+    selectedTagCategory !== null ||
+    selectedTagValues.length > 0 ||
     (!isMultiDesk && activeCustomFieldKeys.length > 0);
   const hasAnyFiltersActive = selectedAssigneeIds.length > 0 || hasMoreFiltersActive;
 
@@ -943,6 +1084,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     isMultiDesk ? [] : selectedStageNames,
     selectedPriorities,
     selectedUserGroupIds,
+    selectedTagValues,
   );
 
   const availableCustomFields = useMemo(() => {
@@ -1003,6 +1145,33 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     value: p.count,
     color: PRIORITY_COLORS[p.priority] ?? '#94a3b8',
   }));
+
+  const activeTagCategory = selectedTagCategory;
+
+  const tagCategoryData = useMemo(
+    () =>
+      (data?.tagCategories ?? []).map((tc, i) => ({
+        name: tc.tagCategory,
+        value: tc.count,
+        color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
+      })),
+    [data?.tagCategories],
+  );
+
+  const tagBreakdownData = useMemo(() => {
+    let rows = activeTagCategory
+      ? (data?.tagBreakdown ?? []).filter(tb => tb.tagCategory === activeTagCategory)
+      : (data?.tagBreakdown ?? []);
+    if (selectedTagValues.length > 0) {
+      const tagSet = new Set(selectedTagValues.map(tv => tv.slice(tv.indexOf(':') + 1)));
+      rows = rows.filter(tb => tagSet.has(tb.tag));
+    }
+    return rows.map((tb, i) => ({
+      name: tb.tag,
+      value: tb.count,
+      color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
+    }));
+  }, [data?.tagBreakdown, activeTagCategory, selectedTagValues]);
 
   const trendData = useMemo(
     () => (data?.trend ?? []).map(d => ({ ...d, label: formatTrendLabel(d.date, isHourly) })),
@@ -1448,6 +1617,136 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         </PopoverPrimitive.Portal>
                       </PopoverPrimitive.Root>
 
+                      {/* Tag Category (single-select) */}
+                      <PopoverPrimitive.Root
+                        open={activeSubmenu === '__tagCategory'}
+                        onOpenChange={nextOpen =>
+                          setActiveSubmenu(nextOpen ? '__tagCategory' : null)
+                        }
+                      >
+                        <PopoverPrimitive.Trigger asChild>
+                          <button
+                            type='button'
+                            className={cn(
+                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                              activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
+                            )}
+                            data-track-category='DeskMetrics'
+                            data-track-name='OpenTagCategorySubmenu'
+                          >
+                            <div className='flex min-w-0 items-center gap-3'>
+                              <Tag size={16} className='shrink-0' />
+                              <span>Tag Category</span>
+                              {selectedTagCategory !== null && (
+                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                              )}
+                            </div>
+                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                          </button>
+                        </PopoverPrimitive.Trigger>
+                        <PopoverPrimitive.Portal>
+                          <PopoverPrimitive.Content
+                            side='right'
+                            align='start'
+                            sideOffset={4}
+                            collisionPadding={12}
+                            className='z-[70] outline-none'
+                            data-custom-field-submenu='true'
+                            onOpenAutoFocus={event => event.preventDefault()}
+                          >
+                            <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
+                              <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                                Select Category
+                              </div>
+                              <div className='max-h-72 overflow-y-auto p-1'>
+                                {(data?.tagCategories ?? []).length === 0 ? (
+                                  <div className='p-6 text-center text-sm text-muted-foreground'>
+                                    No categories
+                                  </div>
+                                ) : (
+                                  <div className='space-y-0.5'>
+                                    {(data?.tagCategories ?? []).map(tc => (
+                                      <button
+                                        key={tc.tagCategory}
+                                        type='button'
+                                        onClick={() => {
+                                          setSelectedTagCategory(
+                                            selectedTagCategory === tc.tagCategory
+                                              ? null
+                                              : tc.tagCategory,
+                                          );
+                                          setActiveSubmenu(null);
+                                        }}
+                                        className={cn(
+                                          'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
+                                          selectedTagCategory === tc.tagCategory
+                                            ? 'bg-accent text-accent-foreground'
+                                            : 'text-foreground hover:bg-muted',
+                                        )}
+                                      >
+                                        <span className='truncate'>{tc.tagCategory}</span>
+                                        <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
+                                          {tc.count}
+                                        </span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </PopoverPrimitive.Content>
+                        </PopoverPrimitive.Portal>
+                      </PopoverPrimitive.Root>
+
+                      {/* Tags within selected category */}
+                      {selectedTagCategory !== null && (
+                        <PopoverPrimitive.Root
+                          open={activeSubmenu === '__tags'}
+                          onOpenChange={nextOpen =>
+                            setActiveSubmenu(nextOpen ? '__tags' : null)
+                          }
+                        >
+                          <PopoverPrimitive.Trigger asChild>
+                            <button
+                              type='button'
+                              className={cn(
+                                'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                activeSubmenu === '__tags' && 'bg-muted font-medium',
+                              )}
+                              data-track-category='DeskMetrics'
+                              data-track-name='OpenTagsSubmenu'
+                            >
+                              <div className='flex min-w-0 items-center gap-3'>
+                                <Tag size={16} className='shrink-0' />
+                                <span>Tags</span>
+                                {selectedTagValues.length > 0 && (
+                                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                )}
+                              </div>
+                              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                            </button>
+                          </PopoverPrimitive.Trigger>
+                          <PopoverPrimitive.Portal>
+                            <PopoverPrimitive.Content
+                              side='right'
+                              align='start'
+                              sideOffset={4}
+                              collisionPadding={12}
+                              className='z-[70] outline-none'
+                              data-custom-field-submenu='true'
+                              onOpenAutoFocus={event => event.preventDefault()}
+                            >
+                              <TagsInCategorySubmenu
+                                channelIds={selectedDeskIds}
+                                category={selectedTagCategory}
+                                selectedTags={selectedTagValues}
+                                onChange={setSelectedTagValues}
+                              />
+                            </PopoverPrimitive.Content>
+                          </PopoverPrimitive.Portal>
+                        </PopoverPrimitive.Root>
+                      )}
+
                       {!isMultiDesk && stageOptions.length > 0 && (
                         <PopoverPrimitive.Root
                           open={activeSubmenu === '__stages'}
@@ -1569,6 +1868,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         setSelectedStageNames([]);
                         setSelectedPriorities([]);
                         setSelectedUserGroupIds([]);
+                        setSelectedTagCategory(null);
+                        setSelectedTagValues([]);
                         clearAllCustomFieldFilters();
                       }}
                       className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
@@ -1911,6 +2212,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           {chartView === 'trend' &&
                             `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                           {chartView === 'assignee' && 'Tickets by assignee'}
+                          {chartView === 'tags' && (activeTagCategory ? `Tags in "${activeTagCategory}"` : 'Tickets by tag category')}
                         </div>
                         <div className='flex items-center gap-2'>
                           <div className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'>
@@ -1955,6 +2257,20 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               )}
                             >
                               By Assignee
+                            </button>
+                            <button
+                              type='button'
+                              onClick={() => setChartView('tags')}
+                              data-track-category='DeskMetrics'
+                              data-track-name='ChartViewTags'
+                              className={cn(
+                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                                chartView === 'tags'
+                                  ? 'bg-background text-foreground shadow-sm'
+                                  : 'text-muted-foreground hover:text-foreground',
+                              )}
+                            >
+                              By Tags
                             </button>
                           </div>
                           <button
@@ -2088,6 +2404,43 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             </ResponsiveContainer>
                           </div>
                         ))}
+
+                      {chartView === 'tags' &&
+                        (() => {
+                          const chartData = activeTagCategory ? tagBreakdownData : tagCategoryData;
+                          return chartData.length === 0 ? (
+                            <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
+                              No tag data in range
+                            </div>
+                          ) : (
+                            <div className='h-[280px]'>
+                              <ResponsiveContainer width='100%' height='100%'>
+                                <PieChart>
+                                  <Pie
+                                    data={chartData}
+                                    dataKey='value'
+                                    nameKey='name'
+                                    innerRadius={70}
+                                    outerRadius={105}
+                                    paddingAngle={3}
+                                    cx='35%'
+                                  >
+                                    {chartData.map(entry => (
+                                      <Cell key={entry.name} fill={entry.color} />
+                                    ))}
+                                  </Pie>
+                                  <RechartsTooltip cursor={false} />
+                                  <Legend
+                                    layout='vertical'
+                                    align='right'
+                                    verticalAlign='middle'
+                                    content={renderTagLegend as never}
+                                  />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </div>
+                          );
+                        })()}
                     </div>
 
                     {/* Ticket table */}
@@ -2125,6 +2478,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {expandedChart === 'trend' &&
                   `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                 {expandedChart === 'assignee' && 'Tickets by assignee'}
+                {expandedChart === 'tags' && (activeTagCategory ? `Tags in "${activeTagCategory}"` : 'Tickets by tag category')}
               </h2>
               <button
                 type='button'
@@ -2230,6 +2584,40 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     </BarChart>
                   </ResponsiveContainer>
                 ))}
+              {expandedChart === 'tags' &&
+                (() => {
+                  const chartData = activeTagCategory ? tagBreakdownData : tagCategoryData;
+                  return chartData.length === 0 ? (
+                    <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                      No tag data in range
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width='100%' height='100%'>
+                      <PieChart>
+                        <Pie
+                          data={chartData}
+                          dataKey='value'
+                          nameKey='name'
+                          innerRadius='30%'
+                          outerRadius='55%'
+                          paddingAngle={3}
+                          cx='35%'
+                        >
+                          {chartData.map(entry => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip cursor={false} />
+                        <Legend
+                          layout='vertical'
+                          align='right'
+                          verticalAlign='middle'
+                          content={renderTagLegend as never}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
             </div>
           </div>
         </div>

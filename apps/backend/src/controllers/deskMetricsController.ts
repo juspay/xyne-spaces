@@ -57,6 +57,7 @@ export class DeskMetricsController {
         stageNames: string[];
         priorities: TicketPriority[];
         userGroupIds: string[];
+        tagValues: string[];
         customFieldFilter?: CustomFieldFilterArg;
       }
     | { ok: false; error: string } {
@@ -104,6 +105,7 @@ export class DeskMetricsController {
         (priority): priority is TicketPriority => validPriorities.has(priority),
       );
       const userGroupIds = parseJsonStringArray(getStringQueryParam(req, 'userGroupIds'));
+      const tagValues = parseJsonStringArray(getStringQueryParam(req, 'tagValues'));
       const customFieldKeys = parseJsonStringArray(getStringQueryParam(req, 'customFieldKeys'));
 
       const parsePerKeyFilters = (
@@ -146,6 +148,7 @@ export class DeskMetricsController {
         stageNames,
         priorities,
         userGroupIds,
+        tagValues,
         ...(customFieldFilter ? { customFieldFilter } : {}),
       };
   }
@@ -159,6 +162,7 @@ export class DeskMetricsController {
       stageNames: string[];
       priorities: TicketPriority[];
       userGroupIds: string[];
+      tagValues: string[];
       customFieldFilter?: CustomFieldFilterArg;
     },
   ): Promise<DeskMetricsResponse> {
@@ -179,6 +183,7 @@ export class DeskMetricsController {
       stageNames: query.stageNames,
       priorities: query.priorities,
       userGroupIds: query.userGroupIds,
+      tagValues: query.tagValues,
       customFieldFilter: query.customFieldFilter,
     });
   }

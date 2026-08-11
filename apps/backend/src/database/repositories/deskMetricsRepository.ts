@@ -78,6 +78,7 @@ export class DeskMetricsRepository {
     stageNames: string[];
     priorities: TicketPriority[];
     userGroupIds: string[];
+    tagValues: string[];
     customFieldFilter?: {
       keys: string[];
       perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
@@ -90,6 +91,7 @@ export class DeskMetricsRepository {
       stageNames,
       priorities,
       userGroupIds,
+      tagValues,
       customFieldFilter,
     } = params;
     const db = this.getDbInstance();
@@ -203,6 +205,25 @@ export class DeskMetricsRepository {
         )`;
     }
 
+    // Tag filter: parse "category:tag" composite values (format used by GeneratedTagsSubmenu)
+    const tagPairs = tagValues
+      .map(v => { const i = v.indexOf(':'); return i === -1 ? null : { cat: v.slice(0, i), tag: v.slice(i + 1) }; })
+      .filter((p): p is { cat: string; tag: string } => p !== null);
+
+    const tagExists: Prisma.Sql =
+      tagPairs.length > 0
+        ? Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "public"."tickets" ft
+            JOIN "public"."emails" e ON e."conversationId" = ft."conversationId"
+            JOIN non_zero.tags tg
+              ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+              AND (${tagPairs
+                .map(p => Prisma.sql`(tg."tagCategory" = ${p.cat} AND tg.tag = ${p.tag})`)
+                .reduce((acc, cur) => Prisma.sql`${acc} OR ${cur}`)})
+            WHERE ft.id = ta."ticketId"
+          )`
+        : Prisma.sql``;
+
     const ticketAttributeConditions: Prisma.Sql[] = [];
     if (stageNames.length > 0) {
       ticketAttributeConditions.push(
@@ -241,31 +262,44 @@ export class DeskMetricsRepository {
           AND ta."activityType" = 'TICKET_CREATED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
           ${ticketScopeExists}
+          ${tagExists}
       )`;
 
     const frtStop = frtStopSql();
-    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, trend, agents] =
-      await Promise.all([
-        this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
-        this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
-        this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
-        this.stageCounts(db, cohortCte),
-        this.priorityBreakdown(db, cohortCte),
-        this.csatStats(db, channelId, gte, lte, ticketScopeExists),
-        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
-        this.agentPerformance(
-          db,
-          cohortCte,
-          frtStop,
-          resolvedAtSql,
-          reopenedSql,
-          channelId,
-          gte,
-          lte,
-          assigneeIds,
-          ticketScopeExists
-        ),
-      ]);
+    const [
+      aggregates,
+      tickets,
+      emailRepliesInRange,
+      stageCounts,
+      priority,
+      csat,
+      trend,
+      agents,
+      tagCategories,
+      tagBreakdown,
+    ] = await Promise.all([
+      this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
+      this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
+      this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
+      this.stageCounts(db, cohortCte),
+      this.priorityBreakdown(db, cohortCte),
+      this.csatStats(db, channelId, gte, lte, ticketScopeExists),
+      this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
+      this.agentPerformance(
+        db,
+        cohortCte,
+        frtStop,
+        resolvedAtSql,
+        reopenedSql,
+        channelId,
+        gte,
+        lte,
+        assigneeIds,
+        ticketScopeExists
+      ),
+      this.tagCategoryBreakdown(db, cohortCte),
+      this.tagBreakdown(db, cohortCte),
+    ]);
 
     return {
       range: { from: gte.toISOString(), to: lte.toISOString() },
@@ -279,6 +313,8 @@ export class DeskMetricsRepository {
       },
       priority,
       trend,
+      tagCategories,
+      tagBreakdown,
       tickets,
       agents,
     };
@@ -379,6 +415,7 @@ export class DeskMetricsRepository {
         rt_seconds: number | null;
         csat_value: { rating?: string; score?: number | string | null } | null;
         custom_fields: Record<string, string> | null;
+        ticket_tags: Array<{ tagCategory: string; tag: string }> | null;
       }>
     >(
       Prisma.sql`
@@ -402,6 +439,19 @@ export class DeskMetricsRepository {
               FILTER (WHERE field_name IS NOT NULL AND field_value IS NOT NULL) AS custom_fields
           FROM deduped_fev
           GROUP BY ticket_id
+        ),
+        ticket_tags_agg AS (
+          SELECT deduped."ticketId" AS ticket_id,
+            jsonb_agg(jsonb_build_object('tagCategory', deduped.tag_category, 'tag', deduped.tag)) AS tags
+          FROM (
+            SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category, tg.tag
+            FROM cohort c
+            JOIN "public"."tickets" t ON t.id = c."ticketId"
+            JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
+            JOIN non_zero.tags tg
+              ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+          ) deduped
+          GROUP BY deduped."ticketId"
         )
         SELECT
           c."ticketId" AS ticket_id,
@@ -418,11 +468,13 @@ export class DeskMetricsRepository {
           (SELECT ta.value FROM "public"."ticket_activities" ta
             WHERE ta."ticketId" = c."ticketId" AND ta."activityType" = 'CSAT_RECEIVED'
             ORDER BY ta."timestamp" DESC LIMIT 1) AS csat_value,
-          fv.custom_fields
+          fv.custom_fields,
+          tta.tags AS ticket_tags
         FROM cohort c
         JOIN "public"."tickets" t ON t.id = c."ticketId"
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
         LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
+        LEFT JOIN ticket_tags_agg tta ON tta.ticket_id = c."ticketId"
         ORDER BY c.created_at DESC
       `
     );
@@ -444,8 +496,49 @@ export class DeskMetricsRepository {
         csatScore: typeof score === 'number' && Number.isFinite(score) ? score : null,
         csatRating: r.csat_value?.rating ?? null,
         customFields: r.custom_fields ?? null,
+        tags: r.ticket_tags ?? null,
       };
     });
+  }
+
+  private async tagCategoryBreakdown(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<Array<{ tagCategory: string; count: number }>> {
+    const rows = await db.$queryRaw<Array<{ tag_category: string; count: number }>>(
+      Prisma.sql`
+        WITH ${cohortCte}
+        SELECT tg."tagCategory" AS tag_category, COUNT(DISTINCT c."ticketId")::int AS count
+        FROM cohort c
+        JOIN "public"."tickets" t ON t.id = c."ticketId"
+        JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
+        JOIN non_zero.tags tg
+          ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+        GROUP BY tg."tagCategory"
+        ORDER BY count DESC
+      `
+    );
+    return rows.map(r => ({ tagCategory: r.tag_category, count: r.count }));
+  }
+
+  private async tagBreakdown(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<Array<{ tag: string; tagCategory: string; count: number }>> {
+    const rows = await db.$queryRaw<Array<{ tag: string; tag_category: string; count: number }>>(
+      Prisma.sql`
+        WITH ${cohortCte}
+        SELECT tg.tag, tg."tagCategory" AS tag_category, COUNT(DISTINCT c."ticketId")::int AS count
+        FROM cohort c
+        JOIN "public"."tickets" t ON t.id = c."ticketId"
+        JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
+        JOIN non_zero.tags tg
+          ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+        GROUP BY tg.tag, tg."tagCategory"
+        ORDER BY count DESC
+      `
+    );
+    return rows.map(r => ({ tag: r.tag, tagCategory: r.tag_category, count: r.count }));
   }
 
   private async agentPerformance(
