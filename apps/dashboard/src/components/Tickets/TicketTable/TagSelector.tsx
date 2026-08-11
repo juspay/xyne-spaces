@@ -10,6 +10,7 @@ interface TagSelectorProps {
   onCreateTag?: (tagName: string) => void;
   stopEditing?: () => void;
   inlineTags?: boolean;
+  allowCreate?: boolean;
 }
 
 export const TagSelector: React.FC<TagSelectorProps> = ({
@@ -19,6 +20,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   onCreateTag,
   stopEditing,
   inlineTags = false,
+  allowCreate = true,
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [search, setSearch] = useState('');
@@ -37,9 +39,10 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   }, [availableTags, search]);
 
   const canCreate = useMemo(() => {
+    if (!allowCreate) return false;
     const trimmed = search.trim();
     return trimmed && !availableTags.some(t => t.toLowerCase() === trimmed.toLowerCase());
-  }, [search, availableTags]);
+  }, [search, availableTags, allowCreate]);
 
   const toggle = (tag: string) => {
     const next = selectedTags.includes(tag)
