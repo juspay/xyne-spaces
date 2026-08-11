@@ -3,6 +3,7 @@ import {
   defineQueries,
   type AnyQueryDefinition,
   type QueryRegistry,
+  type AnyQueryRegistry,
 } from '@rocicorp/zero';
 import {
   BaseTicketType,
@@ -11,6 +12,7 @@ import {
   defineQuery,
   DocType,
   EntityUserAccess,
+  flowStepVisibilitySchemaShape,
   FormContextType,
   FormEntityType,
   LookupType,
@@ -70,6 +72,7 @@ const kanbanTicketsPageArgsSchema = z.object({
   boardId: z.string().optional(),
   userId: z.string().optional(),
   groupId: z.string().optional(),
+  ...flowStepVisibilitySchemaShape,
   columnType: z.enum(['stage', 'status']).optional(),
   stageName: z.string(),
   limit: z.number(),
@@ -254,6 +257,10 @@ const applyKanbanTicketPageConditions = (
   // Scope by selected boards server-side so multi-board pagination stays correct.
   if (!boardId && filters?.boards?.length) {
     query = query.where('boardId', 'IN', filters.boards);
+  }
+
+  if (args.excludeFlowSteps) {
+    query = query.where('rootId', 'IS', null);
   }
 
   switch (viewMode) {
@@ -519,7 +526,7 @@ const applyCanvasVisibilityQueryFilter = (
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
   query.related('userStatuses', (status: any) => status.where('userId', userId));
 
-export const queries = defineQueries({
+export const queries: AnyQueryRegistry = defineQueries({
   // Conversation and Message Queries
   channelConversations: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean() }),
@@ -793,9 +800,21 @@ export const queries = defineQueries({
       boardId: z.string().optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
+      ...flowStepVisibilitySchemaShape,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { viewMode, projectId, boardId, userId, groupId, formEntityValueFieldIds } }) => {
+    ({
+      ctx,
+      args: {
+        viewMode,
+        projectId,
+        boardId,
+        userId,
+        groupId,
+        excludeFlowSteps,
+        formEntityValueFieldIds,
+      },
+    }) => {
       let query = zql.tickets;
 
       // Apply explicit board filter if provided (works across all view modes)
@@ -810,6 +829,10 @@ export const queries = defineQueries({
       // This allows combining project scoping with user/group filtering
       if (!boardId && viewMode !== 'my-tickets' && projectId) {
         query = query.where('projectId', projectId);
+      }
+
+      if (excludeFlowSteps) {
+        query = query.where('rootId', 'IS', null);
       }
       // Apply context filter based on viewMode
       switch (viewMode) {
@@ -882,9 +905,21 @@ export const queries = defineQueries({
       boardId: z.string().optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
+      ...flowStepVisibilitySchemaShape,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { viewMode, projectId, boardId, userId, groupId, formEntityValueFieldIds } }) => {
+    ({
+      ctx,
+      args: {
+        viewMode,
+        projectId,
+        boardId,
+        userId,
+        groupId,
+        excludeFlowSteps,
+        formEntityValueFieldIds,
+      },
+    }) => {
       let query = zql.tickets;
 
       // Apply explicit board filter if provided (works across all view modes)
@@ -899,6 +934,10 @@ export const queries = defineQueries({
       // This allows combining project scoping with user/group filtering
       if (!boardId && viewMode !== 'my-tickets' && projectId) {
         query = query.where('projectId', projectId);
+      }
+
+      if (excludeFlowSteps) {
+        query = query.where('rootId', 'IS', null);
       }
       // Apply context filter based on viewMode
       switch (viewMode) {
@@ -1811,6 +1850,9 @@ export const queries = defineQueries({
       .related('ticketStageRequests', a => a.related('form'))
       .one();
   }),
+  ticketRowById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.tickets.where('id', ticketId).one();
+  }),
   ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
@@ -1932,6 +1974,17 @@ export const queries = defineQueries({
       )
       .orderBy('id', 'asc');
   }),
+  subTicketMappingsForTickets: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) => {
+      return zql.ticket_sub_ticket_mappings
+        .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
+        .related('subTicket', (subTicketQuery) =>
+          subTicketQuery.related('conversation').related('mappedTicket')
+        )
+        .orderBy('id', 'asc');
+    }
+  ),
 
   subTicketsByMappedTicketId: defineQuery(
     z.object({ mappedTicketId: z.string() }),
@@ -2950,6 +3003,23 @@ export const queries = defineQueries({
   ticketActivities: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) =>
     zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc')
   ),
+  ticketActivitiesForTickets: defineQuery(
+    z.object({
+      ticketIds: z.array(z.string()),
+      limit: z.number(),
+      start: z.object({ timestamp: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { ticketIds, limit, start } }) => {
+      let query = zql.ticket_activities
+        .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
+        .orderBy('timestamp', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ timestamp: start.timestamp, id: start.id }, { inclusive: false });
+      }
+      return query.limit(limit);
+    },
+  ),
 
   channelAndThreadMessages: defineQuery(
     z.object({ channelId: z.string() }),
@@ -3006,6 +3076,9 @@ export const queries = defineQueries({
     }
   ),
 
+  ticketExportsForCurrentUser: defineQuery(() => {
+    return zql.ticket_exports.orderBy('createdAt', 'desc').limit(100);
+  }),
   getAllProjects: defineQuery(() => {
     return zql.projects
       .where('type', '!=', ProjectType.DM)
@@ -3908,6 +3981,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   }),
   getAllFormsList: defineQuery(() => {
     return zql.forms.orderBy('createdAt', 'desc');
+  }),
+  getFormById: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
+    return zql.forms.where('id', formId).one();
   }),
   // Query for form fields by form ID
   // Order by sequenceNumber first; fall back to createdAt for rows where all sequenceNumbers are 0 (e.g. legacy data before backfill)

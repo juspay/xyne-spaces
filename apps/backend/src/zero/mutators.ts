@@ -94,6 +94,13 @@ import {
   isSdlcTicketMetadata,
   sdlcDiscussionSchema,
 } from '@xyne/shared';
+import {
+  FLOW_STAGE_NAMES,
+  FlowPlanSchema,
+  deserializeFlowPlan,
+  serializeFlowPlan,
+  validateFlowPlan,
+} from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
   validateFieldBranches,
@@ -152,6 +159,12 @@ import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
+import {
+  onFlowPlanUpdated,
+  onFlowStepBacklogged,
+  onFlowTicketStatusChanged,
+} from '@/services/flowCascadeService';
+import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -892,7 +905,11 @@ async function createNonParticipantSystemMessages(
   }
 }
 
-export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
+export function createMutators(
+  authData: AuthData,
+  asyncTasks: Array<() => Promise<void>>,
+  awaitedPostCommitTasks: Array<() => Promise<void>>,
+) {
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -5670,6 +5687,62 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Ticket stages are controlled by the SDLC workflow');
           }
 
+          const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          if (
+            currentBoard?.boardType === BoardType.FLOW &&
+            (params.stageName !== undefined || params.statusV2 !== undefined)
+          ) {
+            if (!params.stageName) {
+              throw new Error('Flow ticket status must change through a stage transition');
+            }
+            const [currentStage, targetStage, transitions] = await Promise.all([
+              tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
+              ),
+              tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', params.stageName).one(),
+              ),
+              tx.run(zql.stage_transitions.where('boardId', ticket.boardId)),
+            ]);
+            if (!currentStage || !targetStage) {
+              throw new Error('Flow ticket stage not found');
+            }
+            const allowed = transitions.some(
+              transition =>
+                transition.fromStageId === currentStage.id &&
+                transition.toStageId === targetStage.id,
+            );
+            if (!allowed) throw new Error('This Flow stage transition is not allowed');
+            if (
+              params.statusV2 !== undefined &&
+              params.statusV2 !== targetStage.defaultTicketStatusV2
+            ) {
+              throw new Error('Flow ticket status must match its target stage');
+            }
+            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
+            if (params.stageName === FLOW_STAGE_NAMES.BACKLOG && !flow?.planNodeId) {
+              throw new Error('The main Flow ticket cannot be moved to backlog');
+            }
+            if (
+              params.stageName === FLOW_STAGE_NAMES.BACKLOG &&
+              flow?.planNodeId &&
+              currentBoard.flowPlan
+            ) {
+              const plan = deserializeFlowPlan(currentBoard.flowPlan);
+              if (plan.decisions?.some(decision => decision.parentNodeId === flow.planNodeId)) {
+                throw new Error(
+                  'Conditional form steps cannot be moved to backlog. Submit the form to choose a path.',
+                );
+              }
+            }
+            if (flow?.planNodeId && flow.rootTicketId) {
+              const root = await tx.run(zql.tickets.where('id', flow.rootTicketId).one());
+              if (root?.statusV2 === TicketStatusV2.PAUSED) {
+                throw new Error('Flow run is paused');
+              }
+            }
+          }
+
           const now = Date.now();
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
             throw new Error("ETA cannot be set to a past date");
@@ -5740,6 +5813,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Handle board transfer
           if (params.boardId !== undefined && params.boardId !== oldBoardId) {
             const now = Date.now();
+
+            // Flow boards only receive tickets through the flow cascade or
+            // "Start flow"; runs would break if tickets moved in or out.
+            const targetBoard = await tx.run(zql.boards.where('id', params.boardId).one());
+            if (targetBoard?.boardType === BoardType.FLOW) {
+              throw new Error('Tickets cannot be moved onto a Flow board');
+            }
+            const sourceBoard = await tx.run(zql.boards.where('id', oldBoardId).one());
+            if (sourceBoard?.boardType === BoardType.FLOW) {
+              throw new Error('Tickets cannot be moved off a Flow board');
+            }
 
             // 1. Fetch all stages of the new board
             const newBoardStages = await tx.run(
@@ -5874,6 +5958,29 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
+          // Flow-board cascade: instantiate the next plan steps / cascade-cancel
+          // after this transaction commits (ticket creation cannot run inside
+          // a Zero transaction).
+          if (currentBoard?.boardType === BoardType.FLOW) {
+            const movingToBacklog =
+              params.stageName === FLOW_STAGE_NAMES.BACKLOG &&
+              ticket.stageName !== FLOW_STAGE_NAMES.BACKLOG;
+            if (movingToBacklog) {
+              awaitedPostCommitTasks.push(async () => {
+                await onFlowStepBacklogged({ ticketId: params.id, actorUserId: authData.sub });
+              });
+            } else if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
+              const newStatus = params.statusV2 as TicketStatusV2;
+              awaitedPostCommitTasks.push(async () => {
+                await onFlowTicketStatusChanged({
+                  ticketId: params.id,
+                  newStatus,
+                  actorUserId: authData.sub,
+                });
+              });
+            }
+          }
+
           // StatusV2 pause/unpause handling:
           // - Always track status change timestamp in statusUpdatedAt
           // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
@@ -5929,6 +6036,34 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   : { oldValue: ticket[field], newValue: params[field] },
               });
             }
+          }
+
+          const flowSnapshot = (
+            ticket.metadata as {
+              flow?: {
+                nodeSnapshot?: {
+                  planNodeId?: string;
+                  title?: string;
+                  gate?: { type?: string; prompt?: string };
+                };
+              };
+            } | null
+          )?.flow?.nodeSnapshot;
+          if (
+            params.statusV2 === TicketStatusV2.COMPLETED &&
+            ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+            flowSnapshot?.gate?.type === 'confirmation'
+          ) {
+            activities.push({
+              activityType: ActivityType.METADATA,
+              value: {
+                field: 'flowConfirmation',
+                planNodeId: flowSnapshot.planNodeId ?? null,
+                prompt: flowSnapshot.gate.prompt?.trim() || null,
+                confirmationText:
+                  flowSnapshot.gate.prompt?.trim() || flowSnapshot.title?.trim() || null,
+              },
+            });
           }
 
 
@@ -6318,6 +6453,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const oldType = activity.value.oldValue || 'none';
               const newType = activity.value.newValue || 'none';
               activityMessage = `${userName} changed ticket type from ${oldType} to ${newType}`;
+            } else if (
+              activity.activityType === ActivityType.METADATA &&
+              activity.value.field === 'flowConfirmation'
+            ) {
+              const confirmationText = activity.value.confirmationText;
+              activityMessage = confirmationText
+                ? `${userName} confirmed “${confirmationText}”`
+                : `${userName} completed the confirmation`;
             }
 
             if (activityMessage && ticket.conversationId) {
@@ -6647,12 +6790,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           subTicketXyneId: z.string().optional(),
         }),
         async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
-          // A ticket that is itself mapped as a subticket cannot have its own subtickets
-          const parentAsSubTicket = await tx.run(zql.sub_tickets.where('mappedTicketId', ticketId).one());
+          const parentAsSubTicket = await tx.run(
+            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
+          );
+          // Parent ticket is also needed below to denormalize channelId onto the activity.
+          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           if (parentAsSubTicket) {
-            throw new Error(`Cannot create a sub-ticket under a sub-ticket. Parent ticket ${ticketId} is already a sub-ticket.`);
+            const parentBoard = parentTicket
+              ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
+              : null;
+            if (parentBoard?.boardType !== BoardType.FLOW) {
+              throw new Error('Cannot create a sub-ticket under a sub-ticket');
+            }
           }
-
           // Create the subticket
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
@@ -6679,7 +6829,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Log activity and create system message
           const activityId = uuidv4();
-          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           await tx.mutate.ticket_activities.insert({
             workspaceId: authData.workspaceId,
             id: activityId,
@@ -7439,6 +7588,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     board: {
+      updateFlowPlan: defineMutator(
+        z.object({
+          boardId: z.string(),
+          plan: FlowPlanSchema,
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { boardId, plan, timestamp } }) => {
+          const board = await tx.run(zql.boards.where('id', boardId).one());
+          if (!board) {
+            throw new Error('Board not found');
+          }
+          if (board.boardType !== BoardType.FLOW) {
+            throw new Error('Flow plans can only be set on Flow boards');
+          }
+          validateFlowPlan(plan);
+          await validateFlowDecisionFields(tx, plan);
+          await tx.mutate.boards.update({
+            id: boardId,
+            flowPlan: serializeFlowPlan(plan),
+            updatedBy: authData.sub,
+            updatedAt: timestamp,
+          });
+          awaitedPostCommitTasks.push(async () => {
+            await onFlowPlanUpdated({ boardId, actorUserId: authData.sub });
+          });
+        },
+      ),
       update: defineMutator(
         z.object({
           boardId: z.string(),
@@ -7501,6 +7677,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
             if (boardType !== undefined && boardType !== BoardType.RELEASE) {
               throw new Error('Release boards cannot be converted to a normal board');
+            }
+          }
+
+          if (boardType !== undefined && boardType !== board.boardType) {
+            if (board.boardType === BoardType.FLOW) {
+              throw new Error('Flow boards cannot be converted to another board type');
+            }
+            if (boardType === BoardType.FLOW) {
+              throw new Error('Existing boards cannot be converted to a Flow board');
             }
           }
 

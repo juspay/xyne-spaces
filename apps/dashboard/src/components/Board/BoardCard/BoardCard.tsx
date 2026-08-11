@@ -18,6 +18,7 @@ export interface BoardWithStages {
   readonly createdAt: number;
   readonly updatedAt: number | null;
   readonly metadata?: ReadonlyJSONValue;
+  readonly flowPlan?: string | null;
   readonly stages?: readonly StageWithApprovers[] | Error;
   readonly applications?: readonly Application[] | Error;
 }
@@ -26,6 +27,9 @@ export function getBoardEditLabel(
   board: BoardWithStages,
   applicationBoardIds?: Set<string>,
 ): string {
+  if (board.boardType === BoardType.FLOW) {
+    return 'Edit Plan';
+  }
   if (board.boardType !== BoardType.RELEASE) {
     return 'Edit';
   }

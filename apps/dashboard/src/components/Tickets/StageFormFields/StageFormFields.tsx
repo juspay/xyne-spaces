@@ -37,8 +37,13 @@ interface StageFormFieldsProps {
   disabled?: boolean;
   readOnlyDocs?: boolean;
   showPersistedDocValues?: boolean;
-  idPrefix: string;
+  /** Kept for caller compatibility; no longer used since booleans became buttons */
+  idPrefix?: string;
   trackNamePrefix: string;
+  /** Lets narrow embedded forms divide boolean choices across the full row. */
+  booleanButtonsFullWidth?: boolean;
+  /** Renders settled values as an audit summary instead of disabled controls. */
+  readOnlySummary?: boolean;
 }
 
 export const StageFormFields = ({
@@ -52,8 +57,9 @@ export const StageFormFields = ({
   disabled = false,
   readOnlyDocs = false,
   showPersistedDocValues = true,
-  idPrefix,
   trackNamePrefix,
+  booleanButtonsFullWidth = false,
+  readOnlySummary = false,
 }: StageFormFieldsProps): React.JSX.Element => {
   const docAttachmentIds = useMemo(() => {
     const attachmentIds = new Set<string>();
@@ -105,8 +111,30 @@ export const StageFormFields = ({
             fieldName: field.fieldName,
           });
 
+          if (readOnlySummary && field.fieldType !== FormFieldType.DOC) {
+            const displayValue =
+              field.fieldType === FormFieldType.BOOLEAN
+                ? fieldValue[0] === 'true'
+                  ? 'Yes'
+                  : fieldValue[0] === 'false'
+                    ? 'No'
+                    : '—'
+                : fieldValue.filter(Boolean).join(', ') || '—';
+
+            return (
+              <div key={field.id} className='py-3 first:pt-0 last:pb-0'>
+                <p className='text-xs font-medium leading-4 text-muted-foreground'>
+                  {field.fieldName}
+                </p>
+                <p className='mt-1 text-sm font-semibold leading-5 text-foreground'>
+                  {displayValue}
+                </p>
+              </div>
+            );
+          }
+
           return (
-            <div key={field.id} className='mb-4'>
+            <div key={field.id} className={readOnlySummary ? 'py-3 first:pt-0 last:pb-0' : 'mb-4'}>
               <label className='mb-1 block text-sm font-medium text-foreground'>
                 {field.fieldName}
                 {!field.isOptional && <span className='text-red-500'>*</span>}
@@ -139,34 +167,34 @@ export const StageFormFields = ({
               )}
 
               {field.fieldType === FormFieldType.BOOLEAN && (
-                <div className='flex items-center gap-4'>
+                <div className={`flex gap-1.5 ${booleanButtonsFullWidth ? 'w-full' : ''}`}>
                   {[
                     { value: 'true', label: 'Yes' },
                     { value: 'false', label: 'No' },
-                  ].map(option => (
-                    <label
-                      key={option.value}
-                      className={`flex items-center gap-2 text-sm ${
-                        disabled
-                          ? 'cursor-not-allowed text-muted-foreground opacity-70'
-                          : 'cursor-pointer text-foreground'
-                      }`}
-                    >
-                      <input
-                        type='radio'
-                        name={`${idPrefix}-${field.id}`}
-                        value={option.value}
-                        checked={fieldValue[0] === option.value}
-                        onChange={() => updateFieldValue(field.id, [option.value])}
+                  ].map(option => {
+                    const isSelected = fieldValue[0] === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type='button'
+                        onClick={() => updateFieldValue(field.id, [option.value])}
                         disabled={disabled}
-                        className='h-4 w-4 border-input bg-background text-blue-600 disabled:cursor-not-allowed dark:[color-scheme:dark]'
+                        aria-pressed={isSelected}
+                        className={`${
+                          booleanButtonsFullWidth ? 'min-w-0 flex-1' : 'min-w-[64px]'
+                        } rounded-lg border px-4 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${
+                          isSelected
+                            ? 'border-zinc-900 bg-zinc-900 text-white disabled:opacity-80'
+                            : 'border-input bg-background text-muted-foreground hover:bg-muted disabled:opacity-50'
+                        }`}
                         data-track-category='Tickets'
                         data-track-name={`${trackNamePrefix}Boolean`}
                         data-track-metadata={trackMetadata}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 

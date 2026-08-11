@@ -1,5 +1,5 @@
 import { apiInstance } from './clients/apiClient';
-import { BaseTicketType, TicketPriority } from '@xyne/shared';
+import { BaseTicketType, TicketPriority, type FlowStepVisibilityOptions } from '@xyne/shared';
 
 export interface CreateTicketRequest {
   title: string;
@@ -61,7 +61,7 @@ export interface KanbanCountsFilters {
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 }
 
-export interface KanbanCountsRequest {
+export interface KanbanCountsRequest extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
   columnType?: 'stage' | 'status';
   projectId?: string;
