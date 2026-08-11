@@ -94,7 +94,7 @@ jobs:
       - name: Build
         # Matches apps/dashboard/Dockerfile — vite build needs a larger V8 heap.
         env:
-          NODE_OPTIONS: "--max-old-space-size=6144"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run build
 
   # Framework lint — self-contained (no workspace deps).
