@@ -3,21 +3,8 @@ import { useSelector } from '@xstate/react';
 import { Bot, ChevronDown, Info } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { roomActor } from '../../../machines/roomMachine';
-import type { MutableRefObject } from 'react';
-import type { CallReminderClock } from './CallPrivacyReminder';
-import type { CallPrivacyAction, CallPrivacyActionTone } from './callPrivacyActions';
 
 interface CallPrivacyIndicatorProps {
-  // Legacy props kept optional for call-site compatibility; the redesigned indicator
-  // no longer uses the reminder/checklist/recording plumbing.
-  title?: string | undefined;
-  description?: string[] | undefined;
-  actions?: CallPrivacyAction[] | undefined;
-  callId?: string | undefined;
-  activeTone?: CallPrivacyActionTone | undefined;
-  reminderTriggerKey?: number | undefined;
-  reminderEnabled?: boolean | undefined;
-  reminderClockRef?: MutableRefObject<CallReminderClock> | undefined;
   isTranscriptionEnabled?: boolean | undefined;
   isHost?: boolean | undefined;
   onToggleTranscription?: (() => void) | undefined;
@@ -47,6 +34,8 @@ export function CallPrivacyIndicator({
 }: CallPrivacyIndicatorProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const isOpen = useSelector(roomActor, state => state.context.privacyPopoverOpen);
+  // A toggle is in-flight, awaiting the agent's authoritative confirmation.
+  const isPending = useSelector(roomActor, state => state.context.transcriptionPending);
   const isPaused = !isTranscriptionEnabled;
 
   const setOpen = (open: boolean): void => {
@@ -126,11 +115,12 @@ export function CallPrivacyIndicator({
 
           <div className='mt-4 h-px bg-border' />
 
-          {/* Host: one-click remove/add. Non-host: who can remove it. */}
+          {/* Host: one-click remove/add (awaits the agent). Non-host: who can remove it. */}
           {isHost && onToggleTranscription ? (
             <button
               type='button'
               onClick={onToggleTranscription}
+              disabled={isPending}
               aria-label={isPaused ? 'Add Xyne Automatic back' : 'Remove Xyne Automatic'}
               title={
                 isPaused ? 'Resume transcription' : 'Remove Xyne Automatic (stops capturing audio)'
@@ -140,21 +130,27 @@ export function CallPrivacyIndicator({
               data-track-name='TRANSCRIPTION_TOGGLE'
               data-track-metadata={JSON.stringify({ enabled: isTranscriptionEnabled })}
               className={cn(
-                'mt-4 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors',
+                'mt-4 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                 isPaused
                   ? 'border-action-primary text-action-primary hover:bg-accent'
                   : 'border-destructive/40 text-destructive hover:bg-destructive/10',
               )}
             >
               {isPaused ? <Bot className='h-4 w-4' /> : <SlashedBot className='h-4 w-4' />}
-              {isPaused ? 'Add Xyne Automatic back' : 'Remove Xyne Automatic'}
+              {isPending
+                ? isPaused
+                  ? 'Starting…'
+                  : 'Stopping…'
+                : isPaused
+                  ? 'Add Xyne Automatic back'
+                  : 'Remove Xyne Automatic'}
             </button>
           ) : (
             <div className='mt-4 flex items-start gap-2.5 rounded-lg bg-muted px-3 py-2.5'>
               <Info className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
               <p className='text-sm leading-relaxed text-muted-foreground'>
                 Only <span className='font-semibold text-foreground'>{hostName ?? 'the host'}</span>{' '}
-                (host) can control transcription. Ask them in chat if you need the setting changed.
+                (host) can control transcription settings.
               </p>
             </div>
           )}

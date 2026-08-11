@@ -110,6 +110,18 @@ export interface TranscriptionToggleMessage {
   participantName: string;
 }
 
+/**
+ * Authoritative transcription state, broadcast by the AGENT after it actually applies
+ * (or rejects) a `transcription_toggle` command. Clients reflect their privacy state
+ * from THIS message — never from the optimistic command — so the UI can never show
+ * "off" while the agent is still capturing audio.
+ */
+export interface TranscriptionStateMessage {
+  type: 'transcription_state';
+  enabled: boolean;
+  at: number;
+}
+
 // ============================================================================
 // Union Types
 // ============================================================================
@@ -124,7 +136,8 @@ export type AIDataMessage =
   | AIControlTransferMessage
   | AIControlRequestDeniedMessage
   | AIVoiceToggleMessage
-  | TranscriptionToggleMessage;
+  | TranscriptionToggleMessage
+  | TranscriptionStateMessage;
 
 /**
  * Generic data message from data channel (before parsing)
@@ -204,15 +217,13 @@ export interface AIControlRequestDeniedEvent {
 }
 
 /**
- * Parsed transcription toggle event ready for UI (all clients react to reflect
- * the paused state: hide the agent tile, flip the banner, show a toast).
+ * Parsed authoritative transcription-state event (from the agent). Clients reflect
+ * their privacy state from this, not from the optimistic toggle command.
  */
-export interface AITranscriptionToggleEvent {
-  type: 'AI_TRANSCRIPTION_TOGGLE';
+export interface AITranscriptionStateEvent {
+  type: 'AI_TRANSCRIPTION_STATE';
   enabled: boolean;
   at: number;
-  participantId: string;
-  participantName: string;
 }
 
 /**
@@ -224,4 +235,4 @@ export type AIEvent =
   | AIControllerEvent
   | AIControlRequestEvent
   | AIControlRequestDeniedEvent
-  | AITranscriptionToggleEvent;
+  | AITranscriptionStateEvent;

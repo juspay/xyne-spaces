@@ -10,13 +10,16 @@ import { roomActor } from '../../../machines/roomMachine';
  */
 export function useTranscriptionToggleNotice(
   notice: { enabled: boolean; byName: string } | null,
+  isHost: boolean,
 ): void {
   const dismiss = useCallback(() => {
     roomActor.send({ type: 'DISMISS_TRANSCRIPTION_NOTICE' });
   }, []);
 
   useEffect(() => {
-    if (!notice) return;
+    // The host gets their own "Transcription off … Undo" toast (useTranscriptionHostToast),
+    // so skip the peer notice for them to avoid a double toast.
+    if (!notice || isHost) return;
 
     if (notice.enabled) {
       toast.info('Transcription resumed', {
@@ -37,5 +40,5 @@ export function useTranscriptionToggleNotice(
         onAutoClose: dismiss,
       });
     }
-  }, [notice, dismiss]);
+  }, [notice, isHost, dismiss]);
 }

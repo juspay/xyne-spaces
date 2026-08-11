@@ -11,7 +11,7 @@ import {
   AIControllerEvent,
   AIControlRequestEvent,
   AIControlRequestDeniedEvent,
-  AITranscriptionToggleEvent,
+  AITranscriptionStateEvent,
   AIInviteUser,
 } from './types';
 
@@ -79,14 +79,12 @@ export function parseAIDataMessage(data: RawDataMessage): AIEvent | null {
     return event;
   }
 
-  // Handle transcription toggle messages (host paused/resumed the agent)
-  if (data.type === 'transcription_toggle' && typeof data.enabled === 'boolean') {
-    const event: AITranscriptionToggleEvent = {
-      type: 'AI_TRANSCRIPTION_TOGGLE',
+  // Handle authoritative transcription-state broadcasts (from the agent)
+  if (data.type === 'transcription_state' && typeof data.enabled === 'boolean') {
+    const event: AITranscriptionStateEvent = {
+      type: 'AI_TRANSCRIPTION_STATE',
       enabled: data.enabled,
       at: data.at ?? Date.now(),
-      participantId: data.participantId ?? '',
-      participantName: data.participantName ?? '',
     };
     return event;
   }

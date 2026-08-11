@@ -6,12 +6,11 @@ import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
-import { createCallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
-import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import { useHandRaise } from '../hooks/useHandRaise';
 import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
 import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNotice';
 import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
+import { useTranscriptionPendingTimeout } from '../hooks/useTranscriptionPendingTimeout';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -82,6 +81,7 @@ export function CustomLiveKitRoom({
     transcriptionAgentLeft,
     isTranscriptionEnabled,
     transcriptionToggleNotice,
+    transcriptionPending,
     aiController,
     pendingControlRequest,
     isAiControlRequested,
@@ -107,14 +107,6 @@ export function CustomLiveKitRoom({
   // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
   const { raisedHands, toggleHandRaise } = useHandRaise(room);
   useAgentLeftWarning(transcriptionAgentLeft);
-  useTranscriptionToggleNotice(transcriptionToggleNotice);
-  // Session-scoped reminder clock lives here (always mounted for the whole call)
-  // so the transcription disclosure timers survive the mini <-> full view switch.
-  // It is passed to FullCallView only; mini call view never needs it.
-  const privacyReminderClockRef = useRef<CallReminderClock>(createCallReminderClock());
-  useEffect(() => {
-    privacyReminderClockRef.current = createCallReminderClock();
-  }, [callId]);
 
   // Compute state from LiveKit instead of storing in context
   const localParticipant = isNativeMode
@@ -214,14 +206,20 @@ export function CustomLiveKitRoom({
   }, []);
 
   const [showEndCallModal, setShowEndCallModal] = useState(false);
-  // Shown to the host at end-of-call only when transcription is currently OFF.
+  // Solo-host disposition modal (host alone + transcription off).
   const [showDispositionModal, setShowDispositionModal] = useState(false);
+  // Opt-in delete-transcript choice (default OFF = keep). Used by both end-of-call modals.
+  const [deleteTranscript, setDeleteTranscript] = useState(false);
   const [dispositionSubmitting, setDispositionSubmitting] = useState(false);
   const [dispositionError, setDispositionError] = useState<string | null>(null);
 
   const isHost = useIsCallHost(externalId, user?.id);
   // Host's own "Transcription off … Undo" toast when they stop the agent.
   useTranscriptionHostToast(isTranscriptionEnabled, isHost);
+  // Peers see "the host stopped transcription" (host skipped — they get the toast above).
+  useTranscriptionToggleNotice(transcriptionToggleNotice, isHost);
+  // Fail-safe: clear pending + error if the agent never confirms a toggle.
+  useTranscriptionPendingTimeout(transcriptionPending);
   // Mirror the host's transcription on/off into room metadata (on change) so
   // participants who join later stay in sync — LiveKit data messages don't reach
   // participants who weren't present when the host toggled.
@@ -347,65 +345,85 @@ export function CustomLiveKitRoom({
     [isChatOpen, isOnlyParticipant, room?.remoteParticipants.size, saveWhiteboardIfNeeded],
   );
 
-  // Normal end flow, run after any transcript-disposition prompt is resolved.
-  const proceedWithEnd = useCallback(() => {
-    if (isHost && !isOnlyParticipant) {
-      setShowEndCallModal(true);
-    } else {
-      handleDisconnect();
-    }
-  }, [isHost, isOnlyParticipant, handleDisconnect]);
-
   const handleDisconnectClick = useCallback(() => {
-    // Ask the host to keep/discard only when they end the call while transcription is OFF.
-    // Every other case (not host, never paused, paused-then-resumed) keeps + generates
-    // artifacts by default, so we go straight to the normal end flow.
-    if (isHost && !isTranscriptionEnabled) {
+    // Solo host + transcription OFF → focused disposition modal (no end-for-all/leave
+    // choice is needed when alone). Host with others → end-call modal (with the delete
+    // toggle when transcription is off). Everything else → disconnect directly.
+    if (isHost && isOnlyParticipant && !isTranscriptionEnabled) {
       setShowDispositionModal(true);
       return;
     }
-    proceedWithEnd();
-  }, [isHost, isTranscriptionEnabled, proceedWithEnd]);
+    if (isHost && !isOnlyParticipant) {
+      setShowEndCallModal(true);
+      return;
+    }
+    handleDisconnect();
+  }, [isHost, isOnlyParticipant, isTranscriptionEnabled, handleDisconnect]);
 
-  const handleTranscriptDisposition = useCallback(
-    (disposition: 'keep' | 'discard') => {
+  // Apply the delete/keep choice (only when transcription is OFF) then end the call.
+  // Delete is awaited/blocking so nothing the host chose to delete is generated or indexed.
+  const endWithDisposition = useCallback(
+    (endForAll: boolean) => {
+      const closeModals = (): void => {
+        setShowEndCallModal(false);
+        setShowDispositionModal(false);
+      };
+      const needsDisposition = isHost && !isTranscriptionEnabled;
+      if (!needsDisposition) {
+        closeModals();
+        handleDisconnect(endForAll);
+        return;
+      }
       if (dispositionSubmitting) return;
       setDispositionError(null);
+      if (!deleteTranscript) {
+        // Keep is the backend default; fire-and-forget can't lose data.
+        void callService.setTranscriptDisposition(callId, 'keep');
+        closeModals();
+        handleDisconnect(endForAll);
+        return;
+      }
+      // Delete is safety-critical: confirm with the backend BEFORE ending, otherwise it
+      // defaults to keeping the transcript the host chose to delete.
       setDispositionSubmitting(true);
       void (async (): Promise<void> => {
         try {
-          await callService.setTranscriptDisposition(callId, disposition);
-          setShowDispositionModal(false);
-          proceedWithEnd();
+          await callService.setTranscriptDisposition(callId, 'discard');
+          closeModals();
+          handleDisconnect(endForAll);
         } catch {
-          if (disposition === 'keep') {
-            // Keep is the backend default anyway — proceed even if the request failed.
-            setShowDispositionModal(false);
-            proceedWithEnd();
-          } else {
-            // Discard is safety-critical: do NOT end the call until the backend confirms
-            // it, otherwise it would default to keeping the transcript the host discarded.
-            // Keep the modal open with a visible error so the host can retry.
-            setDispositionError('Could not discard the transcript. Please try again.');
-          }
+          setDispositionError('Could not delete the transcript. Please try again.');
         } finally {
           setDispositionSubmitting(false);
         }
       })();
     },
-    [callId, proceedWithEnd, dispositionSubmitting],
+    [
+      isHost,
+      isTranscriptionEnabled,
+      dispositionSubmitting,
+      deleteTranscript,
+      callId,
+      handleDisconnect,
+    ],
   );
 
+  const closeEndCallModal = useCallback(() => {
+    if (dispositionSubmitting) return;
+    setShowEndCallModal(false);
+    setDispositionError(null);
+  }, [dispositionSubmitting]);
+
   const closeDispositionModal = useCallback(() => {
+    if (dispositionSubmitting) return;
     setShowDispositionModal(false);
     setDispositionError(null);
-  }, []);
+  }, [dispositionSubmitting]);
 
-  // End call for everyone (host only)
+  // End call for everyone (host only) — also resolves the keep/discard choice.
   const handleEndForAll = useCallback(() => {
-    // handleDisconnect will close thread panel and send DISCONNECT with endForAll=true
-    handleDisconnect(true);
-  }, [handleDisconnect]);
+    endWithDisposition(true);
+  }, [endWithDisposition]);
 
   // AFK detection hook - shows warning modal when user is alone, auto-ends call if no response
   const {
@@ -539,16 +557,22 @@ export function CustomLiveKitRoom({
         />
         <EndCallModal
           isOpen={showEndCallModal}
-          onClose={() => setShowEndCallModal(false)}
-          onEndForSelf={() => handleDisconnect()}
+          onClose={closeEndCallModal}
+          onEndForSelf={() => endWithDisposition(false)}
           onEndForAll={handleEndForAll}
           isHost={isHost}
+          showTranscriptOption={isHost && !isTranscriptionEnabled}
+          deleteTranscript={deleteTranscript}
+          onDeleteTranscriptChange={setDeleteTranscript}
+          submitting={dispositionSubmitting}
+          error={dispositionError}
         />
         <TranscriptDispositionModal
           isOpen={showDispositionModal}
           onClose={closeDispositionModal}
-          onKeep={() => handleTranscriptDisposition('keep')}
-          onDiscard={() => handleTranscriptDisposition('discard')}
+          onConfirm={() => endWithDisposition(false)}
+          deleteTranscript={deleteTranscript}
+          onDeleteTranscriptChange={setDeleteTranscript}
           submitting={dispositionSubmitting}
           error={dispositionError}
         />
@@ -612,7 +636,6 @@ export function CustomLiveKitRoom({
         onToggleScreenShare={toggleScreenShare}
         onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
-        reminderClockRef={privacyReminderClockRef}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}
@@ -631,16 +654,22 @@ export function CustomLiveKitRoom({
       />
       <EndCallModal
         isOpen={showEndCallModal}
-        onClose={() => setShowEndCallModal(false)}
-        onEndForSelf={() => handleDisconnect()}
+        onClose={closeEndCallModal}
+        onEndForSelf={() => endWithDisposition(false)}
         onEndForAll={handleEndForAll}
         isHost={isHost}
+        showTranscriptOption={isHost && !isTranscriptionEnabled}
+        deleteTranscript={deleteTranscript}
+        onDeleteTranscriptChange={setDeleteTranscript}
+        submitting={dispositionSubmitting}
+        error={dispositionError}
       />
       <TranscriptDispositionModal
         isOpen={showDispositionModal}
         onClose={closeDispositionModal}
-        onKeep={() => handleTranscriptDisposition('keep')}
-        onDiscard={() => handleTranscriptDisposition('discard')}
+        onConfirm={() => endWithDisposition(false)}
+        deleteTranscript={deleteTranscript}
+        onDeleteTranscriptChange={setDeleteTranscript}
         submitting={dispositionSubmitting}
         error={dispositionError}
       />

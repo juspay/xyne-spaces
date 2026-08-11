@@ -1047,6 +1047,10 @@ class MultiUserTranscriber:
             if self._stt_provider != "chutes":
                 logger.info(f"[{self.__class__.__name__}] STT model override: {model}")
     
+    def is_enabled(self) -> bool:
+        """Current authoritative transcription state (True = capturing)."""
+        return self._enabled
+
     async def set_transcription_enabled(self, enabled: bool):
         """Host kill-switch. Disabled → unsubscribe from all audio (nothing reaches
         STT) and tear down every session; enabled → re-subscribe so the normal

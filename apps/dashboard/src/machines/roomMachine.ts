@@ -174,6 +174,7 @@ export interface RoomContext {
   isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
   transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
   privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
+  transcriptionPending: boolean; // A host toggle is in-flight, awaiting the agent's confirmation
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -276,13 +277,9 @@ export type RoomMachineEvent =
   | { type: 'AI_CONTROLLER_CHANGED'; controller: string | null; controllerName: string | null }
   | { type: 'TRANSCRIPTION_AGENT_LEFT' } // LiveKit signalled the agent dropped mid-call
   | { type: 'DISMISS_AGENT_LEFT_WARNING' } // User acknowledged the agent-left toast
-  | { type: 'TOGGLE_TRANSCRIPTION' } // Host toggled the transcription agent on/off (local action)
-  | {
-      type: 'TRANSCRIPTION_TOGGLED'; // Broadcast received: host paused/resumed transcription
-      enabled: boolean;
-      participantId: string;
-      participantName: string;
-    }
+  | { type: 'TOGGLE_TRANSCRIPTION' } // Host requested a transcription on/off change (command only)
+  | { type: 'TRANSCRIPTION_CONFIRMED'; enabled: boolean } // Agent's authoritative state broadcast
+  | { type: 'TRANSCRIPTION_TIMEOUT' } // No agent confirmation within the timeout window
   | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
   | { type: 'SET_PRIVACY_POPOVER'; open: boolean } // Open/close the transcription privacy popover
   | { type: 'SYNC_TRANSCRIPTION_STATE'; enabled: boolean } // Late-joiner sync from room metadata
@@ -451,18 +448,6 @@ export const roomMachine = setup({
             }
           } catch {
             // ignore malformed metadata
-          }
-        };
-
-        // Authoritative host identity for verifying privileged data-channel messages.
-        // The backend stamps `createdBy` (the host's LiveKit identity) into room metadata.
-        const getRoomHostId = (): string | null => {
-          try {
-            if (!room.metadata) return null;
-            const parsed = JSON.parse(room.metadata) as { createdBy?: unknown };
-            return typeof parsed.createdBy === 'string' ? parsed.createdBy : null;
-          } catch {
-            return null;
           }
         };
 
@@ -764,24 +749,19 @@ export const roomMachine = setup({
                 }
                 break;
 
-              case 'AI_TRANSCRIPTION_TOGGLE':
-                // SECURITY: only reflect a toggle that came from the authenticated call
-                // host. A peer could otherwise publish this on the ai-actions topic to
-                // spoof "transcription off" on everyone's screen while the agent keeps
-                // capturing audio. Verify the LiveKit-authenticated sender identity against
-                // the host id from room metadata; fail closed if either is unavailable.
+              case 'AI_TRANSCRIPTION_STATE':
+                // The AGENT's authoritative state broadcast. Only the agent (a trusted,
+                // LiveKit-authenticated identity) may drive the client's privacy state, so
+                // the UI never shows "off" unless the agent actually stopped. The raw
+                // `transcription_toggle` command is intentionally NOT reflected here — a
+                // peer could otherwise spoof "off" while the agent keeps capturing.
                 if (
                   _topic === AI_DATA_TOPIC &&
-                  event.type === 'AI_TRANSCRIPTION_TOGGLE' &&
+                  event.type === 'AI_TRANSCRIPTION_STATE' &&
                   !!_participant?.identity &&
-                  _participant.identity === getRoomHostId()
+                  isTranscriptionAgentIdentity(_participant.identity)
                 ) {
-                  sendBack({
-                    type: 'TRANSCRIPTION_TOGGLED',
-                    enabled: event.enabled,
-                    participantId: event.participantId,
-                    participantName: event.participantName,
-                  } as const);
+                  sendBack({ type: 'TRANSCRIPTION_CONFIRMED', enabled: event.enabled } as const);
                 }
                 break;
             }
@@ -1319,6 +1299,7 @@ export const roomMachine = setup({
       isTranscriptionEnabled: () => true,
       transcriptionToggleNotice: () => null,
       privacyPopoverOpen: () => false,
+      transcriptionPending: () => false,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1473,6 +1454,7 @@ export const roomMachine = setup({
     isTranscriptionEnabled: true,
     transcriptionToggleNotice: null,
     privacyPopoverOpen: false,
+    transcriptionPending: false,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -2034,23 +2016,24 @@ export const roomMachine = setup({
             transcriptionAgentLeft: () => false,
           }),
         },
-        // Host kill-switch: flip transcription locally, broadcast to the agent + peers.
+        // Host kill-switch (COMMAND ONLY): request the change from the agent and mark it
+        // pending. We do NOT flip the local privacy state here — the client reflects the
+        // agent's authoritative `transcription_state` confirmation instead, so the UI can
+        // never show "off" while the agent may still be capturing (e.g. if the publish
+        // fails or the agent rejects the command).
         TOGGLE_TRANSCRIPTION: {
           actions: [
             assign({
-              isTranscriptionEnabled: ({ context }) => !context.isTranscriptionEnabled,
-              // Turning transcription OFF also forces AI voice off (talk-back needs STT).
-              isAIAssistantEnabled: ({ context }) =>
-                context.isTranscriptionEnabled ? false : context.isAIAssistantEnabled,
+              transcriptionPending: () => true,
             }),
             ({ context }): void => {
               if (!context.room) return;
-              const enabled = context.isTranscriptionEnabled; // post-assign (new) value
+              const desired = !context.isTranscriptionEnabled;
               void context.room.localParticipant.publishData(
                 new TextEncoder().encode(
                   JSON.stringify({
                     type: 'transcription_toggle',
-                    enabled,
+                    enabled: desired,
                     at: Date.now(),
                     participantId: context.room.localParticipant.identity,
                     participantName: context.room.localParticipant.name,
@@ -2058,33 +2041,28 @@ export const roomMachine = setup({
                 ),
                 { reliable: true, topic: AI_DATA_TOPIC },
               );
-              // Cascade AI voice off when transcription is disabled.
-              if (!enabled) {
-                void context.room.localParticipant.publishData(
-                  new TextEncoder().encode(
-                    JSON.stringify({
-                      type: 'ai_voice_toggle',
-                      enabled: false,
-                      participantId: context.room.localParticipant.identity,
-                      participantName: context.room.localParticipant.name,
-                    }),
-                  ),
-                  { reliable: true },
-                );
-              }
             },
           ],
         },
-        // Broadcast received (non-host peers): reflect the host's toggle + surface a toast.
-        TRANSCRIPTION_TOGGLED: {
+        // Agent's authoritative confirmation: reflect the real state + clear pending.
+        // Peers get the toast; the host's own toast/undo is handled by useTranscriptionHostToast.
+        TRANSCRIPTION_CONFIRMED: {
           actions: assign({
             isTranscriptionEnabled: ({ event }) => event.enabled,
             isAIAssistantEnabled: ({ event, context }) =>
               event.enabled ? context.isAIAssistantEnabled : false,
+            transcriptionPending: () => false,
             transcriptionToggleNotice: ({ event }) => ({
               enabled: event.enabled,
-              byName: event.participantName || 'Host',
+              byName: 'The host',
             }),
+          }),
+        },
+        // No confirmation arrived — clear pending; the privacy state is left unchanged
+        // (never optimistically flipped), so the UI keeps the last confirmed state.
+        TRANSCRIPTION_TIMEOUT: {
+          actions: assign({
+            transcriptionPending: () => false,
           }),
         },
         DISMISS_TRANSCRIPTION_NOTICE: {

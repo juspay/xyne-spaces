@@ -1,30 +1,29 @@
 import React from 'react';
 import { ActionModal } from '../ActionModal';
+import { DeleteTranscriptToggle } from './DeleteTranscriptToggle';
 
 interface TranscriptDispositionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onKeep: () => void;
-  onDiscard: () => void;
+  onConfirm: () => void;
+  deleteTranscript: boolean;
+  onDeleteTranscriptChange: (deleteTranscript: boolean) => void;
   submitting?: boolean;
   error?: string | null;
 }
 
 /**
- * TranscriptDispositionModal - shown to the host at call end ONLY when
- * transcription is currently OFF. Lets them keep the partial transcript
- * (captured before the pause) + generate artifacts, or discard everything for a
- * fully private call. Every other end path defaults to keep + artifacts.
- *
- * The discard path is awaited by the caller (the backend must confirm it before
- * the call ends, otherwise it defaults to keeping the transcript), so this
- * surfaces a submitting label and any error for retry.
+ * Shown at end-of-call ONLY when the host is the sole participant and transcription
+ * is off — a focused prompt (no "end for everyone / just leave" choice is needed when
+ * alone) to keep or delete the transcript captured before the pause. Every other case
+ * uses the EndCallModal with the same delete toggle folded in.
  */
 export function TranscriptDispositionModal({
   isOpen,
   onClose,
-  onKeep,
-  onDiscard,
+  onConfirm,
+  deleteTranscript,
+  onDeleteTranscriptChange,
   submitting = false,
   error = null,
 }: TranscriptDispositionModalProps): React.ReactElement {
@@ -32,22 +31,28 @@ export function TranscriptDispositionModal({
     <ActionModal
       isOpen={isOpen}
       onClose={onClose}
-      title='Keep the transcript for this call?'
-      subtitle='Transcription was turned off during this call. Keep what was captured before it was turned off (and generate the usual summary and artifacts), or discard everything for a fully private call.'
-      description={error ?? undefined}
+      title='End call?'
       testId='transcript-disposition-modal'
+      content={
+        <DeleteTranscriptToggle
+          deleteTranscript={deleteTranscript}
+          onChange={onDeleteTranscriptChange}
+          disabled={submitting}
+          error={error}
+        />
+      }
       buttons={[
         {
-          label: submitting ? 'Discarding…' : 'Discard everything',
-          onClick: onDiscard,
+          label: 'Cancel',
+          onClick: onClose,
           variant: 'outline',
-          testId: 'transcript-discard-button',
+          disabled: submitting,
         },
         {
-          label: 'Keep transcript',
-          onClick: onKeep,
+          label: submitting ? 'Ending…' : 'End call',
+          onClick: onConfirm,
+          disabled: submitting,
           className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
-          testId: 'transcript-keep-button',
         },
       ]}
     />
