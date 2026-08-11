@@ -11342,7 +11342,11 @@ export const mutators = defineMutators({
       },
     ),
     disable: defineMutator(
-      z.object({ id: z.string(), timestamp: z.number() }),
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+        cancelQueued: z.boolean().optional(),
+      }),
       async ({ tx, args: { id, timestamp } }) => {
         const existing = await tx.run(zql.workflows.where('id', id).one());
         if (!existing || existing.workflowType !== 'Automations') {
