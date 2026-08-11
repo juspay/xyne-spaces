@@ -167,6 +167,12 @@ const supportDynamicFieldFiltersSchema = z
 
 type SupportDynamicFieldFilters = z.infer<typeof supportDynamicFieldFiltersSchema>;
 
+// Email.to is a Postgres text[] field. Zero does not expose an array-contains
+// predicate, so filtered ticket views load emails only while an address filter
+// is active and apply the exact address match in the dashboard.
+const hasSupportEmailFilters = (fromEmails?: string[], toEmails?: string[]): boolean =>
+  Boolean(fromEmails?.some((email) => email.trim()) || toEmails?.some((email) => email.trim()));
+
 const applySupportDynamicFieldFilters = (
   query: any,
   dynamicFieldFilters: SupportDynamicFieldFilters,
@@ -1233,13 +1239,15 @@ export const queries: AnyQueryRegistry = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
+      fromEmails: z.array(z.string()).optional(),
+      toEmails: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
       conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, fromEmails, toEmails, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -1287,7 +1295,7 @@ export const queries: AnyQueryRegistry = defineQueries({
 
       query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
 
-      return query
+      const result = query
         .orderBy('createdAt', 'desc')
         .related('project')
         .related('tagMappings')
@@ -1297,6 +1305,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('formEntityValues', (fev) =>
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
         );
+      return hasSupportEmailFilters(fromEmails, toEmails) ? result.related('emails') : result;
     }
   ),
 
@@ -1584,6 +1593,8 @@ export const queries: AnyQueryRegistry = defineQueries({
       hasAiDraft: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
+      fromEmails: z.array(z.string()).optional(),
+      toEmails: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
       conversationLabelId: z.string().optional(),
@@ -1592,7 +1603,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, fromEmails, toEmails, lastEmailAtStart, lastEmailAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1690,7 +1701,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         );
       }
 
-      return query
+      const result = query
         .limit(limit)
         .related('emailDrafts', q =>
           q.where(({ or, cmp }) =>
@@ -1705,6 +1716,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('formEntityValues', (fev) =>
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
         );
+      return hasSupportEmailFilters(fromEmails, toEmails) ? result.related('emails') : result;
     }
   ),
   supportTicketsPageV4: defineQuery(

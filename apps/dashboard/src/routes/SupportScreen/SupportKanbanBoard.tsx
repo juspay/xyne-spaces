@@ -48,6 +48,7 @@ import {
   type DynamicFieldQueryFilter,
   type FormEntityValueLike,
 } from '../../utils/board/dynamicFieldFilters';
+import { ticketMatchesEmailFilters } from '../../utils/ticketEmailFilters';
 
 const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: number }) => ({
   id: stage.id,
@@ -76,6 +77,8 @@ export interface SupportKanbanBoardProps {
     conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
+    fromEmails: string[] | undefined;
+    toEmails: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
@@ -141,6 +144,8 @@ export const SupportKanbanBoard = ({
         ci: ticketFilter.conversationIdWhitelist ?? null,
         ad: ticketFilter.hasAiDraft ?? null,
         g: ticketFilter.userGroups ?? null,
+        fe: ticketFilter.fromEmails ?? null,
+        te: ticketFilter.toEmails ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
@@ -155,6 +160,8 @@ export const SupportKanbanBoard = ({
       ticketFilter.conversationIdWhitelist,
       ticketFilter.hasAiDraft,
       ticketFilter.userGroups,
+      ticketFilter.fromEmails,
+      ticketFilter.toEmails,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
       dynamicFieldEntries,
@@ -197,15 +204,22 @@ export const SupportKanbanBoard = ({
 
   const dynamicallyFilteredTickets = useMemo<Ticket[] | undefined>(() => {
     if (!supportTickets) return undefined;
-    const rows = supportTickets as Ticket[];
-    if (!dynamicFieldEntries?.length) return rows;
-    return rows.filter(ticket =>
-      ticketMatchesDynamicFieldEntries(
-        (ticket as Ticket & { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
-        dynamicFieldEntries,
-      ),
-    );
-  }, [supportTickets, dynamicFieldEntries]);
+    let rows = supportTickets as Ticket[];
+    if (dynamicFieldEntries?.length) {
+      rows = rows.filter(ticket =>
+        ticketMatchesDynamicFieldEntries(
+          (ticket as Ticket & { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
+          dynamicFieldEntries,
+        ),
+      );
+    }
+    if (ticketFilter.fromEmails?.length || ticketFilter.toEmails?.length) {
+      rows = rows.filter(ticket =>
+        ticketMatchesEmailFilters(ticket, ticketFilter.fromEmails, ticketFilter.toEmails),
+      );
+    }
+    return rows;
+  }, [supportTickets, dynamicFieldEntries, ticketFilter.fromEmails, ticketFilter.toEmails]);
 
   // Report loaded tickets up so the parent can source the merge dialog.
   useEffect(() => {
