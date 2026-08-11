@@ -2458,6 +2458,9 @@ export const queries = defineQueries({
         );
     },
   ),
+  ticketExportsForCurrentUser: defineQuery(() => {
+    return zql.ticket_exports.orderBy('createdAt', 'desc').limit(100);
+  }),
   getAllProjects: defineQuery(() => {
     return zql.projects.orderBy('createdAt', 'desc').related('boards');
   }),
@@ -3070,35 +3073,18 @@ export const queries = defineQueries({
         .one();
     },
   ),
-  getConversationAttachements: defineQuery(
+  // V2: channel access (public-or-participant) is left to MessageAttachmentsACL. V1's inline
+  // flipped channel exists materialized every public channel on hydration (Aug 2026 WAL incidents).
+  getConversationAttachementsV2: defineQuery(
     z.object({
       channelId: z.string(),
       limit: z.number(),
       start: z.object({ attachementId: z.string(), createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, limit, start, direction } }) => {
-      let query = zql.message_attachments;
-      query = query.where(({ exists }) =>
-        exists('conversation', conv =>
-          conv.where('channelId', channelId).where(({ or, exists }) =>
-            or(
-              exists('channel', c => c.where('visibility', '=', ChannelVisibility.PUBLIC), {
-                flip: true,
-              }),
-              exists(
-                'channel',
-                c =>
-                  c.whereExists(
-                    'participants',
-                    v => v.where('userId', ctx.userID).where('channelId', channelId),
-                    { flip: true },
-                  ),
-                { flip: true },
-              ),
-            ),
-          ),
-        ),
+    ({ args: { channelId, limit, start, direction } }) => {
+      let query = zql.message_attachments.whereExists('conversation', conv =>
+        conv.where('channelId', channelId),
       );
 
       if (start) {

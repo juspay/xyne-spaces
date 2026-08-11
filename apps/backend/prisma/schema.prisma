@@ -352,6 +352,23 @@ model TicketTagMapping {
   @@schema("public")
 }
 
+
+model TicketExport {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  requestedBy     String
+  status          String
+  filters         String
+  createdAt       DateTime
+  updatedAt       DateTime
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  requester       User      @relation(fields: [requestedBy], references: [id], onDelete: Cascade, name: "RequestedTicketExports")
+
+  @@index([workspaceId, requestedBy, createdAt(sort: Desc)])
+  @@map("ticket_exports")
+  @@schema("public")
+}
+
 model TicketReferenceMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
   id             String                   @id @default(cuid())
@@ -845,6 +862,7 @@ model User {
   recordings                CallRecording[]         // call recordings this user started
 
   permissions CollectionPermission[]
+  requestedTicketExports TicketExport[] @relation("RequestedTicketExports")
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
   @@index([email])
@@ -1460,6 +1478,7 @@ model Workspace {
   tools             Tool[]
   userGroups        UserGroup[]
   roles             Role[]
+  ticketExports     TicketExport[]
 
   @@unique([orgId, name])
   @@index([orgId])

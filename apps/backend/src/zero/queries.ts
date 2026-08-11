@@ -3129,6 +3129,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  ticketExportsForCurrentUser: defineQuery(() => {
+    return zql.ticket_exports.orderBy('createdAt', 'desc').limit(100);
+  }),
   getAllProjects: defineQuery(() => {
     return zql.projects
       .where('type', '!=', ProjectType.DM)
@@ -3541,6 +3544,11 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  /**
+   * @deprecated Use getConversationAttachementsV2. The flipped, visibility-only channel exists
+   * here materializes every public channel on hydration and can wedge a syncer worker (Aug 2026
+   * WAL-starvation incidents). Kept only for already-deployed clients; do not add call sites.
+   */
   getConversationAttachements: defineQuery(
     z.object({
       channelId: z.string(),
@@ -3570,6 +3578,37 @@ export const queries: AnyQueryRegistry = defineQueries({
             )
           )
         )
+      );
+
+      if (start) {
+        query = query.start(
+          { id: start.attachementId, createdAt: start.createdAt },
+          { inclusive: true }
+        );
+      }
+
+      query = query.orderBy('createdAt', direction === 'forward' ? 'desc' : 'asc');
+
+      if (limit) {
+        query = query.limit(limit);
+      }
+
+      return query;
+    }
+  ),
+
+  // V2: channel access (public-or-participant) is left to MessageAttachmentsACL. V1's inline
+  // flipped channel exists materialized every public channel on hydration (Aug 2026 WAL incidents).
+  getConversationAttachementsV2: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ attachementId: z.string(), createdAt: z.number() }).nullable(),
+      direction: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ args: { channelId, limit, start, direction } }) => {
+      let query = zql.message_attachments.whereExists('conversation', (conv) =>
+        conv.where('channelId', channelId)
       );
 
       if (start) {
