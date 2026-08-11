@@ -23,6 +23,7 @@ import {
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { intentClassifier } from '../../../services/onDeviceIntent';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
@@ -685,6 +686,18 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         };
 
+        // On-device intent classification. Fire-and-forget and never awaited — it must
+        // not add a single millisecond to the send path. Gated to public channels inside
+        // the service (fail closed). Phase 1 is measure-only: this emits telemetry and
+        // renders nothing. See docs/ON_DEVICE_INTENT.md
+        const classifyIntent = (sentMessageId: string): void => {
+          intentClassifier.submitForMessage({
+            text: _plainText,
+            messageId: sentMessageId,
+            channel,
+          });
+        };
+
         if (messageId) {
           // When editing a message, ignore alsoSendToChannel state to prevent metadata corruption
           const result = zero.mutate(
@@ -732,11 +745,21 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }),
             );
             saveDraft(lookupId, '', '');
-            handleMutationResult(result, restoreDraft, undefined, undefined, {
-              channelId,
-              conversationId,
-              isReply: true,
-            });
+            handleMutationResult(
+              result,
+              restoreDraft,
+              undefined,
+              // onServerSuccess, NOT here — Zero writes optimistically, so the message
+              // row may not exist server-side yet and /api/intent/suggest would 404 it
+              // as `message-not-found`. Waiting for the server ack also means we never
+              // classify a message that failed to send.
+              () => classifyIntent(newMessageId),
+              {
+                channelId,
+                conversationId,
+                isReply: true,
+              },
+            );
             // Sender has implicitly read up to their own message
             setThreadLastRead(conversationId, messageCreatedAt);
 
@@ -800,7 +823,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               result,
               restoreDraft,
               () => dispatchChatMessageSentEvent(channelId),
-              undefined,
+              // See the thread-reply branch: classify only once the server has the row.
+              () => classifyIntent(newMessageId),
               {
                 channelId,
                 isNewConversation: true,

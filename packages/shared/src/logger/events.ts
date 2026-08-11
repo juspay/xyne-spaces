@@ -164,6 +164,14 @@ export const Event = {
   LOTUS_STARTUP_DIAGNOSTIC: "lotus_startup_diagnostic",
   LOTUS_CHAT_OPEN_TIMING: "lotus_chat_open_timing",
   LOTUS_METRIC_ERROR: "lotus_metric_error",
+
+  // On-device intent classification. INTENT_CLASSIFIED is the per-event record the
+  // eval flywheel joins on messageId; it must never carry message text.
+  // See apps/dashboard/docs/ON_DEVICE_INTENT.md §6.2
+  INTENT_CLASSIFIED: "intent_classified",
+  INTENT_WORKER_READY: "intent_worker_ready",
+  INTENT_WORKER_FAILED: "intent_worker_failed",
+  INTENT_SELF_DISABLED: "intent_self_disabled",
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

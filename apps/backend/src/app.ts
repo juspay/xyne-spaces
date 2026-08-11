@@ -127,6 +127,10 @@ import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
+import {
+  handleIntentCallback,
+  handleIntentSuggest,
+} from '@/controllers/intentSuggestion.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -312,6 +316,11 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
     this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
+
+    // Ambient intent suggestion trigger — called by the dashboard's on-device
+    // classifier. Every gate is re-checked server-side; see
+    // services/intentSuggestionService.ts
+    this.app.post('/api/intent/suggest', authMiddleware.authenticate, handleIntentSuggest);
 
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
@@ -522,6 +531,14 @@ export class App {
       '/api/internal/email/autodraft-callback/:conversationId/:channelId',
       validateS2SKey,
       handleAutoDraftCallback,
+    );
+    // Ambient intent suggestions — the agent's answer comes back here and, if it
+    // proposed something, becomes a call_start card in the thread.
+    // See services/intentSuggestionService.ts
+    this.app.post(
+      '/api/internal/intent/callback/:messageId/:intentId',
+      validateS2SKey,
+      handleIntentCallback,
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)

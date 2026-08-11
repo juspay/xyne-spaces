@@ -10,6 +10,10 @@ import {
   validateAppActionResponse,
   formatValidationErrors,
 } from '@xyne/shared';
+import {
+  handleIntentCallAction,
+  isIntentCallAction,
+} from '@/services/intentCallActionService';
 
 /** Extract appId from the <div data-flow-appid="..."> tag embedded in message content */
 function parseAppIdFromContent(content: string): string | null {
@@ -52,6 +56,32 @@ export class FlowController {
     }
 
     try {
+      // 2b. Native actions. The intent `call_start` card is posted by the backend
+      // itself, not by an installed app, so it carries no data-flow-appid and has
+      // no webhook to proxy to. Starting a call is a Spaces operation anyway —
+      // the agent proposed, we execute. Must run BEFORE the appId lookup below,
+      // which would otherwise reject the card as "not a flow UI message".
+      if (isIntentCallAction(actionId)) {
+        const workspaceId = req.user?.workspaceId;
+        if (!userId || !workspaceId) {
+          res.status(401).json({ error: 'Unauthorized' });
+          return;
+        }
+        const outcome = await handleIntentCallAction({
+          actionId,
+          messageId,
+          flowJSON: flowResult.data,
+          userId,
+          workspaceId,
+        });
+        if (!outcome.ok) {
+          res.status(500).json({ error: outcome.error });
+          return;
+        }
+        res.json({ type: 'update_screen_data', flowJSON: outcome.flowJSON });
+        return;
+      }
+
       // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
       const message = await repositories.messages.findById(messageId);
       if (!message) {

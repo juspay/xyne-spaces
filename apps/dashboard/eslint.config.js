@@ -40,7 +40,10 @@ export default tseslint.config(
       "public/**/*",
       "src2/**/*",
       "eslint-rules/**/*",
-      "electron/preload.ts"
+      "electron/preload.ts",
+      // Node-side build/eval scripts. Outside tsconfig.app.json, so the
+      // type-checked rules cannot resolve them.
+      "scripts/**/*"
     ],
   },
 

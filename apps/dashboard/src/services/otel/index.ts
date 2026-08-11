@@ -28,6 +28,14 @@ export { authRefreshDuration, authRefreshTotal, clearAuthTokenTotal } from './au
 
 export { loadingAnimationDuration, dataLoadDuration } from './loadingMetrics';
 
+export {
+  intentClassificationTotal,
+  intentScore,
+  intentEmbedDuration,
+  intentWorkerInitDuration,
+  intentDroppedTotal,
+} from './intentMetrics';
+
 export { askAIOpenedTotal } from './xyneAIMetrics';
 
 export {

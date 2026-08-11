@@ -500,6 +500,59 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+// ============================================================================
+// CALL START (call_start)
+// ============================================================================
+// Ambient "start a call now" proposal, raised by on-device intent detection —
+// NOT the same product as `call_schedule`. That card books a future slot (date,
+// start times, 30/45/60 duration). This one answers "can we hop on a call?" and
+// starts one immediately with the suggested people, so it carries no slots and
+// no duration at all.
+//
+// It also differs in provenance: `call_schedule` appears because a user asked an
+// agent to schedule something; this card appears UNINVITED, next to a message the
+// user merely typed. That is why `dismissed` is a first-class phase — an
+// unsolicited suggestion must be refusable, and the refusal is worth recording.
+//
+// See apps/dashboard/docs/ON_DEVICE_INTENT.md
+
+export const callStartPropsSchema = z.discriminatedUnion('phase', [
+  z
+    .object({
+      phase: z.literal('proposed'),
+      title: z.string().min(1),
+      /** Spaces user ids. Rendered as an AvatarGroup; order is the agent's ranking. */
+      attendees: z.array(z.string().min(1)),
+      /** One line on why these people — e.g. "active in this thread". */
+      rationale: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('started'),
+      title: z.string().min(1),
+      attendees: z.array(z.string().min(1)),
+      callId: z.string().min(1).optional(),
+      joinUrl: z.string().url().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('dismissed'),
+      title: z.string().min(1),
+      attendees: z.array(z.string().min(1)),
+    })
+    .strict(),
+]);
+
+export const callStartComponentSchema = baseComponentSchema.extend({
+  type: z.literal('call_start'),
+  props: callStartPropsSchema,
+});
+
+export type CallStartProps = z.infer<typeof callStartPropsSchema>;
+export type CallStartPhase = CallStartProps['phase'];
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -520,6 +573,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    callStartComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),
