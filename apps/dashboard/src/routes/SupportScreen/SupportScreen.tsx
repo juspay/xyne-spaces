@@ -3441,7 +3441,7 @@ export const SupportTicketDetail = ({
   }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
-  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
+  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('replyAll');
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const [isArchivingTicket, setIsArchivingTicket] = useState(false);
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {

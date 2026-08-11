@@ -5,6 +5,7 @@ import {
   Archive,
   ArrowLeft,
   Check,
+  Copy,
   History,
   Pencil,
   Power,
@@ -793,6 +794,18 @@ export function AutomationBuilder({
                 >
                   <History className='size-4' />
                   Runs
+                </Button>
+              ) : null}
+              {savedId ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => void navigate(`/automations/new?fork=${savedId}&clone=1`)}
+                  data-track-category='automation-builder'
+                  data-track-name='header-clone'
+                >
+                  <Copy className='size-4' />
+                  Clone
                 </Button>
               ) : null}
               {/* Activate is open to anyone for any LIVE row. Disable is
