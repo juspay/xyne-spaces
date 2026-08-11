@@ -404,12 +404,26 @@ export class BoardConfigCopyService {
     return result;
   }
 
-  private async copyCustomFieldsAndRoles(
-    sourceBoard: { id: string; projectId: string; workspaceId: string },
-    targetBoard: { id: string; metadata: Prisma.JsonValue },
+  /**
+   * Public (not private) and id-keyed rather than board-object-keyed: called both from
+   * `executeCopy`'s synchronous no-stages path and from the worker's phase 0, so it fetches
+   * its own board rows instead of trusting a caller-supplied snapshot that may be stale by
+   * the time an async job actually runs.
+   */
+  async copyCustomFieldsAndRoles(
+    sourceBoardId: string,
+    targetBoardId: string,
     categories: CopyCategorySelection,
     actorUserId: string,
   ): Promise<{ customFieldsCopied: boolean; rolesCopied: boolean; customFieldWarnings: string[] }> {
+    const [sourceBoard, targetBoard] = await Promise.all([
+      db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, workspaceId: true } }),
+      db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, metadata: true } }),
+    ]);
+    if (!sourceBoard || !targetBoard) {
+      return { customFieldsCopied: false, rolesCopied: false, customFieldWarnings: [] };
+    }
+
     const targetMetadata = { ...(targetBoard.metadata as Record<string, unknown> | null) };
     let customFieldsCopied = false;
     let rolesCopied = false;
@@ -645,14 +659,15 @@ export class BoardConfigCopyService {
     }
     void boardConfigCopySnapshotService.sweepExpiredSnapshots();
 
-    const { customFieldsCopied, rolesCopied, customFieldWarnings } = await this.copyCustomFieldsAndRoles(
-      sourceBoard,
-      targetBoard,
-      input.categories,
-      actorUserId,
-    );
-
+    // No async leg for this path — customFields/roles copy is the entire operation, so it
+    // runs synchronously here and the request/response IS the transaction boundary.
     if (!input.categories.stages) {
+      const { customFieldsCopied, rolesCopied, customFieldWarnings } = await this.copyCustomFieldsAndRoles(
+        sourceBoard.id,
+        targetBoard.id,
+        input.categories,
+        actorUserId,
+      );
       return {
         summary: {
           customFieldsCopied,
@@ -663,6 +678,15 @@ export class BoardConfigCopyService {
         },
       };
     }
+
+    // When stages ARE selected, customFields/roles are deliberately NOT copied here —
+    // they're deferred to phase 0 of the worker job below, so one job owns the entire
+    // mutation sequence. Previously this ran synchronously and committed before the stage
+    // job was even enqueued: if the stage job later failed, the board was left with new
+    // fields/roles bound but old stages intact — a half-migrated state with no job record
+    // reflecting it. Folding this into the job means a failure anywhere in the sequence
+    // (including here) surfaces as a single failed job, and nothing runs before it that
+    // could itself be left dangling if the job never got created.
 
     const sourceStages = await this.getSourceStagesOrdered(sourceBoard.id);
     const sourceTransitions =
@@ -771,9 +795,8 @@ export class BoardConfigCopyService {
       })),
       ticketRemapByOldStageId,
       futureStagesEtaHoursByNewStageId,
-      customFieldsCopied,
-      rolesCopied,
-      customFieldWarnings,
+      copyCustomFields: input.categories.customFields,
+      copyRoles: input.categories.roles,
       snapshotPath,
     };
 

@@ -59,15 +59,13 @@ export interface BoardConfigCopyJobData {
   // keyed by new stage id — lets the worker synthesise a landing target for an old stage
   // that had no tickets at plan time, without re-deriving the board-type-specific formula.
   futureStagesEtaHoursByNewStageId: Record<string, number>;
-  // Whether customFields/roles were already copied synchronously in executeCopy before
-  // this job was enqueued — carried through so the worker's returned summary reflects
-  // what actually happened instead of hardcoding false for the async (stages) leg.
-  customFieldsCopied: boolean;
-  rolesCopied: boolean;
-  // Non-fatal issues surfaced while copying custom fields (e.g. a same-named field with a
-  // different type on the two boards) — carried through so the worker's returned summary
-  // includes them alongside any stage-remap warnings.
-  customFieldWarnings: string[];
+  // Whether phase 0 of the worker should copy customFields/roles before touching any
+  // stage. Deliberately NOT pre-computed booleans of "was it copied" — that copy now
+  // happens inside the job itself (see boardConfigCopyWorker's phase 0), so this job owns
+  // the entire mutation sequence for a stages-included run instead of committing
+  // customFields/roles synchronously before the job even exists.
+  copyCustomFields: boolean;
+  copyRoles: boolean;
   // Object-storage path of the pre-copy snapshot. Required, not optional: executeCopy
   // aborts before mutating anything if the snapshot can't be written, so a job can never
   // legitimately exist without one.

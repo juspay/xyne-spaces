@@ -174,6 +174,29 @@ class BoardConfigCopyWorker {
   ): Promise<BoardConfigCopySummary> {
     logger.info(`${TAG} Starting copy job for targetBoardId=${data.targetBoardId}`);
 
+    // Phase 0: customFields/roles, if selected — run first, inside this job, so a single
+    // job owns the whole mutation sequence for a stages-included copy. Previously this ran
+    // synchronously in executeCopy and committed before the job was even enqueued; if the
+    // stage phases below then failed, the board was left half-migrated (new fields/roles,
+    // old stages) with no job record reflecting it. Now: if this throws, the job fails
+    // before phase 1 ever runs, so nothing about stages is touched — and if it succeeds but
+    // a later phase fails, the failed job's data still shows customFieldsCopied/rolesCopied
+    // accurately via the final summary below rather than reporting a silent partial success.
+    let customFieldsCopied = false;
+    let rolesCopied = false;
+    let customFieldWarnings: string[] = [];
+    if (data.copyCustomFields || data.copyRoles) {
+      const result = await boardConfigCopyService.copyCustomFieldsAndRoles(
+        data.sourceBoardId,
+        data.targetBoardId,
+        { customFields: data.copyCustomFields, roles: data.copyRoles, stages: true },
+        data.actorUserId,
+      );
+      customFieldsCopied = result.customFieldsCopied;
+      rolesCopied = result.rolesCopied;
+      customFieldWarnings = result.customFieldWarnings;
+    }
+
     // Phase 1: insert the new (copied-from-source) stages/transitions onto the target
     // board. Old stages are left in place — both sets briefly coexist so every ticket's
     // stageName always resolves to a real, currently-persisted Stage row.
@@ -204,7 +227,7 @@ class BoardConfigCopyWorker {
       newStageCount: data.newStages.length,
       deletedOldStageCount: 0,
     };
-    const warnings: string[] = [...data.customFieldWarnings];
+    const warnings: string[] = [...customFieldWarnings];
 
     // Phase 2: the main batched remap, sized and progress-reported off the planned set.
     if (plannedStageNames.length > 0) {
@@ -258,8 +281,8 @@ class BoardConfigCopyWorker {
     logger.info(`${TAG} Completed copy job for targetBoardId=${data.targetBoardId}`, summary);
 
     return {
-      customFieldsCopied: data.customFieldsCopied,
-      rolesCopied: data.rolesCopied,
+      customFieldsCopied,
+      rolesCopied,
       snapshotPath: data.snapshotPath,
       stages: summary,
       warnings,
