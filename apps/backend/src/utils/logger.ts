@@ -54,48 +54,55 @@ const normalizeErrors = winston.format((info) => {
   return info;
 });
 
-const productionFormat = winston.format.combine(
+// fluent-logger's msgpack encoder has no cycle detection and throws on BigInt;
+// break cycles and stringify BigInt before anything reaches it.
+const sanitizeForFluent = winston.format((info) => {
+  const seen = new WeakSet<object>();
+  return JSON.parse(
+    JSON.stringify(info, (_key, value) => {
+      if (typeof value === 'bigint') return value.toString();
+      if (value instanceof Error) return serializeError(value);
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) return '[Circular]';
+        seen.add(value);
+      }
+      return value;
+    })
+  );
+});
+
+// Runs once at call time, before winston-transport clones `info` per
+// transport -- that clone drops non-enumerable Error fields and can happen
+// asynchronously under a different request's AsyncLocalStorage context.
+const sharedFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
-  injectContext(),
-  winston.format.json(),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    return JSON.stringify({
-      timestamp,
-      level,
-      message,
-      ...meta,
-    });
-  })
+  injectContext()
 );
 
+const productionFormat = winston.format.printf(({ timestamp, level, message, ...meta }) => {
+  return JSON.stringify({
+    timestamp,
+    level,
+    message,
+    ...meta,
+  });
+});
 
 const devFormat = winston.format.combine(
   winston.format.colorize(),
-  winston.format.timestamp({ format: 'HH:mm:ss' }),
-  winston.format.errors({ stack: true }),
-  normalizeErrors(),
-  injectContext(),
   winston.format.printf(({ timestamp, level, message, module, service, ...meta }) => {
     const context = module || service;
     const contextPrefix = context ? `[${context}] ` : '';
     const metaString = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-    return `${timestamp} ${level}: ${contextPrefix}${message}${metaString}`;
+    const time = typeof timestamp === 'string' ? timestamp.slice(11) : timestamp;
+    return `${time} ${level}: ${contextPrefix}${message}${metaString}`;
   })
 );
 
-// Streamed straight to Fluent Bit's forward input (docker/fluent-bit/) over
-// TCP -- no intermediate log file. The forward protocol carries its own
-// event time, so unlike a file-tailed format there's no timestamp string to
-// keep in sync with a Fluent Bit parser.
-const fluentFormat = winston.format.combine(
-  winston.format.timestamp(),
-  winston.format.errors({ stack: true }),
-  normalizeErrors(),
-  injectContext(),
-  winston.format.json()
-);
+// Streamed straight to Fluent Bit's forward input (docker/fluent-bit/) -- no file, no parser to sync.
+const fluentFormat = winston.format.combine(sanitizeForFluent(), winston.format.json());
 
 const transports: winston.transport[] = [
   new winston.transports.Console({
@@ -109,8 +116,10 @@ if (config.logging.fluent.enabled) {
     new FluentTransport('error.backend', {
       host: config.logging.fluent.host,
       port: config.logging.fluent.port,
-      timeout: 3.0,
+      timeout: 3000, // ms, not seconds
       reconnectInterval: 30000,
+      messageQueueSizeLimit: 1000, // bound memory when Fluent Bit is unreachable
+      highWaterMark: 1000, // avoid backpressure freezing the Console transport too
       level: 'error',
       format: fluentFormat,
     }) as winston.transport
@@ -119,9 +128,7 @@ if (config.logging.fluent.enabled) {
 
 export const logger = winston.createLogger({
   level: config.logging.level,
-  // No logger-level `format`: it would run before each transport's own
-  // format (e.g. devFormat's colorize() would corrupt `level` for the
-  // Fluent transport too), so format is set per-transport instead.
+  format: sharedFormat,
   transports,
   exitOnError: false,
   defaultMeta: {

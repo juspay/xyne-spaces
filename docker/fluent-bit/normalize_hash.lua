@@ -10,11 +10,12 @@ local function normalize(message)
 
   -- UUIDs
   m = string.gsub(m, '%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x', '<uuid>')
-  -- ISO-ish timestamps
-  m = string.gsub(m, '%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d:%d%d[%.%d]*Z?', '<ts>')
+  -- ISO-ish timestamps (m is already lower-cased, so match lower t/z)
+  m = string.gsub(m, '%d%d%d%d%-%d%d%-%d%d[t ]%d%d:%d%d:%d%d[%.%d]*z?', '<ts>')
   -- hex addresses / long hex ids (e.g. 0x7ffee, object hashes)
   m = string.gsub(m, '0x%x+', '<hex>')
-  m = string.gsub(m, '%x%x%x%x%x%x%x%x%x%x%x%x+', '<hex>')
+  -- decimal digits are valid %x, so use the same token as plain numbers below
+  m = string.gsub(m, '%x%x%x%x%x%x%x%x%x%x%x%x+', '<num>')
   -- plain numbers (ids, ports, line numbers, durations)
   m = string.gsub(m, '%d+', '<num>')
   -- quoted string literals (paths, values interpolated into the message)
@@ -42,8 +43,12 @@ end
 
 function normalize_and_hash(tag, timestamp, record)
   local template = normalize(record['message'])
+  -- module can carry dynamic data (e.g. `vespa-search, <searchId>`); normalize
+  -- it too so it doesn't blow up VictoriaLogs stream cardinality as a label.
+  local normalized_module = normalize(record['module'])
   record['normalized_message'] = template
-  record['fingerprint'] = djb2((record['module'] or '') .. '|' .. template)
+  record['normalized_module'] = normalized_module
+  record['fingerprint'] = djb2(normalized_module .. '|' .. template)
 
   -- code = 1: keep record, replaced with modified fields
   return 1, timestamp, record

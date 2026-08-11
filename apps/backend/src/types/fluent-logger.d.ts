@@ -4,6 +4,8 @@ declare module "fluent-logger" {
 		port?: number;
 		timeout?: number;
 		reconnectInterval?: number;
+		messageQueueSizeLimit?: number;
+		highWaterMark?: number;
 		level?: string;
 		format?: unknown;
 	}
