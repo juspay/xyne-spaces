@@ -72,7 +72,7 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
-import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
+import { CanvasCommentRail } from '../CanvasCommentRail/CanvasCommentRail';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
@@ -381,6 +381,8 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       isCommentsOpen,
       setIsCommentsOpen,
       inlineCommentThread,
+      commentThreads,
+      setActiveCommentThreadId,
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
@@ -602,26 +604,6 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
               onCreateThreadFailed={removeCommentAnchorStyle}
             />
           )}
-
-          {canvasId && inlineCommentThread && (
-            <CanvasInlineCommentThread
-              canvasId={canvasId}
-              canvasTitle={_canvasTitle}
-              channelId={channelId}
-              {...(inlineCommentThread.mode === 'thread' && {
-                thread: inlineCommentThread.thread,
-              })}
-              {...(inlineCommentThread.mode === 'create' && {
-                activeAnchor: inlineCommentThread.anchor,
-              })}
-              anchorRect={inlineCommentThread.rect}
-              editable={editable}
-              onClose={closeInlineCommentThread}
-              onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
-              onCreateThreadFailed={removeCommentAnchorStyle}
-            />
-          )}
         </div>
 
         {/* Presentation Modal */}
@@ -647,6 +629,29 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         )}
 
         {/* Copy button overlay for code blocks */}
+        {canvasId && (
+          <CanvasCommentRail
+            canvasId={canvasId}
+            containerRef={containerRef}
+            threads={commentThreads}
+            activeThreadId={activeCommentThreadId}
+            draft={
+              inlineCommentThread?.mode === 'create'
+                ? { anchor: inlineCommentThread.anchor, rect: inlineCommentThread.rect }
+                : null
+            }
+            onDraftBeforeCreate={applyCommentAnchorStyle}
+            onDraftCreated={() => {
+              clearActiveCommentAnchor();
+              closeInlineCommentThread();
+            }}
+            onDraftFailed={removeCommentAnchorStyle}
+            onDraftCancel={closeInlineCommentThread}
+            editable={editable}
+            onActivate={setActiveCommentThreadId}
+          />
+        )}
+
         <CanvasCodeCopyButton containerRef={containerRef} />
       </div>
     );

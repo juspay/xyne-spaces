@@ -73,30 +73,6 @@ const getSelectionRect = (container: HTMLElement | null, blockId: string): DOMRe
   );
 };
 
-const escapeSelectorValue = (value: string): string =>
-  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
-    ? CSS.escape(value)
-    : value.replace(/["\\]/g, '\\$&');
-
-const getCommentThreadRect = (
-  container: HTMLElement | null,
-  blockId: string,
-  threadId: string,
-): DOMRect | null => {
-  if (!container) return null;
-  const escapedThreadId = escapeSelectorValue(threadId);
-  const escapedBlockId = escapeSelectorValue(blockId);
-  return (
-    container
-      .querySelector<HTMLElement>(`[data-canvas-comment-thread-id="${escapedThreadId}"]`)
-      ?.getBoundingClientRect() ??
-    container
-      .querySelector<HTMLElement>(`[data-id="${escapedBlockId}"]`)
-      ?.getBoundingClientRect() ??
-    null
-  );
-};
-
 const INLINE_COMMENT_INTERACTIVE_SELECTOR = [
   '[data-canvas-inline-comment-thread="true"]',
   '[data-overlay-portal]',
@@ -129,22 +105,14 @@ export function useCanvasCommentEditorBridge({
     setCommentHighlightVersion(version => version + 1);
   }, []);
 
-  const handleCommentAnchorClick = useCallback(
-    (thread: CanvasCommentHighlightThread, rect?: DOMRect): void => {
-      setIsCommentsOpen(false);
-      setActiveCommentBlockId(thread.blockId);
-      setActiveCommentThreadId(thread.id);
-      setActiveCommentAnchor(null);
-      if (rect) {
-        setInlineCommentThread({
-          mode: 'thread',
-          thread,
-          rect,
-        });
-      }
-    },
-    [],
-  );
+  // Clicking anchored text opens that thread's card in the rail. The floating
+  // popover is now only used for composing a brand-new comment.
+  const handleCommentAnchorClick = useCallback((thread: CanvasCommentHighlightThread): void => {
+    setActiveCommentBlockId(thread.blockId);
+    setActiveCommentThreadId(thread.id);
+    setActiveCommentAnchor(null);
+    setInlineCommentThread(null);
+  }, []);
 
   useCanvasCommentHighlights({
     canvasId,
@@ -215,26 +183,7 @@ export function useCanvasCommentEditorBridge({
     setActiveCommentThreadId(initialCommentThreadId);
     setActiveCommentAnchor(null);
 
-    const openInlineThread = (): void => {
-      const thread = commentThreads.find(candidate => candidate.id === initialCommentThreadId);
-      if (!thread) return;
-      const rect = getCommentThreadRect(
-        containerRef.current,
-        initialBlockIdToFocus,
-        initialCommentThreadId,
-      );
-      if (!rect) return;
-      openedInitialThreadKeyRef.current = initialThreadKey;
-      setInlineCommentThread({
-        mode: 'thread',
-        thread,
-        rect,
-      });
-    };
-
-    openInlineThread();
-    const timeout = window.setTimeout(openInlineThread, 300);
-    return () => window.clearTimeout(timeout);
+    // The rail renders the thread; activating it is enough to open and light it.
   }, [commentThreads, containerRef, initialBlockIdToFocus, initialCommentThreadId, ready]);
 
   const getCurrentBlockId = useCallback((): string | null => {
@@ -356,9 +305,10 @@ export function useCanvasCommentEditorBridge({
   }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor]);
 
   const focusCommentBlock = useCallback(
-    (blockId: string): void => {
+    (blockId: string, threadId?: string): void => {
       setActiveCommentBlockId(blockId);
-      setActiveCommentThreadId(null);
+      // Keep the thread active so its card and highlight stay lit after the jump.
+      setActiveCommentThreadId(threadId ?? null);
       setActiveCommentAnchor(null);
       const editor = getEditor();
       if (!editor) return;
@@ -386,6 +336,8 @@ export function useCanvasCommentEditorBridge({
   return {
     isCommentsOpen,
     setIsCommentsOpen,
+    commentThreads,
+    setActiveCommentThreadId,
     inlineCommentThread,
     activeCommentBlockId,
     activeCommentThreadId,

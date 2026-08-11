@@ -2282,146 +2282,184 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   color: hsl(var(--muted-foreground));
 }
 
-/* Canvas selected-text formatting menu. Scoped to the custom toolbar class so
-   BlockNote menus in chat, previews, and other editor surfaces keep their own
-   layout. */
-.canvas-formatting-menu.bn-formatting-toolbar {
-  width: 200px;
-  min-width: 200px;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  padding: 6px 8px;
+/* Canvas selection menu — one horizontal pill: formatting on the left, the two
+   labelled actions on the right. Scoped to the custom class so BlockNote menus
+   on other editor surfaces keep their own layout. */
+.canvas-selection-menu.bn-formatting-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  width: auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 4px;
   border: 1px solid hsl(var(--border));
-  border-radius: 12px;
+  border-radius: 10px;
   background: hsl(var(--popover));
   color: hsl(var(--popover-foreground));
   box-shadow:
-    0 18px 44px rgb(15 23 42 / 0.13),
-    0 4px 12px rgb(15 23 42 / 0.08);
+    0 8px 26px hsl(var(--foreground) / 0.14),
+    0 2px 6px hsl(var(--foreground) / 0.06);
+  animation: canvasSelectionIn 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.canvas-formatting-menu--ask-only.bn-formatting-toolbar {
-  width: auto;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+@keyframes canvasSelectionIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.canvas-formatting-menu--ask-only .canvas-formatting-menu__attached-actions {
-  padding-top: 0;
+.canvas-selection-menu__divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 7px 3px;
+  background: hsl(var(--border));
 }
 
-.canvas-formatting-menu__type-row {
+.canvas-selection-menu__type,
+.canvas-selection-menu__format {
   display: flex;
   align-items: center;
-  min-height: 26px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid hsl(var(--border));
+  gap: 1px;
 }
 
-.canvas-formatting-menu__type-row > button {
-  width: 100%;
+.canvas-selection-menu__type > button {
   min-height: 26px;
-  justify-content: flex-start;
-  gap: 5px;
-  padding-inline: 4px;
-  border-radius: 8px;
+  gap: 4px;
+  padding-inline: 7px;
+  border-radius: 7px;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
 }
 
-.canvas-formatting-menu__type-row > button [data-position="right"],
-.canvas-formatting-menu__type-row > button .mantine-Button-section[data-position="right"] {
-  margin-left: auto;
-}
-
-.canvas-formatting-menu__format-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 3px 5px;
-  padding-block: 6px;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.canvas-formatting-menu__format-grid .bn-button {
-  width: 23px;
-  height: 23px;
-  min-width: 23px;
-  min-height: 23px;
-  border-radius: 6px;
+.canvas-selection-menu .bn-button {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 7px;
   color: hsl(var(--foreground));
   background: transparent;
 }
 
-.canvas-formatting-menu__format-grid .bn-button:hover,
-.canvas-formatting-menu__format-grid .bn-button[data-selected] {
+.canvas-selection-menu .bn-button:hover,
+.canvas-selection-menu .bn-button[data-selected] {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
 }
 
-.canvas-formatting-menu__format-grid .bn-button svg {
+.canvas-selection-menu .bn-button svg {
   width: 15px;
   height: 15px;
 }
 
-.canvas-formatting-menu__attached-actions {
-  display: flex;
-  align-items: center;
-  padding-top: 6px;
-}
-
-.canvas-formatting-menu__attached-button {
+.canvas-selection-menu__action {
   display: inline-flex;
-  min-height: 30px;
-  flex: 1 1 0;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--card));
-  padding: 6px 10px;
+  height: 26px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
   color: hsl(var(--foreground));
+  font-family: inherit;
   font-size: 13px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.canvas-selection-menu__action:hover {
+  background: hsl(var(--accent));
+}
+
+.canvas-selection-menu__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Canvas comment rail — cards parked beside the text they annotate. */
+.canvas-comment-rail__slot {
   transition:
+    top 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.canvas-comment-rail__slot--active {
+  transform: translateX(-12px);
+}
+
+.canvas-comment-card {
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.canvas-comment-card__action {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.canvas-comment-card:hover .canvas-comment-card__action,
+.canvas-comment-card:focus-within .canvas-comment-card__action {
+  opacity: 1;
+}
+
+.canvas-comment-badge {
+  animation: canvasCommentBadgeIn 160ms ease both;
+  transition:
+    top 180ms cubic-bezier(0.4, 0, 0.2, 1),
     background-color 120ms ease,
     color 120ms ease;
 }
 
-.canvas-formatting-menu__attached-button:hover {
-  background: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+@keyframes canvasCommentBadgeIn {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.canvas-formatting-menu__attached-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+@keyframes canvasCommentPanelIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.canvas-formatting-menu__attached-button--left {
-  border-right-width: 0;
-  border-radius: 8px 0 0 8px;
+.canvas-comment-activity {
+  animation: canvasCommentPanelIn 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
-.canvas-formatting-menu__attached-button--right {
-  border-radius: 0 8px 8px 0;
-}
-
-.canvas-formatting-menu__attached-button--single {
-  border-right-width: 1px;
-  border-radius: 8px;
-}
-
-.canvas-formatting-menu__attached-button svg {
-  width: 14px;
-  height: 14px;
+@media (prefers-reduced-motion: reduce) {
+  .canvas-selection-menu.bn-formatting-toolbar,
+  .canvas-comment-badge,
+  .canvas-comment-activity {
+    animation: none;
+  }
+  .canvas-comment-rail__slot,
+  .canvas-comment-badge {
+    transition: none;
+  }
 }
 
 .canvas-inline-comment-composer button[aria-label="Mention channel"] {
@@ -2430,11 +2468,6 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .canvas-inline-comment-composer button[data-testid="mention-user-btn"] {
   color: hsl(var(--muted-foreground));
-}
-
-.canvas-inline-comment-composer button[data-testid="send-message-button"] {
-  width: 40px;
-  height: 40px;
 }
 
 /* ============================================================
@@ -2453,6 +2486,22 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   --canvas-content-width: 720px;
   /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
   --canvas-gutter: 54px;
+}
+
+/* Comment rail gutter. The reading column is centred by `margin-inline: auto`;
+   reserving an inline-end margin slides it left so comment cards have somewhere
+   to live that is not on top of the text. Only above a width where both fit —
+   below it the rail falls back to margin badges and a floating card. */
+.canvas-surface {
+  --canvas-comment-rail-width: 344px;
+}
+
+@media (min-width: 1180px) {
+  [data-canvas-comment-rail="on"] .canvas-surface .bn-editor,
+  .canvas-surface[data-canvas-comment-rail="on"] .bn-editor {
+    margin-inline: auto var(--canvas-comment-rail-width);
+    transition: margin-inline-end 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
 }
 
 /* Centered reading column. .bn-editor keeps its inline padding as the
