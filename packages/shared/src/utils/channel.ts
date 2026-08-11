@@ -1,6 +1,6 @@
 import { ChannelType, DeskType } from '../zero/schema.js';
 
-/** Channel types that feed into Xyne Desk. */
+/** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.EMAIL,
   ChannelType.SLACK,
@@ -27,24 +27,4 @@ export function deskTypeForChannelType(type: string | null | undefined): DeskTyp
     default:
       return DeskType.EMAIL;
   }
-}
-
-export const CHANNEL_NAME_MIN_LENGTH = 2;
-export const CHANNEL_NAME_MAX_LENGTH = 80;
-
-export function normalizeChannelName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-_]/g, '');
-}
-
-export function validateChannelName(value: string): string | null {
-  if (value.length < CHANNEL_NAME_MIN_LENGTH)
-    return `Channel name must be at least ${CHANNEL_NAME_MIN_LENGTH} characters`;
-  if (value.length > CHANNEL_NAME_MAX_LENGTH)
-    return `Channel name must be ${CHANNEL_NAME_MAX_LENGTH} characters or less`;
-  if (!/^[a-z0-9-_]+$/.test(value))
-    return 'Only lowercase letters, numbers, hyphens, and underscores are allowed';
-  return null;
 }

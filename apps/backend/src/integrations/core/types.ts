@@ -23,6 +23,7 @@ export enum ExternalSourcePlatform {
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
   APP_STORE = 'app-store-reviews',
+  INSTAGRAM = 'instagram',
 }
 
 export interface IngestionOptions {
@@ -96,11 +97,7 @@ export interface NormalizedData {
     replyTo?: string[];
     type?: EmailType;
     sentByUserId?: string;
-    rating?: number;
-    clientVersionName?: string;
-    clientVersionCode?: string;
-    updateExisting?: boolean;
-    syncTicketOnUpdate?: boolean;
+    skipBlockingCheck?: boolean;
   };
 
   ticketCustomFields?: Array<{
@@ -196,9 +193,6 @@ export interface ExternalSourceAdapter {
   /** Platform name (e.g., "zoho", "slack") */
   name: string;
 
-  /** True when the adapter is ingested by a scheduled provider poll. */
-  supportsPolling?: boolean;
-
   /** Authenticate incoming request (JWT, HMAC, etc.) and check if processing should be skipped */
   authenticate(
     rawBody: string,
@@ -208,11 +202,7 @@ export interface ExternalSourceAdapter {
   ): Promise<AuthResult>;
 
   /** Optional: Preprocess payload (fetch additional data via API) */
-  preprocess?(
-    rawPayload: unknown,
-    source?: ExternalSource,
-    options?: IngestionOptions,
-  ): Promise<unknown>;
+  preprocess?(rawPayload: unknown, source?: ExternalSource, options?: IngestionOptions): Promise<unknown>;
 
   /**
    * Optional: resume cursor to persist after a successful ingest. Return null to leave the stored
@@ -265,7 +255,7 @@ export interface ExternalSourceAdapter {
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 
-  /** Optional: provider reply sender for non-email Desk interactions. */
+  /** Optional: provider reply sender for non-email Desk interactions (e.g. Instagram DMs). */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 

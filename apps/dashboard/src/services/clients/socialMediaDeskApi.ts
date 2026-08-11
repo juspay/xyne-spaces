@@ -120,6 +120,22 @@ export async function setAppStoreAppConnection(
   );
 }
 
+/** Initiates Instagram Business OAuth — returns `authUrl` for redirect. */
+export async function startInstagramOAuth(input: {
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+}): Promise<string> {
+  const response = await apiInstance.post<{ authUrl: string }>(
+    '/integrations/social-media/instagram/oauth/start',
+    { name: input.channelName, ...input },
+  );
+  return response.data.authUrl;
+}
+
 /** Apple keys are rotated by pasting a new .p8, not by re-running a consent redirect. */
 export async function rotateAppStoreCredentials(
   channelId: string,
