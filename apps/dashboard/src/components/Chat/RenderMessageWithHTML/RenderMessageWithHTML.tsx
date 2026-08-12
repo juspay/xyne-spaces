@@ -334,8 +334,8 @@ export function MentionRenderer({
         data-username={displayName}
         className={
           isCurrentUser
-            ? 'mention-text !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-current-user-color,var(--mention-color))]'
-            : 'mention-text'
+            ? 'mention-text'
+            : 'mention-text !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-current-user-color,var(--mention-color))]'
         }
       >
         {displayName}
@@ -499,8 +499,8 @@ export function GroupMentionRenderer({
         data-group-alias={alias}
         className={
           isCurrentUserInGroup
-            ? 'mention-text cursor-pointer !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-current-user-color,var(--mention-color))]'
-            : 'mention-text cursor-pointer'
+            ? 'mention-text cursor-pointer'
+            : 'mention-text cursor-pointer !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-current-user-color,var(--mention-color))]'
         }
         onClick={handleClick}
         role='button'

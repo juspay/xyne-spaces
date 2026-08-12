@@ -24,6 +24,7 @@ import { Pill } from '../library/shared/primitives/Pill';
 import { BehaviourSelect } from '../library/agents/detail/behaviour/BehaviourRows';
 import { AdminPager } from '../library/admin/components/AdminTable';
 import { DetailCard, DetailEmptyState } from '../library/shared/primitives/DetailPrimitives';
+import { PersonPill } from '../shared/PersonPill';
 import { AddOrgMemberDialog } from './AddOrgMemberDialog';
 import { OrganizationSurfacesSection } from './OrganizationSurfacesSection';
 import { OrganizationServiceTokensSection } from './OrganizationServiceTokensSection';
@@ -203,7 +204,7 @@ const OrganizationV2 = (): ReactElement => {
   }
 
   return (
-    <div className='max-w-ai-content mx-auto flex w-full flex-col px-6 pb-16'>
+    <div className='max-w-ai-content mx-auto flex min-h-full w-full flex-col px-6'>
       <div className='sticky top-0 z-10 flex flex-col bg-background'>
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
@@ -234,7 +235,7 @@ const OrganizationV2 = (): ReactElement => {
           )}
         </div>
 
-        <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
+        <div className='mt-3 flex flex-col gap-3 pb-3 pt-2'>
           <Tabs
             items={ORGANIZATION_TABS}
             activeId={activeTab}
@@ -242,17 +243,9 @@ const OrganizationV2 = (): ReactElement => {
             trackCategory='Claw Organization'
             trackPrefix='Organization tab'
           />
-        </div>
-      </div>
-
-      <div className='flex w-full flex-col gap-6 pt-4'>
-        {activeTab === 'members' ? (
-          <section className='flex w-full flex-col gap-3'>
-            <div className='relative'>
-              <SearchDefault
-                className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
-                aria-hidden
-              />
+          {activeTab === 'members' && (
+            <div className='flex items-center gap-2 border-b border-border pb-1 pt-1 focus-within:border-foreground'>
+              <SearchDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />
               <input
                 type='text'
                 value={query}
@@ -264,10 +257,16 @@ const OrganizationV2 = (): ReactElement => {
                 aria-label='Search members'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: search members'
-                className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10'
+                className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground'
               />
             </div>
+          )}
+        </div>
+      </div>
 
+      <div className='flex w-full flex-col gap-6'>
+        {activeTab === 'members' ? (
+          <section className='flex w-full flex-col gap-3'>
             {!canManage && (
               <p className='text-xs text-muted-foreground'>
                 Only an owner or admin can add, remove, or re-role members.
@@ -315,11 +314,13 @@ const OrganizationV2 = (): ReactElement => {
                           className='size-8 shrink-0'
                         />
                         <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                          <span className='truncate text-sm font-medium text-foreground'>
-                            {displayName}
-                          </span>
+                          <PersonPill
+                            userId={member.userId}
+                            name={displayName}
+                            className='truncate text-sm font-medium'
+                          />
                           <span className='truncate text-xs text-muted-foreground'>
-                            {member.email} · Joined {displayDate(member.joinedAt)}
+                            Joined {displayDate(member.joinedAt)}
                           </span>
                         </div>
                       </div>
@@ -374,15 +375,6 @@ const OrganizationV2 = (): ReactElement => {
               </ul>
             )}
 
-            {total > 0 && (
-              <AdminPager
-                offset={offset}
-                count={rows.length}
-                total={total}
-                onPrev={() => setOffset(current => Math.max(0, current - PAGE_SIZE))}
-                onNext={() => setOffset(current => current + PAGE_SIZE)}
-              />
-            )}
           </section>
         ) : (
           <div className='flex w-full flex-col gap-3'>
@@ -391,6 +383,18 @@ const OrganizationV2 = (): ReactElement => {
           </div>
         )}
       </div>
+
+      {activeTab === 'members' && total > 0 && (
+        <div className='sticky bottom-0 z-10 mt-auto bg-background py-3 empty:hidden'>
+          <AdminPager
+            offset={offset}
+            count={rows.length}
+            total={total}
+            onPrev={() => setOffset(current => Math.max(0, current - PAGE_SIZE))}
+            onNext={() => setOffset(current => current + PAGE_SIZE)}
+          />
+        </div>
+      )}
 
       <AddOrgMemberDialog
         open={addOpen}

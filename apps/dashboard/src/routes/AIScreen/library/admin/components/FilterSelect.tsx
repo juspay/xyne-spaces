@@ -14,10 +14,10 @@ export function FilterSelect({
   onChange,
   ariaLabel,
   icon,
-  className = 'w-auto min-w-[9rem] max-w-[16rem]',
+  className = 'w-auto max-w-[16rem]',
 }: {
   value: string;
-  options: readonly { value: string; label: string }[];
+  options: readonly { value: string; label: string; icon?: ReactNode }[];
   onChange: (value: string) => void;
   ariaLabel: string;
   icon?: ReactNode;
@@ -32,8 +32,8 @@ export function FilterSelect({
         aria-label={ariaLabel}
       >
         <SelectValue>
-          <span className='flex min-w-0 items-center gap-2'>
-            {icon}
+          <span className='flex min-w-0 items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground'>
+            {current?.icon ?? icon}
             <span className='truncate'>{current?.label ?? ''}</span>
           </span>
         </SelectValue>
@@ -41,7 +41,10 @@ export function FilterSelect({
       <SelectContent>
         {options.map(option => (
           <SelectItem key={option.value || 'all'} value={option.value || 'all'}>
-            {option.label}
+            <span className='flex min-w-0 items-center gap-2'>
+              {option.icon}
+              <span className='truncate'>{option.label}</span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>

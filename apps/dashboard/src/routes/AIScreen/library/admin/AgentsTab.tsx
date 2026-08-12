@@ -37,6 +37,9 @@ import { useSlackActions } from './hooks/useSlackActions';
 import { useSlackAgentStatuses } from './hooks/useSlackAgentStatuses';
 import { SlackCommandDialog } from './components/SlackCommandDialog';
 import { orgLabel } from './orgLabel';
+import { AdminToolbarPortal } from './components/AdminToolbarSlot';
+import { AdminSearchField } from './components/AdminSearchField';
+import { PersonPill } from '../../shared/PersonPill';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 const isRegistered = (agent: Agent): boolean =>
@@ -80,19 +83,33 @@ function AgentRow({
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
           <span className='truncate text-sm font-medium text-foreground'>{agent.name}</span>
           {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}
-          {slackStatus && (
-            <Pill tone={slackStatus.status === 'installed' ? 'success' : 'neutral'}>
-              {slackBadgeLabel(slackStatus)}
-            </Pill>
-          )}
           {slackStatus?.manifestStale && <Pill tone='warning'>Slack app update required</Pill>}
           {showRegistration ? (
             <Pill tone={isRegistered(agent) ? 'success' : 'neutral'}>
-              {isRegistered(agent) ? 'Registered' : 'Not registered'}
+              <span className='flex items-center gap-1'>
+                {isRegistered(agent) ? 'Registered' : 'Not registered'}
+                {isRegistered(agent) && (
+                  <Tooltip content='Registered on Spaces' side='top'>
+                    <span className='inline-flex'>
+                      <PluginAddonDefault className='size-3 shrink-0' aria-label='Spaces' />
+                    </span>
+                  </Tooltip>
+                )}
+                {slackStatus?.status === 'installed' && (
+                  <Tooltip content={slackBadgeLabel(slackStatus)} side='top'>
+                    <span className='inline-flex'>
+                      <Slack className='size-3 shrink-0' aria-label='Slack' />
+                    </span>
+                  </Tooltip>
+                )}
+              </span>
             </Pill>
           ) : (
             agent.ownerUserId && (
-              <span className='truncate text-xs text-muted-foreground'>owner: {ownerLabel}</span>
+              <span className='flex min-w-0 items-center gap-1 text-xs text-muted-foreground'>
+                owner:
+                <PersonPill userId={agent.ownerUserId} name={ownerLabel} className='truncate' />
+              </span>
             )
           )}
         </div>
@@ -163,6 +180,7 @@ export function AgentsTab({
   registration: AgentRegistration;
 }): ReactElement {
   const queryClient = useQueryClient();
+  const [query, setQuery] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [slackRemoveTarget, setSlackRemoveTarget] = useState<Agent | null>(null);
 
@@ -175,10 +193,16 @@ export function AgentsTab({
     queryFn: () => listClawAuthAgents(userId, { allAgents: true, orgScope: scope }),
   });
 
-  const visible = useMemo(
-    () => (orgId ? (agents ?? []).filter(agent => agent.orgId === orgId) : (agents ?? [])),
-    [agents, orgId],
-  );
+  const visible = useMemo(() => {
+    const scoped = orgId ? (agents ?? []).filter(agent => agent.orgId === orgId) : (agents ?? []);
+    const needle = query.trim().toLowerCase();
+    if (!needle) return scoped;
+    return scoped.filter(agent =>
+      `${agent.name} ${agent.slug} ${agent.owner?.name ?? ''} ${agent.owner?.email ?? ''}`
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [agents, orgId, query]);
 
   const globalAgents = useMemo(() => visible.filter(agent => agent.scope === 'global'), [visible]);
   const personalAgents = useMemo(
@@ -230,8 +254,33 @@ export function AgentsTab({
     onError: error => toast.error(clawErrorText(error, 'Could not delete the agent')),
   });
 
-  if (isPending) return <Skeleton className='mt-4 h-40 w-full' />;
-  if (isError) return <TabMessage>Couldn’t load agents.</TabMessage>;
+  const searchBar = (
+    <AdminToolbarPortal>
+      <AdminSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder='Search agents'
+        ariaLabel='Search agents'
+        trackName='Admin: search agents'
+        className='w-full'
+      />
+    </AdminToolbarPortal>
+  );
+
+  if (isPending)
+    return (
+      <>
+        {searchBar}
+        <Skeleton className='mt-4 h-40 w-full' />
+      </>
+    );
+  if (isError)
+    return (
+      <>
+        {searchBar}
+        <TabMessage>Couldn’t load agents.</TabMessage>
+      </>
+    );
 
   const busy = promote.isPending || demote.isPending || remove.isPending;
 
@@ -289,12 +338,12 @@ export function AgentsTab({
             size='sm'
             disabled={busy}
             data-track-category='Claw Admin'
-            data-track-name='Register agent'
+            data-track-name='Add surface'
             className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
           >
             <PluginAddonDefault className='size-4 text-current' />
             <span className='text-current'>
-              {hasApp && !registered ? 'Resume setup' : 'Register'}
+              {hasApp && !registered ? 'Resume setup' : 'Add surface'}
             </span>
             <ChevronDown className='size-4 text-current' />
           </Button>
@@ -322,7 +371,9 @@ export function AgentsTab({
   };
 
   return (
-    <div className='flex flex-col gap-6 pt-4'>
+    <div className='flex flex-col gap-6'>
+      {searchBar}
+
       {registration.flow && (
         <RegistrationFlowCard
           flow={registration.flow}

@@ -1,13 +1,18 @@
-import { type ReactElement } from 'react';
-import Avatar from '@/components/ui/Avatar/Avatar';
-import { UserHoverWrapper } from '@/components/ui/UserMentionPopover/UserMentionPopover';
+import { type CSSProperties, type ReactElement } from 'react';
+import { MentionText } from '@/components/ui/MentionText/MentionText';
 import { cn } from '@/utils/classNames';
 
 interface PersonPillProps {
-  userId?: string | null;
+  userId?: string | null | undefined;
   name: string;
-  className?: string;
+  className?: string | undefined;
 }
+
+/* eslint-disable @typescript-eslint/naming-convention */
+const NO_HOVER_SHIFT = {
+  '--mention-hover-color': 'var(--mention-color)',
+} as CSSProperties;
+/* eslint-enable @typescript-eslint/naming-convention */
 
 export function PersonPill({ userId, name, className }: PersonPillProps): ReactElement {
   if (!userId) {
@@ -15,16 +20,13 @@ export function PersonPill({ userId, name, className }: PersonPillProps): ReactE
   }
 
   return (
-    <UserHoverWrapper userId={userId}>
-      <span
-        className={cn(
-          'inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full bg-muted py-0.5 pl-0.5 pr-2 align-middle transition-colors hover:bg-accent',
-          className,
-        )}
-      >
-        <Avatar userId={userId} size='xs' className='size-4 shrink-0' />
-        <span className='truncate text-foreground'>{name}</span>
-      </span>
-    </UserHoverWrapper>
+    <span style={NO_HOVER_SHIFT} className={className}>
+      <MentionText
+        type='user'
+        userId={userId}
+        username={name}
+        className='!inline-flex w-fit items-center justify-center !rounded-full border border-transparent px-2 py-0.5 text-xs font-medium'
+      />
+    </span>
   );
 }

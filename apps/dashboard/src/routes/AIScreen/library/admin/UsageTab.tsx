@@ -10,10 +10,13 @@ import {
 } from '@/components/ui/Select';
 import { listAgentUsageStats } from '@/services/claw/clawAdminService';
 import type { AdminDateRange, AdminOrgScope, AgentUsageStat } from '@/services/claw/clawAdminTypes';
+import { CalendarRange } from '@xyne/icons';
 import { TabMessage } from './components/TabMessage';
 import { adminUsageKey } from './hooks/adminQueryKeys';
 import { AdminTable, OrgBadge } from './components/AdminTable';
 import { orgLabel } from './orgLabel';
+import { AdminToolbarPortal } from './components/AdminToolbarSlot';
+import { AdminSearchField } from './components/AdminSearchField';
 
 const fmt = (n: number): string => n.toLocaleString();
 
@@ -40,6 +43,7 @@ export function UsageTab({
   showOrgLabels: boolean;
 }): ReactElement {
   const [range, setRange] = useState<AdminDateRange>(30);
+  const [query, setQuery] = useState('');
 
   const {
     data: stats,
@@ -50,7 +54,11 @@ export function UsageTab({
     queryFn: () => listAgentUsageStats(userId, range, scope),
   });
 
-  const visible = orgId ? (stats ?? []).filter(stat => stat.orgId === orgId) : (stats ?? []);
+  const scoped = orgId ? (stats ?? []).filter(stat => stat.orgId === orgId) : (stats ?? []);
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? scoped.filter(stat => stat.agentSlug.toLowerCase().includes(needle))
+    : scoped;
 
   const totals = visible.reduce(
     (acc, stat) => ({
@@ -62,17 +70,33 @@ export function UsageTab({
   );
 
   return (
-    <div className='flex flex-col gap-6 pt-4'>
-      <div className='flex flex-wrap items-center justify-end gap-3'>
+    <div className='flex flex-col gap-6'>
+      <AdminToolbarPortal>
+        <AdminSearchField
+          value={query}
+          onChange={setQuery}
+          placeholder='Search agents'
+          ariaLabel='Search agent usage'
+          trackName='Admin: search usage'
+          className='w-full'
+        />
+        <div className='flex flex-wrap items-center justify-end gap-2'>
         <Select
           value={String(range)}
           onValueChange={value => setRange(value === 'all' ? 'all' : (Number(value) as 7 | 30))}
         >
           <SelectTrigger
-            className='w-40 focus-visible:border-ring focus-visible:ring-0'
+            className='w-auto max-w-[16rem] focus-visible:border-ring focus-visible:ring-0'
             aria-label='Date range'
           >
-            <SelectValue />
+            <SelectValue>
+              <span className='flex min-w-0 items-center gap-2'>
+                <CalendarRange className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                <span className='truncate'>
+                  {range === 'all' ? 'All time' : `Last ${range} days`}
+                </span>
+              </span>
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value='7'>Last 7 days</SelectItem>
@@ -80,7 +104,8 @@ export function UsageTab({
             <SelectItem value='all'>All time</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+        </div>
+      </AdminToolbarPortal>
 
       <div className='grid gap-3 sm:grid-cols-3'>
         <StatCard label='Total Runs' value={fmt(totals.runs)} />

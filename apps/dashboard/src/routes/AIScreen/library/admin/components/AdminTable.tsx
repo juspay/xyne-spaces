@@ -8,7 +8,7 @@ export function AdminTable({
   headers,
   children,
 }: {
-  headers: readonly { label: string; align?: 'right' }[];
+  headers: readonly { label: string; align?: 'right'; width?: string }[];
   children: ReactNode;
 }): ReactElement {
   return (
@@ -22,6 +22,7 @@ export function AdminTable({
                 className={cn(
                   'whitespace-nowrap px-4 py-2.5',
                   header.align === 'right' && 'text-right',
+                  header.width,
                 )}
               >
                 {header.label}
@@ -51,7 +52,10 @@ export function AdminPager({
   total: number;
   onPrev: () => void;
   onNext: () => void;
-}): ReactElement {
+}): ReactElement | null {
+  const hasPages = offset > 0 || offset + count < total;
+  if (!hasPages) return null;
+
   return (
     <div className='flex items-center justify-between text-xs text-muted-foreground'>
       <span>

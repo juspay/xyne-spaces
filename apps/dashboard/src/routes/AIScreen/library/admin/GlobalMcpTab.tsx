@@ -19,6 +19,8 @@ import {
 } from '@/services/claw/clawAdminService';
 import type { AdminMcpServerSummary, CredentialField } from '@/services/claw/clawAdminTypes';
 import { TabMessage } from './components/TabMessage';
+import { AdminToolbarPortal } from './components/AdminToolbarSlot';
+import { AdminSearchField } from './components/AdminSearchField';
 import { credentialFieldsKey, globalMcpKey } from './hooks/adminQueryKeys';
 
 function CredentialsForm({
@@ -65,7 +67,7 @@ function CredentialsForm({
   const existingKeys = existing?.credentialKeys ?? [];
 
   return (
-    <div className='border-t border-border bg-muted/40 px-4 py-4'>
+    <div className='border-t border-border bg-muted/40 px-1 py-4'>
       {fields.length === 0 ? (
         <p className='text-xs text-muted-foreground'>
           No connector definition found for <span className='font-mono'>{server.type}</span> —
@@ -82,10 +84,10 @@ function CredentialsForm({
           )}
           <div className='flex flex-col gap-3'>
             {fields.map(field => (
-              <label key={field.name} className='flex flex-col gap-1'>
+              <label key={field.name} className='flex flex-col gap-2'>
                 <span className='text-xs font-medium text-foreground'>
                   {field.label}
-                  {!field.optional && ' *'}
+                  {!field.optional && <span className='text-destructive'> *</span>}
                 </span>
                 <Input
                   type={field.type === 'password' ? 'password' : 'text'}
@@ -97,7 +99,6 @@ function CredentialsForm({
                   spellCheck={false}
                   autoComplete='off'
                 />
-                <span className='font-mono text-xs text-muted-foreground'>{field.name}</span>
               </label>
             ))}
           </div>
@@ -128,6 +129,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
   const queryClient = useQueryClient();
   const [openForm, setOpenForm] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminMcpServerSummary | null>(null);
+  const [query, setQuery] = useState('');
 
   const {
     data: servers,
@@ -166,14 +168,57 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
     onError: error => toast.error(clawErrorText(error, 'Could not remove credentials')),
   });
 
-  if (isPending) return <Skeleton className='mt-4 h-32 w-full' />;
-  if (isError) return <TabMessage>Couldn’t load MCP servers.</TabMessage>;
-  if (!servers || servers.length === 0) return <TabMessage>No MCP servers registered.</TabMessage>;
+  const searchBar = (
+    <AdminToolbarPortal>
+      <AdminSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder='Search MCP servers'
+        ariaLabel='Search MCP servers'
+        trackName='Admin: search global MCP servers'
+        className='w-full'
+      />
+    </AdminToolbarPortal>
+  );
+
+  if (isPending)
+    return (
+      <>
+        {searchBar}
+        <Skeleton className='mt-4 h-32 w-full' />
+      </>
+    );
+  if (isError)
+    return (
+      <>
+        {searchBar}
+        <TabMessage>Couldn’t load MCP servers.</TabMessage>
+      </>
+    );
+  if (!servers || servers.length === 0)
+    return (
+      <>
+        {searchBar}
+        <TabMessage>No MCP servers registered.</TabMessage>
+      </>
+    );
+
+  const needle = query.trim().toLowerCase();
+  const visibleServers = needle
+    ? servers.filter((server: AdminMcpServerSummary) =>
+        `${server.name} ${server.type}`.toLowerCase().includes(needle),
+      )
+    : servers;
 
   return (
-    <div className='flex flex-col gap-6 pt-4'>
+    <div className='flex flex-col gap-6'>
+      {searchBar}
+
+      {visibleServers.length === 0 ? (
+        <TabMessage>No MCP servers match your search.</TabMessage>
+      ) : (
       <ul className='flex flex-col'>
-        {servers.map((server: AdminMcpServerSummary) => {
+        {visibleServers.map((server: AdminMcpServerSummary) => {
           const fields = fieldsByType?.[server.type] ?? [];
           const formOpen = openForm === server.type;
 
@@ -221,7 +266,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                     variant='ghost'
                     size='sm'
                     aria-label='Delete global credentials'
-                    className='text-muted-foreground hover:text-destructive focus-visible:bg-muted focus-visible:ring-0'
+                    className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
                     onClick={() => setDeleteTarget(server)}
                     data-track-category='Claw Admin'
                     data-track-name='Delete global MCP credentials'
@@ -248,6 +293,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
           );
         })}
       </ul>
+      )}
 
       <ConfirmDialog
         open={deleteTarget !== null}

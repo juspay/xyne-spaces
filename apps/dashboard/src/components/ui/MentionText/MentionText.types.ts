@@ -35,6 +35,8 @@ interface BaseMentionTextProps {
   onGroupAction?: (groupId: string, action: GroupMentionActionType) => void;
   hoverHandlers?: MentionHoverHandlers;
   preserveThreadRoute?: boolean;
+  /** Extra classes for the rendered pill (radius, truncation, text size). */
+  className?: string;
 }
 
 export type UserMentionProps = BaseMentionTextProps & {

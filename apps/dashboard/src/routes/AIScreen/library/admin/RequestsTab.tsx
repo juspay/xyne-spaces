@@ -6,6 +6,7 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   Bot,
   CheckTickCircle,
+  Eye02On,
   FilterFunnel,
   GitBranch,
   LayerTwo,
@@ -46,16 +47,18 @@ import {
 } from './hooks/adminQueryKeys';
 import { orgLabel } from './orgLabel';
 import { PersonPill } from '../../shared/PersonPill';
+import { AdminToolbarPortal } from './components/AdminToolbarSlot';
+import { AdminSearchField } from './components/AdminSearchField';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 type RequestKindTag = 'agent' | 'skill' | 'mcp' | 'workflow';
 
 const KIND_OPTIONS = [
-  { value: '', label: 'All types' },
-  { value: 'agent', label: 'Agent' },
-  { value: 'skill', label: 'Skill' },
-  { value: 'mcp', label: 'MCP connector' },
-  { value: 'workflow', label: 'Workflow' },
+  { value: '', label: 'All types', icon: <FilterFunnel className='size-4' aria-hidden /> },
+  { value: 'agent', label: 'Agent', icon: <Bot className='size-4' aria-hidden /> },
+  { value: 'skill', label: 'Skill', icon: <LayerTwo className='size-4' aria-hidden /> },
+  { value: 'mcp', label: 'MCP connector', icon: <PluginAddonDefault className='size-4' aria-hidden /> },
+  { value: 'workflow', label: 'Workflow', icon: <GitBranch className='size-4' aria-hidden /> },
 ];
 
 interface UnifiedRequest {
@@ -158,6 +161,8 @@ export function RequestsTab({
   const [rejectingKey, setRejectingKey] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState('');
   const [kindFilter, setKindFilter] = useState('');
+  const [query, setQuery] = useState('');
+  const [openDetailKey, setOpenDetailKey] = useState<string | null>(null);
 
   const agentRequests = useQuery({
     queryKey: pendingRequestsKey(scope),
@@ -325,17 +330,12 @@ export function RequestsTab({
         requesterId: mcpOwnerId(server),
         requesterName: mcpOwner(server),
         occurredAt: at,
-        extra: server.description ?? null,
+        extra: null,
         orgName: null,
         detail: (
-          <details className='mt-3'>
-            <summary className='cursor-pointer text-xs text-muted-foreground hover:text-foreground'>
-              View connector definition
-            </summary>
-            <pre className='mt-2 max-h-72 overflow-auto rounded-lg border border-border bg-muted/50 p-2 text-xs text-muted-foreground'>
-              {connectorDefinition(server)}
-            </pre>
-          </details>
+          <pre className='mt-3 max-h-72 overflow-auto rounded-lg border border-border bg-muted/50 p-2 text-xs text-muted-foreground'>
+            {connectorDefinition(server)}
+          </pre>
         ),
         approveLabel: 'Approve',
         onApprove: () => runApproveMcp(server.id),
@@ -389,7 +389,11 @@ export function RequestsTab({
     runRejectWorkflow,
   ]);
 
-  const visible = kindFilter ? rows.filter(row => row.kind === kindFilter) : rows;
+  const byKind = kindFilter ? rows.filter(row => row.kind === kindFilter) : rows;
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? byKind.filter(row => `${row.title} ${row.requesterName}`.toLowerCase().includes(needle))
+    : byKind;
 
   const isPending = agentRequests.isPending || mcpRequests.isPending || workflowRequests.isPending;
   const isError = agentRequests.isError && mcpRequests.isError && workflowRequests.isError;
@@ -397,15 +401,25 @@ export function RequestsTab({
     !isError && (agentRequests.isError || mcpRequests.isError || workflowRequests.isError);
 
   const filterBar = (
-    <div className='flex flex-wrap items-center justify-end gap-2'>
-      <FilterSelect
-        ariaLabel='Request type filter'
-        icon={<FilterFunnel className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
-        value={kindFilter}
-        onChange={setKindFilter}
-        options={KIND_OPTIONS}
+    <AdminToolbarPortal>
+      <AdminSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder='Search requests'
+        ariaLabel='Search requests'
+        trackName='Admin: search requests'
+        className='w-full'
       />
-    </div>
+      <div className='flex flex-wrap items-center justify-end gap-2'>
+        <FilterSelect
+          ariaLabel='Request type filter'
+          icon={<FilterFunnel className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
+          value={kindFilter}
+          onChange={setKindFilter}
+          options={KIND_OPTIONS}
+        />
+      </div>
+    </AdminToolbarPortal>
   );
 
   const content = isPending ? (
@@ -417,81 +431,107 @@ export function RequestsTab({
   ) : (
     <ul className='flex flex-col gap-2'>
       {visible.map(row => (
-        <li key={row.key} className='rounded-xl border border-border p-4'>
-          <div className='flex items-start justify-between gap-3'>
-            <div className='flex min-w-0 flex-1 flex-col gap-1'>
-              <div className='flex min-w-0 items-center gap-2'>
-                <Tooltip content={KIND_TOOLTIP[row.kind]} side='top'>
-                  <span className='flex shrink-0 items-center text-muted-foreground'>
-                    {KIND_ICON[row.kind]}
-                  </span>
-                </Tooltip>
-                {row.onView ? (
-                  <button
-                    type='button'
-                    onClick={row.onView}
-                    className='min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline'
-                    data-track-category='Claw Admin'
-                    data-track-name='View requested agent'
-                  >
-                    {row.title}
-                  </button>
-                ) : (
-                  <span className='truncate text-sm font-medium text-foreground'>{row.title}</span>
-                )}
-                {showOrgLabels && row.orgName && <OrgBadge orgName={row.orgName} />}
+        <li key={row.key} className='rounded-xl border border-border px-4 py-3'>
+          <div className='flex flex-col gap-1'>
+            <div className='flex min-w-0 items-start gap-2'>
+              <Tooltip content={KIND_TOOLTIP[row.kind]} side='top'>
+                <span className='flex size-5 shrink-0 items-center justify-center text-muted-foreground'>
+                  {KIND_ICON[row.kind]}
+                </span>
+              </Tooltip>
+
+              <div className='flex min-w-0 flex-1 flex-col gap-1'>
+                <div className='flex min-w-0 items-center gap-2'>
+                  {row.onView ? (
+                    <button
+                      type='button'
+                      onClick={row.onView}
+                      className='truncate text-left text-sm font-medium text-foreground hover:underline'
+                      data-track-category='Claw Admin'
+                      data-track-name='Open requested item'
+                    >
+                      {row.title}
+                    </button>
+                  ) : (
+                    <span className='truncate text-sm font-medium text-foreground'>{row.title}</span>
+                  )}
+                  {showOrgLabels && row.orgName && <OrgBadge orgName={row.orgName} />}
+                </div>
+
+                <p className='flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground'>
+                  Requested by
+                  <PersonPill userId={row.requesterId} name={row.requesterName} />
+                  {row.occurredAt && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <Tooltip content={new Date(row.occurredAt).toLocaleString()} side='top'>
+                        <span className='cursor-default'>{relativeTime(row.occurredAt)}</span>
+                      </Tooltip>
+                    </>
+                  )}
+                </p>
+
+                {row.extra && <p className='text-xs text-muted-foreground'>{row.extra}</p>}
               </div>
 
-              <p className='flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground'>
-                Requested by <PersonPill userId={row.requesterId} name={row.requesterName} />
-                {row.occurredAt && (
-                  <>
-                    <span aria-hidden>·</span>
-                    <span title={new Date(row.occurredAt).toLocaleString()}>
-                      {relativeTime(row.occurredAt)}
-                    </span>
-                  </>
+              <div className='-my-1 flex shrink-0 items-center gap-1'>
+                {row.detail ? (
+                  <Tooltip content='View details' side='top'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      aria-label='View details'
+                      aria-expanded={openDetailKey === row.key}
+                      onClick={() =>
+                        setOpenDetailKey(prev => (prev === row.key ? null : row.key))
+                      }
+                      className='size-7 text-muted-foreground hover:text-foreground'
+                      data-track-category='Claw Admin'
+                      data-track-name='View request details'
+                    >
+                      <Eye02On className='size-4' />
+                    </Button>
+                  </Tooltip>
+                ) : (
+                  <span className='size-7' aria-hidden />
                 )}
-              </p>
 
-              {row.extra && <p className='text-xs text-muted-foreground'>{row.extra}</p>}
-            </div>
+                <Tooltip content='Approve request' side='top'>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    aria-label={row.approveLabel}
+                    disabled={busy || row.approveDisabled}
+                    onClick={row.onApprove}
+                    className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                    data-track-category='Claw Admin'
+                    data-track-name={`Approve ${row.kind} request`}
+                  >
+                    <CheckTickCircle className='size-4' />
+                  </Button>
+                </Tooltip>
 
-            <div className='flex shrink-0 items-center gap-1'>
-              <Tooltip content={row.approveLabel} side='top'>
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='icon'
-                  aria-label={row.approveLabel}
-                  disabled={busy || row.approveDisabled}
-                  onClick={row.onApprove}
-                  className='text-muted-foreground hover:text-status-success'
-                  data-track-category='Claw Admin'
-                  data-track-name={`Approve ${row.kind} request`}
-                >
-                  <CheckTickCircle className='size-4' />
-                </Button>
-              </Tooltip>
-
-              <Tooltip content='Reject' side='top'>
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='icon'
-                  aria-label='Reject'
-                  disabled={busy}
-                  onClick={() => {
-                    setRejectNote('');
-                    setRejectingKey(prev => (prev === row.key ? null : row.key));
-                  }}
-                  className='text-muted-foreground hover:text-destructive'
-                  data-track-category='Claw Admin'
-                  data-track-name={`Reject ${row.kind} request`}
-                >
-                  <MultipleCrossCancelCircle className='size-4' />
-                </Button>
-              </Tooltip>
+                <Tooltip content='Reject request' side='top'>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    aria-label='Reject request'
+                    disabled={busy}
+                    onClick={() => {
+                      setRejectNote('');
+                      setRejectingKey(prev => (prev === row.key ? null : row.key));
+                    }}
+                    className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
+                    data-track-category='Claw Admin'
+                    data-track-name={`Reject ${row.kind} request`}
+                  >
+                    <MultipleCrossCancelCircle className='size-4' />
+                  </Button>
+                </Tooltip>
+              </div>
             </div>
           </div>
 
@@ -516,14 +556,14 @@ export function RequestsTab({
             </div>
           )}
 
-          {row.detail}
+          {openDetailKey === row.key && row.detail}
         </li>
       ))}
     </ul>
   );
 
   return (
-    <div className='flex flex-col gap-6 pt-4'>
+    <div className='flex flex-col gap-6'>
       {registration.flow && (
         <RegistrationFlowCard
           flow={registration.flow}
