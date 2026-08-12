@@ -27,9 +27,3 @@ CREATE UNIQUE INDEX "channel_board_mappings_one_default_per_channel"
 
 CREATE INDEX "channel_board_mappings_channelId_idx"
     ON "public"."channel_board_mappings"("channelId");
-
-CREATE INDEX "channel_board_mappings_boardId_idx"
-    ON "public"."channel_board_mappings"("boardId");
-
-CREATE INDEX "channel_board_mappings_workspaceId_channelId_idx"
-    ON "public"."channel_board_mappings"("workspaceId", "channelId");
