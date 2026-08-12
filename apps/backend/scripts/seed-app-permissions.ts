@@ -20,6 +20,7 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'tickets:write', description: 'Create and update tickets from apps' },
   { scope: 'usergroups:read', description: 'Read user groups from apps' },
   { scope: 'users:read', description: 'Read user profile information from apps' },
+  { scope: 'users:write', description: 'Update the installing app user’s own profile status from apps' },
 ];
 
 async function main() {

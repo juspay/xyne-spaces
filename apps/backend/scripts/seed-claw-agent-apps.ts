@@ -13,6 +13,7 @@ const CLAW_APP_PERMISSIONS = [
   'chat:write',
   'channels:read',
   'users:read',
+  'users:write',
   'usergroups:read',
   'tickets:read',
   'tickets:write',

@@ -25,7 +25,7 @@ export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
   // per-user tool-sync. See routes/tools.ts:185-196 — the picker unions
   // adapter writeTools + staticTools. NOT a HITL gate; this tool stays
   // autonomous (the whole point of the app-tools server).
-  staticTools: ["apps-send-message"],
+  staticTools: ["apps-send-message", "apps-set-own-status"],
   credentialFields: [],
   buildCommand(credentials) {
     const appToken = (credentials["app_token"] as string | undefined) ?? "";

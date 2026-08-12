@@ -141,8 +141,27 @@ const SEND_MESSAGE_TOOL = {
   },
 };
 
+const SET_STATUS_TOOL = {
+  name: "apps-set-own-status",
+  description:
+    "Set the bot/agent's OWN Xyne Spaces profile status using the agent app token. " +
+    "This tool never accepts a userId and cannot update any human or other agent status. " +
+    "Use it when the agent needs to advertise its current availability or operating state in Spaces. " +
+    "Pass null for a field to clear that field. statusExpiryAt, assignmentUnavailableUntil, and notificationsPausedUntil must be ISO-8601 timestamps when provided.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      statusEmoji: { type: ["string", "null"], description: "Emoji to show next to the bot status; pass null to clear." },
+      statusContent: { type: ["string", "null"], description: "Short status text, max 280 characters; pass null to clear." },
+      statusExpiryAt: { type: ["string", "null"], description: "ISO timestamp when the status should expire; pass null to clear." },
+      assignmentUnavailableUntil: { type: ["string", "null"], description: "ISO timestamp until the bot should be treated as assignment-unavailable; pass null to clear." },
+      notificationsPausedUntil: { type: ["string", "null"], description: "ISO timestamp until bot notifications are paused; pass null to clear." },
+    },
+  },
+};
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [PING_TOOL, SEND_MESSAGE_TOOL],
+  tools: [PING_TOOL, SEND_MESSAGE_TOOL, SET_STATUS_TOOL],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
@@ -150,6 +169,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
   if (name === "ping") {
     return { content: [{ type: "text", text: "ok" }] };
+  }
+
+  if (name === "apps-set-own-status") {
+    if (!APP_TOKEN || !SPACES_URL) {
+      return {
+        content: [{ type: "text", text: "XYNE_SPACES_APP_TOKEN or XYNE_SPACES_URL not set — server misconfigured." }],
+        isError: true,
+      };
+    }
+    try {
+      const input = (args ?? {}) as Record<string, unknown>;
+      const allowedKeys = [
+        "statusEmoji",
+        "statusContent",
+        "statusExpiryAt",
+        "assignmentUnavailableUntil",
+        "notificationsPausedUntil",
+      ];
+      const body: Record<string, unknown> = {};
+      for (const key of allowedKeys) {
+        if (Object.prototype.hasOwnProperty.call(input, key)) body[key] = input[key];
+      }
+      if (Object.keys(body).length === 0) {
+        return { content: [{ type: "text", text: "Provide at least one status field to set or clear." }], isError: true };
+      }
+
+      const result = await spacesAppFetch("/user/status", body);
+      return { content: [{ type: "text", text: `Own Spaces status updated: ${JSON.stringify(result)}` }] };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { content: [{ type: "text", text: `apps-set-own-status error: ${msg}` }], isError: true };
+    }
   }
 
   // Accept legacy `spaces-send-message` name as an alias so any agent or

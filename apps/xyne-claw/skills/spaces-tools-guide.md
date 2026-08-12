@@ -49,6 +49,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Updating a ticket | `spaces-update-ticket` (write) |
 | Scheduling a meeting | `spaces-schedule-call` (write) |
 | Posting in a different thread/channel as the user | `user-send-message` (write) |
+| Setting the agent/bot's own Spaces status | `apps-set-own-status` (write, bot/app identity only) |
 | Creating a canvas | `spaces-create-canvas` (write) |
 | Editing a canvas | `spaces-edit-canvas` (write) |
 
@@ -113,6 +114,24 @@ The org is full of look-alike content. Stay anchored to **exactly** what was ask
 # Per-tool argument reference
 
 Read the section for the tool you're about to call. Every `Required` line is enforced — calls without those fields error out.
+
+---
+
+## apps-set-own-status
+
+Sets the current agent/bot app user's own Spaces profile status. This uses the bot/app identity, never a human user token, and the tool does not accept `userId`; it cannot update another user or another agent.
+
+**Required:** at least one status field.
+
+**Args:**
+
+- **statusEmoji** (string or null) — Emoji to show, or `null` to clear.
+- **statusContent** (string or null, max 280 chars) — Short status text, or `null` to clear.
+- **statusExpiryAt** (ISO timestamp or null) — When the visible status expires, or `null` to clear.
+- **assignmentUnavailableUntil** (ISO timestamp or null) — When the bot becomes available for assignment again, or `null` to clear.
+- **notificationsPausedUntil** (ISO timestamp or null) — Pause bot notifications until this time, or `null` to clear.
+
+Use this only when changing the agent's own advertised status in Spaces. Do not use it for normal replies or for changing a human user's status.
 
 ---
 
