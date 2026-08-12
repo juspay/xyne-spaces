@@ -1138,7 +1138,10 @@ export const queries = defineQueries({
       conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       formEntityValueFieldIds: z.array(z.string()).optional(),
-    }),
+    }).refine(
+      args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
     ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
@@ -1332,7 +1335,10 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
-    }),
+    }).refine(
+      args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
     ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
