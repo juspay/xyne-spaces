@@ -13,33 +13,30 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCachedQuery } from '@/hooks/useCachedQuery';
 import { queries } from '@/zero/queries';
 import { listClawAuthAgents } from '@/services/claw/clawAuthAgentsService';
-import { listPendingRequests } from '@/services/claw/clawAdminService';
+import {
+  listMcpPublishRequests,
+  listPendingRequests,
+  listWorkflowGlobalRequests,
+} from '@/services/claw/clawAdminService';
 import { appsService } from '@/services/Apps/appsService';
 import type { AdminOrgScope } from '@/services/claw/clawAdminTypes';
-import { AdminsTab } from './AdminsTab';
 import { AgentsTab } from './AgentsTab';
 import { AuditTab } from './AuditTab';
 import { GlobalMcpTab } from './GlobalMcpTab';
-import { McpPublishTab } from './McpPublishTab';
 import { RequestsTab } from './RequestsTab';
 import { ScheduledTab } from './ScheduledTab';
-import { WorkflowRequestsTab } from './WorkflowRequestsTab';
 import { UsageTab } from './UsageTab';
-import { adminAgentsKey, adminAgentsPrefix, pendingRequestsKey } from './hooks/adminQueryKeys';
+import {
+  adminAgentsKey,
+  adminAgentsPrefix,
+  mcpPublishKey,
+  pendingRequestsKey,
+  workflowRequestsKey,
+} from './hooks/adminQueryKeys';
 import { useAgentRegistration } from './hooks/useAgentRegistration';
 import { orgLabel } from './orgLabel';
 
-const ADMIN_TABS = [
-  'agents',
-  'requests',
-  'mcp-publish',
-  'workflow-requests',
-  'admins',
-  'audit',
-  'usage',
-  'scheduled',
-  'global-mcp',
-] as const;
+const ADMIN_TABS = ['agents', 'requests', 'audit', 'usage', 'scheduled', 'global-mcp'] as const;
 type TabKey = (typeof ADMIN_TABS)[number];
 
 const TAB_SCOPED_PARAMS = ['q', 'status'];
@@ -144,9 +141,26 @@ export default function AdminV2(): ReactElement {
         ? 'All orgs'
         : (orgOptions.find(option => option.value === orgFilter)?.label ?? 'Organization');
 
-  const visibleRequestCount = orgId
-    ? (requests ?? []).filter(request => request.orgId === orgId).length
-    : (requests?.length ?? 0);
+  const { data: mcpPublishRequests } = useQuery({
+    queryKey: mcpPublishKey(),
+    queryFn: () => listMcpPublishRequests(userId),
+    enabled: Boolean(userId),
+  });
+
+  const { data: workflowRequests } = useQuery({
+    queryKey: workflowRequestsKey(scope),
+    queryFn: () => listWorkflowGlobalRequests(userId, scope),
+    enabled: Boolean(userId),
+  });
+
+  const visibleRequestCount =
+    (orgId
+      ? (requests ?? []).filter(request => request.orgId === orgId).length
+      : (requests?.length ?? 0)) +
+    (mcpPublishRequests?.length ?? 0) +
+    (orgId
+      ? (workflowRequests ?? []).filter(request => request.orgId === orgId).length
+      : (workflowRequests?.length ?? 0));
 
   const tabs = useMemo<TabItem[]>(
     () => [
@@ -155,9 +169,6 @@ export default function AdminV2(): ReactElement {
         id: 'requests',
         label: visibleRequestCount > 0 ? `Requests (${visibleRequestCount})` : 'Requests',
       },
-      { id: 'mcp-publish', label: 'MCP Publish' },
-      { id: 'workflow-requests', label: 'Workflow Requests' },
-      { id: 'admins', label: 'Admins' },
       { id: 'audit', label: 'Audit' },
       { id: 'usage', label: 'Usage' },
       { id: 'scheduled', label: 'Scheduled' },
@@ -236,24 +247,7 @@ export default function AdminV2(): ReactElement {
           registration={registration}
         />
       )}
-      {tab === 'mcp-publish' && <McpPublishTab userId={userId} />}
-      {tab === 'workflow-requests' && (
-        <WorkflowRequestsTab
-          userId={userId}
-          scope={scope}
-          orgId={orgId}
-          orgNamesById={orgNamesById}
-          showOrgLabels={orgFilter === ALL_ORGS}
-        />
-      )}
       {tab === 'global-mcp' && <GlobalMcpTab userId={userId} />}
-      {tab === 'admins' && (
-        <AdminsTab
-          userId={userId}
-          orgNamesById={orgNamesById}
-          showOrgLabels={orgFilter === ALL_ORGS}
-        />
-      )}
       {tab === 'audit' && (
         <AuditTab
           userId={userId}
