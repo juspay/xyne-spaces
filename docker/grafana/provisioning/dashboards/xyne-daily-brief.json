@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -7,27 +9,54 @@
   "preload": false,
   "refresh": "1m",
   "schemaVersion": 42,
-  "tags": ["daily-brief", "xyne", "monitoring"],
-  "templating": { "list": [] },
-  "time": { "from": "now-30d", "to": "now" },
+  "tags": [
+    "daily-brief",
+    "xyne",
+    "monitoring"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "Daily Brief",
   "uid": "xyne-daily-brief",
-  "version": 6,
+  "version": 10,
   "panels": [
     {
       "type": "stat",
       "title": "Users with a brief",
       "description": "Users who have at least one generated brief. Read from generated_content, so it is exact and independent of the time range.",
-      "datasource": { "type": "prometheus", "uid": "P4169E866C3094E38" },
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": 0 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
@@ -37,23 +66,63 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
-      "targets": [{ "refId": "A", "instant": true, "expr": "max(daily_brief_users_total)" }]
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_users_total)"
+        }
+      ]
     },
     {
       "type": "stat",
       "title": "Users who requested a regen",
       "description": "Users who have requested at least one regeneration. Counted by user id in Redis when the request reaches claw-auth, so it is exact and independent of the time range.",
-      "datasource": { "type": "prometheus", "uid": "P4169E866C3094E38" },
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
       "id": 2,
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [{ "options": { "match": "null", "result": { "text": "0" } }, "type": "special" }],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": 0 }] },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
@@ -63,23 +132,63 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
-      "targets": [{ "refId": "A", "instant": true, "expr": "max(daily_brief_regen_users_total)" }]
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_regen_users_total)"
+        }
+      ]
     },
     {
       "type": "stat",
       "title": "Users (devices) who switched briefs",
-      "description": "Distinct devices that picked a different brief from the history menu within the selected time range. Switching is a client-only action, so the only identity available is a per-browser id — the same person on web and Electron counts twice.",
-      "datasource": { "type": "prometheus", "uid": "P4169E866C3094E38" },
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "description": "Distinct devices that picked a different brief from the history menu within the selected time range. Switching is a client-only action, so the only identity available is a per-browser id \u2014 the same person on web and Electron counts twice.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "id": 3,
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [{ "options": { "match": "null", "result": { "text": "0" } }, "type": "special" }],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": 0 }] },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
@@ -89,7 +198,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
       "targets": [
@@ -104,14 +219,32 @@
       "type": "stat",
       "title": "Briefs generated",
       "description": "Briefs that exist globally (one per user per day; a regeneration overwrites that day's brief rather than adding one). Read from generated_content, so it is exact and independent of the time range.",
-      "datasource": { "type": "prometheus", "uid": "P4169E866C3094E38" },
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
       "id": 4,
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": 0 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
@@ -121,23 +254,53 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
-      "targets": [{ "refId": "A", "instant": true, "expr": "max(daily_brief_total)" }]
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_total)"
+        }
+      ]
     },
     {
       "type": "stat",
       "title": "Regenerations",
       "description": "Regeneration requests ever served, globally. Counted in Redis when the request reaches claw-auth, so it survives restarts and is exact regardless of the time range.",
-      "datasource": { "type": "prometheus", "uid": "P4169E866C3094E38" },
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
       "id": 5,
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": 0 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
@@ -147,23 +310,43 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
       "targets": [
-        { "refId": "A", "instant": true, "expr": "max(daily_brief_regenerations_total)" }
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_regenerations_total)"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Briefs and regenerations over time",
-      "description": "Lifetime totals plotted over the selected range — the slope is how fast briefs are being produced and regenerated.",
-      "datasource": { "type": "prometheus", "uid": "P4169E866C3094E38" },
-      "gridPos": { "h": 6, "w": 18, "x": 6, "y": 6 },
+      "description": "Lifetime totals plotted over the selected range \u2014 the slope is how fast briefs are being produced and regenerated.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 18,
+        "x": 6,
+        "y": 6
+      },
       "id": 6,
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 0,
@@ -178,15 +361,810 @@
         "overrides": []
       },
       "options": {
-        "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
-        { "refId": "A", "expr": "max(daily_brief_total)", "legendFormat": "briefs" },
+        {
+          "refId": "A",
+          "expr": "max(daily_brief_total)",
+          "legendFormat": "briefs"
+        },
         {
           "refId": "B",
           "expr": "max(daily_brief_regenerations_total)",
           "legendFormat": "regenerations"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Users who rejected the auto brief",
+      "description": "Users who have re-run a brief the cron produced for them \u2014 dissatisfaction with the default. Exact, lifetime.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 12
+      },
+      "id": 7,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_default_rejected_users_total)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Users who regenerated more than once",
+      "description": "Users who re-ran a brief they had already regenerated \u2014 the regeneration itself did not satisfy them. Exact, lifetime.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 12
+      },
+      "id": 8,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_repeat_regen_users_total)"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Why briefs get regenerated",
+      "description": "replacing_scheduled_brief = rejecting the cron brief \u00b7 replacing_own_regeneration = rejecting their own re-run \u00b7 retry_after_failure = the previous run errored, not a quality signal \u00b7 first_brief_of_day = no brief existed yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (origin) (increase(daily_brief_regeneration_attempts_total[$__range]))",
+          "legendFormat": "{{origin}}"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "How many regenerations it takes",
+      "description": "Attempt depth within a single day per user. A tall 1 with a short 2 means one re-run usually settles it; a long tail means the brief is not converging.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (attempt) (increase(daily_brief_regeneration_attempts_total{origin!=\"retry_after_failure\"}[$__range]))",
+          "legendFormat": "attempt {{attempt}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Rejection rate of the auto brief",
+      "description": "Share of cron-generated briefs that the user immediately re-ran. The headline quality number for the scheduled brief.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_regeneration_attempts_total{origin=\"replacing_scheduled_brief\"}[$__range])) / clamp_min(sum(increase(daily_brief_generated_total{trigger=\"scheduled\",status=\"ready\"}[$__range])), 1)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Avg generation time",
+      "description": "Mean wall-clock time of a successful brief run. sum/count is the exact mean; the quantile panel next to it is bucket-approximated.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 24
+      },
+      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_generation_duration_milliseconds_sum{status=\"ready\"}[$__range])) / clamp_min(sum(increase(daily_brief_generation_duration_milliseconds_count{status=\"ready\"}[$__range])), 1)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "p95 generation time",
+      "description": "95th percentile of successful runs \u2014 what the slowest users actually wait.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 24
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "histogram_quantile(0.95, sum by (le) (increase(daily_brief_generation_duration_milliseconds_bucket{status=\"ready\"}[$__range])))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "p50 delivery delay",
+      "description": "How late the scheduled brief landed versus the cron's target time (queue wait + global LLM slot + the run). The SLO users actually feel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 24
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "histogram_quantile(0.5, sum by (le) (increase(daily_brief_scheduled_delivery_delay_milliseconds_bucket[$__range])))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Regenerations abandoned",
+      "description": "Times someone left the screen while a regeneration was still running. Cross with the wait buckets below to see when we lose them.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "id": 15,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Generation time by trigger",
+      "description": "p50 and p95 of successful runs, cron versus on-demand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "id": 16,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto"
+          },
+          "mappings": [],
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le, trigger) (rate(daily_brief_generation_duration_milliseconds_bucket{status=\"ready\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{trigger}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, trigger) (rate(daily_brief_generation_duration_milliseconds_bucket{status=\"ready\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{trigger}}"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "How long people wait before giving up",
+      "description": "Share of abandonments that had already happened by each wait threshold \u2014 read it as a cumulative curve: the bar at 60s is everyone who left within 60s. Where it crosses 50% is median patience. Compare that against p50 generation time: if patience is shorter, the pipeline is losing people mid-run.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
+      "id": 17,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (le) (increase(daily_brief_regenerate_abandoned_seconds_bucket{le!=\"+Inf\"}[$__range])) / scalar(clamp_min(sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range])), 1))",
+          "legendFormat": "within {{le}}s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Median patience",
+      "description": "The wait at which half of the people who walked away had already gone. Put this next to p50 generation time \u2014 if it is smaller, you are losing people before the brief can possibly arrive.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 37
+      },
+      "id": 18,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "histogram_quantile(0.5, sum by (le) (increase(daily_brief_regenerate_abandoned_seconds_bucket[$__range])))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Abandonment rate",
+      "description": "Share of regenerations where the user left before it finished. Client-measured, so treat it as a lower bound \u2014 a closed tab may never report.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 37
+      },
+      "id": 19,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "\u2014"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range])) / clamp_min(sum(increase(daily_brief_regeneration_attempts_total[$__range])), 1)"
         }
       ]
     }

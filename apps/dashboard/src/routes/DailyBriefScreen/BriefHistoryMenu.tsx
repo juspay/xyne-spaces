@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ClockDefault, File02Default } from '@xyne/icons';
+import { ChevronBigDown, ClockDefault, File02Default } from '@xyne/icons';
 import { Popover } from '../../components/ui/Popover';
 import { cn } from '../../utils/classNames';
 import { APP_NO_DRAG_STYLE } from '../../utils/electronApp';
@@ -23,22 +23,33 @@ interface BriefHistoryMenuProps {
   onSelect: (date: string) => void;
 }
 
+const COLLAPSED_COUNT = 5;
+
 export function BriefHistoryMenu({
   history,
   selectedDate,
   onSelect,
 }: BriefHistoryMenuProps): ReactElement {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const handleOpenChange = (next: boolean): void => {
+    setOpen(next);
+    if (!next) setExpanded(false);
+  };
+
+  const visible = expanded ? history : history.slice(0, COLLAPSED_COUNT);
+  const hiddenCount = history.length - visible.length;
 
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       side='bottom'
       align='end'
       sideOffset={8}
       collisionPadding={12}
-      className='w-[232px] max-h-[320px] overflow-y-auto rounded-[12px] border-border bg-popover p-1.5 shadow-lg'
+      className='w-[232px] max-h-[250px] overflow-y-auto rounded-[12px] border-border bg-popover p-1.5 shadow-lg'
       trigger={
         <button
           type='button'
@@ -56,7 +67,7 @@ export function BriefHistoryMenu({
         <div className='px-2.5 py-2 text-[13px] text-muted-foreground'>No past briefs.</div>
       ) : (
         <ul className='flex flex-col gap-px'>
-          {history.map(item => {
+          {visible.map(item => {
             const isActive = selectedDate === item.date;
             return (
               <li key={item.date}>
@@ -82,6 +93,22 @@ export function BriefHistoryMenu({
               </li>
             );
           })}
+          {hiddenCount > 0 && (
+            <li>
+              <button
+                type='button'
+                onClick={() => setExpanded(true)}
+                data-track-category='DailyBrief'
+                data-track-name='daily-brief-history-show-all'
+                className='flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[13px] font-medium tracking-[-0.1px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+              >
+                <span className='flex size-4 shrink-0 items-center justify-center'>
+                  <ChevronBigDown size={14} />
+                </span>
+                <span className='truncate'>Show all ({history.length})</span>
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </Popover>

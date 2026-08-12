@@ -29,7 +29,11 @@ import {
   userAgentInstructionRepository,
   DAILY_BRIEF_KIND,
 } from "../repositories/index.js";
-import { recordDailyBriefGenerated, type DailyBriefTrigger } from "../otel/daily-brief-metrics.js";
+import {
+  recordDailyBriefGenerated,
+  recordScheduledDeliveryDelay,
+  type DailyBriefTrigger,
+} from "../otel/daily-brief-metrics.js";
 
 const log = createLogger("daily-brief");
 
@@ -126,6 +130,7 @@ export async function generateDailyBrief(
   } = {},
 ): Promise<GenerateBriefResult | null> {
   const trigger = opts.trigger ?? "scheduled";
+  const startedAt = Date.now();
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { orgId: true, name: true, email: true },
@@ -204,12 +209,13 @@ export async function generateDailyBrief(
         `[daily-brief] run for ${userId} finished without a dailyBrief payload (lastEvent=${streamResult.lastEventName}, error=${streamResult.errorReason ?? "none"})`,
       );
       await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket);
-      recordDailyBriefGenerated(trigger, "failed");
+      recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt);
       return null;
     }
 
     const content = renderBriefMarkdown(brief);
     const citationMeta = buildThreadCitationMeta(done?.toolInvocations, content);
+    const generatedAt = new Date();
     await generatedContentRepository.saveReady({
       userId,
       orgId,
@@ -222,15 +228,16 @@ export async function generateDailyBrief(
         ...(citationMeta ?? {}),
       } as unknown as import("@prisma/client").Prisma.InputJsonValue,
       sessionId: sessionId ?? null,
-      generatedAt: new Date(),
+      generatedAt,
     });
     log.info(`[daily-brief] generated + persisted for ${userId} (session=${sessionId ?? "?"})`);
-    recordDailyBriefGenerated(trigger, "ready");
+    recordDailyBriefGenerated(trigger, "ready", Date.now() - startedAt);
+    if (trigger === "scheduled") recordScheduledDeliveryDelay(dateBucket, generatedAt);
     return { brief, content, sessionId };
   } catch (err) {
     log.error(`[daily-brief] generation failed for ${userId}:`, err instanceof Error ? err.message : String(err));
     await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket).catch(() => {});
-    recordDailyBriefGenerated(trigger, "failed");
+    recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt);
     return null;
   }
 }

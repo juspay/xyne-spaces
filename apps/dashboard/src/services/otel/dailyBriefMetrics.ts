@@ -9,7 +9,7 @@
  */
 
 import { metrics } from '@opentelemetry/api';
-import type { Counter, Meter } from '@opentelemetry/api';
+import type { Counter, Histogram, Meter } from '@opentelemetry/api';
 import { OTEL_SERVICE_NAME } from '../../config';
 import { safeRecordMetric } from './index';
 
@@ -38,5 +38,37 @@ const dailyBriefSwitchedTotal: Counter = new Proxy({} as Counter, {
 export function trackDailyBriefSwitched(): void {
   safeRecordMetric(() => {
     dailyBriefSwitchedTotal.add(1);
+  });
+}
+
+/** How long people are willing to wait before walking away from a regeneration. */
+const ABANDON_BUCKETS_SECONDS = [15, 30, 60, 120, 180, 300, 600];
+
+let _dailyBriefRegenerateAbandoned: Histogram | null = null;
+
+/**
+ * Histogram: seconds spent waiting before leaving the screen mid-regeneration.
+ * Its `_count` is the plain abandonment tally; the buckets say when we lose people.
+ */
+const dailyBriefRegenerateAbandoned: Histogram = new Proxy({} as Histogram, {
+  get(_target, prop) {
+    if (!_dailyBriefRegenerateAbandoned) {
+      _dailyBriefRegenerateAbandoned = getMeter().createHistogram(
+        'daily_brief_regenerate_abandoned',
+        {
+          description: 'Seconds waited before leaving the Daily Brief mid-regeneration',
+          unit: 's',
+          advice: { explicitBucketBoundaries: ABANDON_BUCKETS_SECONDS },
+        },
+      );
+    }
+    return _dailyBriefRegenerateAbandoned[prop as keyof Histogram];
+  },
+});
+
+/** Track leaving the screen while a regeneration was still running. */
+export function trackDailyBriefRegenerateAbandoned(waitedSeconds: number): void {
+  safeRecordMetric(() => {
+    dailyBriefRegenerateAbandoned.record(waitedSeconds);
   });
 }

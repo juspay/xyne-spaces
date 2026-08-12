@@ -193,8 +193,14 @@ router.post("/regenerate", async (req: Request, res: Response) => {
     if (!res.writableEnded) abort.abort();
   });
 
-  void recordDailyBriefRegeneration(userId);
-  send("start", { date: briefDateBucket() });
+  const dateBucket = briefDateBucket();
+  // Read the row BEFORE generateDailyBrief flips it to "generating", otherwise
+  // there is no way to tell a rejected brief from a retry after a failure.
+  const existing = await generatedContentRepository
+    .findForBucket(userId, DAILY_BRIEF_KIND, dateBucket)
+    .catch(() => null);
+  void recordDailyBriefRegeneration(userId, dateBucket, existing);
+  send("start", { date: dateBucket });
   try {
     const result = await generateDailyBrief(userId, {
       signal: abort.signal,

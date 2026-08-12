@@ -15,7 +15,10 @@ import {
   type DailyBriefLatest,
   type DailyBriefPayload,
 } from '../../api/dailyBriefApi';
-import { trackDailyBriefSwitched } from '../../services/otel/dailyBriefMetrics';
+import {
+  trackDailyBriefRegenerateAbandoned,
+  trackDailyBriefSwitched,
+} from '../../services/otel/dailyBriefMetrics';
 
 const REMARK_PLUGINS = [remarkGfm];
 const IS_DEV = import.meta.env.DEV;
@@ -169,6 +172,8 @@ const DailyBriefScreen = (): ReactElement => {
   const [progress, setProgress] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const mountedRef = useRef(true);
+  // Read on unmount, where component state is already stale.
+  const regenerateStartedAtRef = useRef<number | null>(null);
   const isInPanelWebview = useIsInPanelWebview();
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
@@ -197,6 +202,10 @@ const DailyBriefScreen = (): ReactElement => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      const startedAt = regenerateStartedAtRef.current;
+      if (startedAt !== null) {
+        trackDailyBriefRegenerateAbandoned(Math.round((Date.now() - startedAt) / 1000));
+      }
     };
   }, []);
 
@@ -251,6 +260,7 @@ const DailyBriefScreen = (): ReactElement => {
     const update = (fn: () => void): void => {
       if (mountedRef.current) fn();
     };
+    regenerateStartedAtRef.current = Date.now();
     try {
       await dailyBriefApi.regenerate({
         onStart: () => update(() => setProgress('Generating…')),
@@ -263,6 +273,7 @@ const DailyBriefScreen = (): ReactElement => {
     } catch {
       update(() => setError('Regeneration failed.'));
     } finally {
+      regenerateStartedAtRef.current = null;
       update(() => {
         setRegenerating(false);
         setProgress(null);
