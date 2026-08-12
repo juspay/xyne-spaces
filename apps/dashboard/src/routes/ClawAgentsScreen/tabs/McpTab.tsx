@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/Board/EmptyState/EmptyState';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { McpServerIcon } from '@/components/ClawAgents/McpServerIcon';
 import { useClawMcp } from '@/hooks/useClawMcp';
+import { Badge } from '@/components/ui/Badge';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
 import {
   AGENT_CATEGORIES,
@@ -41,9 +42,9 @@ const McpCard = ({
           {server.name}
         </span>
         {server.oauth && (
-          <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
+          <Badge variant='secondary' className='px-1.5 py-0 text-[10px] leading-tight'>
             OAuth
-          </span>
+          </Badge>
         )}
       </div>
       {server.description && (

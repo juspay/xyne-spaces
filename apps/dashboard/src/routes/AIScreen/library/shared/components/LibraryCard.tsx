@@ -66,7 +66,7 @@ export interface LibraryCardProps {
   testId?: string;
   icon: ReactNode;
   name: string;
-  meta?: string | undefined;
+  meta?: ReactNode | string | undefined;
   statusDot?: ReactNode;
   description?: string | undefined;
   dimmed?: boolean;
@@ -98,9 +98,13 @@ export function LibraryCard({
             {name}
           </span>
           {meta ? (
-            <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
-              {meta}
-            </span>
+            typeof meta === 'string' ? (
+              <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
+                {meta}
+              </span>
+            ) : (
+              meta
+            )
           ) : null}
           {statusDot}
         </div>
