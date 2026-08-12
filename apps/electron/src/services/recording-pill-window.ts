@@ -173,6 +173,7 @@ function stopDrag(): void {
 }
 
 export function showRecordingPill(state: RecordingPillState): void {
+  const wasHiding = hideTimer !== null;
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
@@ -184,8 +185,10 @@ export function showRecordingPill(state: RecordingPillState): void {
   if (pillWindow && !pillWindow.isDestroyed()) {
     pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
     pillWindow.webContents.send('recording-pill:show', currentState);
-    if (!pillWindow.isVisible()) {
+    if (!pillWindow.isVisible() || wasHiding) {
       applyIgnoreMouseEvents(true);
+    }
+    if (!pillWindow.isVisible()) {
       pillWindow.showInactive();
     }
     return;
