@@ -191,7 +191,7 @@ export default function AdminV2(): ReactElement {
           </div>
           <Select value={orgFilter} onValueChange={setOrgFilter}>
             <SelectTrigger
-              className='w-48 shrink-0 focus-visible:border-ring focus-visible:ring-0'
+              className='w-auto max-w-[16rem] shrink-0 gap-2 focus-visible:border-ring focus-visible:ring-0'
               aria-label='Organization filter'
             >
               <SelectValue>{selectedOrgLabel}</SelectValue>

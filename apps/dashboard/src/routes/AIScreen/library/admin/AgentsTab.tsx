@@ -77,11 +77,6 @@ function AgentRow({
   return (
     <li className='flex items-center justify-between gap-3 border-b border-border px-1 py-4'>
       <div className='flex min-w-0 items-center gap-3'>
-        <span
-          className='inline-block size-3 shrink-0 rounded-full'
-          style={{ backgroundColor: agent.color }}
-          aria-hidden
-        />
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
           <span className='truncate text-sm font-medium text-foreground'>{agent.name}</span>
           {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}

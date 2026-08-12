@@ -63,10 +63,7 @@ export function UsageTab({
 
   return (
     <div className='flex flex-col gap-6 pt-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <p className='text-xs text-muted-foreground'>
-          Run counts and token consumption per agent. Sorted by total tokens.
-        </p>
+      <div className='flex flex-wrap items-center justify-end gap-3'>
         <Select
           value={String(range)}
           onValueChange={value => setRange(value === 'all' ? 'all' : (Number(value) as 7 | 30))}

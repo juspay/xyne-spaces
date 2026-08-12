@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { DeleteDustbin01 } from '@xyne/icons';
+import { CheckTickCircle, DeleteDustbin01, SparkleAi01, UserDefault } from '@xyne/icons';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
@@ -112,19 +112,21 @@ export function ScheduledTab({
     <div className='flex flex-wrap items-center justify-end gap-2'>
       <FilterSelect
         ariaLabel='Agent filter'
+        icon={<SparkleAi01 className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
         value={agentSlug}
         onChange={value => resetTo(() => setAgentSlug(value))}
         options={agentOptions}
       />
       <FilterSelect
         ariaLabel='User filter'
+        icon={<UserDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
         value={jobUserId}
         onChange={value => resetTo(() => setJobUserId(value))}
         options={userOptions}
       />
       <FilterSelect
         ariaLabel='Status filter'
-        className='w-40'
+        icon={<CheckTickCircle className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
         value={status}
         onChange={value => resetTo(() => setStatus(value))}
         options={STATUS_OPTIONS}

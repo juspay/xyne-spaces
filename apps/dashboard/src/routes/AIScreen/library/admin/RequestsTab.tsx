@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, type ReactElement, type ReactNode } fro
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckTickCircle, Eye02On, MultipleCrossCancelCircle } from '@xyne/icons';
+import { CheckTickCircle, Eye02On, FilterFunnel, MultipleCrossCancelCircle } from '@xyne/icons';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -369,7 +369,7 @@ export function RequestsTab({
     <div className='flex flex-wrap items-center justify-end gap-2'>
       <FilterSelect
         ariaLabel='Request type filter'
-        className='w-52'
+        icon={<FilterFunnel className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
         value={kindFilter}
         onChange={setKindFilter}
         options={KIND_OPTIONS}

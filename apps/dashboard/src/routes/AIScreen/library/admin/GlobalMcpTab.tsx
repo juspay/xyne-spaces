@@ -172,12 +172,6 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
 
   return (
     <div className='flex flex-col gap-6 pt-4'>
-      <p className='text-xs text-muted-foreground'>
-        Admin-managed fallback credentials for MCP servers. At call time the user’s personal
-        connection is preferred; if absent, these are used. Disable “Allow fallback” for servers
-        where each user must have their own auth.
-      </p>
-
       <ul className='flex flex-col'>
         {servers.map((server: AdminMcpServerSummary) => {
           const fields = fieldsByType?.[server.type] ?? [];
@@ -225,7 +219,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                   <Button
                     type='button'
                     variant='ghost'
-                    size='icon'
+                    size='sm'
                     aria-label='Delete global credentials'
                     className='text-muted-foreground hover:text-destructive focus-visible:bg-muted focus-visible:ring-0'
                     onClick={() => setDeleteTarget(server)}
@@ -233,6 +227,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                     data-track-name='Delete global MCP credentials'
                   >
                     <DeleteDustbin01 className='size-4' />
+                    Delete creds
                   </Button>
                 )}
               </div>
