@@ -92,6 +92,8 @@ const ConversationPanelV2 = ({
   conversationIds,
   onOpenThread,
   useLocalTabState = false,
+  unreadsOnly,
+  onThreadClick,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -111,6 +113,8 @@ const ConversationPanelV2 = ({
   // for the doc-type filter), keep the active tab in local state instead of the URL —
   // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
   useLocalTabState?: boolean;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -288,7 +292,9 @@ const ConversationPanelV2 = ({
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
                   {...(onOpenThread && { onOpenThread })}
-                ></ChatListV4>
+                  unreadsOnly={unreadsOnly ?? false}
+                  {...(onThreadClick && { onThreadClick })}
+                />
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
