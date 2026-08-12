@@ -1,8 +1,26 @@
+import { createHmac } from "node:crypto";
+import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
+
 const requiredEnv = (name: string): string => {
   const val = process.env[name];
   if (!val) throw new Error(`Missing required env: ${name}`);
   return val;
 };
+
+const rootEncryptionKey = Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex");
+if (rootEncryptionKey.length !== 32) {
+  throw new Error("ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hex characters");
+}
+
+const dataEncryptionKey = derivePurposeKey(rootEncryptionKey, "data-encryption/aes-256-gcm/v1");
+const actionSigningKey = derivePurposeKey(rootEncryptionKey, "action-approval/hmac-sha256/v1");
+const sessionSigningKey = derivePurposeKey(rootEncryptionKey, "session-token/hmac-sha256/v1");
+const oauthStateSigningKey = derivePurposeKey(rootEncryptionKey, "oauth-state/hmac-sha256/v1");
+const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("xyne-claw-auth/session-token/v1").digest();
+
+// Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
+// the derived data key; reads fall back to the legacy root during migration.
+registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
@@ -13,7 +31,13 @@ export const CONFIG = {
   // traffic off the public ingress (~100k+ progress events/day in prod).
   // Falls back to `selfUrl` so single-node / dev deployments keep working.
   internalUrl: process.env["AUTH_SERVICE_INTERNAL_URL"] ?? process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
-  encryptionKey: Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex"),
+  encryptionKey: dataEncryptionKey,
+  actionSigningKey,
+  sessionSigningKey,
+  oauthStateSigningKey,
+  legacyActionSigningKey: rootEncryptionKey,
+  legacySessionSigningKey,
+  legacyOauthStateSigningKey: rootEncryptionKey,
   // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
   // value (the two services are independently keyed). Used ONLY to decrypt
   // `installed_apps.signingSecret` read from the Spaces DB during the
@@ -139,19 +163,16 @@ export const CONFIG = {
   // releases (incident 2026-06-09 euler-doctor session dea1f67c).
   runRecoveryTimeoutMs: Number(process.env["RUN_RECOVERY_TIMEOUT_MS"] ?? 1_200_000),
   runRecoveryBackoffMs: Number(process.env["RUN_RECOVERY_BACKOFF_MS"] ?? 30000),
+  /** Poll cadence for a WRITE sandbox to free up. The agent-sandbox operator
+   *  keeps reconciling the (still-alive) SandboxClaim and the kata node pool may
+   *  be scaling in, so a modest fixed delay re-dispatches until one binds. */
+  sandboxRetryDelayMs: Number(process.env["SANDBOX_RETRY_DELAY_MS"] ?? 60_000),
+  /** Hard cap on sandbox_unavailable deferrals (default ~15 x 60s = 15 min of
+   *  waiting). Guards against a run parking forever if capacity never frees. */
+  maxSandboxDeferrals: Number(process.env["MAX_SANDBOX_DEFERRALS"] ?? 15),
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   fakeGcsHost: process.env["FAKE_GCS_HOST"] ?? "",
-  // Object storage provider — 'gcs' (default) or 's3'; see @xyne/storage.
-  // Env names match the Spaces backend (config/env.ts) and xyne-claw so one
-  // set of envs configures all three apps.
-  storageProvider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
-  s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
-  s3BucketName: process.env["S3_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
-  s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
-  s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
-  s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
-  isProduction: process.env["NODE_ENV"] === "production",
   /**
    * Bitbucket Server creds used by the admin dashboard to count PRs/commits
    * authored by the xyne-doctor bot identity (`john.doe@gmail.com`).
@@ -195,6 +216,33 @@ export const CONFIG = {
   vespaFeedEndpoint: (process.env["VESPA_FEED_ENDPOINT"] ?? process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8080").replace(/\/+$/, ""),
   vespaNamespace: process.env["VESPA_NAMESPACE"] ?? "namespace",
   vespaCluster: process.env["VESPA_CLUSTER"] ?? "my_content",
+  /**
+   * Vespa CONFIG SERVER endpoint (port 19071, distinct from the query port
+   * above) — used only to fetch each schema's deployed .sd text
+   * (GET .../content/schemas/<schema>.sd) so rank-profile names can be read
+   * live off the running deployment instead of hand-maintained in code (see
+   * vespa-schema-profiles.ts). Defaults to VESPA_QUERY_ENDPOINT's host on
+   * port 19071 — query and config server are normally the same pod.
+   * Tenant/application/environment/region/instance default to "default",
+   * matching this app's own deployed session scripts (reindex.sh) for a
+   * plain single-node `vespa deploy`.
+   */
+  vespaConfigEndpoint: (() => {
+    const explicit = process.env["VESPA_CONFIG_ENDPOINT"];
+    if (explicit) return explicit.replace(/\/+$/, "");
+    try {
+      const u = new URL(process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8081");
+      u.port = "19071";
+      return u.toString().replace(/\/+$/, "");
+    } catch {
+      return "http://localhost:19071";
+    }
+  })(),
+  vespaConfigTenant: process.env["VESPA_CONFIG_TENANT"] ?? "default",
+  vespaConfigApplication: process.env["VESPA_CONFIG_APPLICATION"] ?? "default",
+  vespaConfigEnvironment: process.env["VESPA_CONFIG_ENVIRONMENT"] ?? "default",
+  vespaConfigRegion: process.env["VESPA_CONFIG_REGION"] ?? "default",
+  vespaConfigInstance: process.env["VESPA_CONFIG_INSTANCE"] ?? "default",
   /**
    * Pause (ms) the search-eval-run-worker inserts after each row's Vespa
    * query, in BOTH permission modes — a large sheet (hundreds/thousands of
@@ -260,6 +308,11 @@ export const CONFIG = {
   researchAgentMcpApiKey: process.env["RESEARCH_AGENT_MCP_API_KEY"]
     ?? process.env["research_agent_mcp_api_key"]
     ?? "",
+  /** Global, credentialless Heisenberg pipeline REST API proxied by its MCP server. */
+  heisenbergBaseUrl: (
+    process.env["HEISENBERG_BASE_URL"] ??
+    "<heisenberg-url>"
+  ).replace(/\/+$/, ""),
 } as const;
 
 // Grafana → error auto-fix pipeline (lives here — claw stays stateless; the

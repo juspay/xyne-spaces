@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
-    "@xyne/kata-sdk": "workspace:*",
+    "@xyne/kata-sdk": "file:../kata-sdk",
     "marked": "^18.0.4",
     "mermaid": "^11.4.0",
     "pdf-lib": "^1.17.1",

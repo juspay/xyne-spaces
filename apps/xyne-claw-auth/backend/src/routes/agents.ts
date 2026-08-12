@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -558,6 +558,93 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
+router.patch("/:slug/design-system", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const orgId = getOrgId(req);
+    const requesterId = getRequesterId(req);
+    if (!orgId) {
+      res.status(400).json({ success: false, error: "Organization context is required" });
+      return;
+    }
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Authenticated user is required" });
+      return;
+    }
+
+    const existing = await agentRepository.findBySlug(req.params.slug, orgId);
+    if (!existing) {
+      logAgentScopedMiss(req, "agents/design-system", req.params.slug, orgId);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    const admin = await isClawAdmin(requesterId);
+    const isOwner = existing.ownerUserId === requesterId;
+    const share = await agentShareRepository.findByAgentAndUser(existing.id, requesterId);
+    const isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
+    if (!admin && !isOwner && !isContributor) {
+      res.status(403).json({ success: false, error: "Only the agent owner, contributors, or admins can edit its design system" });
+      return;
+    }
+
+    const supplied = (req.body as { designSystem?: unknown }).designSystem;
+    if (supplied !== null && typeof supplied !== "string") {
+      res.status(400).json({ success: false, error: "designSystem must be a string or null" });
+      return;
+    }
+    const designSystem = typeof supplied === "string" ? supplied.trim() : "";
+    if (designSystem.length > 32_000) {
+      res.status(400).json({ success: false, error: "designSystem must be at most 32,000 characters" });
+      return;
+    }
+
+    // Optimistic retry prevents this narrow edit from replacing a concurrent
+    // provider/tools/sandbox config write with a stale snapshot.
+    let updated = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const fresh = await agentRepository.findById(existing.id);
+      if (!fresh) {
+        res.status(404).json({ success: false, error: "Agent not found" });
+        return;
+      }
+      const nextConfig = { ...(asRecord(fresh.config) ?? {}) };
+      if (designSystem) nextConfig["designSystem"] = designSystem;
+      else delete nextConfig["designSystem"];
+
+      const configCheck = validateAgentModelConfig(nextConfig);
+      if (!configCheck.ok) {
+        res.status(400).json({ success: false, error: configCheck.error });
+        return;
+      }
+      const result = await prisma.agent.updateMany({
+        where: { id: fresh.id, updatedAt: fresh.updatedAt },
+        data: { config: nextConfig as Prisma.InputJsonValue },
+      });
+      if (result.count === 1) {
+        logAgentConfigWriteDiff(fresh.slug, requesterId, fresh.config, nextConfig);
+        updated = await agentRepository.findById(fresh.id);
+        break;
+      }
+    }
+
+    if (!updated) {
+      res.status(409).json({ success: false, error: "Agent settings changed while saving; please retry" });
+      return;
+    }
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "AGENT_UPDATED",
+      targetId: existing.id,
+      description: `Agent "${existing.name}" (${existing.slug}) design system updated`,
+      metadata: { changed: ["designSystem"], orgId: existing.orgId },
+    });
+    res.json({ success: true, data: sanitizeAgent(updated as unknown as Record<string, unknown>) });
+  } catch (err) {
+    log.error("[agents] design-system update error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const orgId = getOrgId(req);
@@ -976,7 +1063,7 @@ router.get("/delegation-requests/pending-for-me", async (req: Request, res: Resp
 router.get(
   "/:slug/delegation-grants",
   requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const caller = req.agentContext!.agent;
       const grants = await prisma.agentDelegationGrant.findMany({
@@ -2323,8 +2410,8 @@ router.post("/:slug/configure-webhook", async (req: Request<{ slug: string }>, r
     // HMAC-check inbound webhook bodies. Best-effort — if Spaces is reachable
     // for configureWebhook (just succeeded above) it's almost certainly
     // reachable for signing-secret too. On failure we log and leave the
-    // signature column null; verify middleware stays warn-only for this agent
-    // until a future call (or the backfill script) succeeds.
+    // signature column null; fail-closed verification rejects this agent's
+    // webhooks until a future call (or the backfill script) succeeds.
     await fetchAndStoreSigningSecretFromSpacesApi({
       agentId: agent.id,
       spacesAppId: agent.spacesAppId,
@@ -2467,7 +2554,7 @@ const pictureUpload = multer({
 
 router.post(
   "/:slug/upload-picture",
-  pictureUpload.single("picture"),
+  pictureUpload.single("picture") as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
       const userToken = extractUserToken(req);

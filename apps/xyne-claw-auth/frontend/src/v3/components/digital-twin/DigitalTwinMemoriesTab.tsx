@@ -33,7 +33,7 @@ import { useSnackbar } from "../ui/Snackbar";
 import { Search } from "../ui/Search";
 import { Skeleton } from "../ui/Skeleton";
 import { Button } from "../ui/Button";
-import { Tooltip } from "../ui/Tooltip";
+import { Tooltip, InfoIcon as InfoHint } from "../ui/Tooltip";
 import { EnableModal } from "./EnableModal";
 import { DeleteMemoriesModal } from "./DeleteMemoriesModal";
 import { DigitalTwinReviewTab } from "./DigitalTwinReviewTab";
@@ -267,30 +267,42 @@ export function DigitalTwinMemoriesTab({ userId, onCandidateApproved, onViewReas
       {/* Sub-tab nav + actions — pinned at top */}
       <div className="shrink-0 border-b border-xyne-border px-[20px] py-[12px]">
         <div className="flex flex-wrap items-center gap-[6px]">
-          <SubTabBtn active={sub === "all"} onClick={() => setSub("all")} icon={<BrainIcon size={13} />}>
-            Memories
-          </SubTabBtn>
-          <SubTabBtn active={sub === "hot"} onClick={() => setSub("hot")} icon={<FireIcon size={13} />}>
-            Hot
-          </SubTabBtn>
-          <SubTabBtn
-            active={sub === "proposals"}
-            onClick={() => setSub("proposals")}
-            icon={<ClipboardTextIcon size={13} />}
-          >
-            Proposals
-          </SubTabBtn>
-          <SubTabBtn
-            active={sub === "tester"}
-            onClick={() => setSub("tester")}
-            icon={<MagnifyingGlassIcon size={13} />}
-          >
-            Recall
-          </SubTabBtn>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn active={sub === "all"} onClick={() => setSub("all")} icon={<BrainIcon size={13} />}>
+              Memories
+            </SubTabBtn>
+            <InfoHint text="Facts your Twin has learned about you and draws on when it acts on your behalf." />
+          </span>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn active={sub === "hot"} onClick={() => setSub("hot")} icon={<FireIcon size={13} />}>
+              Hot
+            </SubTabBtn>
+            <InfoHint text="Your most-recalled memories — the ones your Twin leaned on most over the last 7–90 days." />
+          </span>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn
+              active={sub === "proposals"}
+              onClick={() => setSub("proposals")}
+              icon={<ClipboardTextIcon size={13} />}
+            >
+              Proposals
+            </SubTabBtn>
+            <InfoHint text="Candidate memories your Twin drafted from your activity, waiting for your approval. Approve one and it becomes a saved Memory. New candidates arrive nightly." />
+          </span>
+          <span className="flex items-center gap-[2px]">
+            <SubTabBtn
+              active={sub === "tester"}
+              onClick={() => setSub("tester")}
+              icon={<MagnifyingGlassIcon size={13} />}
+            >
+              Recall
+            </SubTabBtn>
+            <InfoHint text="Test what your Twin would remember — type a question and preview the memories it surfaces." />
+          </span>
 
           {/* Right-side action buttons */}
           <div className="ml-auto flex items-center gap-[4px]">
-            <Tooltip content="Backfill history" side="bottom">
+            <Tooltip content="Backfill: learn from your past Spaces history (3–24 months). Adds candidate memories to your Proposals queue for review." side="bottom">
               <button
                 onClick={() => setShowBackfill(true)}
                 aria-label="Backfill history"
