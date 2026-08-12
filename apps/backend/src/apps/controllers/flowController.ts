@@ -4,6 +4,8 @@ import { repositories } from '@/database/repositories';
 import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { decrypt } from '@/services/encryptionService';
+import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
+import { incomingWebhookController } from './incomingWebhookController';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -48,6 +50,13 @@ export class FlowController {
         error: 'Invalid flowJSON in context',
         details: formatValidationErrors(flowResult),
       });
+      return;
+    }
+
+    // 2b. Amazon SNS confirmation is owned by the incoming-webhook controller,
+    // not proxied: an incoming webhook has no outbound webhookUrl to proxy to.
+    if (actionId === SNS_CONFIRM_ACTION_ID) {
+      res.status(200).json(await incomingWebhookController.confirmSnsSubscription(values));
       return;
     }
 
