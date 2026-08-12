@@ -35,6 +35,7 @@ import { logger, Event } from '../../utils/logger';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
+import { useKanbanColumnReorder } from '../../hooks/useKanbanColumnReorder';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
@@ -421,6 +422,14 @@ export const SupportKanbanBoard = ({
     transitions,
   });
 
+  // Per-user column reorder — persisted per desk channel in localStorage.
+  // channelId is always available (from the URL) and unique per desk, so each
+  // desk channel gets its own independent column order even if multiple desks
+  // share the same board.
+  const columnOrderScope = channelId;
+  const { orderedStages: orderedDeskStages, handleReorder: handleReorderDeskStages } =
+    useKanbanColumnReorder(stageColumns, columnOrderScope);
+
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
@@ -445,12 +454,13 @@ export const SupportKanbanBoard = ({
         onDragEnd={event => void handleDragEnd(event)}
       >
         <KanbanColumns
-          stages={stageColumns}
+          stages={orderedDeskStages}
           ticketsByStage={ticketsByStage}
           onTicketClick={onTicketClick}
           containerClassName='h-full'
           showEmailReads={true}
           visibleColumns={DESK_KANBAN_VISIBLE_COLUMNS}
+          {...(columnOrderScope ? { onReorderStages: handleReorderDeskStages } : {})}
           {...(activeTicketId !== undefined && { activeTicketId })}
           slaPolicies={slaPolicies}
         />

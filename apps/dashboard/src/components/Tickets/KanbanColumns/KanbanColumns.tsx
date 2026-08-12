@@ -355,6 +355,8 @@ interface KanbanColumnsProps {
    * stage-based SLA (no policy fetch needed in that case).
    */
   slaPolicies?: BoardSlaPolicy[];
+  /** Called when the user reorders columns via drag. Only provided when a scope context (board/channel/project) exists. */
+  onReorderStages?: (draggedStageId: string, targetStageId: string) => void;
 }
 
 export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
@@ -384,6 +386,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
+  onReorderStages,
 }) => {
   const columnType = paginatedColumnConfig?.columnType ?? 'stage';
   const knownTicketsForOptimisticMerge = React.useMemo(
@@ -400,6 +403,22 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
       .filter(stage => isTerminalStageStatus(stage.defaultTicketStatusV2))
       .map(stage => stage.id),
   );
+
+  // --- Column reorder (native HTML5 drag-and-drop, separate from dnd-kit ticket DnD) ---
+  // Ref tracks the drag synchronously (available immediately in onDragOver,
+  // before React re-renders). State tracks it for visual feedback (opacity/ring).
+  const draggedStageIdRef = React.useRef<string | null>(null);
+  const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
+  const [dragOverStageId, setDragOverStageId] = React.useState<string | null>(null);
+  const startColumnDrag = (stageId: string) => {
+    draggedStageIdRef.current = stageId;
+    setDraggedStageId(stageId);
+  };
+  const endColumnDrag = () => {
+    draggedStageIdRef.current = null;
+    setDraggedStageId(null);
+    setDragOverStageId(null);
+  };
 
   React.useEffect(() => {
     setCollapsedStageIds(prev => {
@@ -456,8 +475,52 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
               className={cn(
                 'group/kanbancol flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
                 isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
+                draggedStageId === stage.id && 'opacity-40',
+                dragOverStageId === stage.id &&
+                  draggedStageId !== stage.id &&
+                  'ring-2 ring-primary/50',
               )}
+              onDragOver={e => {
+                // Only react to native DnD when a column drag is active —
+                // prevents interference from text selection, file drops, etc.
+                // Uses ref (not state) so it's available immediately after
+                // onDragStart, before React re-renders.
+                if (!onReorderStages || !draggedStageIdRef.current) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOverStageId !== stage.id) setDragOverStageId(stage.id);
+              }}
+              onDrop={e => {
+                e.preventDefault();
+                if (!draggedStageIdRef.current) return;
+                const draggedId = e.dataTransfer.getData('text/plain');
+                endColumnDrag();
+                if (draggedId && draggedId !== stage.id && onReorderStages) {
+                  onReorderStages(draggedId, stage.id);
+                }
+              }}
             >
+              {/* DRAG HANDLE — top-center strip, any kanban layout, both states */}
+              {onReorderStages && (
+                <div
+                  className='flex items-center justify-center w-full rounded-t-lg transition-colors select-none cursor-grab active:cursor-grabbing hover:bg-accent/30'
+                  style={{ height: 20 }}
+                  draggable
+                  onDragStart={e => {
+                    e.dataTransfer.setData('text/plain', stage.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    startColumnDrag(stage.id);
+                  }}
+                  onDragEnd={endColumnDrag}
+                >
+                  <div className='flex gap-[3px] items-center'>
+                    {[0, 1, 2].map(i => (
+                      <div key={i} className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40' />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div
                 className={cn(
                   'flex items-center justify-between px-4 pt-3 pb-1 w-full',
