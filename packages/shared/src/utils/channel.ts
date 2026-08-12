@@ -1,11 +1,12 @@
 import { ChannelType, DeskType } from '../zero/schema.js';
 
-/** Desk channel types — EMAIL, SLACK and APP channels all feed into Xyne Desk. */
+/** Channel types that feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.EMAIL,
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.CALL,
+  ChannelType.SOCIAL_MEDIA,
 ]);
 
 export function isDeskChannelType(type: string | null | undefined): boolean {
@@ -21,6 +22,8 @@ export function deskTypeForChannelType(type: string | null | undefined): DeskTyp
       return DeskType.APP;
     case ChannelType.CALL:
       return DeskType.CALL;
+    case ChannelType.SOCIAL_MEDIA:
+      return DeskType.SOCIAL_MEDIA;
     default:
       return DeskType.EMAIL;
   }

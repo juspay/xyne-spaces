@@ -1,32 +1,69 @@
 import { useMemo } from 'react';
-import { ChannelUserStatus, ChannelSortOrder } from '@xyne/shared';
+import { ChannelUserStatus, ChannelFilterMode, ChannelSortOrder } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { VisibleChannel } from '../machines/stateMachine';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
-import { groupChannelsByScope } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
+import {
+  groupChannelsByScope,
+  DEFAULT_FILTER_MODE,
+  DEFAULT_GROUP_SORT_ORDER,
+} from '../components/Chat/ChatDirectory/ChatDirectory.utils';
+
+export type SidebarGroup = 'starred' | 'channels' | 'dms';
+
+export interface SidebarGroupPreference {
+  filterMode: ChannelFilterMode;
+  sortOrder: ChannelSortOrder;
+}
 
 interface UseChannelSortResult {
   starred: VisibleChannel[];
   channels: VisibleChannel[];
   directMessages: VisibleChannel[];
-  allDirectMessages: VisibleChannel[];
   channelSortOrder: ChannelSortOrder;
   setChannelSortOrder: (order: ChannelSortOrder) => void;
+  groupPreferences: Record<SidebarGroup, SidebarGroupPreference>;
+  setGroupPreference: (group: SidebarGroup, patch: Partial<SidebarGroupPreference>) => void;
 }
-
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const useChannelSort = (
   channelData: VisibleChannel[] | undefined,
   allChannelsUserStatus: ChannelUserStatus[],
   currentUserId: string,
-  activeChannelId?: string,
 ): UseChannelSortResult => {
   const zero = useZero();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
   const channelSortOrder = userPreference?.channelSortOrder ?? ChannelSortOrder.RECENCY;
+  const groupPreferences: Record<SidebarGroup, SidebarGroupPreference> = {
+    starred: {
+      filterMode: userPreference?.starredFilterMode ?? DEFAULT_FILTER_MODE,
+      sortOrder: userPreference?.starredSortOrder ?? DEFAULT_GROUP_SORT_ORDER,
+    },
+    channels: {
+      filterMode: userPreference?.channelFilterMode ?? DEFAULT_FILTER_MODE,
+      sortOrder: channelSortOrder,
+    },
+    dms: {
+      filterMode: userPreference?.dmFilterMode ?? DEFAULT_FILTER_MODE,
+      sortOrder: userPreference?.dmSortOrder ?? DEFAULT_GROUP_SORT_ORDER,
+    },
+  };
+
+  const setGroupPreference = (
+    group: SidebarGroup,
+    patch: Partial<SidebarGroupPreference>,
+  ): void => {
+    void zero.mutate(
+      mutators.userPreference.setSidebarGroupPreference({
+        id: userPreference?.id ?? crypto.randomUUID(),
+        group,
+        ...patch,
+        timestamp: Date.now(),
+      }),
+    );
+  };
 
   const setChannelSortOrder = (order: ChannelSortOrder): void => {
     void zero.mutate(
@@ -38,9 +75,11 @@ export const useChannelSort = (
     );
   };
 
-  const { starred, channels, directMessages, allDirectMessages } = useMemo(() => {
-    if (!channelData)
-      return { starred: [], channels: [], directMessages: [], allDirectMessages: [] };
+  const starredSortOrder = groupPreferences.starred.sortOrder;
+  const dmSortOrder = groupPreferences.dms.sortOrder;
+
+  const { starred, channels, directMessages } = useMemo(() => {
+    if (!channelData) return { starred: [], channels: [], directMessages: [] };
 
     const grouped = groupChannelsByScope(channelData, allChannelsUserStatus);
 
@@ -83,38 +122,34 @@ export const useChannelSort = (
       ];
     };
 
-    const sortChannels = (list: VisibleChannel[]): VisibleChannel[] => {
-      if (channelSortOrder === ChannelSortOrder.ALPHABETICAL) return sortAlphabetical(list);
-      if (channelSortOrder === ChannelSortOrder.UNREAD) return sortByUnreadAndActivity(list);
+    const sortBy = (list: VisibleChannel[], order: ChannelSortOrder): VisibleChannel[] => {
+      if (order === ChannelSortOrder.ALPHABETICAL) return sortAlphabetical(list);
+      if (order === ChannelSortOrder.UNREAD) return sortByUnreadAndActivity(list);
       return sortByActivity(list);
     };
 
-    // Limit DMs to: active channel, unread, or activity within last 7 days
-    const now = Date.now();
-    const recentDms = grouped.directMessages.filter(channel => {
-      if (channel.id === activeChannelId) return true;
-      const status = allChannelsUserStatus.find(
-        s => s.channelId === channel.id && s.userId === currentUserId,
-      );
-      if ((status?.unreadCount ?? 0) > 0) return true;
-      const lastActivity = channel.channelStats?.lastActivityAt ?? 0;
-      return now - lastActivity < SEVEN_DAYS_MS;
-    });
-
+    // Activity cutoffs are the Filter menu's job now — return the full lists.
     return {
-      starred: sortByUnreadAndActivity(grouped.starred),
-      channels: sortChannels(grouped.channels),
-      directMessages: sortByUnreadAndActivity(recentDms),
-      allDirectMessages: sortByUnreadAndActivity(grouped.directMessages),
+      starred: sortBy(grouped.starred, starredSortOrder),
+      channels: sortBy(grouped.channels, channelSortOrder),
+      directMessages: sortBy(grouped.directMessages, dmSortOrder),
     };
-  }, [channelData, allChannelsUserStatus, currentUserId, channelSortOrder, activeChannelId]);
+  }, [
+    channelData,
+    allChannelsUserStatus,
+    currentUserId,
+    channelSortOrder,
+    starredSortOrder,
+    dmSortOrder,
+  ]);
 
   return {
     starred,
     channels,
     directMessages,
-    allDirectMessages,
     channelSortOrder,
     setChannelSortOrder,
+    groupPreferences,
+    setGroupPreference,
   };
 };

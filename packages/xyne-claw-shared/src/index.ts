@@ -24,6 +24,8 @@ export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, 
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
+export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
+export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
 export { buildHtmlDocument, sanitizeHtmlBody } from "./tools/create-report/template.js";

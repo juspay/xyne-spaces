@@ -429,7 +429,8 @@ export function CanvasInlineCommentThread({
       </div>
 
       {editable && (
-        <div className='border-t border-border p-3'>
+        <div className='flex items-center gap-3 border-t border-border bg-background px-6 py-4'>
+          <Avatar userId={user?.id ?? null} size='sm' rounded showActiveStatus={false} />
           <OverlayZIndexContext.Provider value='z-[100]'>
             <InputBox
               id={`canvas-inline-comment-${currentThreadId ?? activeAnchor?.blockId ?? canvasId}`}
@@ -443,12 +444,12 @@ export function CanvasInlineCommentThread({
               onMentionSelect={mention => {
                 if (mention.type === 'user') selectedMentionIdsRef.current.add(mention.id);
               }}
-              placeholder={currentThread ? 'Reply' : 'Comment'}
+              placeholder={`${currentThread ? 'Reply' : 'Comment'} — @AI to edit...`}
               className={cn(
-                'canvas-comment-composer min-h-[38px] rounded-[18px] border border-input bg-background shadow-sm ring-1 ring-border/70 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10',
+                'canvas-inline-comment-composer min-h-[40px] flex-1 rounded-[22px] border border-input bg-background shadow-sm',
               )}
               features={{
-                richText: true,
+                richText: false,
                 commands: false,
                 mentions: true,
                 fileAttachments: false,
@@ -463,7 +464,6 @@ export function CanvasInlineCommentThread({
               ]}
               maxFiles={0}
               disableDraftUpload
-              hideComposerTools
               hideVoiceInput
               compact
             />

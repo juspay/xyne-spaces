@@ -92,6 +92,7 @@ import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
+import ReleaseManagerView from './ProjectsScreen/ReleaseManagerView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
@@ -159,6 +160,7 @@ import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
+import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
@@ -1117,6 +1119,14 @@ export const router = createBrowserRouter([
                 ),
               },
               {
+                path: 'ticket-reports',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
+                    <TicketReportsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
                 path: 'agents',
                 element: (
                   <ResourceProtectedRoute resourceName='AGENTS'>
@@ -1277,6 +1287,10 @@ export const router = createBrowserRouter([
                     <ProjectsListView />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: 'releaseManager',
+                element: <ReleaseManagerView />,
               },
               {
                 path: 'listProjects/:projectId',

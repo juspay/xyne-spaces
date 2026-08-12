@@ -117,7 +117,7 @@ export class DraftAttachmentController {
           select: { id: true, uploadedByUserId: true, entityType: true },
         });
         const foreign = existingAttachments.find(
-          a => a.uploadedByUserId !== userId || a.entityType !== AttachmentEntityType.DRAFT,
+          a => a.uploadedByUserId !== userId,
         );
         if (foreign) {
           logger.warn(

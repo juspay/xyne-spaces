@@ -19,6 +19,8 @@ export class BitbucketService {
   private readonly MAX_RETRIES = 5;
   private readonly BASE_DELAY_MS = 1000;
   private readonly MAX_DELAY_MS = 30000;
+  // Bound outbound calls so a hung upstream can't pin analysis/webhooks.
+  private readonly REQUEST_TIMEOUT_MS = 30000;
 
   constructor(config: BitbucketConfig) {
     this.config = config;
@@ -26,6 +28,13 @@ export class BitbucketService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  buildCommitFileUrl(projectKey: string, repositorySlug: string, commitId: string, filePath: string): string {
+    // config.baseUrl is the REST API base (…/rest/api/latest). Strip the REST
+    // segment to get the browser host, then use Bitbucket's commit-diff shape.
+    const webBase = this.config.baseUrl.replace(/\/rest\/.*$/, '').replace(/\/+$/, '');
+    return `${webBase}/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}#${filePath}`;
   }
 
   private getRetryDelay(attempt: number): number {
@@ -71,6 +80,7 @@ export class BitbucketService {
             Accept: acceptHeader,
             Authorization: this.getAuthHeader(),
           },
+          signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
         });
 
         if (response.ok) {
@@ -118,13 +128,14 @@ export class BitbucketService {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        // Only retry network errors, not API errors (except 429 handled above)
-        if (error instanceof TypeError || (error as Error).message?.includes('fetch')) {
+        // Retry network errors/timeouts only (429 handled above).
+        const isTimeout = (error as Error)?.name === 'TimeoutError' || (error as Error)?.name === 'AbortError';
+        if (isTimeout || error instanceof TypeError || (error as Error).message?.includes('fetch')) {
           if (attempt < this.MAX_RETRIES - 1) {
             const delayMs = this.getRetryDelay(attempt);
             logger.warn(
-              `Network error on attempt ${attempt + 1}/${this.MAX_RETRIES}. ` +
-              `Retrying after ${delayMs}ms...`,
+              `${isTimeout ? `Request timed out after ${this.REQUEST_TIMEOUT_MS}ms` : 'Network error'} ` +
+              `on attempt ${attempt + 1}/${this.MAX_RETRIES} (url=${url}). Retrying after ${delayMs}ms...`,
               lastError
             );
             await this.sleep(delayMs);
@@ -317,7 +328,7 @@ export class BitbucketService {
     repositorySlug: string,
     commitHash: string,
   ): Promise<PullRequestData[]> {
-    let endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitHash}/pull-requests`;
+    const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitHash}/pull-requests`;
 
     try {
       const pullRequests = await this.fetchAllPages<BitbucketPullRequestsResponse>(endpoint);
@@ -373,16 +384,43 @@ export class BitbucketService {
     commitId: string,
     filePath: string
   ): Promise<string> {
-    // Use the commit diff endpoint - shows diff for this specific commit
-    // The contextLines parameter adds context around changes
+    // Some Bitbucket deployments sit behind a WAF that 403s any URL containing
+    // ".env" (a common secret-scan probe), which breaks per-file diffs for env
+    // files. Fetch those from the whole-commit diff (file path not in the URL, so
+    // WAF-safe) and slice out the file. Also the fallback for any blocked path.
+    if (filePath.includes('.env')) {
+      return this.getFileDiffFromCommitDiff(projectKey, repositorySlug, commitId, filePath);
+    }
     const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}/diff/${filePath}?contextLines=0`;
-
     try {
       return await this.makeRequest<string>(endpoint, 'text');
     } catch (error) {
-      logger.error(`Failed to fetch diff for ${filePath} in commit ${commitId}:`, error as Error);
-      throw error;
+      logger.warn(`Per-file diff failed for ${filePath} in ${commitId}; falling back to whole-commit diff`);
+      return this.getFileDiffFromCommitDiff(projectKey, repositorySlug, commitId, filePath);
     }
+  }
+
+  // Whole-commit diff (no file path in the URL → WAF-safe), returning only the
+  // section for `filePath` in the same unified format the per-file endpoint
+  // yields, so DiffParser handles it unchanged. '' if the file isn't present.
+  private async getFileDiffFromCommitDiff(
+    projectKey: string,
+    repositorySlug: string,
+    commitId: string,
+    filePath: string,
+  ): Promise<string> {
+    const full = await this.makeRequest<string>(
+      `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}/diff?contextLines=0`,
+      'text',
+    );
+    for (const section of full.split(/^diff --git /m)) {
+      const firstLine = section.split('\n', 1)[0];
+      // standard `a/… b/…`; some Bitbucket Server emits `src://… dst://…`
+      if (firstLine.endsWith(` b/${filePath}`) || firstLine.endsWith(`dst://${filePath}`)) {
+        return `diff --git ${section}`;
+      }
+    }
+    return '';
   }
 
 
@@ -525,7 +563,8 @@ export class BitbucketService {
         headers: {
           'Accept': 'application/json;charset=UTF-8',
           'Authorization': this.getAuthHeader(),
-        }
+        },
+        signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
       });
 
       if (!response.ok) {

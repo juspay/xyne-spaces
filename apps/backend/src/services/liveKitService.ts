@@ -341,6 +341,34 @@ export class LiveKitService {
     }
   }
 
+  /**
+   * Publish the transcription on/off state into room metadata so late joiners see
+   * it (LiveKit data messages aren't delivered to participants who join later — the
+   * same H4 fix used for recording state). Present participants also react to the
+   * live data-channel toggle; this is what keeps late joiners in sync.
+   */
+  async setRoomTranscriptionEnabled(roomName: string, enabled: boolean): Promise<void> {
+    try {
+      const rooms = await this.roomService.listRooms([roomName]);
+      if (!rooms || rooms.length === 0) {
+        logger.debug(`[LiveKit] Room ${roomName} not found, skipping transcription-state update`);
+        return;
+      }
+      const existingMetadata = rooms[0].metadata ? JSON.parse(rooms[0].metadata) : {};
+      const updatedMetadata = {
+        ...existingMetadata,
+        transcriptionEnabled: enabled,
+        transcriptionVersion: Date.now(),
+      };
+      await this.roomService.updateRoomMetadata(roomName, JSON.stringify(updatedMetadata));
+      logger.info(`[LiveKit] Updated transcription state for room ${roomName}`, { enabled });
+    } catch (error) {
+      // Non-critical — present participants already got the live toggle; this only
+      // drives late-joiner sync.
+      logger.warn(`[LiveKit] Failed to set transcription state for room ${roomName}:`, error);
+    }
+  }
+
   getClientUrl(): string {
     return this.clientUrl;
   }
