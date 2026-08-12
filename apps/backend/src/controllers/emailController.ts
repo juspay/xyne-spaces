@@ -24,7 +24,11 @@ import {
   ActivityType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
-import { listS2SClawAgents, getConversationInsight } from '@/services/clawAgentService';
+import {
+  listS2SClawAgents,
+  getConversationTranscript,
+  forkClawConversation,
+} from '@/services/clawAgentService';
 import { vespaClient } from '@/services/vespaSearch';
 import { mailSchema } from '@/vespa/src/types';
 import { ZohoService } from '@/services/zohoService';
@@ -44,6 +48,7 @@ import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import { v4 as uuidv4 } from 'uuid';
 
 interface ReplyEmailRequest {
   body: string;
@@ -766,7 +771,7 @@ export class EmailController {
     }
   };
 
-  getAutoDraftInsight = async (req: Request, res: Response) => {
+  getAutoDraftTranscript = async (req: Request, res: Response) => {
     try {
       const { conversationId } = req.params;
       const channelId = (req.query.channelId as string | undefined)?.trim();
@@ -785,22 +790,73 @@ export class EmailController {
       const agentSlug = preference?.autoDraftAgentSlug?.trim() || 'draft-agent';
       const personaUserId = preference?.ownerUserId || null;
       if (!personaUserId) {
-        return res.json({ available: false, reasoning: null, toolInvocations: [] });
+        return res.json({ available: false, messages: [] });
       }
 
-      const insight = await getConversationInsight({
+      const transcript = await getConversationTranscript({
         agentSlug,
         conversationId,
         userId: personaUserId,
+        // The insight is scoped to the current channel, so use the
+        // authenticated viewer's verified workspace context to disambiguate
+        // the persona's Spaces surface identity for the S2S Claw request.
+        spacesWorkspaceId: req.user?.workspaceId,
       });
 
       res.setHeader('Cache-Control', 'no-store');
-      return res.json({ available: true, ...insight });
+      return res.json({ available: true, agentSlug, ...transcript });
     } catch (error: any) {
-      logger.error('[EmailController] getAutoDraftInsight error:', {
+      logger.error('[EmailController] getAutoDraftTranscript error:', {
         message: error?.message,
       });
-      return res.status(502).json({ error: 'Failed to fetch auto-draft insight' });
+      return res.status(502).json({ error: 'Failed to fetch auto-draft transcript' });
+    }
+  };
+
+  continueAutoDraft = async (req: Request, res: Response) => {
+    try {
+      const { conversationId } = req.params;
+      const channelId = (req.body?.channelId as string | undefined)?.trim();
+      if (!conversationId || !channelId) {
+        return res.status(400).json({ error: 'conversationId and channelId are required' });
+      }
+
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+      const isMember = await this.channelParticipantRepo.isParticipant(channelId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
+
+      const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
+      const agentSlug = preference?.autoDraftAgentSlug?.trim() || 'draft-agent';
+      const targetConversationId = uuidv4().replace(/_/g, '-');
+
+      const forked = await forkClawConversation({
+        agentSlug,
+        sourceConversationId: conversationId,
+        targetConversationId,
+        userId,
+        spacesWorkspaceId: req.user?.workspaceId,
+      });
+
+      if (!forked.success) {
+        logger.warn('[EmailController] continueAutoDraft: fork failed', {
+          conversationId,
+          agentSlug,
+          error: forked.error,
+        });
+        return res
+          .status(409)
+          .json({ error: 'Auto-draft conversation is no longer available to continue' });
+      }
+
+      return res.json({ conversationId: targetConversationId, agentSlug });
+    } catch (error: any) {
+      logger.error('[EmailController] continueAutoDraft error:', {
+        message: error?.message,
+      });
+      return res.status(502).json({ error: 'Failed to continue auto-draft' });
     }
   };
 

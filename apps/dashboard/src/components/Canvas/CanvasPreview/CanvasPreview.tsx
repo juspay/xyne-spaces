@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
 import { FileText, X } from 'lucide-react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
@@ -16,6 +16,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useTheme } from '../../../hooks/useTheme';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface CanvasPreviewProps {
   canvasId?: string;

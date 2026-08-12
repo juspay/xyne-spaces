@@ -73,6 +73,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const prompt = cfg.prompt as string;
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
@@ -86,6 +87,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         agentSlug,
         task: prompt,
         userId: runUserId,
+        ...identityContext,
         callbackUrl,
         ...(visibleContext ? visibleContext : {}),
       });
@@ -180,6 +182,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     );
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
     const visibleContext = resolveVisibleConversationContext(context);
 
@@ -194,6 +197,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         agentSlug,
         task: retryPrompt,
         userId: runUserId,
+        ...identityContext,
         callbackUrl,
         ...(visibleContext ? visibleContext : {}),
       });
@@ -322,6 +326,32 @@ async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Pr
     );
   }
   return fallbackUserId;
+}
+
+/**
+ * Queue workers do not have a browser cookie. Resolve the workspace context
+ * from Spaces itself and send it as optional metadata, preserving the legacy
+ * raw userId field for older Claw deployments.
+ */
+async function resolveHeadlessIdentityContext(
+  userId: string,
+  workspaceId: string,
+): Promise<{ spacesWorkspaceId: string; spacesOrgId: string; spacesOrgMemberId: string }> {
+  const [workspace, user] = await Promise.all([
+    db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
+    db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } }),
+  ]);
+  if (!workspace?.orgId) {
+    throw new Error(`[RUN_AGENT] workspace ${workspaceId} has no organization`);
+  }
+  if (!user?.orgMemberId) {
+    throw new Error(`[RUN_AGENT] user ${userId} has no orgMemberId`);
+  }
+  return {
+    spacesWorkspaceId: workspaceId,
+    spacesOrgId: workspace.orgId,
+    spacesOrgMemberId: user.orgMemberId,
+  };
 }
 
 function deriveStepNameFromCtx(context: AutomationContext): string | null {

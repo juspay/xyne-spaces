@@ -164,6 +164,19 @@ export class TagRepository {
     });
   }
 
+  async findById(id: string, workspaceId: string, tx?: TxClient): Promise<Tag | null> {
+    return this.client(tx).tag.findFirst({
+      where: { id, workspaceId, isDeleted: false },
+    });
+  }
+
+  async updateTagMethod(id: string, method: TagMethod, updatedBy?: string | null, tx?: TxClient): Promise<Tag> {
+    return this.client(tx).tag.update({
+      where: { id },
+      data: { method, updatedAt: new Date(), ...(updatedBy !== undefined ? { updatedBy } : {}) },
+    });
+  }
+
   /**
    * Returns all distinct (tagCategory, tag) pairs for a configKey (capped at 500).
    * Used by the "AI Tags" filter submenu to list all tags that actually exist for a channel.

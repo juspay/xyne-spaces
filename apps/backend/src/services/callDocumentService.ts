@@ -12,6 +12,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
+import type { SummaryTemplate } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
@@ -25,17 +26,16 @@ import type {
 } from '@/types/blockNoteTypes';
 import {
   buildSummaryTemplateSelectionPrompt,
+  formatSummaryTemplateSections,
   parseSelectedSummaryTemplate,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
 import {
-  BUILTIN_RECORDING_SUMMARY_TEMPLATES,
+  DEFAULT_RECORDING_SUMMARY_TEMPLATE,
   DEFAULT_RECORDING_SUMMARY_FIELDS,
   RECORDING_DETAILED_SUMMARY_PROMPT,
-  getBuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplateId,
 } from './recordingSummaryTemplates';
+import { summaryTemplateService } from './summaryTemplateService';
 
 // PRD Document structure
 interface PRDDocument {
@@ -901,35 +901,32 @@ export class CallDocumentService {
     return selectedTemplate;
   }
 
-  /**
-   * Select one of the built-in recording templates. These templates are
-   * intentionally code-backed for the v1 rollout, so every workspace gets the
-   * same choices without requiring seed rows in summary_templates.
-   */
+  /** Select the best persisted template, falling back to the code-backed default. */
   async selectRecordingSummaryTemplateForTranscript(
     transcript: string,
+    workspaceId: string,
+    userId: string,
     callId: string,
-  ): Promise<BuiltinRecordingSummaryTemplate> {
-    const candidates: SummaryTemplateCandidate[] = BUILTIN_RECORDING_SUMMARY_TEMPLATES.map(
-      template => ({
-        id: template.id,
-        name: template.name,
-        version: 1,
-        autoTriggerPrompt: template.selectionCriteria,
-        sections: template.fields,
-        systemPrompt: '',
-      }),
+  ): Promise<SummaryTemplate | null> {
+    const templates = await summaryTemplateService.list(workspaceId, userId);
+    const defaultTemplate = await summaryTemplateService.findAccessibleById(
+      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+      workspaceId,
+      userId,
     );
+    if (templates.length === 0) return defaultTemplate;
 
     const result = await executeStreamingLlmRequest({
-      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, candidates),
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
       operation: 'recording_summary_template_selection',
       callId,
     });
 
     if (result.ok) {
-      const selected = parseSelectedSummaryTemplate(result.content, candidates);
-      const template = selected ? getBuiltinRecordingSummaryTemplate(selected.id) : undefined;
+      const selected = parseSelectedSummaryTemplate(result.content, templates);
+      const template = selected
+        ? templates.find(candidate => candidate.id === selected.id)
+        : undefined;
       if (template) {
         logger.info(`[${callId}] recording_summary_template_selected`, {
           template_id: template.id,
@@ -940,24 +937,36 @@ export class CallDocumentService {
     }
 
     logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
-      template_id: 'default',
+      template_id: defaultTemplate?.id,
       reason: result.ok ? 'invalid_selection' : result.reason,
     });
-    return getBuiltinRecordingSummaryTemplate('default')!;
+    return defaultTemplate;
   }
 
-  /** Generate a headless-recording summary using the supplied v1 seed prompt. */
+  /** Generate a headless-recording summary using a saved or code-backed template. */
   async generateRecordingSummary(
     transcript: string,
     callId: string,
-    templateId?: BuiltinRecordingSummaryTemplateId,
+    templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
-  ): Promise<{ summary: string; template: BuiltinRecordingSummaryTemplate } | null> {
-    const template = templateId
-      ? getBuiltinRecordingSummaryTemplate(templateId)
-      : await this.selectRecordingSummaryTemplateForTranscript(transcript, callId);
+  ): Promise<{ summary: string; template: SummaryTemplate } | null> {
+    const call = await repositories.calls.findByExternalId(callId);
+    if (!call?.workspaceId) return null;
 
-    if (!template) {
+    const selectedTemplate = templateId
+      ? await summaryTemplateService.findAccessibleById(
+          templateId,
+          call.workspaceId,
+          call.createdByUserId,
+        )
+      : await this.selectRecordingSummaryTemplateForTranscript(
+          transcript,
+          call.workspaceId,
+          call.createdByUserId,
+          callId,
+        );
+
+    if (!selectedTemplate) {
       logger.error(`[${callId}] recording_summary_generation_failed`, {
         reason: 'invalid_template',
         template_id: templateId,
@@ -965,12 +974,21 @@ export class CallDocumentService {
       return null;
     }
 
+    const template = await summaryTemplateService.ensureGeneratedSystemPrompt(selectedTemplate);
+    if (!template) {
+      logger.error(`[${callId}] recording_summary_generation_failed`, {
+        reason: 'system_prompt_generation_failed',
+        template_id: selectedTemplate.id,
+      });
+      return null;
+    }
+
     const summary = await this.generateDetailedSummary(
       transcript,
       callId,
-      undefined,
-      template.fields,
-      undefined,
+      template.autoTriggerPrompt ?? undefined,
+      formatSummaryTemplateSections(template.sections),
+      template.systemPrompt,
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta,
@@ -1213,57 +1231,68 @@ export class CallDocumentService {
       // PRIVATE — note-taker recordings are shared per-user/group/channel via
       // entity_access, and the recording sharing API updates canvas_participants
       // in the same transaction.
-      await prisma.canvas.create({
-        data: {
-          id: canvasId,
-          title,
-          content: [],
-          channelId,
-          workspaceId,
-          createdBy: createdByUserId,
-          visibility: CanvasVisibility.PRIVATE,
-          isTemplate: false,
-          isCollaborative: true,
-          lastEditedBy: createdByUserId,
-          lastEditedAt: now,
-          createdAt: now,
-          updatedAt: now,
-          metadata: {
-            source: 'call_detailed_summary',
-            callId,
-            conversationId,
-            isAiGenerated: true,
-            generatedAt: now.toISOString(),
-            mentionedUserIds, // Store mentioned users for side effect handler
-            version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+      //
+      // Bootstrapping the canvas + its two initial owners (Xyne Automatic bot,
+      // call creator) is a trusted system sequence, not the acting requester
+      // adding arbitrary participants — that requester may just be someone the
+      // recording was shared with, who isn't yet a participant on this
+      // brand-new canvas. Run it as an interactive transaction so it bypasses
+      // the per-request tenant ACL (CanvasParticipantsACL.canCreate would
+      // otherwise deny the second insert since the requester isn't a
+      // participant yet); regular canvas access after this stays ACL-gated.
+      await prisma.$transaction(async (tx) => {
+        await tx.canvas.create({
+          data: {
+            id: canvasId,
+            title,
+            content: [],
+            channelId,
+            workspaceId,
+            createdBy: createdByUserId,
+            visibility: CanvasVisibility.PRIVATE,
+            isTemplate: false,
+            isCollaborative: true,
+            lastEditedBy: createdByUserId,
+            lastEditedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            metadata: {
+              source: 'call_detailed_summary',
+              callId,
+              conversationId,
+              isAiGenerated: true,
+              generatedAt: now.toISOString(),
+              mentionedUserIds, // Store mentioned users for side effect handler
+              version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+            },
           },
-        },
-      });
+        });
 
-      // Add Xyne Automatic bot as OWNER
-      await prisma.canvasParticipant.create({
-        data: {
-          id: participantId,
-          canvasId,
-          workspaceId,
-          userId: createdByUserId,
-          role: CanvasRole.OWNER,
-          joinedAt: now,
-          updatedAt: now,
-        },
-      });
+        // Add Xyne Automatic bot as OWNER
+        await tx.canvasParticipant.create({
+          data: {
+            id: participantId,
+            canvasId,
+            workspaceId,
+            userId: createdByUserId,
+            role: CanvasRole.OWNER,
+            joinedAt: now,
+            updatedAt: now,
+          },
+        });
 
-      // Add call creator as OWNER
-      await prisma.canvasParticipant.create({
-        data: {
-          id: uuidv4(),
-          canvasId,
-          workspaceId,
-          userId: callCreatorUserId,
-          role: CanvasRole.OWNER,
-          joinedAt: now,
-          updatedAt: now,
-        },
+        // Add call creator as OWNER
+        await tx.canvasParticipant.create({
+          data: {
+            id: uuidv4(),
+            canvasId,
+            workspaceId,
+            userId: callCreatorUserId,
+            role: CanvasRole.OWNER,
+            joinedAt: now,
+            updatedAt: now,
+          },
+        });
       });
 
       // Initialize Y-Sweet for collaborative editing

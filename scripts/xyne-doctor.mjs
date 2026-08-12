@@ -1423,7 +1423,9 @@ const runChildCommand = (command, cwd, capture, options = {}) =>
         detached: useProcessGroup,
         env: environment,
         shell: false,
-        stdio: piped ? ["ignore", "pipe", "pipe"] : "inherit",
+        stdio: piped
+          ? [stdin.isTTY ? "inherit" : "ignore", "pipe", "pipe"]
+          : "inherit",
       });
     } catch (error) {
       const message = safeSpawnErrorMessage(error);

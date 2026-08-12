@@ -33,7 +33,12 @@ export type StageVisitEta = {
 };
 
 export interface UseStageFormParams {
-  ticket: Ticket;
+  /** Only the id is read — callers without a full Ticket (e.g. flow steps) pass `{ id }`. */
+  ticket: Pick<Ticket, 'id'>;
+  /**
+   * The form's value context: a real stage, or any pseudo-stage whose `id`
+   * scopes the form values (flow steps pass `{ id: planNodeId, name }`).
+   */
   targetStage: Stage;
   formId: string;
   hasApprovers: boolean;

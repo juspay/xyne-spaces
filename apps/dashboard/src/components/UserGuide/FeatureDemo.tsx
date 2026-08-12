@@ -22,7 +22,6 @@ import {
   Lightbulb,
   FileText,
   Headphones,
-  Workflow,
   ShieldUser,
   AppWindow,
   Globe,
@@ -1611,16 +1610,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
         'SRT-042 · Cannot log in · 2h left ⚠',
         'SRT-041 · Export CSV broken · 5h',
         'SRT-040 · Notification delay',
-      ],
-    },
-    workflows: {
-      title: 'Workflows',
-      icon: <Workflow size={10} />,
-      lines: [
-        '✅ Assign to on-call',
-        '✅ Notify #incidents',
-        '⟳ Create RCA draft (running)',
-        '○ Close linked alerts',
       ],
     },
     jira: {

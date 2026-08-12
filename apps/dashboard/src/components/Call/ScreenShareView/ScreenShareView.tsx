@@ -14,6 +14,7 @@ import type { DrawingCanvasHandle } from '../DrawingCanvas';
 import { useDrawStore } from '../../../hooks/useDrawStore';
 import { sortParticipants } from '../ParticipantGrid/sortParticipants';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
+import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
 
 interface ScreenShareViewProps {
   focusedScreenShare: ParticipantInfo;
@@ -118,12 +119,20 @@ export function ScreenShareView({
     screenShareTrackRef,
   ]);
 
+  // Host kill-switch: hide the agent tile from the sidebar while transcription is off.
+  const isTranscriptionEnabled = useSelector(
+    roomActor,
+    state => state.context.isTranscriptionEnabled,
+  );
+
   // Sort sidebar: mic on → camera on → earlier joinedAt, always applied.
   // Agent (Xyne Automatic) pinned to end unless AI assistant is enabled.
-  const sortedParticipants = useMemo(
-    () => sortParticipants(participants, isAIAssistantEnabled),
-    [participants, isAIAssistantEnabled],
-  );
+  const sortedParticipants = useMemo(() => {
+    const visible = isTranscriptionEnabled
+      ? participants
+      : participants.filter(p => !isTranscriptionAgentIdentity(p.identity));
+    return sortParticipants(visible, isAIAssistantEnabled);
+  }, [participants, isAIAssistantEnabled, isTranscriptionEnabled]);
 
   return (
     <div className={cn('h-full w-full flex overflow-hidden', className)}>

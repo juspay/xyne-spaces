@@ -22,6 +22,11 @@ export interface ChannelClawAgent {
 
 export interface ClawRunRequest {
   userId: string;
+  /**
+   * Verified Spaces workspace for this raw, workspace-scoped user id. Claw
+   * uses it with x-spaces-user-id to resolve the exact surface identity.
+   */
+  spacesWorkspaceId?: string;
   userName: string;
   userEmail: string;
   query: string;
@@ -229,6 +234,9 @@ export interface S2SRunAgentRequest {
   userId: string;
   userName: string;
   userEmail: string;
+  spacesWorkspaceId: string;
+  spacesOrgId: string;
+  spacesOrgMemberId: string;
   callbackUrl: string;
   conversationId?: string;
   channelId?: string;
@@ -242,11 +250,6 @@ export interface S2SRunAgentResponse {
   error?: string;
 }
 
-export interface ConversationInsight {
-  reasoning: string | null;
-  content: string | null;
-  toolInvocations: unknown[];
-}
 
 
 // ============================================================================
@@ -294,8 +297,20 @@ function extractCookieHeader(req: { headers?: { cookie?: string } }): Record<str
   return cookie ? { Cookie: cookie } : {};
 }
 
-function extractUserIdHeader(userId: string): Record<string, string> {
-  return { 'x-user-id': userId };
+function extractUserIdHeader(
+  userId: string,
+  workspaceId?: string,
+): Record<string, string> {
+  // `userId` is the raw, workspace-scoped Spaces user id. Keep the legacy
+  // x-user-id header for older Claw deployments, and send the explicit source
+  // identity for Claw versions that canonicalize it at the auth boundary.
+  // The workspace completes the compound Spaces surface identity and prevents
+  // a canonicalizer from guessing a membership for a multi-workspace person.
+  return {
+    'x-user-id': userId,
+    'x-spaces-user-id': userId,
+    ...(workspaceId ? { 'x-spaces-workspace-id': workspaceId } : {}),
+  };
 }
 
 // ============================================================================
@@ -520,6 +535,7 @@ export async function runClawAgentStream(
 
   const payload: Record<string, unknown> = {
     userId: request.userId,
+    ...(request.spacesWorkspaceId && { spacesWorkspaceId: request.spacesWorkspaceId }),
     userName: request.userName,
     userEmail: request.userEmail,
     task: request.query,
@@ -586,6 +602,7 @@ export async function runClawAgentStream(
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
       ...cookieHeader,
+      ...extractUserIdHeader(request.userId, request.spacesWorkspaceId),
     },
     body: JSON.stringify(payload),
     ...(opts.signal ? { signal: opts.signal } : {}),
@@ -769,7 +786,8 @@ export async function runClawAgentStream(
 export async function cancelClawAgentRun(
   req: { headers?: { cookie?: string } },
   userId: string,
-  sessionId: string
+  sessionId: string,
+  workspaceId?: string,
 ): Promise<{ success: boolean; status: string; error?: string }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/run/stream/cancel`;
   try {
@@ -777,7 +795,7 @@ export async function cancelClawAgentRun(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...extractUserIdHeader(userId),
+        ...extractUserIdHeader(userId, workspaceId),
         ...extractCookieHeader(req),
       },
       body: JSON.stringify({ sessionId }),
@@ -1268,6 +1286,9 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
         agentSlug: req.agentSlug,
         task: req.task,
         userId: req.userId,
+        spacesWorkspaceId: req.spacesWorkspaceId,
+        spacesOrgId: req.spacesOrgId,
+        spacesOrgMemberId: req.spacesOrgMemberId,
         callbackUrl: req.callbackUrl,
         ...(req.conversationId ? { conversationId: req.conversationId } : {}),
         ...(req.channelId ? { channelId: req.channelId } : {}),
@@ -1298,6 +1319,10 @@ export interface AppMentionAgentRequest {
   channelId: string;
   workspaceId: string;
   resultForwardUrl: string;
+  /** Optional when the caller already resolved the Spaces identity. */
+  spacesWorkspaceId?: string;
+  spacesOrgId?: string;
+  spacesOrgMemberId?: string;
 }
 
 export async function runClawAgent(
@@ -1352,6 +1377,8 @@ export async function runClawAgent(
     return { dispatched: false };
   }
 
+  const identityContext = await resolveHeadlessAppEventIdentity(req);
+
   const event: BaseAppEvent = {
     eventType: AppEventType.APP_MENTION,
     payload: {
@@ -1363,6 +1390,7 @@ export async function runClawAgent(
       userId: req.userId,
       senderName: req.userName,
       channelId: req.channelId,
+      ...identityContext,
       metadata: { resultForwardUrl: req.resultForwardUrl },
     },
     timestamp: new Date().toISOString(),
@@ -1371,48 +1399,138 @@ export async function runClawAgent(
   return { dispatched: true };
 }
 
+async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Promise<{
+  workspaceId: string;
+  orgId: string;
+  orgMemberId: string;
+}> {
+  // A server-initiated event has no browser cookie. Resolve from the channel
+  // and actor records rather than trusting caller-supplied identity fields.
+  const [actor, channel] = await Promise.all([
+    db.user.findUnique({ where: { id: req.userId }, select: { orgMemberId: true } }),
+    db.channel.findUnique({ where: { id: req.channelId }, select: { workspaceId: true } }),
+  ]);
+  const workspaceId = req.spacesWorkspaceId ?? channel?.workspaceId;
+  const workspace = workspaceId
+    ? await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } })
+    : null;
+  const orgId = req.spacesOrgId ?? workspace?.orgId;
+  const orgMemberId = req.spacesOrgMemberId ?? actor?.orgMemberId;
+  if (!workspaceId || !orgId || !orgMemberId) {
+    throw new Error(
+      `[ClawAgentService] Cannot dispatch a headless Claw event without workspace, org, and org-member identity for user ${req.userId}`,
+    );
+  }
+  return {
+    workspaceId,
+    orgId,
+    orgMemberId,
+  };
+}
+
+interface ClawChatMessage {
+  id: string;
+  role: string;
+  reasoning?: string | null;
+  content?: string | null;
+}
+
+interface ClawMessagesPayload {
+  success?: boolean;
+  data?: ClawChatMessage[];
+  toolInvocations?: unknown[];
+  invocationsByMsgId?: Record<string, unknown[]>;
+  icons?: Record<string, string>;
+  runByMsgId?: Record<string, string>;
+  ratingByMsgId?: Record<string, unknown>;
+}
+
 /** Fetch the latest assistant reasoning and tool invocations from a claw conversation. Used by email auto-draft. */
-export async function getConversationInsight(params: {
+async function fetchClawChatMessages(params: {
   agentSlug: string;
   conversationId: string;
   userId: string;
-}): Promise<ConversationInsight> {
-  const { agentSlug, conversationId, userId } = params;
+  spacesWorkspaceId?: string;
+}): Promise<{
+  messages: ClawChatMessage[];
+  invocationsByMsgId: Record<string, unknown[]>;
+  raw: ClawMessagesPayload;
+}> {
+  const { agentSlug, conversationId, userId, spacesWorkspaceId } = params;
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(conversationId)}/messages`;
   let res: globalThis.Response;
   try {
     res = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': userId, ...getS2SHeaders() },
+      headers: {
+        'Content-Type': 'application/json',
+        ...extractUserIdHeader(userId, spacesWorkspaceId),
+        ...getS2SHeaders(),
+      },
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] getConversationInsight: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
+      `[ClawAgentService] fetchClawChatMessages: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
   if (!res.ok) {
     const body = await safeReadText(res);
-    throw new Error(`[ClawAgentService] getConversationInsight: HTTP ${res.status} — ${body}`);
+    throw new Error(`[ClawAgentService] fetchClawChatMessages: HTTP ${res.status} — ${body}`);
   }
 
-  const json = (await res.json()) as {
-    success?: boolean;
-    data?: Array<{ id: string; role: string; reasoning?: string | null; content?: string | null }>;
-    invocationsByMsgId?: Record<string, unknown[]>;
+  const json = (await res.json()) as ClawMessagesPayload;
+  return {
+    messages: Array.isArray(json.data) ? json.data : [],
+    invocationsByMsgId: json.invocationsByMsgId ?? {},
+    raw: json,
   };
-  const messages = Array.isArray(json.data) ? json.data : [];
-  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-  const reasoning =
-    lastAssistant?.reasoning && lastAssistant.reasoning.trim() ? lastAssistant.reasoning : null;
-  const content =
-    lastAssistant?.content && lastAssistant.content.trim() ? lastAssistant.content : null;
-  const toolInvocations =
-    lastAssistant && Array.isArray(json.invocationsByMsgId?.[lastAssistant.id])
-      ? (json.invocationsByMsgId![lastAssistant.id] as unknown[])
-      : [];
-  return { reasoning, content, toolInvocations };
+}
+
+export async function getConversationTranscript(params: {
+  agentSlug: string;
+  conversationId: string;
+  userId: string;
+  spacesWorkspaceId?: string;
+}): Promise<ClawMessagesPayload> {
+  const { raw } = await fetchClawChatMessages(params);
+  return raw;
+}
+
+export async function forkClawConversation(params: {
+  agentSlug: string;
+  sourceConversationId: string;
+  targetConversationId: string;
+  userId: string;
+  spacesWorkspaceId?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { agentSlug, sourceConversationId, targetConversationId, userId, spacesWorkspaceId } =
+    params;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(sourceConversationId)}/fork`;
+  let res: globalThis.Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extractUserIdHeader(userId, spacesWorkspaceId),
+        ...getS2SHeaders(),
+      },
+      body: JSON.stringify({ targetConversationId }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new Error(
+      `[ClawAgentService] forkClawConversation: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+  if (!res.ok || json.success !== true) {
+    return { success: false, error: json.error ?? `fork HTTP ${res.status}` };
+  }
+  return { success: true };
 }
 
 async function safeReadText(res: globalThis.Response): Promise<string> {

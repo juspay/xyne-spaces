@@ -11,7 +11,6 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
-import type { BuiltinRecordingSummaryTemplateId } from '@/services/recordingSummaryTemplates';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No
 // configKey is used, so tagService.createTag skips the "category must be
@@ -21,7 +20,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
-  summaryTemplateId: BuiltinRecordingSummaryTemplateId;
+  summaryTemplateId: string;
 }
 
 /**
@@ -168,9 +167,9 @@ class NoteTakerTranscriptService {
    */
   async regenerateSummary(
     call: Call,
-    templateId: BuiltinRecordingSummaryTemplateId,
+    templateId: string,
   ): Promise<{
-    summaryTemplateId: BuiltinRecordingSummaryTemplateId;
+    summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
@@ -433,7 +432,7 @@ class NoteTakerTranscriptService {
   private async generateDetailedSummaryCanvas(
     call: Call,
     formattedTranscript: string,
-    templateId?: BuiltinRecordingSummaryTemplateId,
+    templateId?: string,
   ): Promise<DetailedSummaryCanvasResult | null> {
     const callId = call.externalId;
 

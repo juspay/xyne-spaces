@@ -4,7 +4,7 @@ import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { appDeskService } from '@/services/appDeskService';
-import { DESK_SOURCE_PREFIXES, extractInstalledAppId } from '@/integrations/core/deskSources';
+import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 
 const TAG = '[AppDesk]';
 const APPROVED_STATUSES = [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE];
@@ -49,18 +49,9 @@ router.get('/apps', authV2Middleware.authenticate, async (req: Request, res: Res
   try {
     const workspaceId = req.user!.workspaceId!;
 
-    const claimedSources = await db.externalSource.findMany({
-      where: { name: { startsWith: DESK_SOURCE_PREFIXES.APP }, isActive: true },
-      select: { name: true },
-    });
-    const claimedAppIds = claimedSources
-      .map(s => extractInstalledAppId(s.name))
-      .filter((id): id is string => id !== null);
-
     const installedApps = await db.installedApps.findMany({
       where: {
         user: { workspaceId },
-        ...(claimedAppIds.length > 0 && { id: { notIn: claimedAppIds } }),
         installedAppPermissions: {
           some: {
             status: { in: APPROVED_STATUSES },
@@ -75,11 +66,23 @@ router.get('/apps', authV2Middleware.authenticate, async (req: Request, res: Res
       },
     });
 
+    const appDeskSources = await db.externalSource.findMany({
+      where: { sourceType: 'app-desk', isActive: true, workspaceId },
+      select: { name: true, externalIdentifier: true },
+    });
+    const deskCountByInstall = new Map<string, number>();
+    for (const source of appDeskSources) {
+      const installedAppId = resolveAppDeskInstalledAppId(source);
+      if (!installedAppId) continue;
+      deskCountByInstall.set(installedAppId, (deskCountByInstall.get(installedAppId) ?? 0) + 1);
+    }
+
     const eligible = installedApps.map(a => ({
       installedAppId: a.id,
       appId: a.appId,
       name: a.app.name,
       description: a.app.description,
+      deskCount: deskCountByInstall.get(a.id) ?? 0,
     }));
 
     res.json({ apps: eligible });
@@ -161,16 +164,16 @@ router.post(
       const source = await db.externalSource.findFirst({
         where: { channelId, sourceType: 'app-desk', isActive: false },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, name: true },
+        select: { id: true, name: true, externalIdentifier: true },
       });
       if (!source) {
         res.status(404).json({ error: 'No disconnected integration found for this channel' });
         return;
       }
 
-      const installedAppId = extractInstalledAppId(source.name);
+      const installedAppId = resolveAppDeskInstalledAppId(source);
       if (!installedAppId) {
-        res.status(400).json({ error: 'Invalid app-desk source name' });
+        res.status(400).json({ error: 'App-desk source is missing its backing install' });
         return;
       }
       const installedApp = await db.installedApps.findFirst({

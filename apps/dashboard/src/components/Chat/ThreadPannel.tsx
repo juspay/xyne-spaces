@@ -97,8 +97,8 @@ import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
-type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
+type TabType = 'thread' | 'details' | 'files' | 'rca';
+type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
   channelId?: string;
@@ -122,6 +122,10 @@ interface ThreadMessagesProps {
   /** Custom click handler for the channel name badge. Defaults to opening the thread in-channel. */
   onChannelLinkClick?: () => void;
   skipInputAutoFocus?: boolean;
+  /** Overrides what the header's Ask AI button does. Defaults to opening the
+   *  panel on this thread; hosts with their own agent session (e.g. Desk's
+   *  draft agent) pass their own opener. */
+  onAskAI?: () => void;
 }
 
 export const ThreadMessages = ({
@@ -142,6 +146,7 @@ export const ThreadMessages = ({
   showChannelLink = false,
   onChannelLinkClick,
   skipInputAutoFocus: propSkipInputAutoFocus = false,
+  onAskAI,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -182,7 +187,7 @@ export const ThreadMessages = ({
 
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'workflows', 'rca'];
+  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
   const selectedTab: TabType = validTabs.includes(selectedTabParam as TabType)
     ? (selectedTabParam as TabType)
     : 'thread';
@@ -246,6 +251,10 @@ export const ThreadMessages = ({
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
+  const [threadTicket] = useCachedQuery(queries.ticketRowById({ ticketId: derivedTicketId }), {
+    enabled: !!derivedTicketId,
+  });
+  const isFlowStep = !!threadTicket?.rootId;
 
   // Update derived values when props/params change OR when conversation loads
   useEffect(() => {
@@ -767,17 +776,17 @@ export const ThreadMessages = ({
   // Support URL-driven tab selection for the compact side panel mode as well.
   useEffect(() => {
     if (!underTicketView) return;
+    if (hideTabBar) {
+      setUnderTicketActiveTab('replies');
+      return;
+    }
 
     if (selectedTab === 'rca' && isFixTicket) {
       setUnderTicketActiveTab('rca');
       return;
     }
-    if (selectedTab === 'workflows') {
-      setUnderTicketActiveTab('workflows');
-      return;
-    }
     setUnderTicketActiveTab('replies');
-  }, [underTicketView, selectedTab, isFixTicket]);
+  }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
   const tabs = useMemo(() => {
     const allTabs = [
@@ -940,7 +949,7 @@ export const ThreadMessages = ({
     });
   };
 
-  // Early return for underTicketView mode - separate tab-based UI with Replies and Workflows
+  // Early return for underTicketView mode - separate tab-based UI with Messages and RCA
   if (underTicketView) {
     return (
       <div
@@ -1173,6 +1182,10 @@ export const ThreadMessages = ({
                     size='sm'
                     variant='ghost'
                     onClick={() => {
+                      if (onAskAI) {
+                        onAskAI();
+                        return;
+                      }
                       xyneAIActor.send({
                         type: 'OPEN',
                         channelId: derivedChannelId,
@@ -1387,6 +1400,7 @@ export const ThreadMessages = ({
                     messagesWithSeparators={messagesWithSeparators}
                     initialScrollOffset={0}
                     isTicketThread={true}
+                    isFlowStep={isFlowStep}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
                     enableCollapsing={previewCardMode}
