@@ -1,5 +1,5 @@
-import { ReactElement, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, SearchBig, Share01, CheckTickSingle } from '@xyne/icons';
 import { invokeShortcut } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
@@ -11,6 +11,17 @@ const buttonClass = cn(
   'text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
 );
 
+const disabledButtonClass = cn(
+  buttonClass,
+  'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-sidebar-secondary-foreground',
+);
+
+const getHistoryIndex = (): number => {
+  const historyState = window.history.state as { idx?: unknown } | null;
+  const index = historyState?.idx;
+  return typeof index === 'number' ? index : 0;
+};
+
 /**
  * Top-bar navigation cluster: history back/forward and the global (cmd+k) search.
  * Matches the Agent Hub navigator frame — back and forward sit adjacent, with the
@@ -18,8 +29,32 @@ const buttonClass = cn(
  */
 const AppNavigator = (): ReactElement => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [copied, setCopied] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState(getHistoryIndex);
+  const maxHistoryIndexRef = useRef(historyIndex);
+
+  useEffect(() => {
+    const nextHistoryIndex = getHistoryIndex();
+    maxHistoryIndexRef.current = Math.max(maxHistoryIndexRef.current, nextHistoryIndex);
+    setHistoryIndex(nextHistoryIndex);
+  }, [location.key]);
+
+  const canGoBack = historyIndex > 0;
+  const canGoForward = historyIndex < maxHistoryIndexRef.current;
+
+  const handleGoBack = (): void => {
+    if (canGoBack) {
+      void navigate(-1);
+    }
+  };
+
+  const handleGoForward = (): void => {
+    if (canGoForward) {
+      void navigate(1);
+    }
+  };
 
   const handleShareWorkspace = async (): Promise<void> => {
     if (!workspaceId) return;
@@ -54,8 +89,9 @@ const AppNavigator = (): ReactElement => {
         <button
           type='button'
           aria-label='Back'
-          onClick={() => void navigate(-1)}
-          className={buttonClass}
+          onClick={handleGoBack}
+          disabled={!canGoBack}
+          className={canGoBack ? buttonClass : disabledButtonClass}
           data-track-category='APP_NAVIGATOR'
           data-track-name='GO_BACK'
         >
@@ -64,8 +100,9 @@ const AppNavigator = (): ReactElement => {
         <button
           type='button'
           aria-label='Forward'
-          onClick={() => void navigate(1)}
-          className={buttonClass}
+          onClick={handleGoForward}
+          disabled={!canGoForward}
+          className={canGoForward ? buttonClass : disabledButtonClass}
           data-track-category='APP_NAVIGATOR'
           data-track-name='GO_FORWARD'
         >
