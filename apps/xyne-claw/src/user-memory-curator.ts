@@ -36,7 +36,9 @@ import { createLogger } from "./logger.js";
 const log = createLogger("user-memory-curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
+// Background job: prefer the low-priority automation key so curator bursts
+// can't queue interactive agent turns on the main key's parallel-slot pool.
+const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
 // Model name passed to LiteLLM for the distill call. Reads from `LITELLM_MODEL`
 // to share the same env var with other LiteLLM-backed paths in this service
 // (avoids having to keep two model env vars in sync when we upgrade Haiku).

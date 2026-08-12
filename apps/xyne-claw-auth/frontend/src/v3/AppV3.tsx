@@ -243,6 +243,15 @@ export function AppV3() {
                 <ChatPageV3 />
               </div>
             } />
+            <Route path="/v3/design" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                {/* Keep Design's active draft separate from the normal Chat
+                    destination while reusing the same chat runtime/API. */}
+                <ChatProvider>
+                  <ChatPageV3 mode="design" />
+                </ChatProvider>
+              </div>
+            } />
             <Route path="/v3/workflows" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                 <WorkflowsPageV3 userId={userId} />

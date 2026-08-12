@@ -8,7 +8,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getDmChannelForUserAndApp } from "../lib/spaces-db.js";
-import { gcsService } from "../services/storageService.js";
+import { gcsService } from "../services/gcsService.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("runs");

@@ -517,6 +517,17 @@ const SERVERS = [
     healthcheckSpec: { name: "get_user_tweets", params: { username: "OpenAI", count: 1 } },
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
+  {
+    type: "heisenberg",
+    name: "Heisenberg Pipeline",
+    // stdio transport — the endpoint comes from HEISENBERG_BASE_URL at runtime.
+    url: "",
+    description: "Global MCP proxy for Heisenberg pipeline runs, status, coverage, test failures, and logs.",
+    transport: "stdio",
+    credentialForm: { fields: [] },
+    healthcheckSpec: { name: "heisenberg_health", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["heisenberg_start_pipeline", "heisenberg_index_logs"] },
+  },
 ] as const;
 
 async function main() {
@@ -529,7 +540,7 @@ async function main() {
   // Create "spaces" Surface if it doesn't exist
   const spacesSurface = await prisma.surface.upsert({
     where: { key: "spaces" },
-    create: { id: "spaces", key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
+    create: { key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
     update: {},
   });
 
@@ -809,6 +820,7 @@ Anyone in the company. A nervous intern. A staff engineer. An HR partner. A PM, 
 - Never narrate your process. No "Let me search…", "I'll look into…", "I'll need to check…", "The user is asking…". Just deliver the answer.
 - Mirror the asker's energy and formality. Match the seriousness of the question. If they're casual, be casual; if they're terse, be terse.
 - **Default to BRIEF.** Lead with the answer in 1–3 sentences, then only the bits that matter. No giant headers, no decorative bullets, no fake structure. People should be able to read the whole reply, not skim for a TL;DR.
+- **A chart of real numbers is not decoration.** "Brief" governs your WORDS, not your evidence. The moment your answer carries a breakdown (per team, per status, per service), a trend over time, a split of a whole, or a before/after — call \`visualize\` and show it, instead of spelling the figures out in prose. Then add the one line the chart can't say: what it means. Reach for it on your own; nobody should have to ask you to chart.
 - Go long only when they ask for depth ("explain in detail", "write it up", "full background") or when one paragraph genuinely can't cover it. Even then — structured but tight.
 - No emojis. No "Here's what I found:" preambles. Open with the answer itself.
 - One-sentence offers of follow-up are great ("Want me to dig into any of these?"). Long sign-offs aren't.
@@ -850,11 +862,13 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
 - **genius-investigation** — root-cause analysis on incidents, fraud, disputes, outages.
+- **visualize** — turn metrics you ALREADY have into a chart (bar, line, area, pie/donut, KPI, scatter, table). Reach for it whenever your answer carries counts, totals, trends, breakdowns, proportions, or a before/after comparison — from any source, not just analytics tools. It renders only if you copy its \`\`\`chart block back verbatim. See the \`charts\` skill for chart choice and payload shapes.
 - **query-codebase** / **review-pull-request** — high-level code/PR understanding. **Require** a repo/product selected in the research context; if none is selected, tell the user to pick one — don't call.
 - **web-search** / **deep-research** — for things outside the workspace (when enabled).
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
+- **spaces-sdlc-create-artifact** — create a PRD or Tech Doc only when the active Spaces context explicitly identifies an SDLC repository. This V1 action creates the editable canvas immediately; use the supplied SDLC repository id and require a parent PRD for a Tech Doc.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -952,8 +966,9 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
+            "spaces-sdlc-create-artifact",
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -1032,8 +1047,9 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
+            "spaces-sdlc-create-artifact",
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -1054,6 +1070,180 @@ You:
     },
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
+
+  const SDLC_DIRECT_TOOL_SLUGS = [
+    // Selecting the connector subagents exposes their complete read palettes.
+    // Keep connector write tools direct so the normal approval gates still apply.
+    "spaces-whoami",
+    "spaces-search",
+    "spaces-tickets",
+    "spaces-messages",
+    "spaces-message-detail",
+    "spaces-channels",
+    "spaces-users",
+    "spaces-activity",
+    "spaces-projects",
+    "spaces-project-team-members",
+    "spaces-boards",
+    "spaces-calls",
+    "spaces-canvases",
+    "spaces-read-canvas",
+    "spaces-meeting-insights",
+    "spaces-emails",
+    "spaces-thread-attachments",
+    "spaces-fetch-attachment",
+    "spaces-workflow-stats",
+    "spaces-create-ticket",
+    "spaces-update-ticket",
+    "spaces-schedule-call",
+    "user-send-message",
+    "spaces-create-canvas",
+    "spaces-edit-canvas",
+    "spaces-upload-to-kb",
+    "spaces-sdlc-create-artifact",
+    "spaces-sdlc-update-baseline",
+    "create_repository",
+    "merge_pull_request",
+  ];
+  const sdlcSandboxToolSlugs = customTools
+    .filter((tool) => tool.source === "custom:sandbox")
+    .map((tool) => tool.slug);
+  const sdlcCustomToolSlugs = [
+    ...new Set([
+      ...sdlcSandboxToolSlugs,
+      "web-search",
+      "todo-read",
+      "todo-write",
+    ]),
+  ];
+  const SDLC_TOOL_PERMISSIONS = {
+    "xyne-spaces__spaces-create-ticket": "ask",
+    "xyne-spaces__spaces-update-ticket": "ask",
+    "xyne-spaces__spaces-schedule-call": "ask",
+    "xyne-spaces__user-send-message": "ask",
+    "xyne-spaces__spaces-create-canvas": "ask",
+    "xyne-spaces__spaces-edit-canvas": "ask",
+    "xyne-spaces__spaces-upload-to-kb": "ask",
+    "xyne-spaces__spaces-sdlc-create-artifact": "allow",
+    "xyne-spaces__spaces-sdlc-update-baseline": "allow",
+  };
+
+  const SDLC_AGENT_PROMPT = `You are **SDLC Assistant** — the focused engineering agent for repository-backed software delivery in Xyne Spaces.
+
+Every repository operation must use the SDLC repository pinned by trusted run context. Never infer a repository from its display name, search Spaces to discover one, or select a repository from an error message. If no valid SDLC repository context is attached, explain that the user must select a repository from an SDLC Hub and stop without calling repository or artifact tools.
+
+For baseline work, use sandbox-repo-setup for the pinned repository, search the pinned repository channel for relevant imported Wiki canvases with spaces-search, read their full content with spaces-read-canvas, and verify their claims against the live repository. Then use spaces-sdlc-update-baseline to begin one draft, checkpoint each required section immediately after its focused inspection, and finalize only after all sections are present. Cite exact relative paths and symbols, distinguish source evidence from inference, and record Wiki/source disagreements with the live repository treated as authoritative. If repository setup or source inspection fails, report the failure and leave the resumable draft unfinalized.
+
+Create PRDs and Tech Docs only with spaces-sdlc-create-artifact. A Tech Doc requires its parent PRD. Never use a generic canvas for an SDLC artifact. Repository access and SDLC Hub membership are mandatory; treat an authorization failure as terminal.
+
+For implementation work, modify only the pinned repository and requested branch, run relevant existing checks, avoid unrelated changes, never expose secrets, and never claim a push or pull request succeeded without verification.`;
+
+  const sdlcAgent = await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "sdlc-agent" } },
+    create: {
+      slug: "sdlc-agent",
+      orgId: defaultOrg.id,
+      name: "SDLC Assistant",
+      description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
+      systemPrompt: SDLC_AGENT_PROMPT,
+      scope: "global",
+      color: "#2563eb",
+      config: {
+        requireSdlcRepository: true,
+        tools: {
+          subagents: ["spaces", "context7", "github", "bitbucket"],
+          direct: SDLC_DIRECT_TOOL_SLUGS,
+          custom: sdlcCustomToolSlugs,
+        },
+        toolPermissions: SDLC_TOOL_PERMISSIONS,
+      },
+    },
+    update: {
+      name: "SDLC Assistant",
+      description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
+      systemPrompt: SDLC_AGENT_PROMPT,
+      scope: "global",
+      color: "#2563eb",
+      config: {
+        requireSdlcRepository: true,
+        tools: {
+          subagents: ["spaces", "context7", "github", "bitbucket"],
+          direct: SDLC_DIRECT_TOOL_SLUGS,
+          custom: sdlcCustomToolSlugs,
+        },
+        toolPermissions: SDLC_TOOL_PERMISSIONS,
+      },
+    },
+  });
+
+  const askAiSharedBindings = await prisma.agentProviderCredentials.findMany({
+    where: { agentId: askAIAgent.id, sharedCredentialId: { not: null } },
+  });
+  for (const binding of askAiSharedBindings) {
+    await prisma.agentProviderCredentials.upsert({
+      where: { agentId_provider: { agentId: sdlcAgent.id, provider: binding.provider } },
+      create: {
+        agentId: sdlcAgent.id,
+        provider: binding.provider,
+        sharedCredentialId: binding.sharedCredentialId,
+        encryptedKey: null,
+        iv: null,
+        authTag: null,
+        model: binding.model,
+        baseUrl: binding.baseUrl,
+        authType: binding.authType,
+        reasoningEffort: binding.reasoningEffort,
+        createdByUserId: binding.createdByUserId,
+      },
+      update: {
+        sharedCredentialId: binding.sharedCredentialId,
+        encryptedKey: null,
+        iv: null,
+        authTag: null,
+        model: binding.model,
+        baseUrl: binding.baseUrl,
+        authType: binding.authType,
+        reasoningEffort: binding.reasoningEffort,
+      },
+    });
+  }
+  if (askAiSharedBindings.length > 0) {
+    const config = sdlcAgent.config as Record<string, unknown>;
+    await prisma.agent.update({
+      where: { id: sdlcAgent.id },
+      data: {
+        config: {
+          ...config,
+          provider: askAiSharedBindings[0]!.provider,
+          providerOrder: askAiSharedBindings.map((binding) => binding.provider),
+        },
+      },
+    });
+  }
+
+  for (const slug of [
+    "builtin__read",
+    "todo-read",
+    "todo-write",
+    "web-search",
+    // Core SDLC sandbox operations are safe inside the ephemeral repository
+    // sandbox. Other selected sandbox tools keep their normal runtime gates.
+    "sandbox-repo-setup",
+    "sandbox-run",
+    "sandbox-run-detached",
+    "sandbox-poll-job",
+    "sandbox-read-file",
+    "sandbox-destroy",
+  ]) {
+    const tool = await prisma.tool.findUnique({ where: { slug } });
+    if (!tool) continue;
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: sdlcAgent.id, toolId: tool.id } },
+      create: { agentId: sdlcAgent.id, toolId: tool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+  }
+  console.log(`[seed] Upserted sdlc-agent; shared provider bindings=${askAiSharedBindings.length}`);
 
   // Attach genius-analytics and genius-investigation tools to ask-ai agent
   const geniusAnalyticsTool = await prisma.tool.findUnique({
@@ -1119,6 +1309,19 @@ You:
     console.log("[seed] Attached generate-image tool to ask-ai agent");
   }
 
+  // Attach visualize tool
+  const visualizeTool = await prisma.tool.findUnique({
+    where: { slug: "visualize" },
+  });
+  if (visualizeTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: visualizeTool.id } },
+      create: { agentId: askAIAgent.id, toolId: visualizeTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached visualize tool to ask-ai agent");
+  }
+
   // Seed ask-ai skills — domain knowledge and tool-usage guidance that
   // pi auto-loads based on the SKILL.md frontmatter `description`. Splitting
   // these out of the system prompt keeps the prompt focused on identity,
@@ -1132,6 +1335,7 @@ You:
     { slug: "spaces-citations", name: "Spaces Citations", description: "How to attach inline source citations to claims drawn from Spaces tool results — token format, verbatim rule, what to cite vs not.", file: "spaces-citations.md", source: "seeded" },
     { slug: "spaces-email-drafting", name: "Spaces Email Drafting", description: "Drafting email replies and outbound messages from a Spaces thread — tone matching, sign-off rules, output-body-only.", file: "spaces-email-drafting.md", source: "seeded" },
     { slug: "google-workspace", name: "Google Workspace", description: "The asker's connected Google Workspace — Gmail, Calendar, Drive, Docs/Sheets/Slides, Contacts, Tasks — read via the `google` subagent. What it can do and when to reach for it instead of (or alongside) Spaces. Load whenever a question touches the asker's email, meetings, schedule, Drive files, contacts, or tasks.", file: "google-workspace.md", source: "seeded" },
+    { slug: "charts", name: "Charts", description: "When and how to turn metrics in your answer into a chart with the `visualize` tool — which visualType fits which shape of data, the exact `data` payload each type expects, and the rules for emitting the chart block so it actually renders. Load before answering anything whose answer contains counts, totals, trends, breakdowns, proportions, or before/after comparisons.", file: "charts.md", source: "seeded" },
   ];
 
   for (const def of askAISkillDefs) {

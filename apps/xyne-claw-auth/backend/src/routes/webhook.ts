@@ -20,6 +20,7 @@ import {
   chatMessageRepository,
   agentChainWorkflowRepository,
   activeGoalRepository,
+  experimentRepository,
 } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
@@ -33,9 +34,12 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
+import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
-import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
+import { handleSlashCommandBeforeRun, normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
 import {
   QUEUE_ENABLED,
   QUEUE_CAP,
@@ -67,15 +71,18 @@ import {
 } from "../queue/run-recovery-worker.js";
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
-import { gcsService } from "../services/storageService.js";
+import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
+import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
   setActivePlanCard,
@@ -88,7 +95,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
@@ -383,13 +390,6 @@ import {
   AUTOMATION_RUN_DEDUP_TTL,
 } from "../lib/session-context.js";
 export { setSession, getSession, getSessionByConv, type SessionContext };
-import {
-  upsertWidgetBinding,
-  findPrBindingByUrl,
-  readPrBindingData,
-  normalizePrUrl,
-  setWidgetBindingStatus,
-} from "../lib/agent-widget-binding.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -443,6 +443,163 @@ import {
   zipAttachmentsToBuffer,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+
+function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
+  return {
+    conjecture: findings.filter((f) => f.status === "conjecture").length,
+    proved: findings.filter((f) => f.status === "proved").length,
+    refuted: findings.filter((f) => f.status === "refuted").length,
+  };
+}
+
+const EXPERIMENT_FINDINGS_MAX_BYTES = 200 * 1024;
+
+function capExperimentFindingsMarkdown(markdown: string): string {
+  if (Buffer.byteLength(markdown, "utf8") <= EXPERIMENT_FINDINGS_MAX_BYTES) return markdown;
+  const suffix = "\n\n---\n\n_Report truncated at 200KB for Spaces file delivery._\n";
+  let capped = markdown;
+  while (Buffer.byteLength(capped + suffix, "utf8") > EXPERIMENT_FINDINGS_MAX_BYTES && capped.length > 0) {
+    capped = capped.slice(0, Math.max(0, capped.length - 4096));
+  }
+  return `${capped.trimEnd()}${suffix}`;
+}
+
+function experimentFindingsFilename(agentSlug: string, date = new Date()): string {
+  const safeSlug = agentSlug.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "agent";
+  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
+  return `experiment-findings-${safeSlug}-${stamp}.md`;
+}
+
+/**
+ * Upload a generated markdown document as a thread attachment.
+ *
+ * FILE ONLY — deliberately no `flow` parameter. `/files/filesUpload`
+ * (filesController.uploadFiles) does not read a flow field, so a card passed
+ * here is silently dropped and no Approve/Decline buttons ever render. Post
+ * approval cards separately via `/chat/postMessage` with `flow: <FlowDefinition>`.
+ */
+async function postGeneratedMarkdownFile(args: {
+  channelId: string;
+  conversationId: string;
+  workspaceId?: string | null;
+  userId: string;
+  appToken: string;
+  filename: string;
+  /** Text body, or raw bytes when `mimeType` says the payload is binary. */
+  markdown: string | Uint8Array;
+  mimeType?: string;
+  /** Additional files to attach to the SAME message (Spaces' filesUpload takes
+   *  repeated `files` parts). Used by /experiment findings, which ships the
+   *  proof zip AND the readable .md side by side — the zip is the archive, the
+   *  markdown is what people actually open in the thread. */
+  extraFiles?: Array<{ filename: string; content: string | Uint8Array; mimeType?: string }>;
+  summary: string;
+}): Promise<void> {
+  const form = new FormData();
+  const mimeType = args.mimeType ?? "text/markdown";
+  const body = typeof args.markdown === "string"
+    ? [args.markdown]
+    : [new Uint8Array(args.markdown)];
+  form.append("files", new Blob(body, { type: mimeType }), args.filename);
+  for (const extra of args.extraFiles ?? []) {
+    const extraBody = typeof extra.content === "string"
+      ? [extra.content]
+      : [new Uint8Array(extra.content)];
+    form.append("files", new Blob(extraBody, { type: extra.mimeType ?? "text/markdown" }), extra.filename);
+  }
+  form.append("channelId", args.channelId);
+  form.append("conversationId", args.conversationId);
+  form.append("userId", args.userId);
+  if (args.workspaceId) form.append("workspaceId", args.workspaceId);
+  form.append("markdownText", args.summary);
+  form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
+  await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
+}
+
+function formatExperimentStatus(
+  run: Awaited<ReturnType<typeof experimentRepository.findActiveByConversation>>,
+  findings: Array<{ status: string; title: string; epoch: number; createdAt: Date }>,
+): string {
+  if (!run) return "No active /experiment in this thread.";
+  const elapsedMs = Date.now() - run.createdAt.getTime();
+  const remainingMs = Math.max(0, run.deadlineAt.getTime() - Date.now());
+  const counts = experimentCounts(findings);
+  const recent = [...findings]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 5);
+  const icon = (status: string) => status === "proved" ? "✓" : status === "refuted" ? "✗" : "◉";
+  return [
+    `**/experiment status** — epoch ${run.epoch}`,
+    `Elapsed: ${formatDuration(elapsedMs)} · Remaining: ${formatDuration(remainingMs)}`,
+    ...(run.provider ? [`Model: ${formatExperimentModel(run.provider, run.modelId)}`] : []),
+    `Now: ${run.currentHypothesis?.trim() || "(no current hypothesis recorded)"}`,
+    `Findings: ${counts.conjecture} open · ${counts.proved} proved · ${counts.refuted} refuted`,
+    recent.length
+      ? ["", ...recent.map((f) => `${icon(f.status)} [epoch ${f.epoch}] ${f.title}`)].join("\n")
+      : "\nNo findings recorded yet.",
+  ].join("\n");
+}
+
+function formatExperimentModel(provider: string, modelId?: string | null): string {
+  return modelId?.trim() ? `${provider}/${modelId.trim()}` : `${provider} (default)`;
+}
+
+async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
+  const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
+  if (!active) return false;
+  if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
+
+  const now = Date.now();
+  if (active.status === "finishing") {
+    await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
+    return false;
+  }
+
+  // Rapid-fail brake: an epoch that died within seconds of STARTING (model
+  // outage, misconfig) must NOT chain instantly — that's an unbounded tight
+  // dispatch loop. Measured against the session's own startedAt (not the
+  // experiment row's updatedAt, which ledger writes also bump). Deferring
+  // leaves the run inactive; the supervisor's stale sweep re-dispatches after
+  // its window, turning a hot loop into ~1 retry/10min.
+  const MIN_EPOCH_MS = 30_000;
+  const epochRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+  const epochRanMs = epochRun?.startedAt ? now - epochRun.startedAt.getTime() : Number.POSITIVE_INFINITY;
+  if (epochRanMs < MIN_EPOCH_MS) {
+    clog.warn(`[experiment] epoch for ${active.id} lived only ${Math.round(epochRanMs / 1000)}s — deferring next epoch to supervisor (rapid-fail brake)`);
+    await experimentRepository.update(active.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
+    return true; // treated as handled: keep this thread's queue-drain semantics unchanged
+  }
+
+  // Check the epoch that just ended, in parallel with the next one starting.
+  // Deliberately not awaited: the checker is advisory, and a slow or failing
+  // verification pass must never delay or block the experiment's own progress.
+  // Its verdicts land in the ledger and reach whichever epoch starts after.
+  void dispatchExperimentChecker(active, active.epoch).catch((err) => {
+    clog.warn("[experiment] checker dispatch threw", {
+      experimentId: active.id,
+      epoch: active.epoch,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  if (now < active.deadlineAt.getTime()) {
+    const next = await experimentRepository.update(active.id, {
+      epoch: { increment: 1 },
+      lastEpochEndedAt: new Date(),
+    });
+    await dispatchExperimentEpoch(next);
+    return true;
+  }
+
+  const finishing = await experimentRepository.update(active.id, {
+    status: "finishing",
+    epoch: { increment: 1 },
+    lastEpochEndedAt: new Date(),
+  });
+  await dispatchExperimentEpoch(finishing);
+  return true;
+}
+
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -549,6 +706,89 @@ function mergeInvocationsForCitations(...lists: unknown[]): unknown[] {
 }
 
 /**
+ * LEGACY delivery path (pre-XYNE-17815): post the Twin's proposal as an
+ * approve/decline card in a DM with the owner. Kept ONLY as the fallback for
+ * Spaces backends that don't yet serve /api/internal/twin-reply-draft — see
+ * sendTwinReplyDraft. Delete once every environment runs the in-thread draft.
+ * The signature suffix is already applied by the caller, so the original
+ * inline suffix block was removed on restore (it would double-append).
+ */
+async function sendDigitalTwinApprovalDm(
+  ctx: SessionContext,
+  delivery: TwinDelivery,
+  attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+  sessionId: string,
+): Promise<void> {
+  // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
+  // drops it). If it somehow does, never open a DM / post / write a pending row.
+  if (delivery.action === "ignore") {
+    clog.warn(`[webhook/result] sendDigitalTwinApprovalDm called with action=ignore — dropping, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
+  const token = ctx.appToken;
+
+  // workspaceId required by prod openDm schema. Empty fallback only to satisfy
+  // types — the earlier USER_MENTIONED gate already rejected runs where we
+  // couldn't resolve the workspaceId, so this should always have a real value.
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+  }, token)) as { channelId: string };
+
+  const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+    delivery: delivery,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    targetChannelId: ctx.channelId,
+    targetConversationId: ctx.conversationId,
+    mentionedUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+    senderId: ctx.senderId,
+    senderName: ctx.senderName,
+    channelName: ctx.channelName,
+    task: ctx.task,
+    ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+    dmChannelId: dmResult.channelId,
+    spacesBaseUrl: CONFIG.spacesAppUrl,
+  }), ctx.spacesAppId);
+
+  if (attachments?.length) {
+    const form = new FormData();
+    for (const att of attachments) {
+      const buffer = Buffer.from(att.data, "base64");
+      const blob = new Blob([buffer], { type: att.mimeType });
+      form.append("files", blob, att.fileName);
+    }
+    form.append("channelId", dmResult.channelId);
+    form.append("userId", ctx.spacesAppUserId);
+    form.append("flow", JSON.stringify(twinFlow));
+
+    await spacesAppFetchMultipart("/files/filesUpload", form, token);
+  } else {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: dmResult.channelId,
+      flow: twinFlow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+  }
+
+  // Record a PENDING feedback row so the daily learning loop can later reconcile
+  // the user's accept / decline / edit / ignore of this proposal. Fire-and-forget.
+  void recordTwinApprovalPending({
+    userId: ctx.mentionedUserId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    channelName: ctx.channelName,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    incomingTask: ctx.task,
+    delivery: delivery,
+  });
+
+  clog.info(`[webhook/result] Digital Twin: sent approve/decline DM to ${ctx.mentionedUserId} (asked by ${ctx.senderId})`);
+  await deleteSession(sessionId);
+}
+
+/**
  * Deliver the Twin's structured proposal as an OWNER-ONLY in-thread reply draft
  * (replaces the old approval DM card). Bakes citation metadata from the Twin's
  * private `reasoning` (its `[clf-…#n]` tokens reference the Spaces tools it
@@ -561,6 +801,8 @@ async function sendTwinReplyDraft(
   delivery: TwinDelivery,
   toolInvocations: unknown,
   sessionId: string,
+  /** Callback attachments — only used by the legacy approval-DM fallback. */
+  attachments?: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
 ): Promise<void> {
   // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
   // drops it). If it somehow does, never create a draft / write a pending row.
@@ -635,7 +877,14 @@ async function sendTwinReplyDraft(
     sessionId,
   };
 
-  // Create the owner-only in-thread draft in Spaces (Redis). Fail-closed silence.
+  // Create the owner-only in-thread draft in Spaces. When the Spaces backend
+  // doesn't serve /api/internal/twin-reply-draft yet (route added in
+  // XYNE-17815; caller shipped 2026-07-23, route reached main 2026-08-05), the
+  // request falls through to the user-auth middleware and comes back 401/404.
+  // That skew silently killed EVERY twin reply for ~2 weeks because this path
+  // was fail-closed with no alternative. Fall back to the pre-XYNE-17815
+  // approval DM card instead: the twin keeps working on old backends, and the
+  // moment the route deploys we're back on the in-thread draft with no change.
   try {
     const resp = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/twin-reply-draft`, {
       method: "POST",
@@ -645,6 +894,13 @@ async function sendTwinReplyDraft(
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
+      // 401/404 == endpoint not deployed (or not reachable as S2S) → legacy DM.
+      // Any other status is a genuine draft-create failure: stay fail-closed.
+      if (resp.status === 401 || resp.status === 404) {
+        clog.warn(`[webhook/result] Twin reply-draft endpoint unavailable (${resp.status}) — falling back to approval DM, session ${sessionId}`);
+        await sendDigitalTwinApprovalDm(ctx, effectiveDelivery, attachments, sessionId);
+        return;
+      }
       clog.error(`[webhook/result] Twin reply-draft create failed: ${resp.status} ${text.slice(0, 200)} — staying silent, session ${sessionId}`);
       await deleteSession(sessionId);
       return;
@@ -714,11 +970,30 @@ async function postGoalPhase(
 interface ResolvedAgent {
   id: string;
   slug: string;
+  /** Display name — the text a leftover "@Display Name" mention carries. */
+  name: string;
   orgId: string;
   appToken: string;
   spacesAppId: string;
   spacesAppUserId: string;
   isDefault: boolean;
+}
+
+/**
+ * Strip a leftover leading "@<agent mention>" so a slash command lands at byte
+ * zero. Matches only the given names verbatim (display name first, slug as
+ * fallback) — never a generic @-token+words pattern, which cannot distinguish
+ * a multi-word display name from the user's own prose.
+ */
+function stripLeadingAgentMention(text: string, names: Array<string | null | undefined>): string {
+  for (const raw of names) {
+    const name = raw?.trim();
+    if (!name) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^@${escaped}(?=\\s|$)`, "i");
+    if (re.test(text)) return text.replace(re, "").trimStart();
+  }
+  return text;
 }
 
 async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
@@ -728,6 +1003,7 @@ async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent
     return {
       id: agent.id,
       slug: agent.slug,
+      name: agent.name ?? agent.slug,
       orgId: agent.orgId,
       appToken: decryptStoredField(agent.spacesAppToken),
       spacesAppId: agent.spacesAppId,
@@ -747,6 +1023,7 @@ async function getDefaultAgent(): Promise<ResolvedAgent | null> {
   return {
     slug: agent.slug,
     id: agent.id,
+    name: agent.name ?? agent.slug,
     orgId: agent.orgId,
     appToken: decryptStoredField(agent.spacesAppToken),
     spacesAppId: agent.spacesAppId,
@@ -810,6 +1087,11 @@ export async function fetchConversationHistory(
 
 // ── Action formatting ───────────────────────────────────────────────
 
+/** Tickets rendered in full inside the bulk approval card. The rest are
+ *  summarised by count — every ticket in `params` is still created on approve,
+ *  since the executed payload comes from the HMAC-signed action, not the card. */
+const BULK_TICKETS_CARD_LIMIT = 25;
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -830,6 +1112,36 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     const desc = (params["description"] as string ?? "").slice(0, 300);
     const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
     if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-create-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [
+      `**Create ${tickets.length} Tickets**`,
+      ``,
+      `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
+      ``,
+    ];
+    // Everything the approver needs lives in THIS card — no companion file
+    // upload. Same shape as spaces-create-ticket above (title + trimmed
+    // description), repeated per ticket. The card body scrolls past 280px
+    // (buildWriteApprovalFlow), so a long batch stays readable in-thread.
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const title = String(ticket["title"] ?? "(untitled)");
+      const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
+      const assignee = String(ticket["assignedTo"] ?? params["defaultAssignedTo"] ?? "");
+      const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
+      const rawDesc = String(ticket["description"] ?? "");
+      const desc = rawDesc.slice(0, 200);
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
+      if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
+      lines.push(``);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
+    }
     return lines.join("\n");
   }
 
@@ -874,6 +1186,87 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     lines.push(`**${key}:** ${val}`);
   }
   return lines.join("\n");
+}
+
+async function postWriteApprovalAction(args: {
+  action: Record<string, unknown>;
+  ctx: SessionContext;
+  token: string;
+  targetValidation: { channelName?: string };
+}): Promise<void> {
+  const { action, ctx, token, targetValidation } = args;
+  const params = action["params"] as Record<string, unknown>;
+  const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
+
+  // The pending-action signature is minted before the Spaces delivery target is
+  // known. Verify it, then bind the trusted session agent to the card signature
+  // so flow-action cannot be replayed with another org's app credentials.
+  const { signAction, verifyActionSignature } = await import("./mcp.js");
+  const pendingActionPayload = {
+    serverType: action["serverType"] as string,
+    tool: action["tool"] as string,
+    params,
+    userId: action["userId"] as string,
+  };
+  if (!verifyActionSignature(pendingActionPayload, action["signature"] as string)) {
+    throw new Error("Invalid pending write-action signature");
+  }
+  const agentSlug = ctx.agentSlug ?? "";
+  const spacesAppId = ctx.spacesAppId ?? "";
+  const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
+
+  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+    serverType: pendingActionPayload.serverType,
+    tool: pendingActionPayload.tool,
+    params,
+    userId: pendingActionPayload.userId,
+    signature: cardSignature,
+    agentSlug,
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+  }), spacesAppId);
+
+  // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
+  // (filesController.uploadFiles) has no flow handling at all — a `flow` field
+  // sent with an upload is silently dropped, so the Approve/Decline card never
+  // appears. Only `/chat/postMessage` renders a card, and its schema calls the
+  // field `flow` (UpdateMessage uses `flowJSON` — different route, different
+  // name).
+  //
+  // spaces-create-bulk-tickets deliberately posts NO file: the batch renders
+  // inline in the approval card itself (formatActionDescription), same as
+  // spaces-create-ticket. One message, one Approve button, nothing to open.
+  if (action["tool"] === "spaces-memory-create" && params?.["content"]) {
+    const memContent = params["content"] as string;
+    const memDocType = (params["docType"] as string) ?? "fact";
+    try {
+      await postGeneratedMarkdownFile({
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+        userId: ctx.spacesAppUserId,
+        appToken: token,
+        filename: `memory-${memDocType}-${Date.now()}.md`,
+        markdown: memContent,
+        summary: "",
+      });
+    } catch (err) {
+      clog.warn("[webhook/result] memory attachment upload failed; posting approval card without attachment", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: ctx.channelId,
+    // Same empty-conversationId guard as the result post: an API/event-triggered
+    // run has no thread, so posting the approval card with conversationId: ""
+    // 400s in Spaces' channel-validation middleware and the card silently never
+    // appears. Omit when empty → the card posts as a top-level channel message.
+    ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+    flow: writeFlow,
+    userId: ctx.spacesAppUserId,
+  }, token);
 }
 
 
@@ -933,6 +1326,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agent = {
         id: agentRow.id,
         slug: agentRow.slug,
+        name: agentRow.name ?? agentRow.slug,
         orgId: agentRow.orgId ?? null,
         appToken: decryptStoredField(agentRow.spacesAppToken),
         spacesAppId: agentRow.spacesAppId,
@@ -1005,6 +1399,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agent = {
         id: agentRow.id,
         slug: agentRow.slug,
+        name: agentRow.name ?? agentRow.slug,
         orgId: agentRow.orgId ?? null,
         appToken: decryptStoredField(agentRow.spacesAppToken),
         spacesAppId: agentRow.spacesAppId,
@@ -1085,6 +1480,22 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   const userText = payload.cleanContent?.trim();
   if (!userText) return;
+  // Commands whose leading slash is an execution contract in xyne-claw. Keep
+  // them out of auto-goal/plan mode: both transforms strip or suspend the
+  // command before the runtime can mount its command-owned tools.
+  // cleanContent usually removes the bot mention, but some Spaces event
+  // producers leave a leading "@Display Name" behind. Strip ONLY this agent's
+  // own mention (exact display name, or slug as fallback). A generic
+  // "@word word..." strip is unanchorable: word-classes can't tell display-name
+  // tokens from the user's prose, so "@Bot how do I use /explainer" would lose
+  // "how do I use" and force command mode on a question.
+  const taskCommandText = stripLeadingAgentMention(userText, [agent.name, agent.slug]);
+  // KEEP IN SYNC with TASK_COMMANDS in apps/xyne-claw/src/task-commands.ts —
+  // a command missing here ships with the mention un-stripped, so claw never
+  // sees it at byte zero and the whole contract silently degrades (bit /design
+  // in prod 2026-08-08). Proper fix: shared registry in xyne-claw-shared.
+  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard)(?:\s|$)/i.test(taskCommandText);
+  const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
     return;
@@ -1126,7 +1537,234 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const rawSlash = parseSlashCommand(userText);
   const slash =
     rawSlash ??
-    (autoGoalEnabled ? parseSlashCommand(`/goal ${userText}`) : null);
+    (autoGoalEnabled && !immediateTaskCommand ? parseSlashCommand(`/goal ${userText}`) : null);
+  const experimentCommand = parseExperimentCommand(userText);
+
+  if (experimentCommand) {
+    const postExperimentReply = (markdownText: string) => spacesAppFetch("/chat/postMessage", {
+      channelId: payload.channelId,
+      conversationId: payload.conversationId,
+      markdownText,
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, agent.appToken).catch((err) => {
+      log.warn("Failed to post /experiment reply", { error: err instanceof Error ? err.message : String(err) });
+    });
+
+    if (experimentCommand.sub === "unknown") {
+      await postExperimentReply([
+        "/experiment <duration> [provider=…] [model=…] [focus…]",
+        "/experiment status",
+        "/experiment list",
+        "/experiment findings [id]",
+        "/experiment stop",
+      ].join("\n"));
+      return;
+    }
+
+    if (experimentCommand.sub === "status") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      const findings = run ? await experimentRepository.listFindings(run.id) : [];
+      await postExperimentReply(formatExperimentStatus(run, findings));
+      return;
+    }
+
+    if (experimentCommand.sub === "stop") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      if (!run) {
+        await postExperimentReply("No active /experiment to stop.");
+        return;
+      }
+      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
+      if (!allowed) {
+        await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
+        return;
+      }
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+      let cancelledEpoch = false;
+      if (run.currentSessionId) {
+        try {
+          await cancelRunSession(run.currentSessionId, run.userId);
+          cancelledEpoch = true;
+        } catch (err) {
+          log.warn("[experiment] failed to cancel running epoch", {
+            experimentId: run.id,
+            sessionId: run.currentSessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      await postExperimentReply(cancelledEpoch
+        ? "Stopped /experiment (cancelled the running epoch)."
+        : "Stopped /experiment.");
+      return;
+    }
+
+    if (experimentCommand.sub === "list") {
+      // Thread-scoped, no ownership gate — same visibility as /experiment
+      // status. The run ids printed here are what `/experiment findings <id>`
+      // takes, and THAT path does gate on owner/admin.
+      const runs = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId, 15);
+      if (runs.length === 0) {
+        await postExperimentReply("No /experiment has run in this thread.");
+        return;
+      }
+      const rows = runs.map((run) => {
+        const started = run.createdAt.toISOString().slice(0, 16).replace("T", " ");
+        const model = run.provider ? ` · ${formatExperimentModel(run.provider, run.modelId)}` : "";
+        const live = run.status === "running" || run.status === "finishing" ? " ← active" : "";
+        return `\`${run.id}\` — ${run.status}, ${run._count.findings} findings, epoch ${run.epoch}${model} · ${started}${live}`;
+      });
+      await postExperimentReply([
+        `**/experiment list** — ${runs.length} run${runs.length === 1 ? "" : "s"} in this thread`,
+        "",
+        ...rows,
+        "",
+        "Pull any one with `/experiment findings <id>`.",
+      ].join("\n"));
+      return;
+    }
+
+    if (experimentCommand.sub === "findings") {
+      const run = experimentCommand.id
+        ? await experimentRepository.findById(experimentCommand.id)
+        : await experimentRepository.findBestForFindings(payload.conversationId);
+      if (!run) {
+        await postExperimentReply(experimentCommand.id
+          ? "Experiment not found."
+          : "No /experiment has run in this thread.");
+        return;
+      }
+      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
+        await postExperimentReply("Not your experiment.");
+        return;
+      }
+      const [findings, reviews] = await Promise.all([
+        experimentRepository.listFindings(run.id),
+        experimentRepository.listReviews(run.id),
+      ]);
+      const recentRuns = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId);
+      const counts = experimentCounts(findings);
+      const summaryLines = [
+        `**/experiment findings** — ${run.agentSlug}`,
+        `Status: ${run.status} · Epoch: ${run.epoch} · Findings: ${counts.proved} proved, ${counts.conjecture} open, ${counts.refuted} refuted`,
+      ];
+      if (!experimentCommand.id && recentRuns[0] && recentRuns[0].id !== run.id) {
+        summaryLines.push(`(showing experiment ${run.id} — the most recent run in this thread had no findings)`);
+      }
+      const otherRuns = recentRuns.filter((candidate) => candidate.id !== run.id).slice(0, 5);
+      if (recentRuns.length > 1 && otherRuns.length > 0) {
+        summaryLines.push(`Other runs in this thread: ${otherRuns.map((candidate) =>
+          `${candidate.id} (${candidate.status}, ${candidate._count.findings} findings, ${candidate.createdAt.toISOString().slice(0, 10)})`
+        ).join(" · ")}`);
+      }
+      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings, reviews));
+      const filename = experimentFindingsFilename(run.agentSlug);
+
+      // Prefer ONE zip laid out by epoch over a bare .md: the proof artifacts
+      // are otherwise scattered across hours of thread messages, and a proof
+      // you can't locate is a proof you don't have. Falls back to the markdown
+      // when the thread has no attachments or Spaces is unreachable.
+      let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
+      try {
+        // Reads the thread's attachments as the REQUESTER, so the bundle can
+        // never contain a file they couldn't already open in the thread.
+        const bundleAuth = await resolveAuthForUser(payload.userId);
+        if (!bundleAuth) {
+          log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
+            userId: payload.userId,
+          });
+        } else {
+          bundle = await buildExperimentProofBundle({
+            run,
+            findings,
+            findingsMarkdown: markdown,
+            conversationId: payload.conversationId,
+            auth: bundleAuth,
+          });
+        }
+      } catch (err) {
+        log.warn("[experiment] proof bundle failed; falling back to markdown only", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (bundle) {
+        summaryLines.push(
+          `Proof bundle: ${bundle.includedCount} of ${bundle.entries.length} findings have their artifact attached` +
+          (bundle.missingCount > 0 ? ` · ${bundle.missingCount} missing (see MANIFEST.md)` : "") +
+          ` — organised by epoch inside the zip. The findings write-up is also attached as ${filename}.`,
+        );
+      }
+      const summary = summaryLines.join("\n");
+      try {
+        await postGeneratedMarkdownFile({
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          userId: agent.spacesAppUserId,
+          appToken: agent.appToken,
+          filename: bundle ? bundle.filename : filename,
+          markdown: bundle ? bundle.buffer : markdown,
+          ...(bundle ? { mimeType: "application/zip" } : {}),
+          // Ship the readable findings .md alongside the zip. The zip is the
+          // complete archive (proof artifacts organised by epoch), but nobody
+          // wants to download-and-unzip just to read the write-up — so the
+          // markdown rides the same message, exactly as it did before bundling.
+          ...(bundle ? { extraFiles: [{ filename, content: markdown, mimeType: "text/markdown" }] } : {}),
+          summary,
+        });
+      } catch (err) {
+        log.warn("[experiment] findings file upload failed; posting inline fallback", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${bundle ? bundle.filename : filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
+      }
+      return;
+    }
+
+    if (experimentCommand.invalidProvider !== undefined) {
+      await postExperimentReply([
+        `Invalid /experiment provider: ${experimentCommand.invalidProvider || "(empty)"}`,
+        `Valid providers: ${Array.from(EXPERIMENT_PROVIDERS).join(", ")}`,
+      ].join("\n"));
+      return;
+    }
+
+    const existing = await experimentRepository.findActiveByConversation(payload.conversationId);
+    if (existing) {
+      await postExperimentReply("An active /experiment is already running in this thread. Use `/experiment status` or `/experiment stop`.");
+      return;
+    }
+    const run = await experimentRepository.createRun({
+      conversationId: payload.conversationId,
+      channelId: payload.channelId,
+      agentSlug: agent.slug,
+      userId: payload.userId,
+      orgId: agent.orgId,
+      focus: experimentCommand.focus ?? null,
+      provider: experimentCommand.provider ?? null,
+      modelId: experimentCommand.model ?? null,
+      deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
+    });
+    await postExperimentReply([
+      "**/experiment started**",
+      `Mode: time-boxed autonomous exploration`,
+      `Duration: ${formatDuration(experimentCommand.durationMs)}`,
+      ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
+      `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+      `Use \`/experiment status\` to inspect progress.`,
+    ].join("\n"));
+    try {
+      await dispatchExperimentEpoch(run);
+    } catch (err) {
+      // A silent failure here strands a zombie "active" run that blocks every
+      // future /experiment in this thread. Abort it and tell the user why.
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn("[experiment] initial dispatch failed", { error: msg });
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
+      await postExperimentReply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`);
+    }
+    return;
+  }
 
   // ── /queue ── show messages waiting behind the active run, then stop.
   if (slash?.kind === "queueShow") {
@@ -1164,6 +1802,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "**Slash commands**",
         "- `/goal <condition>` — work autonomously until the condition is met",
         "- `/goal status` — show the active goal",
+        "- `/experiment <duration> [focus...]` — explore until the deadline · `/experiment status` · `/experiment stop`",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
@@ -1356,7 +1995,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       intercept.replyToUser,
     );
   } else {
-    task = userText;
+    task = immediateTaskCommand ? taskCommandText : userText;
   }
 
   // `/upgrade` — explicit user opt-in to the agent's premium provider for
@@ -1878,6 +2517,16 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const userCookieHeader = userCookieParts.length > 0 ? userCookieParts.join("; ") : undefined;
 
     const inboundAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    // Large /record-skill videos travel as authenticated references. The
+    // internal /run proxy binds these to its newly minted session; xyne-claw
+    // later streams the bytes through claw-auth into the sandbox in bounded
+    // chunks. Never base64 a screen recording into the 50 MB JSON body.
+    const inboundRecordingRefs: Array<{
+      attachmentId: string;
+      fileName: string;
+      mimeType: string;
+      fileSize: number;
+    }> = [];
     // Mime allow-list for what xyne-claw's /run can consume. Must stay in
     // sync with TEXT_ATTACHMENT_MIME_TYPES / TEXT_ATTACHMENT_EXTENSIONS and
     // the xlsx/pdf detectors in xyne-claw/src/routes/run.ts — claw-auth
@@ -1923,6 +2572,56 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (!isAllowedAttachment(att)) {
           log.warn(
             `Skipping attachment ${att.attachmentId} (${att.fileName}, ${att.mimeType}) — not in claw-auth allow-list. Update isAllowedAttachment in webhook.ts.`,
+          );
+          continue;
+        }
+        const videoExtMatch = /\.(mov|mp4|m4v|webm|avi|mkv|mpg|mpeg|wmv|flv)$/i.exec(att.fileName ?? "");
+        const isVideoRecording = att.mimeType?.toLowerCase().startsWith("video/") || videoExtMatch !== null;
+        if (recordSkillCommand && isVideoRecording) {
+          // A dropped recording must TELL the user — a /record-skill run that
+          // silently loses its video still force-mounts analyze-skill-recording
+          // and pressures the model to draft a skill from nothing.
+          const notifyRecordingDropped = (reason: string) => {
+            log.warn(`Skipping /record-skill recording ${att.attachmentId} (${att.fileName}) — ${reason}`);
+            if (!payload.conversationId) return;
+            void spacesAppFetch("/chat/postMessage", {
+              channelId: payload.channelId,
+              conversationId: payload.conversationId,
+              markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+              userId: agent.spacesAppUserId,
+              metadata: { contentFormat: "markdown" },
+            }, agent.appToken).catch(() => {});
+          };
+          const fileSize = Number(att.fileSize);
+          if (!Number.isFinite(fileSize) || fileSize <= 0) {
+            notifyRecordingDropped("its size was not reported by the upload — please re-upload it");
+            continue;
+          }
+          if (fileSize > 1024 * 1024 * 1024) {
+            notifyRecordingDropped("it exceeds the 1 GB recording limit");
+            continue;
+          }
+          // claw-auth's /run consumer validates each ref strictly; normalize
+          // HERE (the producer) so a client that stored a .mov as
+          // application/octet-stream doesn't get rejected downstream.
+          if (inboundRecordingRefs.length >= 4) {
+            notifyRecordingDropped("at most 4 recordings are analyzed per run");
+            continue;
+          }
+          const normalizedMime = att.mimeType?.toLowerCase().startsWith("video/")
+            ? att.mimeType
+            : `video/${(videoExtMatch?.[1] ?? "mp4").toLowerCase()}`;
+          const safeFileName = (att.fileName ?? `recording-${att.attachmentId}`)
+            .replace(/[/\\]/g, "_")
+            .slice(0, 255);
+          inboundRecordingRefs.push({
+            attachmentId: att.attachmentId,
+            fileName: safeFileName,
+            mimeType: normalizedMime,
+            fileSize,
+          });
+          log.info(
+            `Deferred /record-skill recording ${att.attachmentId} (${safeFileName}, ${fileSize} bytes, ${normalizedMime}) to sandbox stream`,
           );
           continue;
         }
@@ -2057,6 +2756,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
+      ...(inboundRecordingRefs.length > 0 ? { recordingRefs: inboundRecordingRefs } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled (memory-search tool),
       // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
@@ -2074,7 +2774,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // /webhook path only serves interactive mentions (USER_MENTIONED /
       // APP_MENTIONED / DIRECT_MESSAGE); scheduled/automation runs arrive via the
       // separate S2S handler and must NOT be configured with planMode.
-      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
@@ -2109,7 +2809,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // Plan mode (see dispatchPayload): 'plan' only when the agent opts in AND
       // this is a non-twin interactive mention. Absent ⇒ 'auto' (today's flow).
       // The plan-approval flow-action flips this to 'auto' for Turn 2.
-      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // ── Per-user twin FIFO gate ───────────────────────────────────────────────
@@ -2175,9 +2875,49 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       body: JSON.stringify(dispatchPayload),
     });
 
+    // A dispatch that dies on a TRANSIENT upstream failure (envoy 502/503/504
+    // "no healthy upstream" during a claw rollout, a connection refusal against
+    // a terminating pod) is retryable — the run never started, so nothing is
+    // duplicated by trying again. Without this, a routine claw deploy turns
+    // every in-flight mention into a user-visible "I couldn't start this
+    // request: no healthy upstream" (observed prod 2026-08-05) even though a
+    // retry two seconds later would have succeeded. Mirrors the retry the /run
+    // proxy already does (routes/run.ts fetchClawRunWithRetry).
+    //
+    // The ladder must OUTLAST a claw rollout, not just a blip: envoy keeps
+    // returning 503 for the full pod-boot window (image pull + boot +
+    // readiness, 1–3 min observed prod 2026-08-06 — a 2s×2 ladder exhausted in
+    // 4.5s and still posted the "briefly unavailable" notice for every mention
+    // landing mid-deploy). This runs after the webhook was ack'd, so waiting
+    // here blocks no caller; the message is already acked and the queue slot
+    // is held for this conversation.
+    const DISPATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
+    const isTransientUpstream = (status: number, body: string): boolean =>
+      status === 502 || status === 503 || status === 504 ||
+      /no healthy upstream|upstream connect error|connection (refused|reset)|EAI_AGAIN|ECONNREFUSED|fetch failed/i.test(body);
+
+    const fetchRunWithRetry = async (): Promise<Awaited<ReturnType<typeof fetchRun>>> => {
+      let lastRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
+      const attempts = DISPATCH_RETRY_DELAYS_MS.length + 1;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAYS_MS[attempt - 1]));
+        const res = await fetchRun();
+        if (res.ok) return res;
+        // Peek at the body WITHOUT consuming the caller's copy.
+        const peek = await res.clone().text().catch(() => "");
+        if (!isTransientUpstream(res.status, peek)) return res;
+        lastRes = res;
+        log.warn(
+          `Dispatch attempt ${attempt + 1}/${attempts} hit transient upstream (${res.status}) for agent=${agent.slug}` +
+          (attempt < attempts - 1 ? ` — retrying in ${DISPATCH_RETRY_DELAYS_MS[attempt]! / 1000}s` : " — giving up"),
+        );
+      }
+      return lastRes!;
+    };
+
     let runRes: Awaited<ReturnType<typeof fetchRun>>;
     try {
-      runRes = await fetchRun();
+      runRes = await fetchRunWithRetry();
     } catch (err) {
       // Dispatch never happened — free the global twin slot, and drain/free the
       // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
@@ -2189,7 +2929,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       throw err;
     }
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string };
+    const body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
 
     // Re-key the GLOBAL twin slot to the real sessionId (released by
     // /webhook/result); free it immediately if the dispatch didn't produce a run.
@@ -2292,6 +3032,34 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // the slot) so the conversation isn’t wedged until the busy TTL expires.
       // We hold the token here, so release is owner-checked.
       await drainNextQueued(payload.conversationId, runAgentSlug, slotToken).catch(() => {});
+    }
+
+    // A refused dispatch (agent disabled, no provider, resolution failure)
+    // previously left the thread SILENT — the user mentioned the agent and
+    // nothing happened. Surface the refusal for interactive mentions. Twin
+    // mentions stay silent (background persona; a refusal notice would be
+    // noise), and resultForward callers get the failure via their callback.
+    if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
+      const refusal = body.error ?? "the run could not be started";
+      // Three shapes of refusal, three honest messages. A transient upstream
+      // failure that survived the retries above is an infra blip, not a broken
+      // agent — saying "I couldn't start this request: no healthy upstream"
+      // reads as an agent fault and tells the user nothing actionable.
+      const notice = /disabled/i.test(refusal)
+        ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
+        : isTransientUpstream(runRes.status, refusal)
+          ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
+          : `⚠️ I couldn't start this request: ${refusal}`;
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: payload.channelId,
+        conversationId: payload.conversationId,
+        markdownText: notice,
+        userId: agent.spacesAppUserId,
+        metadata: { contentFormat: "markdown" },
+      }, agent.appToken).catch((err) =>
+        log.warn("Failed to post dispatch-refusal notice", { error: err instanceof Error ? err.message : String(err) }),
+      );
+      log.warn(`Dispatch refused for agent=${agent.slug} conv=${payload.conversationId}: ${refusal}`);
     }
     }; // end dispatchRunForTarget
 
@@ -2560,6 +3328,13 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: msg.channelId,
       ...(msg.context ? { context: msg.context } : {}),
+      // Experiment epochs re-dispatched from the queue must keep their context,
+      // else claw injects no experiment-ledger/-review tools on the retry.
+      ...(msg.experiment ? { experiment: msg.experiment } : {}),
+      // /record-skill refs must survive the hop too — /run re-binds them in
+      // Redis under the fresh sessionId; without this the retried run's
+      // analyze-skill-recording finds no registered recordings (404).
+      ...(msg.recordingRefs?.length ? { recordingRefs: msg.recordingRefs } : {}),
       // A lock-contention retry already persisted its user message on the first
       // dispatch — skip re-persisting so the retry doesn't create a duplicate
       // root user row (branch). Proactively-queued mentions leave this unset and
@@ -2684,26 +3459,39 @@ async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
 //     and need the final callback to resume the workflow step.
 //   - The target agent must be path-bound. The old bare `/webhook` route took
 //     `agentSlug` from the body, which made the endpoint too broad.
-export async function handleAutomationWebhook(req: Request, res: Response, pathAgentSlug: string, pathAgentOrgId?: string | null): Promise<void> {
+export async function handleAutomationWebhook(
+  req: Request,
+  res: Response,
+  pathAgentSlug: string,
+  pathAgentOrgId?: string | null,
+): Promise<void> {
   const payload = req.body as {
     sessionId?: string;
     agentSlug?: string;
     task?: string;
     userId?: string;
+    userName?: string;
+    userEmail?: string;
     callbackUrl?: string;
+    callbackSecret?: string;
     context?: string;
     conversationId?: string | null;
     channelId?: string | null;
     channelName?: string | null;
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
+    executionProfile?: "sdlc";
+    sdlcOperation?: "baseline" | "artifact" | "work";
+    sdlcContext?: Record<string, unknown>;
   };
 
-  const { sessionId, userId, callbackUrl, context } = payload;
+  const { sessionId, userId, callbackUrl, callbackSecret, context } = payload;
   let task = payload.task;
   const agentSlug = pathAgentSlug;
   if (payload.agentSlug && payload.agentSlug !== pathAgentSlug) {
-    res.status(400).json({ success: false, error: `body agentSlug does not match path agent "${pathAgentSlug}"` });
+    res
+      .status(400)
+      .json({ success: false, error: `body agentSlug does not match path agent "${pathAgentSlug}"` });
     return;
   }
 
@@ -2718,6 +3506,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
     res.status(400).json({ success: false, error: `missing required fields: ${missing.join(", ")}` });
     return;
   }
+  if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
+    res.status(400).json({
+      success: false,
+      error: "callbackSecret must be a string of at most 256 characters",
+    });
+    return;
+  }
+  const externalResultCallback: ExternalResultCallbackConfig | undefined =
+    callbackUrl && callbackSecret
+      ? { url: callbackUrl, encryptedSecret: encryptSurfaceSecret(callbackSecret) }
+      : undefined;
 
   // Agent existence + enabled check. Without this, spaces fires the run and
   // only finds out it was rejected when the (never-arriving) callback never
@@ -2726,13 +3525,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // unresolved).
   const automationOrgId = await orgIdForSpacesUser(userId, "scheduled-job", pathAgentOrgId ?? undefined);
   if (!automationOrgId) {
-    clog.error(`[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`);
+    clog.error(
+      `[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`,
+    );
     res.status(400).json({ success: false, error: "orgId is required" });
     return;
   }
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);
   if (!agent) {
-    clog.warn(`[webhook/automation-run] agent org-scoped miss slug=${agentSlug} orgId=${automationOrgId ?? "none"} userId=${userId} sessionId=${sessionId}`);
+    clog.warn(
+      `[webhook/automation-run] agent org-scoped miss slug=${agentSlug} orgId=${automationOrgId ?? "none"} userId=${userId} sessionId=${sessionId}`,
+    );
     res.status(404).json({ success: false, error: `agent "${agentSlug}" not found` });
     return;
   }
@@ -2768,13 +3571,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       if (acquiredStep !== "OK") {
         const holder = await redis.get(stepKey);
         if (holder && holder !== sessionId) {
-          clog.info(`[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`);
+          clog.info(
+            `[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`,
+          );
           res.status(200).json({ success: true, sessionId: holder, deduplicated: true });
           return;
         }
       }
     } catch (err) {
-      clog.warn(`[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -2786,7 +3593,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       if (acquired !== "OK") {
         const holder = await redis.get(dedupKey);
         if (holder && holder !== sessionId) {
-          clog.warn(`[webhook/automation-run] duplicate automation run rejected conversationId=${payload.conversationId} agentSlug=${agentSlug} incomingSessionId=${sessionId} holderSessionId=${holder}`);
+          clog.warn(
+            `[webhook/automation-run] duplicate automation run rejected conversationId=${payload.conversationId} agentSlug=${agentSlug} incomingSessionId=${sessionId} holderSessionId=${holder}`,
+          );
           res.status(409).json({
             success: false,
             error: "duplicate automation run for this conversation and agent already in progress",
@@ -2796,7 +3605,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         }
       }
     } catch (err) {
-      clog.warn(`[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -2814,10 +3625,7 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // creates the conversation). Without a bot identity we keep the original
   // direct-callback behavior (no interposition, no mention resolution).
   const interpose = Boolean(
-    callbackUrl &&
-    agent.spacesAppUserId &&
-    agent.spacesAppToken &&
-    agent.spacesAppId,
+    callbackUrl && agent.spacesAppUserId && agent.spacesAppToken && agent.spacesAppId,
   );
   let automationSlotToken: string | null = null;
   const releaseAutomationSlot = async (): Promise<void> => {
@@ -2846,11 +3654,18 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
-      clog.info(`[webhook/automation-run] conv ${payload.conversationId} busy — queued automation session=${sessionId} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`);
+      clog.info(
+        `[webhook/automation-run] conv ${payload.conversationId} busy — queued automation session=${sessionId} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`,
+      );
       if (enq.enqueued || enq.deduped) {
         res.status(202).json({ success: true, queued: true, sessionId });
       } else {
-        res.status(enq.full ? 429 : 503).json({ success: false, error: enq.full ? "conversation queue is full" : "failed to queue automation run" });
+        res
+          .status(enq.full ? 429 : 503)
+          .json({
+            success: false,
+            error: enq.full ? "conversation queue is full" : "failed to queue automation run",
+          });
       }
       return;
     }
@@ -2885,15 +3700,15 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
-      resultForwardUrl: callbackUrl!,
-      resolveMentions: true,
+      ...(externalResultCallback
+        ? { externalResultCallback }
+        : { resultForwardUrl: callbackUrl!, resolveMentions: true }),
     };
     await setSession(sessionId!, sessionContext);
   }
 
-  // Do NOT create an AgentRun row here. /internal/run mints its OWN
-  // authoritative sessionId (ours is ignored — see the recovery comment below)
-  // and inserts the run row itself, deriving triggerSource="automation" from
+  // Do NOT create an AgentRun row here. /internal/run preserves this trusted
+  // sessionId and inserts the run row itself, deriving triggerSource="automation" from
   // eventType. A pre-insert under OUR sessionId created a SECOND row that no
   // execution or result callback ever referenced — it sat "running" forever
   // (the Control Center double-run report, 2026-07-08, and the ~1,400 zombie
@@ -2906,7 +3721,8 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // requireResultToken-gated, so we mint a per-run token and pass it; claw
   // echoes it as `x-session-token` on the callback. When NOT interposing we
   // pass the automation's callbackUrl straight through, as before.
-  const clawCallbackUrl = interpose ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result` : callbackUrl;
+  const clawCallbackUrl =
+    interpose || externalResultCallback ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result` : callbackUrl;
 
   // Read-only enforcement for automation runs lives in CODE (isReadOnlyJob), so
   // the write EXCEPTION is code-driven too — the CALLER declares it. When the
@@ -2915,11 +3731,86 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // agentConfig; claw already honors that flag on both gates (tool-palette strip
   // + sbx-git routing). Any caller that doesn't send it stays read-only, and no
   // per-agent DB flag is needed.
-  const forwardedAgentConfig: Record<string, unknown> | undefined =
-    agent.config || payload.allowWriteInReadOnlyJob
+  const sdlcProfile =
+    payload.executionProfile === "sdlc" &&
+    agentSlug === "sdlc-agent" &&
+    s2sKeyMatches(req.headers["x-s2s-key"]);
+  const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
+  const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+  const directTools = Array.isArray(baseTools["direct"]) ? (baseTools["direct"] as string[]) : [];
+  const customTools = Array.isArray(baseTools["custom"]) ? (baseTools["custom"] as string[]) : [];
+  const subagents = Array.isArray(baseTools["subagents"]) ? (baseTools["subagents"] as string[]) : [];
+  const sdlcCustomTools = [
+    "sandbox-repo-setup",
+    "sandbox-run",
+    "sandbox-run-detached",
+    "sandbox-poll-job",
+    "sandbox-read-file",
+    "sandbox-destroy",
+  ];
+  const sdlcOutputFormat =
+    payload.sdlcOperation === "work"
       ? {
-          ...((agent.config as Record<string, unknown> | null) ?? {}),
-          ...(payload.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              branchName: { type: "string" },
+              commitHash: { type: "string" },
+              pullRequestUrl: { type: "string" },
+            },
+            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
+          },
+          requireToolsBeforeSubmit: ["sandbox-repo-setup", "sandbox-run", "spaces-sdlc-create-pull-request"],
+        }
+      : {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              created: { type: "boolean" },
+              canvasId: { type: "string" },
+              artifactKind: { type: "string" },
+            },
+            required: ["created", "canvasId", "artifactKind"],
+          },
+          requireToolsBeforeSubmit: [
+            payload.sdlcOperation === "baseline"
+              ? "spaces-sdlc-update-baseline"
+              : "spaces-sdlc-create-artifact",
+          ],
+        };
+  const forwardedAgentConfig: Record<string, unknown> | undefined =
+    agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
+      ? {
+          ...baseAgentConfig,
+          ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
+          ...(sdlcProfile
+            ? {
+                tools: {
+                  ...baseTools,
+                  direct: [
+                    ...new Set([
+                      ...directTools,
+                      "spaces-sdlc-create-artifact",
+                      "spaces-sdlc-update-baseline",
+                      "spaces-sdlc-create-pull-request",
+                    ]),
+                  ],
+                  custom: [...new Set([...customTools, ...sdlcCustomTools])],
+                  subagents,
+                },
+                toolPermissions: {
+                  ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
+                  "xyne-spaces__spaces-sdlc-create-artifact": "allow",
+                  "xyne-spaces__spaces-sdlc-update-baseline": "allow",
+                  "xyne-spaces__spaces-sdlc-create-pull-request": "allow",
+                },
+                outputFormat: sdlcOutputFormat,
+                sdlcContext: payload.sdlcContext,
+              }
+            : {}),
         }
       : undefined;
   const resultToken = interpose
@@ -2938,7 +3829,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // [AUTODBG] instrument the whole dispatch window — automations were observed
   // stalling silently right after [agent-run] start (no forward, no error).
-  clog.info(`[webhook] AUTODBG ${sessionId}: after AgentRun.start — resolving provider configs (agent=${agentSlug}, interpose=${interpose})`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: after AgentRun.start — resolving provider configs (agent=${agentSlug}, interpose=${interpose})`,
+  );
   const __t0 = process.hrtime.bigint();
   let providerConfigs: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerConfigs"] = {};
   let providerOrder: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerOrder"] = [];
@@ -2947,15 +3840,23 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
     // headlessBulk: this handler serves automations, external webhooks, and
     // the error-pipeline runner — the per-agent automationProvider downgrade
     // applies here (never to human chat/mention dispatches).
-    ({ providerConfigs, providerOrder, parent: providerParent } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
+    ({
+      providerConfigs,
+      providerOrder,
+      parent: providerParent,
+    } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
   } catch (provErr) {
-    clog.error(`[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`);
+    clog.error(
+      `[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`,
+    );
     await releaseAutomationSlot();
     res.status(502).json({ success: false, error: "provider config resolution failed" });
     return;
   }
   const __provMs = Number((process.hrtime.bigint() - __t0) / 1_000_000n);
-  clog.info(`[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`,
+  );
 
   let runRes: Response | undefined;
   try {
@@ -2971,14 +3872,22 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         orgId: agent.orgId,
         task,
         userId,
+        ...(payload.userName ? { userName: payload.userName } : {}),
+        ...(payload.userEmail ? { userEmail: payload.userEmail } : {}),
         eventType: "automation",
+        // SDLC callers are callback-driven and only need the accepted session
+        // id here. Without detached mode this request enters the SSE bridge,
+        // whose event-consumption loop can delay flushing the outer webhook
+        // response during event-heavy setup runs. The Spaces backend then
+        // times out even though Claw continues successfully.
+        ...(sdlcProfile ? { detached: true } : {}),
         callbackUrl: clawCallbackUrl,
         ...(resultToken ? { sessionToken: resultToken } : {}),
         ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
         fastMode: fastModeEnabled,
         // Primary provider — the pod keys its model off `provider` (defaults to
         // "spaces"/kimi when unset), so without this every automation ran on
-        // private-large regardless of the agent's configured provider.
+        // the platform default regardless of the agent's configured provider.
         ...(providerParent ? { provider: providerParent } : {}),
         ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
         ...(providerOrder.length > 1 ? { providerOrder } : {}),
@@ -2992,7 +3901,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       signal: AbortSignal.timeout(180_000),
     })) as unknown as Response;
   } catch (err) {
-    clog.error(`[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+    clog.error(
+      `[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+    );
     await releaseAutomationSlot();
     res.status(502).json({ success: false, error: "failed to reach claw-pod" });
     return;
@@ -3002,28 +3913,45 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // can distinguish "claw rejected" from "claw-auth rejected".
   const status = (runRes as unknown as { status: number }).status;
   const text = await (runRes as unknown as { text: () => Promise<string> }).text();
-  clog.info(`[webhook] AUTODBG ${sessionId}: /internal/run responded status=${status} bodyLen=${text.length} body=${text.slice(0, 200)}`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: /internal/run responded status=${status} bodyLen=${text.length} body=${text.slice(0, 200)}`,
+  );
   if (status < 200 || status >= 300) {
     await releaseAutomationSlot();
+  }
+  let runSessionId = sessionId!;
+  try {
+    const parsed = JSON.parse(text) as { sessionId?: string };
+    if (parsed.sessionId) runSessionId = parsed.sessionId;
+  } catch {
+    // Non-JSON body — retain the caller-provided session id.
+  }
+  if (externalResultCallback && status >= 200 && status < 300) {
+    const storedRun = await prisma.agentRun.findUnique({
+      where: { sessionId: runSessionId },
+      select: { metadata: true },
+    });
+    const metadata =
+      storedRun?.metadata && typeof storedRun.metadata === "object" && !Array.isArray(storedRun.metadata)
+        ? (storedRun.metadata as Record<string, unknown>)
+        : {};
+    await prisma.agentRun.update({
+      where: { sessionId: runSessionId },
+      data: { metadata: { ...metadata, externalResultCallback } },
+    });
   }
 
   // Crash/stall resilience — ONLY for interposed runs. When interposing, the
   // result routes through claw-auth's /webhook/result (so recovery's stored
   // SessionContext + exhausted-notice poster apply) and we hold the agent's app
-  // identity. We key recovery off claw-auth's authoritative sessionId (it mints
-  // its own; ours is ignored) so the GCS idempotency marker and the
+  // identity. We key recovery off the preserved authoritative sessionId so the
+  // GCS idempotency marker and the
   // progress-heartbeat → root mapping line up. If claw-pod stalls without a
   // completed-result marker, the worker replays this payload under a fresh
   // session — idempotency-keyed, so a finished run is never re-forwarded (no
   // double workflow-step advance). Non-interpose runs callback straight to the
   // automation engine, which owns its own retry; we deliberately don't layer on.
   if (interpose && status >= 200 && status < 300) {
-    let runSessionId = sessionId!;
-    try {
-      const parsed = JSON.parse(text) as { sessionId?: string };
-      if (parsed.sessionId) runSessionId = parsed.sessionId;
-    } catch { /* non-JSON body — fall back to our local id */ }
-
     const recoveryPayload = {
       userId: userId!,
       task: task!,
@@ -3065,7 +3993,11 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       // id), so /webhook/result resolves ctx from THIS recovery context. Mirror
       // the interpose session (line ~2252): forward the result to the
       // automation's callback instead of posting to a (nonexistent) channel.
-      ...(interpose ? { resultForwardUrl: callbackUrl!, resolveMentions: true } : {}),
+      ...(externalResultCallback
+        ? { externalResultCallback }
+        : interpose
+          ? { resultForwardUrl: callbackUrl!, resolveMentions: true }
+          : {}),
     };
     await registerRunRecovery({
       rootSessionId: runSessionId,
@@ -3075,7 +4007,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       dispatchPayload: recoveryPayload,
       sessionContext: recoveryCtx,
     }).catch((err) => {
-      clog.warn(`[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     });
   }
 
@@ -3145,31 +4079,50 @@ async function persistCallbackAttachments(
   chatMessageId: string,
   uploaderUserId: string,
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+): Promise<Array<{ id: string; originalFilename: string; mimeType: string }>> {
+  return persistBase64ChatAttachments(chatMessageId, uploaderUserId, attachments);
+}
+
+/**
+ * Auto-publish for /design and /dashboard runs delivered into Spaces threads: the thread
+ * already holds the artifact file, so mint (or refresh) the conversation's
+ * stable share link and post it — one click to the rendered design instead of
+ * a download. Reuses the Studio share model: per (owner, conversation) row,
+ * revocable from Studio, opaque-origin serving. Best-effort — a share failure
+ * must never disturb the delivered result.
+ */
+async function publishThreadArtifactShare(
+  ctx: SessionContext,
+  runOwnerId: string,
+  created: Array<{ id: string; originalFilename: string; mimeType: string }>,
 ): Promise<void> {
-  if (!attachments?.length) return;
-  const now = new Date();
-  const year = String(now.getUTCFullYear());
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  for (const att of attachments) {
-    try {
-      const buffer = Buffer.from(att.data, "base64");
-      const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
-      const destPath = `chat-attachments/${uploaderUserId}/${year}/${month}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
-      await gcsService.uploadFile(buffer, destPath, att.mimeType);
-      await prisma.chatAttachment.create({
-        data: {
-          chatMessageId,
-          uploaderUserId,
-          storageProvider: "gcs",
-          url: destPath,
-          originalFilename: att.fileName,
-          mimeType: att.mimeType,
-          size: buffer.length,
-        },
-      });
-    } catch (err) {
-      clog.warn(`[webhook/result] failed to persist attachment ${att.fileName}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    const command = ctx.task?.trimStart().toLowerCase().match(/^\/(design|dashboard)(?:\s|$)/)?.[1];
+    if (!command) return;
+    if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
+    const html = [...created].reverse().find((a) =>
+      a.mimeType.toLowerCase().includes("html") || a.originalFilename.toLowerCase().endsWith(".html"),
+    );
+    if (!html) return;
+    const share = await upsertDesignShare({
+      ownerUserId: runOwnerId,
+      orgId: ctx.agentOrgId,
+      conversationId: ctx.conversationId,
+      attachmentId: html.id,
+      title: html.originalFilename.replace(/\.html?$/i, ""),
+      expiresAt: null,
+    });
+    const link = designShareUrl(share.sharePath);
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+      userId: ctx.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, ctx.appToken);
+    clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
+  } catch (err) {
+    clog.warn(`[webhook/result] design share publish failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -3200,8 +4153,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
     // one-click button below the agent's reply so the user can promote the
-    // remaining work to a /goal autonomous loop. See start-goal handler in
-    // app-callback.ts. Only present when the agent's config has
+    // remaining work to a /goal autonomous loop. See start-goal handling in
+    // flow-action.ts. Only present when the agent's config has
     // suggestGoal=true AND the tool was actually called this turn.
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
@@ -3288,6 +4241,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // releases the slot — UNLESS a /goal turn is continuing (goalContinues),
   // which keeps the slot so the loop owns the conversation across turns.
   let goalContinues = false;
+  let experimentContinues = false;
   let skipQueueDrain = false;
   let resultConversationId = payload.conversationId ?? "";
   let resultAgentSlug = payload.agentSlug ?? "";
@@ -3414,7 +4368,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.info(`[webhook/result] Digital Twin chose to ignore — dropping, no DM/post, session ${sessionId}`);
       await deleteSession(sessionId);
     } else if (isTwinDelivery(payload.twinDelivery)) {
-      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId);
+      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId, payload.attachments);
     } else {
       clog.info(`[webhook/result] Digital Twin stayed silent — no twin_deliver delivery (fail-closed), session ${sessionId}`);
       await deleteSession(sessionId);
@@ -3523,6 +4477,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     await handleRunCompletion(sessionId, "completed").catch((err) => {
       clog.warn(`[webhook/result] Failed to mark ${sessionId} completed in run recovery:`, err instanceof Error ? err.message : err);
     });
+    if (ctx?.conversationId && ctx.agentSlug) {
+      experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
+        clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+        return false;
+      });
+    }
   }
 
   const isSessionLockedFailure = payload.status === "failed" && payload.error === "session_locked";
@@ -3615,6 +4575,34 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     externalResultCallback = metadata?.externalResultCallback;
   }
   if (externalResultCallback) {
+    // HITL for API/service-token runs: the external caller receives its result
+    // via the callback, but a gated write (spaces-create-ticket, user-send-message,
+    // ...) still needs a human to approve/decline. Those approval cards are only
+    // posted on the normal channel path further below - which this branch returns
+    // before reaching. When the run is bound to a Spaces channel (the service
+    // token carried spaces:channels:post, so /run let channelId survive), post the
+    // cards into that channel BEFORE we tear the session down. Implicitly gated by
+    // ctx.channelId: headless runs with no bound channel skip this, exactly as before.
+    const externalPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
+    const cbCtx = ctx;
+    if (cbCtx?.channelId && cbCtx.appToken && externalPendingActions?.length) {
+      const cbAppToken = cbCtx.appToken;
+      let approvalCardsSent = 0;
+      for (const action of externalPendingActions) {
+        try {
+          const targetValidation = await pendingActionTargetValidation(action, cbCtx, cbAppToken);
+          if (targetValidation.error) {
+            clog.info(`[webhook/result] external-callback skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+            continue;
+          }
+          await postWriteApprovalAction({ action, ctx: cbCtx, token: cbAppToken, targetValidation });
+          approvalCardsSent += 1;
+        } catch (err) {
+          clog.warn(`[webhook/result] external-callback approval card failed tool=${String(action["tool"] ?? "")} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      clog.info(`[webhook/result] external-callback sent ${approvalCardsSent}/${externalPendingActions.length} write approval card(s) channelId=${cbCtx.channelId} sessionId=${sessionId}`);
+    }
     await deleteSession(sessionId);
     await sendStoredExternalResultCallback(
       externalResultCallback,
@@ -3659,8 +4647,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // failed with no chain and no promote-prompt, so the user saw nothing and
     // asked "why no reply"). Cancellations are intentional and stay silent.
     let failureSurfaced = false;
+    const rawErr = String(payload.error ?? "");
+    // SHUTDOWN_DRAIN-prefixed failures are pod-restart kills (claw's drain
+    // deadline aborted the run — see cancelActiveRunsForDrain). The recovery
+    // worker refires these, so NOTHING below should treat them as agent
+    // failures: no chain escalation, no failure-investigation dispatch, no
+    // "internal error" notice. If the refire also dies it fails with a normal
+    // (unprefixed) error and the full failure path runs then — the thread is
+    // never permanently silent.
+    const isShutdownDrain = /^SHUTDOWN_DRAIN:/.test(rawErr);
     // ── Handle failure chain if configured ──
-    if (payload.status === "failed" && ctx?.agentSlug && ctx.agentOrgId) {
+    if (payload.status === "failed" && !isShutdownDrain && ctx?.agentSlug && ctx.agentOrgId) {
       try {
         const agentRow = await agentRepository.findBySlug(ctx.agentSlug, ctx.agentOrgId);
 
@@ -3828,7 +4825,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // user — otherwise the thread goes silent and looks like the agent ignored
     // the mention. Only for conversation-mode failures with a thread to post
     // to; cancellations and approval-mode runs stay silent by design.
-    const rawErr = String(payload.error ?? "");
     // A dropped SSE stream ("…ended without a done frame") is a TRANSIENT
     // transport flake — claw-auth retries the dispatch automatically and the
     // retry almost always completes and posts the real reply. Surfacing a
@@ -3842,6 +4838,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       payload.status === "failed" &&
       !failureSurfaced &&
       !isTransientSseDrop &&
+      !isShutdownDrain &&
       ctx?.conversationId &&
       ctx?.channelId &&
       ctx.responseMode === "conversation"
@@ -3922,6 +4919,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // silently dropped them, so pipeline/automation runs never showed
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
         .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
+        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
         .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
@@ -3978,7 +4976,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // Clear the ephemeral agent progress signal — dashboard drops the spinner.
   // Only fires in the ephemeral path; the placeholder path clears naturally
   // when we edit the "⏳" message with the final result below.
-  if (USE_EPHEMERAL_PROGRESS) {
+  // Same deliverability guard as the per-tool push in /progress: twin runs and
+  // claw-only conversations (no Spaces channelId) never posted a spinner, so
+  // clearing would only add another guaranteed-4xx call.
+  if (USE_EPHEMERAL_PROGRESS && ctx.agentSlug !== "digital-twin" && ctx.channelId) {
     spacesAppFetch("/chat/agentProgress", {
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
@@ -4010,6 +5011,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // transcript row (Spaces gets them as posted files, but the claw chat
       // UI reads chat_attachments).
       .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
+        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
   }
 
@@ -4564,39 +5566,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-          const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-            serverType: action["serverType"] as string,
-            tool: action["tool"] as string,
-            params: action["params"] as Record<string, unknown>,
-            userId: action["userId"] as string,
-            signature: action["signature"] as string,
-            agentSlug: ctx.agentSlug ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }), ctx.spacesAppId);
-
-          if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-            const memParams = action["params"] as Record<string, unknown>;
-            const memContent = memParams["content"] as string;
-            const memDocType = (memParams["docType"] as string) ?? "fact";
-            const form = new FormData();
-            const blob = new Blob([memContent], { type: "text/markdown" });
-            form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-            form.append("channelId", ctx.channelId);
-            form.append("conversationId", ctx.conversationId);
-            form.append("userId", ctx.spacesAppUserId);
-            form.append("flow", JSON.stringify(writeFlow));
-            await spacesAppFetchMultipart("/files/filesUpload", form, token);
-          } else {
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              flow: writeFlow,
-              userId: ctx.spacesAppUserId,
-            }, token);
-          }
+          await postWriteApprovalAction({ action, ctx, token, targetValidation });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -4734,7 +5704,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.info(`Posting result: channelId=${ctx.channelId} conversationId=${ctx.conversationId} resultLen=${prepared.text.length} userId=${ctx.spacesAppUserId}`);
           await spacesAppFetch("/chat/postMessage", {
             channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
+            // Channel-bound, thread-less runs (API/event-triggered) carry an
+            // empty conversationId. Sending "" explicitly fails Spaces'
+            // ChannelValidationSchema (conversationId is .min(1).optional() —
+            // "" is a string, not undefined, so it trips .min(1) → 400
+            // "Validation error"). Omit it when empty so Spaces treats the post
+            // as a top-level channel message and creates a fresh thread.
+            ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
             markdownText: prepared.text,
             userId: ctx.spacesAppUserId,
             metadata: convMetadata,
@@ -4815,12 +5791,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
                 return;
               }
             }
+            const refireUserId = refire["userId"];
+            if (typeof refireUserId !== "string" || !refireUserId) {
+              log.warn("[goal] refire missing userId; refusing to dispatch");
+              return;
+            }
             const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
             void fetch(runUrl, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                "x-user-id": refireUserId,
               },
               body: JSON.stringify(refire),
             }).catch((err) => {
@@ -4914,6 +5896,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // ── Post question buttons in thread ──
     const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
+      const { signAction: signUserAnswer } = await import("./mcp.js");
       for (const q of pendingQuestions) {
         const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
           questionId: q.questionId,
@@ -4922,6 +5905,23 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           conversationId: ctx.conversationId,
           userId: ctx.senderId,
         }), ctx.spacesAppId);
+        // XYNE-55135: bind the card's identity + routing fields with an HMAC at
+        // creation time. The transport signature only proves Spaces forwarded
+        // the body unmodified; it cannot prove these fields equal what the agent
+        // posted, because Spaces forwards client-controlled flowJSON.data.
+        // flow-action re-derives and verifies this exact payload on click.
+        questionFlow.data = {
+          ...(questionFlow.data ?? {}),
+          signature: signUserAnswer({
+            actionType: "user-answer",
+            questionId: q.questionId,
+            userId: ctx.senderId,
+            agentSlug: ctx.agentSlug ?? "",
+            spacesAppId: ctx.spacesAppId ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+          }),
+        };
         await spacesAppFetch("/chat/postMessage", {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
@@ -4942,28 +5942,53 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // collapses to a confirmation line after tap via replaceFlowCardWithText.
     const goalSuggestion = payload.pendingGoalSuggestion;
     if (goalSuggestion && goalSuggestion.condition?.trim() && goalSuggestion.rationale?.trim()) {
-      // Newline-strip + length-cap defensively: matches parseSlashCommand's
-      // cap so manually-typed and button-fired goals behave identically.
-      const safeCondition = goalSuggestion.condition.replace(/\r?\n/g, " ").slice(0, 2_000);
+      const safeCondition = normalizeGoalCondition(goalSuggestion.condition);
       const safeRationale = goalSuggestion.rationale.replace(/\r?\n/g, " ").slice(0, 400);
-      const goalFlow = withSpacesAppId(buildGoalSuggestionFlow(safeRationale, {
-        condition: safeCondition,
-        agentSlug: ctx.agentSlug ?? "",
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        userId: ctx.senderId,
-      }), ctx.spacesAppId);
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        flow: goalFlow,
-        userId: ctx.spacesAppUserId,
-      }, token).catch((err) => {
-        log.warn("Failed to post /goal suggestion FlowUI card", {
-          error: err instanceof Error ? err.message : String(err),
+      if (!safeCondition) {
+        log.warn("Skipped /goal suggestion with invalid condition");
+      } else {
+        const goalAgentSlug = ctx.agentSlug ?? "";
+        const goalSpacesAppId = ctx.spacesAppId ?? "";
+        const actionNonce = crypto.randomUUID();
+        const issuedAt = Date.now();
+        const { signAction } = await import("./mcp.js");
+        const goalActionPayload = {
+          actionType: "start-goal",
+          actionId: "start-goal",
+          condition: safeCondition,
+          agentSlug: goalAgentSlug,
+          spacesAppId: goalSpacesAppId,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+          actionNonce,
+          issuedAt,
+        };
+        const goalFlow = withSpacesAppId(buildGoalSuggestionFlow(safeRationale, {
+          condition: safeCondition,
+          agentSlug: goalAgentSlug,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), goalSpacesAppId);
+        goalFlow.data = {
+          ...(goalFlow.data ?? {}),
+          actionNonce,
+          issuedAt,
+          signature: signAction(goalActionPayload),
+        };
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow: goalFlow,
+          userId: ctx.spacesAppUserId,
+        }, token).catch((err) => {
+          log.warn("Failed to post /goal suggestion FlowUI card", {
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
-      log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
+        log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
+      }
     }
 
     // ── Send approval DMs for pending write actions (HITL) ──
@@ -4977,40 +6002,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           continue;
         }
 
-        const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-        const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-          serverType: action["serverType"] as string,
-          tool: action["tool"] as string,
-          params: action["params"] as Record<string, unknown>,
-          userId: action["userId"] as string,
-          signature: action["signature"] as string,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-        }), ctx.spacesAppId);
-
-        // Post in the same thread where the conversation happened
-        if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-          const memParams = action["params"] as Record<string, unknown>;
-          const memContent = memParams["content"] as string;
-          const memDocType = (memParams["docType"] as string) ?? "fact";
-          const form = new FormData();
-          const blob = new Blob([memContent], { type: "text/markdown" });
-          form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-          form.append("channelId", ctx.channelId);
-          form.append("conversationId", ctx.conversationId);
-          form.append("userId", ctx.spacesAppUserId);
-          form.append("flow", JSON.stringify(writeFlow));
-          await spacesAppFetchMultipart("/files/filesUpload", form, token);
-        } else {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            flow: writeFlow,
-            userId: ctx.spacesAppUserId,
-          }, token);
-        }
+        await postWriteApprovalAction({ action, ctx, token, targetValidation });
         approvalCardsSent += 1;
       }
 
@@ -5202,7 +6194,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // Best-effort cleanup; the ingress key also has a TTL.
       }
     }
-    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !skipQueueDrain) {
+    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
       await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
   }
@@ -5229,6 +6221,21 @@ async function doRenderPlanCard(
   // being dropped by a momentary getSession miss.
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
   if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
+
+  // Per-agent opt-out (agent.config.postTodos === false): suppress the live
+  // plan/todo card in the Spaces thread for agents whose owner turned this off.
+  // Absent/true preserves the default (post), so existing agents are unchanged.
+  // This is the ONE choke point every kind:"plan" emitter funnels through
+  // (the runtime todo-write tool, run.ts onPlan, consume-claw-stream), so a
+  // single guard here covers every emitter and every dispatch surface. Read
+  // fresh from the agent row (a PK lookup) — mirrors how memoryEnabled is
+  // consumed at the point of use, and lets a mid-run config change take effect.
+  if (ctx.agentId) {
+    const cfgRow = await prisma.agent
+      .findUnique({ where: { id: ctx.agentId }, select: { config: true } })
+      .catch(() => null);
+    if ((cfgRow?.config as { postTodos?: boolean } | null)?.postTodos === false) return;
+  }
 
   // Deterministic per-conversation plan facts, written BEFORE Turn 2 dispatched
   // (so they're present even for the first todo-write): whether the plan was
@@ -5315,355 +6322,6 @@ function renderPlanCard(
   return next;
 }
 
-// ── PR card render (create/merge PR subagent tool → kind:"pr" progress) ─────
-// A github/bitbucket/gitlab subagent's create_pull_request / merge_pull_request
-// tool fires a kind:"pr" progress event carrying a canonical, provider-neutral
-// PR fact. We post ONE card per PR (keyed by a deterministic screenId) the first
-// time, then updateMessage the SAME card in place as its status advances. Only
-// conversation mode (a Spaces thread) has a surface — DM/approval runs are
-// skipped. Renders are serialized per session so two PR events can't race the
-// message-id write. Best-effort; never blocks the /progress ack.
-interface PrProgressInput {
-  provider: PrProvider;
-  status: PrStatus;
-  title: string;
-  url?: string;
-  desc?: string;
-  ticketId?: string;
-  number?: string | number;
-  repo?: string;
-}
-
-const PR_PROVIDERS = new Set<PrProvider>(["github", "bitbucket", "gitlab", "other"]);
-const PR_STATUSES = new Set<PrStatus>(["created", "merged", "reverted", "deleted", "declined"]);
-
-/** Validate + coerce the untrusted wire `pr` payload into a typed fact, or null. */
-function coercePrInput(raw: unknown): PrProgressInput | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const { provider, status, title } = o as { provider?: unknown; status?: unknown; title?: unknown };
-  if (typeof provider !== "string" || !PR_PROVIDERS.has(provider as PrProvider)) return null;
-  if (typeof status !== "string" || !PR_STATUSES.has(status as PrStatus)) return null;
-  if (typeof title !== "string" || !title.trim()) return null;
-  const str = (v: unknown): string | undefined =>
-    typeof v === "string" && v.trim() ? v.trim() : undefined;
-  const out: PrProgressInput = {
-    provider: provider as PrProvider,
-    status: status as PrStatus,
-    title: title.trim(),
-  };
-  const url = str(o["url"]);
-  if (url) out.url = url;
-  const desc = str(o["desc"]);
-  if (desc) out.desc = desc;
-  const ticketId = str(o["ticketId"]);
-  if (ticketId) out.ticketId = ticketId;
-  const repo = str(o["repo"]);
-  if (repo) out.repo = repo;
-  const number = o["number"];
-  if (typeof number === "string" && number.trim()) out.number = number.trim();
-  else if (typeof number === "number" && Number.isFinite(number)) out.number = number;
-  return out;
-}
-
-const prRenderQueue = new Map<string, Promise<void>>();
-
-async function doRenderPrCard(
-  sessionId: string,
-  pr: PrProgressInput,
-  conversationId?: string | null,
-  agentSlug?: string | null,
-): Promise<void> {
-  // Same robust resolution every /webhook/progress branch uses (sessionId →
-  // recovery → conv-index), so a refired run that minted a fresh sessionId still
-  // lands the card in the right thread.
-  const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
-  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) {
-    clog.warn(
-      `[pr-card] skipping render for ${sessionId}: ctx=${ctx ? "yes" : "MISSING"} ` +
-        `responseMode=${ctx?.responseMode ?? "?"} channelId=${ctx?.channelId ? "yes" : "MISSING"} ` +
-        `appToken=${ctx?.appToken ? "yes" : "MISSING"} (conv=${conversationId ?? "?"} agent=${agentSlug ?? "?"})`,
-    );
-    return;
-  }
-
-  // Deterministic screenId keyed on PR identity — same PR ⇒ same card across
-  // status transitions (created → merged / …). Must match buildPrFlow's own
-  // derivation, so pass it explicitly to both the id map and the builder.
-  const identity: { provider: PrProvider; repo?: string; number?: string | number; url?: string } = {
-    provider: pr.provider,
-  };
-  if (pr.repo) identity.repo = pr.repo;
-  if (pr.number !== undefined) identity.number = pr.number;
-  if (pr.url) identity.url = pr.url;
-  const screenId = prScreenId(identity);
-
-  const flow = buildPrFlow(
-    {
-      provider: pr.provider,
-      status: pr.status,
-      title: pr.title,
-      ...(pr.url ? { url: pr.url } : {}),
-      ...(pr.desc ? { desc: pr.desc } : {}),
-      ...(pr.ticketId ? { ticketId: pr.ticketId } : {}),
-    },
-    {
-      screenId,
-      data: {
-        agentSlug: ctx.agentSlug,
-        conversationId: ctx.conversationId,
-        channelId: ctx.channelId,
-      },
-    },
-  );
-
-  const existing = ctx.prMessageIds?.[screenId];
-  let renderedMessageId: string | undefined = existing;
-  if (!existing) {
-    clog.info(
-      `[pr-card] posting NEW card screenId=${screenId} provider=${pr.provider} status=${pr.status} conv=${ctx.conversationId}`,
-    );
-    // postMessage takes the partial `flow` field; chatController wraps it.
-    // conversationId lands the card IN THE THREAD (channelId alone hits root).
-    const resp = (await spacesAppFetch(
-      "/chat/postMessage",
-      { channelId: ctx.channelId, conversationId: ctx.conversationId, flow, userId: ctx.spacesAppUserId },
-      ctx.appToken,
-    )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
-    const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
-    if (messageId) {
-      renderedMessageId = messageId;
-      clog.info(`[pr-card] posted card screenId=${screenId} messageId=${messageId}`);
-      // Merge into the FRESHEST session so we don't clobber a concurrently-set
-      // planMessageId or another PR's id.
-      const fresh = (await getSession(sessionId).catch(() => null)) ?? ctx;
-      await setSession(sessionId, {
-        ...fresh,
-        prMessageIds: { ...(fresh.prMessageIds ?? {}), [screenId]: messageId },
-      }).catch(() => {});
-    } else {
-      clog.warn(`[pr-card] postMessage returned no messageId for screenId=${screenId} — resp=${JSON.stringify(resp)?.slice(0, 200)}`);
-    }
-  } else {
-    clog.info(`[pr-card] updating card in place screenId=${screenId} messageId=${existing} → status=${pr.status}`);
-    // updateMessage takes the full `flowJSON` field; needs channelId for
-    // validateChannelAccessForPost.
-    await spacesAppFetch(
-      "/chat/updateMessage",
-      { messageId: existing, flowJSON: flow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
-      ctx.appToken,
-    );
-  }
-
-  // ── Durable binding (COMPLEMENTS the Redis fast path above) ───────────────
-  // Persist where this PR card lives + the agent that posted it, keyed by the
-  // deterministic screenId and (for webhook lookup) the normalized PR URL. An
-  // inbound Bitbucket webhook that fires after this session's SessionContext is
-  // gone reads this to post a fresh status card. Best-effort — a binding failure
-  // must never break the render, and a missing URL just means the webhook can't
-  // find it (we log so that's visible). We store the card-rebuild fields in
-  // `data` so the webhook renders an identical card with the new status.
-  try {
-    // Empty-after-normalize (e.g. a protocol-only URL) MUST be stored as null,
-    // never "" — a webhook lookup by a real URL could never match "", and an ""
-    // key could spuriously collide across PRs.
-    const normalizedUrl = pr.url ? normalizePrUrl(pr.url) : "";
-    const externalKey = normalizedUrl || null;
-    if (!externalKey) {
-      clog.warn(
-        `[pr-card] binding has no usable PR url (screenId=${screenId}) — webhook status updates won't find this card`,
-      );
-    }
-    const bindingData: Record<string, unknown> = { provider: pr.provider, title: pr.title };
-    if (pr.url) bindingData["url"] = pr.url;
-    if (pr.ticketId) bindingData["ticketId"] = pr.ticketId;
-    if (pr.desc) bindingData["desc"] = pr.desc;
-    if (pr.repo) bindingData["repo"] = pr.repo;
-    if (pr.number !== undefined) bindingData["number"] = pr.number;
-    await upsertWidgetBinding({
-      orgId: ctx.agentOrgId ?? "",
-      kind: "pr",
-      screenId,
-      externalKey,
-      conversationId: ctx.conversationId,
-      channelId: ctx.channelId,
-      messageId: renderedMessageId ?? null,
-      spacesAppId: ctx.spacesAppId,
-      spacesAppUserId: ctx.spacesAppUserId,
-      agentSlug: ctx.agentSlug ?? null,
-      status: pr.status,
-      data: bindingData,
-    });
-  } catch (e) {
-    clog.warn(
-      `[pr-card] upsertWidgetBinding failed for screenId=${screenId}:`,
-      e instanceof Error ? e.message : e,
-    );
-  }
-}
-
-function renderPrCard(
-  sessionId: string,
-  pr: PrProgressInput,
-  conversationId?: string | null,
-  agentSlug?: string | null,
-): Promise<void> {
-  const prev = prRenderQueue.get(sessionId) ?? Promise.resolve();
-  const next = prev.catch(() => {}).then(() => doRenderPrCard(sessionId, pr, conversationId, agentSlug));
-  prRenderQueue.set(sessionId, next);
-  void next.finally(() => {
-    if (prRenderQueue.get(sessionId) === next) prRenderQueue.delete(sessionId);
-  });
-  return next;
-}
-
-// ── POST /webhook/pr-event — inbound git-host PR status change (S2S) ────────
-//
-// The MAIN backend receives + HMAC-verifies the Bitbucket webhook and runs its
-// ticket-status sync, then forwards a normalized PR fact HERE (fire-and-forget,
-// x-s2s-key). We look up the durable AgentWidgetBinding for this PR by its
-// normalized URL and — only if an agent originally posted a card for it — post a
-// FRESH status card into the SAME thread as that agent's bot. No binding ⇒ this
-// PR wasn't created by an agent in a Spaces thread ⇒ 200 no-op (mirrors the
-// backend's "not created by Xyne → ignore"). Dedupe on the last-rendered status
-// so provider re-delivery (or an in-session merge already rendered live) never
-// double-posts. Serialized per PR URL. Best-effort; the ack is immediate.
-interface PrEventInput {
-  provider: PrProvider;
-  status: PrStatus;
-  prUrl: string;
-  number?: string | number;
-  repo?: string;
-}
-
-function coercePrEventInput(raw: unknown): PrEventInput | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const provider = o["provider"];
-  const status = o["status"];
-  const prUrl = o["prUrl"] ?? o["url"];
-  if (typeof provider !== "string" || !PR_PROVIDERS.has(provider as PrProvider)) return null;
-  if (typeof status !== "string" || !PR_STATUSES.has(status as PrStatus)) return null;
-  if (typeof prUrl !== "string" || !prUrl.trim()) return null;
-  const out: PrEventInput = {
-    provider: provider as PrProvider,
-    status: status as PrStatus,
-    prUrl: prUrl.trim(),
-  };
-  const repo = o["repo"];
-  if (typeof repo === "string" && repo.trim()) out.repo = repo.trim();
-  const number = o["number"];
-  if (typeof number === "string" && number.trim()) out.number = number.trim();
-  else if (typeof number === "number" && Number.isFinite(number)) out.number = number;
-  return out;
-}
-
-async function postWebhookPrStatusCard(ev: PrEventInput): Promise<{ posted: boolean; reason?: string }> {
-  const binding = await findPrBindingByUrl(ev.prUrl);
-  if (!binding) return { posted: false, reason: "no-binding" };
-  if (binding.status === ev.status) return { posted: false, reason: "dedup-same-status" };
-
-  const cardData = readPrBindingData(binding);
-  if (!cardData) return { posted: false, reason: "binding-missing-card-data" };
-
-  const agentRow = await agentRepository.findBySpacesAppId(binding.spacesAppId);
-  if (!agentRow?.spacesAppToken) return { posted: false, reason: "agent-unresolved" };
-  // Defense-in-depth org isolation: the agent resolved from the binding's OWN
-  // spacesAppId must belong to the binding's org. They agree by construction
-  // (both captured from one SessionContext at card-creation), so a mismatch
-  // means corrupted/tampered state — never post another org's bot into this
-  // thread. Only enforced when both orgs are known (a binding written when
-  // ctx.agentOrgId was absent stores ""), so a legit empty-org binding still
-  // renders.
-  if (binding.orgId && agentRow.orgId && binding.orgId !== agentRow.orgId) {
-    clog.warn(
-      `[webhook/pr-event] org mismatch binding.org=${binding.orgId} agent.org=${agentRow.orgId} (spacesAppId=${binding.spacesAppId}) — skipping`,
-    );
-    return { posted: false, reason: "org-mismatch" };
-  }
-  const appToken = decryptStoredField(agentRow.spacesAppToken);
-  const userId = binding.spacesAppUserId || agentRow.spacesAppUserId || "";
-  if (!userId) return { posted: false, reason: "no-bot-user" };
-
-  // A distinct screenId per status so each webhook status card is its OWN
-  // artifact in the thread (a NEW card per status change), never reconciling
-  // onto the agent's original created card.
-  const screenId = `${binding.screenId}-${ev.status}`;
-  const flow = buildPrFlow(
-    {
-      provider: cardData.provider as PrProvider,
-      status: ev.status,
-      title: cardData.title,
-      ...(cardData.url ? { url: cardData.url } : {}),
-      ...(cardData.desc ? { desc: cardData.desc } : {}),
-      ...(cardData.ticketId ? { ticketId: cardData.ticketId } : {}),
-    },
-    {
-      screenId,
-      data: {
-        ...(binding.agentSlug ? { agentSlug: binding.agentSlug } : {}),
-        conversationId: binding.conversationId,
-        channelId: binding.channelId,
-        source: "webhook",
-      },
-    },
-  );
-
-  clog.info(
-    `[webhook/pr-event] posting status card screenId=${screenId} status=${ev.status} conv=${binding.conversationId}`,
-  );
-  const resp = (await spacesAppFetch(
-    "/chat/postMessage",
-    { channelId: binding.channelId, conversationId: binding.conversationId, flow, userId },
-    appToken,
-  )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
-  const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
-
-  // Record the new status so a re-delivered webhook is a no-op. Best-effort: if
-  // this write fails a re-delivery could post a duplicate card (acceptable — far
-  // better than losing the card by marking status BEFORE the post succeeds), so
-  // log rather than swallow, to surface a persistent failure.
-  await setWidgetBindingStatus(binding.id, ev.status, messageId).catch((e) =>
-    clog.warn(
-      `[webhook/pr-event] setWidgetBindingStatus failed (binding=${binding.id} status=${ev.status}):`,
-      e instanceof Error ? e.message : e,
-    ),
-  );
-  return { posted: true };
-}
-
-const prEventQueue = new Map<string, Promise<unknown>>();
-
-router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) => {
-  // Ack immediately — never block the caller (the backend webhook handler).
-  res.json({ success: true });
-
-  const ev = coercePrEventInput(req.body);
-  if (!ev) {
-    clog.warn(`[webhook/pr-event] rejected payload: ${JSON.stringify(req.body)?.slice(0, 300)}`);
-    return;
-  }
-
-  // Serialize per PR URL so two rapid events for the same PR can't race the
-  // status write (and thus the dedup check).
-  const key = normalizePrUrl(ev.prUrl);
-  const prev = prEventQueue.get(key) ?? Promise.resolve();
-  const next = prev.catch(() => {}).then(async () => {
-    try {
-      const r = await postWebhookPrStatusCard(ev);
-      clog.info(
-        `[webhook/pr-event] provider=${ev.provider} status=${ev.status} url=${key} → ${r.posted ? "POSTED" : `skipped:${r.reason}`}`,
-      );
-    } catch (e) {
-      clog.warn(`[webhook/pr-event] failed url=${key}:`, e instanceof Error ? e.message : e);
-    }
-  });
-  prEventQueue.set(key, next);
-  void next.finally(() => {
-    if (prEventQueue.get(key) === next) prEventQueue.delete(key);
-  });
-});
-
 // ── POST /webhook/progress — live tool-call update from xyne-claw ───────────
 //
 // xyne-claw POSTs here on every tool_execution_start (throttled to 10s).
@@ -5722,28 +6380,6 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
       clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
     );
-    return;
-  }
-
-  // PR card: a create/merge pull-request subagent tool fires kind:"pr" with a
-  // canonical, provider-neutral PR fact. Post (first time) or update-in-place the
-  // PR card in the thread. Serialized per session; best-effort — never blocks.
-  if ((req.body as { kind?: string }).kind === "pr") {
-    void touchRunRecovery(sessionId).catch(() => {});
-    const rawPr = (req.body as { pr?: unknown }).pr;
-    const pr = coercePrInput(rawPr);
-    if (pr) {
-      clog.info(
-        `[webhook/progress] kind:pr received sessionId=${sessionId} provider=${pr.provider} status=${pr.status} number=${pr.number ?? "?"} repo=${pr.repo ?? "?"}`,
-      );
-      renderPrCard(sessionId, pr, conversationId, agentSlug).catch((e) =>
-        clog.warn(`[webhook/progress] renderPrCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
-      );
-    } else {
-      clog.warn(
-        `[webhook/progress] kind:pr REJECTED by coercePrInput sessionId=${sessionId} raw=${JSON.stringify(rawPr)?.slice(0, 300)}`,
-      );
-    }
     return;
   }
 
@@ -5827,6 +6463,19 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
   const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
 
+  // Spaces-side progress needs a real Spaces surface. Two cases produce
+  // thousands of guaranteed-4xx calls a day (prod 2026-08-11):
+  //  - digital-twin: the shared twin app user isn't a participant of most
+  //    channels its runs fire in → 403 "does not have access" per tool step.
+  //    Twin activity has its own draft/DM surface; it never needs the spinner.
+  //  - claw-only conversations (agent-chat/v3): ctx.conversationId is a
+  //    claw-auth UUID with no Spaces row → 404 "Conversation not found".
+  //    Spaces-origin runs always carry the channelId from the webhook payload,
+  //    so a missing channelId marks a conversation Spaces can't resolve.
+  // The v3 live tap above already delivered the label to claw's own UI.
+  const spacesProgressDeliverable = ctx.agentSlug !== "digital-twin" && Boolean(ctx.channelId);
+  if (!spacesProgressDeliverable) return;
+
   try {
     if (USE_EPHEMERAL_PROGRESS) {
       await spacesAppFetch("/chat/agentProgress", {
@@ -5854,8 +6503,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
 // Register the agent-specific webhook route (AFTER /result to avoid param catch).
 // `verifySpacesSignature` HMAC-checks the body using the agent's per-app
-// signing secret stored in agents.signingSecret. It fails closed by default;
-// SPACES_WEBHOOK_VERIFY_MODE=warn is only an explicit rollout escape hatch.
+// signing secret stored in agents.signingSecret and always fails closed.
 //
 // The bare-path `/webhook` (no agent slug) used to fall through to a
 // default-agent dispatch — verified dead in 7d of prod logs (0 hits across
@@ -5901,11 +6549,22 @@ router.post("/app/:spacesAppId", async (req: Request, res: Response): Promise<vo
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
+  // TEMPORARY (2026-08-10): s2s-authenticated callers that don't sign yet
+  // (SDLC surface's ClawAgentService) are let through with a loud warning
+  // instead of a 401. Scope is deliberately narrow: the s2s key must match
+  // AND the signature header must be entirely absent — a present-but-invalid
+  // signature still rejects, and non-s2s callers are unchanged. Remove once
+  // every s2s caller signs (the SDLC team is adding X-Xyne-Signature).
+  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
+  if (unsignedS2S) {
+    clog.warn(`[webhook/app] UNSIGNED s2s request allowed spacesAppId=${spacesAppId} — caller must add X-Xyne-Signature; this bypass is temporary`);
+  } else {
+    let verified = false;
+    await verifySpacesSignature(req, res, () => {
+      verified = true;
+    });
+    if (!verified || res.headersSent) return;
+  }
 
   if (isAutomationRequest) {
     const agent = await agentRepository.findBySpacesAppId(spacesAppId);
@@ -5936,11 +6595,19 @@ router.post("/:agentSlug", async (req: Request, res: Response): Promise<void> =>
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
+  // TEMPORARY (2026-08-10): same unsigned-s2s bypass as /app/:spacesAppId —
+  // warn and allow ONLY when the s2s key matches and the signature header is
+  // entirely absent. Remove once every s2s caller signs.
+  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
+  if (unsignedS2S) {
+    clog.warn(`[webhook] UNSIGNED s2s request allowed agentSlug=${agentSlug} — caller must add X-Xyne-Signature; this bypass is temporary`);
+  } else {
+    let verified = false;
+    await verifySpacesSignature(req, res, () => {
+      verified = true;
+    });
+    if (!verified || res.headersSent) return;
+  }
 
   if (isAutomationRequest) {
     await handleAutomationWebhook(req, res, agentSlug);

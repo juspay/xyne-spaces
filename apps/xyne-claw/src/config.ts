@@ -43,6 +43,17 @@ const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmMod
 export const LITELLM = {
   url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
+  // Separate low-priority key for non-interactive load: automation/scheduled
+  // agent runs and background curators. Keeps batch traffic from saturating
+  // the interactive key's max_parallel_requests pool (prod incident 2026-07-29:
+  // email-followup-classifier + curators pinned the shared key at 50/50 slots,
+  // queueing human mentions for minutes). Falls back to the main key so the
+  // split can deploy before the second key is provisioned.
+  automationApiKey: process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? ""),
+  // Optional cheaper/faster model for automation/scheduled runs. Falls back to
+  // the main model, and a per-agent modelSettings.model still wins over this —
+  // it only replaces the PLATFORM DEFAULT for batch traffic.
+  automationModel: process.env["LITELLM_AUTOMATION_MODEL"]?.trim() || litellmModel,
   model: litellmModel,
   // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
   // Boss decisions are short structured calls; running them on the same big
@@ -65,22 +76,6 @@ export const GCS = {
   // every run with SessionRestoreFailedError before the agent starts. Always
   // empty in production, where the SDK uses ADC / Workload Identity.
   fakeHost: normalizeFakeGcsHost(),
-} as const;
-
-/**
- * Object storage provider selection — 'gcs' (default) or 's3'. Consumed by
- * storage.ts via the shared @xyne/storage factory. Env names match the Spaces
- * backend (config/env.ts) and claw-auth so one set of envs configures all
- * three apps: STORAGE_PROVIDER, AWS_REGION, AWS_ACCESS_KEY_ID,
- * AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME, S3_ENDPOINT.
- */
-export const STORAGE = {
-  provider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
-  s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
-  s3BucketName: process.env["S3_BUCKET_NAME"] ?? GCS.bucketName,
-  s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
-  s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
-  s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
 } as const;
 
 function normalizeFakeGcsHost(): string {
