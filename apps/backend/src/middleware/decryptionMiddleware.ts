@@ -31,7 +31,6 @@ export async function decryptRequestBodyMiddleware(
   next: NextFunction,
 ): Promise<void> {
   try {
-    console.log('decryptRequestBodyMiddleware: Checking for encrypted fields in request body');
     const method = req.method?.toUpperCase();
 
     if (!['POST', 'PUT', 'PATCH'].includes(method) || !req.body || typeof req.body !== 'object') {
