@@ -27,6 +27,7 @@ import {
   Mic,
   Hash,
   Lock,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -148,10 +149,15 @@ function ContextPill({
   );
 }
 
-// Ghost toolbar button matching the /ai composer's look.
+// Ghost toolbar button matching the /ai composer's look. `visibleText` is
+// opt-in — when set, the button widens into a pill with the icon plus a text
+// node instead of the default icon-only circle (used for the Instant toggle
+// so it reads as a named mode, not just an icon other buttons could be
+// mistaken for).
 function ToolbarButton({
   icon,
   label,
+  visibleText,
   onClick,
   active,
   activeClass,
@@ -160,6 +166,7 @@ function ToolbarButton({
 }: {
   icon: ReactElement;
   label: string;
+  visibleText?: string;
   onClick: () => void;
   active?: boolean;
   activeClass?: string;
@@ -175,7 +182,8 @@ function ToolbarButton({
       title={label}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
+        'inline-flex h-8 shrink-0 items-center justify-center rounded-full transition',
+        visibleText ? 'gap-1 px-2.5' : 'w-8',
         active
           ? (activeClass ?? 'bg-secondary text-foreground')
           : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
@@ -185,6 +193,7 @@ function ToolbarButton({
       data-track-name={trackName}
     >
       {icon}
+      {visibleText && <span className='text-xs font-medium'>{visibleText}</span>}
     </button>
   );
 }
@@ -225,6 +234,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+  const [instant, setInstant] = useState(() => seed.instant);
 
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -250,6 +260,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
+      instant,
     }),
     [
       selections,
@@ -258,6 +269,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
+      instant,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -750,6 +762,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 active={createCanvasEnabled}
                 activeClass='bg-secondary text-primary'
                 trackName='TOGGLE_CREATE_CANVAS'
+              />
+              <ToolbarButton
+                icon={<Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
+                label={instant ? 'Instant answer enabled' : 'Answer from Knowledge Base only, instantly'}
+                visibleText='Instant'
+                onClick={() => setInstant(v => !v)}
+                active={instant}
+                activeClass='bg-secondary text-status-pending'
+                trackName='TOGGLE_INSTANT'
               />
             </div>
 
