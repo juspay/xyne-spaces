@@ -42,6 +42,8 @@ import {
   type ContextSelections,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
+import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
+import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 
 export interface AIComposerAttachment {
   id: string;
@@ -234,7 +236,24 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
-  const [instant, setInstant] = useState(() => seed.instant);
+
+  // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
+  // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
+  // request to an instant agent always runs instant (enforced server-side
+  // regardless of what this composer sends), so there's no per-message
+  // choice; the same `['accessible-claw-agents']` query the agent selector
+  // uses is free here via the React Query cache.
+  const { selectedAgentSlug } = useSelectedAgent();
+  const { data: composerAgents } = useQuery({
+    queryKey: ['accessible-claw-agents'],
+    queryFn: fetchAccessibleClawAgents,
+    staleTime: 5 * 60 * 1000,
+  });
+  const selectedAgent = useMemo(
+    () => composerAgents?.find((a) => a.slug === selectedAgentSlug) ?? null,
+    [composerAgents, selectedAgentSlug],
+  );
+  const instant = selectedAgent?.instantAgent === true;
 
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -763,15 +782,24 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 activeClass='bg-secondary text-primary'
                 trackName='TOGGLE_CREATE_CANVAS'
               />
-              <ToolbarButton
-                icon={<Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
-                label={instant ? 'Instant answer enabled' : 'Answer from Knowledge Base only, instantly'}
-                visibleText='Instant'
-                onClick={() => setInstant(v => !v)}
-                active={instant}
-                activeClass='bg-secondary text-status-pending'
-                trackName='TOGGLE_INSTANT'
-              />
+              {/* Locked indicator, not a toggle — only rendered when the
+                  selected agent is configured as an "Instant Agent"
+                  (agent.config.instantAgent, see xyne-claw-auth's
+                  AgentDetailLeftColumn.tsx). Every request to such an
+                  agent always runs instant (enforced server-side in
+                  agent-chat.ts/run-stream.ts regardless of what this
+                  composer sends), so there's nothing to toggle — other
+                  agents show no instant affordance at all. */}
+              {instant && (
+                <div
+                  title='This agent always answers instantly from the Knowledge Base'
+                  aria-label='Instant agent'
+                  className='inline-flex h-8 shrink-0 cursor-default items-center justify-center gap-1 rounded-full bg-secondary px-2.5 text-status-pending'
+                >
+                  <Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />
+                  <span className='text-xs font-medium'>Instant</span>
+                </div>
+              )}
             </div>
 
             <div className='flex shrink-0 items-center gap-1.5'>
