@@ -257,6 +257,40 @@ export const recordingStore = createStore({
         }
       };
 
+      const handleRoomDisconnected = (): void => {
+        const current = recordingStore.getSnapshot().context;
+        if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
+
+        const message =
+          'Recording stopped because its session was disconnected and could not be saved.';
+        logger.error(Event.RECORDING_ERROR, { error: message });
+        toast.error('Recording stopped', {
+          description: 'We could not save this recording. Please try again.',
+          duration: 6000,
+        });
+        recordingStore.send({ type: 'error', error: message });
+      };
+
+      const handleRoomMetadataChanged = (metadata: string): void => {
+        try {
+          const data = JSON.parse(metadata) as { recordingStartFailure?: unknown };
+          if (data.recordingStartFailure !== true) return;
+
+          const current = recordingStore.getSnapshot().context;
+          if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
+
+          const message = 'Recording could not be saved because its session could not be created.';
+          logger.error(Event.RECORDING_ERROR, { error: message });
+          toast.error('Recording stopped', {
+            description: 'We could not save this recording. Please try again.',
+            duration: 6000,
+          });
+          recordingStore.send({ type: 'error', error: message });
+        } catch {
+          // Ignore malformed room metadata.
+        }
+      };
+
       const handleDataReceived = (
         payload: Uint8Array,
         _participant?: unknown,
@@ -297,12 +331,16 @@ export const recordingStore = createStore({
       room.on(RoomEvent.DataReceived, handleDataReceived);
       room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
       room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+      room.on(RoomEvent.Disconnected, handleRoomDisconnected);
+      room.on(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
 
       transcriptUnsubscribe = (): void => {
         clearAgentLeftTimer();
         room.off(RoomEvent.DataReceived, handleDataReceived);
         room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
         room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
+        room.off(RoomEvent.Disconnected, handleRoomDisconnected);
+        room.off(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
       };
 
       playAudio(AUDIO_PATHS.RECORDING_START);
