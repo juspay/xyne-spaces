@@ -106,6 +106,7 @@ import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
+import { RecordingFallbackCoordinator } from '../components/Recording/RecordingFallbackCoordinator';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
@@ -729,6 +730,7 @@ const AppRoot = (): ReactElement => {
                   <>
                     <IncomingCallModal />
                     <GlobalCallOverlay />
+                    <RecordingFallbackCoordinator />
                     {recordingVersion === 'v2' ? <NoteTakerOverlayHost /> : <RecordingOverlay />}
                     <GlobalUploadProgress />
                     <NotificationHandler />

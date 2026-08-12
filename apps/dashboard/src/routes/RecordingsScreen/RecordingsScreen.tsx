@@ -7,7 +7,7 @@
  * Recording persists across navigation via the global RecordingOverlay.
  */
 
-import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { v4 as uuidv4 } from 'uuid';
@@ -128,7 +128,6 @@ export default function RecordingsScreen(): ReactElement {
   const [savingTitle, setSavingTitle] = useState(false);
   // True when the title modal was opened because the agent dropped (auto-end),
   // not by a user-initiated stop. Drives the warning banner in SaveTitleModal.
-  const [endedByAgentDrop, setEndedByAgentDrop] = useState(false);
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
   // Multi-select for bulk actions (delete / ask AI)
@@ -152,10 +151,10 @@ export default function RecordingsScreen(): ReactElement {
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const autoStartRequestedAt = useRecordingStore(ctx => ctx.autoStartRequestedAt);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
-  const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
   const activeLayout = useRecordingStore(ctx => ctx.activeLayout);
   const isTranscriptMinimized = useRecordingStore(ctx => ctx.isTranscriptMinimized);
+  const fallbackReasons = useRecordingStore(ctx => ctx.fallbackReasons);
 
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [canvasCreationFailed, setCanvasCreationFailed] = useState(false);
@@ -180,15 +179,8 @@ export default function RecordingsScreen(): ReactElement {
     }
   }, [isActive]);
 
-  // Stable callback passed to the connection hook — stops the recording and
-  // shows the save-title modal when the room disconnects unexpectedly.
-  const handleUnexpectedDisconnect = useCallback((): void => {
-    sendRecordingEvent({ type: 'stopRecording' });
-    setShowTitleModal(true);
-  }, []);
-
   const { roomConnectionState, showConnectionWarning, networkQuality, dismissConnectionWarning } =
-    useRecordingConnectionState(room, isActive, recordingStatus, handleUnexpectedDisconnect);
+    useRecordingConnectionState(room, isActive, recordingStatus);
 
   // Live transcript streaming from global store (subscription is managed by the store)
   const { transcripts } = useTranscriptStream();
@@ -334,18 +326,6 @@ export default function RecordingsScreen(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingStop, recordingStatus]);
 
-  // Agent dropped mid-recording → auto-end and show the save-title modal with a
-  // notice. No confirmation: a note-taker with no transcription can't continue.
-  useEffect(() => {
-    if (agentLeft && (recordingStatus === 'recording' || recordingStatus === 'paused')) {
-      lastExternalIdRef.current = externalId;
-      setEndedByAgentDrop(true);
-      sendRecordingEvent({ type: 'stopRecording' }); // clears agentLeft in the store
-      setShowTitleModal(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLeft, recordingStatus]);
-
   // ─── REMOVED: connection state management moved to useRecordingConnectionState ───
   // See hooks/useRecordingConnectionState.ts
 
@@ -361,7 +341,6 @@ export default function RecordingsScreen(): ReactElement {
       }
       await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
       setShowTitleModal(false);
-      setEndedByAgentDrop(false);
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
     } catch {
@@ -866,6 +845,12 @@ export default function RecordingsScreen(): ReactElement {
         )}
       </div>
 
+      {isActive && fallbackReasons.length > 0 && (
+        <div className='fixed bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-full bg-amber-100 px-4 py-2 text-xs font-medium text-amber-900 shadow dark:bg-amber-950 dark:text-amber-100'>
+          Local protection active — transcript will catch up after recovery
+        </div>
+      )}
+
       {/* ─── Sticky Bottom Control Bar (always visible) ───── */}
       <RecordingControlBar
         isRecording={recordingStatus === 'recording' || recordingStatus === 'paused'}
@@ -884,7 +869,7 @@ export default function RecordingsScreen(): ReactElement {
         defaultTitle={generateAutoTitle()}
         onSave={handleSaveTitle}
         isSaving={savingTitle}
-        endedByAgentDrop={endedByAgentDrop}
+        endedByAgentDrop={false}
       />
 
       {/* ─── Bulk Delete Confirmation Dialog ───── */}

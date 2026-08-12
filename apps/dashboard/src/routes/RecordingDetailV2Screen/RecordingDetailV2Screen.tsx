@@ -7,8 +7,10 @@ import { motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
+  RECORDING_REPAIR_MERGED_EVENT,
   recordingService,
   type RecordingDetail,
+  type RecordingRepairMergedEventDetail,
   type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
@@ -318,6 +320,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   useEffect(() => {
     if (recordingId) void loadRecording(recordingId);
+  }, [recordingId]);
+
+  useEffect(() => {
+    const handleMerged = (event: Event): void => {
+      const detail = (event as CustomEvent<RecordingRepairMergedEventDetail>).detail;
+      if (recordingId && detail?.callId === recordingId) void loadRecording(recordingId);
+    };
+    window.addEventListener(RECORDING_REPAIR_MERGED_EVENT, handleMerged);
+    return (): void => window.removeEventListener(RECORDING_REPAIR_MERGED_EVENT, handleMerged);
   }, [recordingId]);
 
   // A summary asked for on a previous visit is still pending, so restore the skeleton.

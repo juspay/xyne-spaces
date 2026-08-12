@@ -1,5 +1,14 @@
 import { GCSService } from './gcsService.js';
-import type { StorageService, UploadOptions, UploadResult, UploadToPathOptions, DeleteResult, FileMetadata, ListedFile } from './types.js';
+import type {
+  StorageService,
+  UploadOptions,
+  UploadResult,
+  UploadToPathOptions,
+  ConditionalUploadResult,
+  DeleteResult,
+  FileMetadata,
+  ListedFile,
+} from './types.js';
 
 export class GCSAdapter implements StorageService {
   constructor(private gcs: GCSService) {}
@@ -32,6 +41,14 @@ export class GCSAdapter implements StorageService {
   async uploadStreamToPath(stream: NodeJS.ReadableStream, options: UploadToPathOptions): Promise<UploadResult> {
     const r = await this.gcs.uploadStreamToPath(stream, options);
     return { filename: r.filename, path: r.gcsPath, size: r.size };
+  }
+
+  async uploadFileIfAbsent(
+    buffer: Buffer,
+    options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> },
+  ): Promise<ConditionalUploadResult> {
+    const result = await this.gcs.uploadFileV2IfAbsent(buffer, options);
+    return { filename: result.filename, path: result.gcsPath, size: result.size, created: result.created };
   }
 
   async deleteFile(filename: string): Promise<DeleteResult> {

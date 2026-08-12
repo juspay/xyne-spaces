@@ -1,4 +1,5 @@
 import { Prisma, type Call } from '@prisma/client';
+import { CallType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -142,7 +143,7 @@ class NoteTakerTranscriptService {
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
 
-      await this.generateAndSaveSummary(call, formattedTranscript);
+      const generatedTitle = await this.generateAndSaveSummary(call, formattedTranscript);
       const detailedSummary = await this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelIds = await this.generateAndSaveLabels(call, formattedTranscript);
       const markedItems = await this.generateMarkedItemsList(call, formattedTranscript);
@@ -150,12 +151,104 @@ class NoteTakerTranscriptService {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
+          generatedLabelIds: labelIds.length > 0 ? labelIds : undefined,
+          generatedTitle: generatedTitle ?? undefined,
         },
         labels: labelIds,
         markedItems,
         summaryTemplateId: detailedSummary?.summaryTemplateId,
       });
       await this.queueVespaIndexing(call);
+    } finally {
+      await releaseLock(lockHandle);
+    }
+  }
+
+  /**
+   * Merge locally captured outage audio into the canonical note-taker transcript.
+   * Canonical JSONL and Call.transcript persistence are strict; derived AI outputs
+   * are best-effort and retain their last known-good values on failure.
+   */
+  async applyRecordingRepair(
+    callId: string,
+    repairEntries: TranscriptEntry[],
+    coverage: Array<{ startedAt: number; endedAt: number }>,
+  ): Promise<void> {
+    const lockHandle = await acquireLock(`lock:note-taker-transcript-processing:${callId}`, {
+      ttlSeconds: 180,
+      waitTimeoutMs: 30_000,
+      retryDelayMs: 300,
+    });
+    if (!lockHandle) throw new Error('Timed out waiting for note-taker transcript lock');
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call || call.callType !== CallType.HEADLESS) {
+        throw new Error('Headless recording not found');
+      }
+      const rawContent = await transcriptService.retrieveTranscriptAllowEmpty(callId);
+      const baseEntries = rawContent ? transcriptService.parseTranscriptEntries(rawContent) : [];
+      const mergedEntries = [
+        ...baseEntries.filter(entry => {
+          const timestampMs = entry.timestamp * 1000;
+          return !coverage.some(interval =>
+            timestampMs >= interval.startedAt && timestampMs < interval.endedAt,
+          );
+        }),
+        ...repairEntries,
+      ].sort((left, right) => left.timestamp - right.timestamp);
+
+      await transcriptService.persistRawTranscript(callId, mergedEntries);
+      // Unlike ordinary processing, a repair must not become MERGED unless the
+      // formatted transcript path is durably visible on Call.transcript.
+      await this.attachTranscript(call, mergedEntries);
+
+      // The identified transcript cannot contain locally recovered audio, so
+      // repaired AI outputs must use the newly committed canonical entries.
+      const formattedTranscript = transcriptService.formatTranscript(mergedEntries, callId);
+      if (!formattedTranscript) {
+        await this.finalizeCallUpdates(call, { metadata: { transcriptEntryCount: mergedEntries.length } });
+        return;
+      }
+
+      const metadata = this.getMetadata(call);
+      const previousGeneratedLabels = Array.isArray(metadata.generatedLabelIds)
+        ? metadata.generatedLabelIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      const previousGeneratedTitle =
+        typeof metadata.generatedTitle === 'string' ? metadata.generatedTitle : null;
+
+      const generatedTitle = await this.generateAndSaveSummary(
+        call,
+        formattedTranscript,
+        previousGeneratedTitle,
+      ).catch(error => {
+        logger.error(`[${callId}] repair_summary_refresh_failed`, { error, path: 'note_taker' });
+        return null;
+      });
+      const detailedSummary = await this.generateDetailedSummaryCanvas(call, formattedTranscript);
+      const generatedLabels = await this.generateAndSaveLabels(call, formattedTranscript);
+      const generatedMarkedItems = await this.generateMarkedItemsList(call, formattedTranscript);
+      const current = (await repositories.calls.findByExternalId(callId)) ?? call;
+      const labels = generatedLabels.length > 0
+        ? [...new Set([
+            ...(current.labels ?? []).filter(id => !previousGeneratedLabels.includes(id)),
+            ...generatedLabels,
+          ])]
+        : undefined;
+
+      await this.finalizeCallUpdates(current, {
+        metadata: {
+          transcriptEntryCount: mergedEntries.length,
+          detailedSummaryCanvasId: detailedSummary?.canvasId,
+          generatedLabelIds: generatedLabels.length > 0 ? generatedLabels : undefined,
+          generatedTitle: generatedTitle ?? undefined,
+        },
+        labels,
+        markedItems: generatedMarkedItems,
+        summaryTemplateId: detailedSummary?.summaryTemplateId,
+      });
+      await this.queueVespaIndexing(current);
     } finally {
       await releaseLock(lockHandle);
     }
@@ -223,12 +316,15 @@ class NoteTakerTranscriptService {
   }
 
   private getStoredEntryCount(call: Call): number {
-    const metadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : null;
+    const metadata = this.getMetadata(call);
     const stored = metadata?.transcriptEntryCount;
     return typeof stored === 'number' ? stored : -1;
+  }
+
+  private getMetadata(call: Call): Record<string, unknown> {
+    return call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+      ? (call.metadata as Record<string, unknown>)
+      : {};
   }
 
   /**
@@ -342,7 +438,8 @@ class NoteTakerTranscriptService {
   private async generateAndSaveSummary(
     call: Call,
     formattedTranscript: string,
-  ): Promise<void> {
+    replaceGeneratedTitle: string | null = null,
+  ): Promise<string | null> {
     const callId = call.externalId;
 
     // Number the transcript so the LLM can cite segments with [clf-N] tokens.
@@ -358,7 +455,7 @@ class NoteTakerTranscriptService {
         });
         return null;
       }),
-      call.title
+      call.title && replaceGeneratedTitle === null
         ? Promise.resolve(null)
         : transcriptService.generateCallTitle(formattedTranscript, callId).catch((err) => {
             logger.error(`[${callId}] generate_title_threw`, {
@@ -378,21 +475,21 @@ class NoteTakerTranscriptService {
 
     if (!summary && !title) {
       logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
-      return;
+      return null;
     }
 
     // `call` was snapshotted when processing started, which by now can be a minute
     // ago — long enough for the user to have renamed the recording while the LLM was
     // working. Re-read the title so the generated one never lands on a name they typed.
-    const titleToSave =
-      title && !(await repositories.calls.findByExternalId(callId))?.title ? title : null;
+    const latestTitle = (await repositories.calls.findByExternalId(callId))?.title;
+    const titleToSave = title && (!latestTitle || latestTitle === replaceGeneratedTitle) ? title : null;
 
     if (!summary && !titleToSave) {
       logger.info(`[${callId}] ai_title_discarded`, {
         reason: 'renamed_during_processing',
         path: 'note_taker',
       });
-      return;
+      return null;
     }
 
     try {
@@ -410,7 +507,7 @@ class NoteTakerTranscriptService {
       // P2025: call was deleted while summary was being generated — ignore gracefully
       if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
         logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-        return;
+        return null;
       }
       logger.error(`[${callId}] call_record_update_failed`, {
         stage: 'call_record_update',
@@ -418,8 +515,9 @@ class NoteTakerTranscriptService {
         error: updateError,
         stack: updateError instanceof Error ? updateError.stack : undefined,
       });
-      return;
+      return null;
     }
+    return titleToSave;
   }
 
   /**
