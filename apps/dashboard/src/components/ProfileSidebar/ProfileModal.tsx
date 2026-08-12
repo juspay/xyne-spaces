@@ -87,6 +87,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
             <UserProfile
               userId={userId}
               isOwnProfile={isOwnProfile}
+              headerLayout='inline'
               className='border-0 shadow-none rounded-none'
             />
           ) : (
