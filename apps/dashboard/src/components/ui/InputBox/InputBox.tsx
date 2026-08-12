@@ -632,6 +632,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       onSelectionUpdate: ({ editor }) => {
         setIsInCodeBlock(editor.isActive('codeBlock'));
+
+        if (features.richText && !isMobile && !editor.state.selection.empty) {
+          setShowFormatToolbar(true);
+        }
       },
       onUpdate: ({ editor }) => {
         const textContent = editor.getText().trim();
