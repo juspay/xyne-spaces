@@ -291,6 +291,29 @@ export class LiveKitService {
     }
   }
 
+  /**
+   * Tell a connected note-taker client that its backing Call row could not be
+   * created. The client consumes this before the room is terminated.
+   */
+  async notifyRecordingStartFailure(roomName: string): Promise<void> {
+    const rooms = await this.roomService.listRooms([roomName]);
+    if (!rooms || rooms.length === 0) return;
+
+    const existingMetadata = parseRoomMetadata(
+      roomName,
+      rooms[0].metadata,
+      'recording_start_failure',
+    );
+    await this.roomService.updateRoomMetadata(
+      roomName,
+      JSON.stringify({
+        ...existingMetadata,
+        recordingStartFailure: true,
+        recordingStartFailureVersion: Date.now(),
+      }),
+    );
+  }
+
   async updateParticipantPublishSources(
     roomName: string,
     identity: string,
