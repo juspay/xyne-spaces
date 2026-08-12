@@ -52,6 +52,7 @@ import { decryptStoredField } from "../surfaces/spaces/client.js";
 
 import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { isInstantAgent, resolvePreviousTurnContext, resolveInstantHistory } from "../lib/instant-context.js";
 import type { SessionContext } from "./webhook.js";
 const log = createLogger("run");
 
@@ -426,6 +427,8 @@ async function resolveAgent(
 ): Promise<
   | {
       id: string;
+      name: string;
+      description: string;
       systemPrompt: string;
       modelId?: string | undefined;
       agentConfig: Record<string, unknown>;
@@ -494,6 +497,8 @@ async function resolveAgent(
 
   return {
     id: agent.id,
+    name: agent.name,
+    description: agent.description ?? "",
     systemPrompt: agent.systemPrompt,
     modelId: agent.modelId || undefined,
     orgId: agent.orgId,
@@ -914,6 +919,23 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: agent.error });
       return;
     }
+
+    // Instant mode: a persisted per-agent setting (agent.config.instantAgent),
+    // not a per-message toggle — see isInstantAgent's doc comment. When set,
+    // claw runs the single-search/single-answer instant path instead of the
+    // full agentic loop (apps/xyne-claw/src/instant-run.ts, short-circuited
+    // at the top of processTask). The two Postgres reads instant mode needs
+    // that claw has no access path to — the previous turn's retrieved
+    // context, and this conversation's plain-text history (instant mode has
+    // no persistent session on claw to carry these forward on its own) —
+    // are resolved here and forwarded in the request body below.
+    const instant = isInstantAgent(agent.config);
+    const [instantPreviousTurnContext, instantHistory] = instant && conversationId
+      ? await Promise.all([
+          resolvePreviousTurnContext(conversationId, agentSlug || "assistant"),
+          resolveInstantHistory(conversationId, agentSlug || "assistant"),
+        ])
+      : [null, []];
 
     // Per-run provider/model pin. Validate up-front (clean 400) — once the SSE
     // stream opens we can only fail mid-stream. Mirrors the agent-chat route.
@@ -1421,6 +1443,10 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...(agent.modelId ? { modelId: agent.modelId } : {}),
       agentConfig: mergedAgentConfig,
       agentSlug,
+      ...(instant ? { instant: true } : {}),
+      ...(instant && instantHistory.length > 0 ? { instantHistory } : {}),
+      ...(instant && instantPreviousTurnContext ? { previousTurnContext: instantPreviousTurnContext } : {}),
+      ...(instant ? { followUpAgentContext: { name: agent.name, description: agent.description } } : {}),
       channelId: effectiveChannelId,
       ...(projectId ? { projectId } : {}),
       ...(projectName ? { projectName } : {}),

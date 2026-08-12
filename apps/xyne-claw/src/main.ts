@@ -13,8 +13,6 @@ import { debugRouter } from "./routes/debug.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
 import { evalExtractRouter } from "./routes/eval-extract.js";
 import { entityLlmRouter } from "./routes/entity-llm.js";
-import { instantAskRouter } from "./routes/instant-ask.js";
-import { followUpRouter } from "./routes/follow-up.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
@@ -71,8 +69,6 @@ app.use(debugRouter);
 app.use(evalJudgeRouter);
 app.use(evalExtractRouter);
 app.use(entityLlmRouter);
-app.use(instantAskRouter);
-app.use(followUpRouter);
 app.use(attachmentsRouter);
 
 const server = app.listen(SERVER.port, () => {

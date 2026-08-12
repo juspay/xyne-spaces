@@ -632,10 +632,11 @@ export const agentRunRepository = {
 
   /**
    * Most recent completed run's toolInvocations for a conversation+agent —
-   * used by instant mode's follow-up path (lib/instant-ask.ts) to reuse the
-   * previous turn's cited doc(s) instead of re-searching the whole KB. Only
-   * ever called after classify has already flagged isFollowUp=true, so this
-   * query never runs on the normal-answer path.
+   * used by instant mode's follow-up path (lib/instant-context.ts's
+   * resolvePreviousTurnContext) to reuse the previous turn's cited doc(s)
+   * instead of re-searching the whole KB. Only ever called after classify
+   * has already flagged isFollowUp=true, so this query never runs on the
+   * normal-answer path.
    */
   findLatestToolInvocations: (conversationId: string, agentSlug: string) =>
     prisma.agentRun.findFirst({

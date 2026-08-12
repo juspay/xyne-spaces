@@ -31,8 +31,6 @@ import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
-import { answerInstantAsk, resolveInstantAgentContext, isInstantAgent } from "../lib/instant-ask.js";
-import { persistInstantDebugTrace, readInstantDebugTrace } from "../lib/instant-debug-store.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
@@ -1032,8 +1030,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     //     endpoint can pair runs ↔ assistant messages once branching produces
     //     multiple siblings under the same user parent).
     // Kept alongside the trimmed `existingMessages` below (content-free, for
-    // PI-branch path resolution) since the instant branch needs turn content
-    // for its history — re-fetching would be a redundant round trip.
+    // PI-branch path resolution) so `existingMessages` can be derived from it
+    // without a redundant round trip.
     const existingMessageRows = existingConvId
       ? await chatMessageRepository.findByConversation(conversationId)
       : [];
@@ -1169,161 +1167,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       parentId: assistantParentId,
       orgId: agent.orgId,
     });
-
-    // Single search + single answer pass, no claw dispatch at all — no PI
-    // session, no webhook round trip, none of the studioMode/design-selection/
-    // attached-context machinery below (all irrelevant to a KB-only answer).
-    // Mirrors run-stream.ts's instant branch; see lib/instant-ask.ts for the
-    // full rationale. Gated on the AGENT's own config, not the client-sent
-    // `instant` flag — see isInstantAgent's doc comment.
-    if (isInstantAgent(agent.config)) {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      });
-      res.write(`event: meta\ndata: ${JSON.stringify({ conversationId })}\n\n`);
-
-      const instantSessionId = `instant-${randomUUID()}`;
-      // Mirrors the normal agentic path's early `event: run` (line ~1604) —
-      // see run-stream.ts's matching addition for why: without this, callers
-      // that key off `event: run` for the resolved sessionId (this route's
-      // own SSE contract, matched by any consumer treating this the same as
-      // a normal dispatch) never learn it until the very end.
-      res.write(`event: run\ndata: ${JSON.stringify({ sessionId: instantSessionId, conversationId })}\n\n`);
-
-      // Awaited (unlike a normal run's fire-and-forget start()) — there, a
-      // real webhook round trip to claw provides a wide window before
-      // finalize() runs. Here the whole flow is one fast in-process call, so
-      // start() must actually land before finalize() tries to UPDATE the
-      // same row.
-      let instantRunStarted = true;
-      await agentRunRepository.start({
-        sessionId: instantSessionId,
-        userId,
-        agentSlug: slug,
-        orgId: agent.orgId,
-        triggerSource: "chat",
-        task: message.trim(),
-        conversationId,
-      }).catch((e: unknown) => {
-        instantRunStarted = false;
-        log.warn("[agent-chat] instant AgentRun.start failed:", e instanceof Error ? e.message : String(e));
-      });
-
-      try {
-        const instantHistory = existingMessageRows
-          .filter((m) => m.agentSlug === slug && (m.role === "user" || m.role === "assistant") && m.content.trim())
-          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
-
-        const { agentPrompt, providerConfig } = await resolveInstantAgentContext(agent);
-
-        const instantStartedAt = new Date().toISOString();
-
-        // Debug events and answer tokens stream live as they happen — same
-        // shapes/timing as a normal agentic dispatch's onDebug/onTextDelta.
-        // Only the terminal `done` frame still waits on persistence below.
-        const instantResult = await answerInstantAsk({
-          userId,
-          agentSlug: slug,
-          conversationId,
-          sessionId: instantSessionId,
-          task: message.trim(),
-          history: instantHistory,
-          ...(agentPrompt ? { agentPrompt } : {}),
-          ...(providerConfig ? { providerConfig } : {}),
-          onDebugEvent: (debugEvent) => {
-            res.write(`event: debug\ndata: ${JSON.stringify({ debugEvent })}\n\n`);
-          },
-          // This route's own SSE contract (see lib/api.ts's sendChatMessage
-          // parser, the Claw dashboard's actual consumer) is `event: text` +
-          // `{delta}` — a DIFFERENT shape than run-stream.ts's `event: delta`
-          // + `{content}` used for the Spaces dashboard. Matching the wrong
-          // one here means `onTextDelta` silently never fires client-side —
-          // the message would just sit blank until the `done` frame.
-          onTextDelta: (delta) => {
-            res.write(`event: text\ndata: ${JSON.stringify({ delta })}\n\n`);
-            if (CONFIG.liveToolCallsEnabled) {
-              pushDelta(instantSessionId, conversationId, slug, assistantMsg.id, delta, undefined, userId);
-            }
-          },
-          // Same contract note as above — this route uses `event: tool` +
-          // `{toolInvocation}` (sendChatMessage's `case "tool"`), not
-          // run-stream.ts's `event: invocation` + raw object.
-          onToolInvocation: (toolInvocation) => {
-            res.write(`event: tool\ndata: ${JSON.stringify({ toolInvocation })}\n\n`);
-          },
-        });
-
-        // Persist BEFORE writing the terminal `done` frame — see
-        // run-stream.ts's instant branch for why (closes the "Debug this
-        // response" race against AgentRun.finalize()).
-        await Promise.all([
-          chatMessageRepository.update(assistantMsg.id, {
-            content: instantResult.content,
-            status: "completed",
-          }).catch((e: unknown) => log.warn("[agent-chat] instant persist failed:", e instanceof Error ? e.message : String(e))),
-          instantRunStarted
-            ? agentRunRepository.finalize(instantSessionId, {
-                status: "completed",
-                result: instantResult.content,
-                toolsUsed: ["kb-search"],
-                toolInvocations: instantResult.toolInvocations,
-                chatMessageId: assistantMsg.id,
-              }).catch((e: unknown) => log.warn("[agent-chat] instant AgentRun.finalize failed:", e instanceof Error ? e.message : String(e)))
-            : Promise.resolve(),
-          // Debug trace storage — claw-auth's own local dir + GCS, mirroring
-          // claw's own session-store.ts pattern (see lib/instant-debug-store.ts).
-          // Neither Postgres nor claw's PVC are involved for this data anymore.
-          persistInstantDebugTrace({
-            conversationId,
-            agentSlug: slug,
-            userId,
-            sessionId: instantSessionId,
-            task: message.trim(),
-            startedAt: instantStartedAt,
-            finishedAt: new Date().toISOString(),
-            lastAssistantText: instantResult.content,
-            toolInvocations: instantResult.toolInvocations,
-            events: instantResult.debugEvents,
-            totalMs: Date.now() - Date.parse(instantStartedAt),
-          }).catch(() => false),
-        ]);
-
-        // Mirrors the claw-dispatch branch's `event: debug_artifacts_ready`
-        // (line ~302) — the dashboard's debug panel listens for this specific
-        // event to auto-refetch (see run-stream.ts's matching addition for
-        // the full rationale). Without it the panel went blank at turn-end
-        // until a manual "Refresh" click, even though the data was already
-        // persisted.
-        res.write(`event: debug_artifacts_ready\ndata: ${JSON.stringify({ sessionId: instantSessionId, conversationId })}\n\n`);
-
-        if (CONFIG.liveToolCallsEnabled) {
-          publishLiveEvent(conversationId, { type: "done", conversationId, agentSlug: slug, userId, status: "completed", ts: Date.now() });
-        }
-        endDeltaCoalescer(instantSessionId);
-
-        res.write(`event: done\ndata: ${JSON.stringify({
-          content: instantResult.content,
-          status: "completed",
-          conversationId,
-          id: assistantMsg.id,
-          ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
-          ...(assistantParentId ? { parentId: assistantParentId } : {}),
-        })}\n\n`);
-        res.end();
-      } catch (err) {
-        const errMessage = err instanceof Error ? err.message : "Instant answer failed";
-        log.error("[agent-chat] instant answer failed:", errMessage);
-        await chatMessageRepository.update(assistantMsg.id, { content: errMessage, status: "failed" }).catch(() => {});
-        if (!res.writableEnded) {
-          res.write(`event: error\ndata: ${JSON.stringify({ error: errMessage })}\n\n`);
-          res.end();
-        }
-      }
-      return;
-    }
 
     // If this turn requires a branched PI session, clone it now (S2S to claw).
     if (cloneSourcePiConversationId) {
@@ -2582,10 +2425,9 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     if (upstream.status === 404) {
       // No completed artifacts on claw's PVC yet — either the run is still in
       // flight (claw's incremental write hasn't landed) or this conversation
-      // has no agentic runs at all (instant-only — handled separately below,
-      // via claw-auth's own storage, not claw's PVC). Synthesize a bundle
-      // from the durable agent_run rows for in-progress agentic runs so the
-      // drawer shows tool calls live instead of 404ing until completion.
+      // has no runs at all. Synthesize a bundle from the durable agent_run
+      // rows for in-progress runs so the drawer shows tool calls live instead
+      // of 404ing until completion.
       const inProgressRuns = hasElevatedDebugAccess
         ? await agentRunRepository.listByConversation(req.params.convId, requesterId)
         : await agentRunRepository.listByUser(requesterId, { conversationId: req.params.convId, agentSlug: req.params.slug });
@@ -2624,32 +2466,6 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       body = (await upstream.json()) as typeof body;
     }
 
-    // Instant runs live entirely in claw-auth's own local+GCS storage now —
-    // never on claw's PVC, never in Postgres. Always check it and merge in,
-    // regardless of whether the above found agentic data: a conversation can
-    // freely mix instant and agentic turns under the same agent (the toggle
-    // is per-message), and the debugger should show all of them together.
-    const instantBundle = await readInstantDebugTrace(req.params.convId, req.params.slug).catch((err: unknown) => {
-      log.warn("[agent-chat] instant debug read failed:", err instanceof Error ? err.message : String(err));
-      return null;
-    });
-    if (instantBundle && body.data) {
-      const instantRuns = instantBundle.runs.map((r) => ({
-        fileName: r.fileName,
-        data: { ...r.data, debugEvents: instantBundle.debugEvents },
-      }));
-      body.data = {
-        ...body.data,
-        // The real agentic session (if any) stays the "live" trace — it was
-        // already resolved above (from claw's upstream, or left null if this
-        // conversation has no agentic runs at all). Only fall back to the
-        // instant bundle's own session when there's no agentic one to prefer.
-        debugSession: body.data.debugSession ?? (instantBundle.debugSession as unknown as { userId?: string; sessionId?: string } | null),
-        debugEvents: body.data.debugSession ? (body.data.debugEvents ?? null) : instantBundle.debugEvents,
-        runs: [...(body.data.runs ?? []), ...instantRuns],
-      };
-    }
-
     if (!body.data || ((body.data.runs?.length ?? 0) === 0 && !body.data.debugSession)) {
       res.status(404).json({ success: false, error: "Debug artifacts not found" });
       return;
@@ -2669,10 +2485,10 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       body.data = {
         ...d,
         debugSession: ownSession,
-        // `debugSession`-linked events (claw-native runs) plus each owned
-        // run's OWN `data.debugEvents` (instant runs — see run-stream.ts's
-        // instant branch — carry their trace there instead of a debugSession,
-        // since they never touch claw's PVC at all).
+        // `debugSession`-linked events plus each owned run's OWN
+        // `data.debugEvents` — a conversation can hold multiple runs, and
+        // each run's own debug-events.json is merged in alongside the
+        // top-level debugSession.
         debugEvents: [
           ...(ownSession ? d.debugEvents ?? [] : []),
           ...ownRuns.flatMap((r) => (Array.isArray(r.data?.debugEvents) ? (r.data.debugEvents as unknown[]) : [])),
@@ -2718,12 +2534,10 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
           : !d.debugSession || debugSessionOwned
             ? d.debugSession ?? null
             : (redactResultKeysDeep(d.debugSession) as typeof d.debugSession),
-        // `debugSession`-linked events (claw-native runs) plus each (already
-        // per-user-redacted, above) run's OWN `data.debugEvents` — instant
-        // runs carry their trace there instead of a debugSession. Reusing
-        // `redactedRuns` (rather than the raw pre-ACL `d.debugEvents`) so
-        // another user's instant search results/answers get the same
-        // result-key redaction their `runs` entry already gets.
+        // `debugSession`-linked events plus each (already per-user-redacted,
+        // above) run's OWN `data.debugEvents`. Reusing `redactedRuns` (rather
+        // than the raw pre-ACL `d.debugEvents`) so another user's run gets
+        // the same result-key redaction their `runs` entry already gets.
         debugEvents: [
           ...(hideDebugSession
             ? []

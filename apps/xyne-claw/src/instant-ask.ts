@@ -1,15 +1,9 @@
 /**
- * Instant KB answer completions — runs on claw (where LITELLM_API_KEY lives).
- *
- * Why on claw, not claw-auth: same reason as entity-llm.ts/curator.ts.
- * claw-auth owns the instant pipeline (KB search, prompt assembly, citation
- * shaping) but holds no LLM credentials, so it POSTs the assembled message
- * list here and gets raw completion text back. The credential stays scoped to
- * one pod and "all LLM calls happen on claw" still holds.
+ * Instant KB answer completions — runs on claw (where LITELLM_API_KEY lives),
+ * called in-process by instant-run.ts's classify/answer steps.
  *
  * Deliberately NOT a general LLM proxy: the model and temperature are fixed
- * here, and the request is size-capped. Callers choose the prompt, nothing
- * else.
+ * here. Callers choose the prompt, nothing else.
  */
 
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
@@ -45,10 +39,6 @@ log.info(
     `attemptTimeout=${INSTANT_TIMEOUT_MS}ms retries=${INSTANT_MAX_RETRIES}`,
 );
 
-/** Guard rails on what one call may carry. */
-export const MAX_MESSAGES = 32;
-export const MAX_TOTAL_CHARS = 400_000;
-
 export type InstantAskRole = "system" | "user" | "assistant";
 export interface InstantAskMessage {
   role: InstantAskRole;
@@ -74,10 +64,11 @@ export class InstantAskError extends Error {
  * `opts.credential` is an escape hatch for an AGENT's own "bring your own
  * key" LiteLLM credential (claw-auth resolves + decrypts it via
  * resolveAgentProviderConfigs, same as a normal agentic run, and forwards it
- * here over the S2S channel — never exposed to the browser). When absent,
- * falls back to the platform default `LITELLM`/`INSTANT_MODEL` below. Only
- * ever used for the answer call, not classify — see instant-ask.ts on the
- * claw-auth side for why.
+ * as part of the /run dispatch body — never exposed to the browser; see
+ * instant-run.ts's classify/answer steps for how it's threaded through).
+ * When absent, falls back to the platform default `LITELLM`/`INSTANT_MODEL`
+ * below. Only ever used for the answer call, not classify — classify is a
+ * cheap, mechanical decision that doesn't need the agent's own model.
  */
 export async function completeInstantAsk(
   messages: InstantAskMessage[],
@@ -85,7 +76,7 @@ export async function completeInstantAsk(
   opts?: {
     model?: "answer" | "classify";
     jsonMode?: boolean;
-    credential?: { apiKey: string; baseUrl: string; model: string };
+    credential?: { apiKey: string; baseUrl?: string; model: string };
   },
 ): Promise<string> {
   const apiKey = opts?.credential?.apiKey ?? LITELLM.apiKey;
@@ -175,7 +166,7 @@ export async function streamInstantAnswer(
   messages: InstantAskMessage[],
   onChunk: (text: string) => void,
   opts?: {
-    credential?: { apiKey: string; baseUrl: string; model: string };
+    credential?: { apiKey: string; baseUrl?: string; model: string };
   },
 ): Promise<string> {
   const apiKey = opts?.credential?.apiKey ?? LITELLM.apiKey;
@@ -250,38 +241,4 @@ export async function streamInstantAnswer(
     }
   }
   return full;
-}
-
-/** Shape/size validation for an S2S request body. Returns the parsed messages. */
-export function parseInstantAskMessages(raw: unknown): InstantAskMessage[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw new InstantAskError("messages must be a non-empty array", 400);
-  }
-  if (raw.length > MAX_MESSAGES) {
-    throw new InstantAskError(`messages exceeds ${MAX_MESSAGES} entries`, 400);
-  }
-
-  let total = 0;
-  const out: InstantAskMessage[] = [];
-  for (const entry of raw) {
-    const m = entry as { role?: unknown; content?: unknown };
-    if (m.role !== "system" && m.role !== "user" && m.role !== "assistant") {
-      throw new InstantAskError(
-        "each message needs role system|user|assistant",
-        400,
-      );
-    }
-    if (typeof m.content !== "string") {
-      throw new InstantAskError("each message needs a string content", 400);
-    }
-    total += m.content.length;
-    if (total > MAX_TOTAL_CHARS) {
-      throw new InstantAskError(
-        `messages exceed ${MAX_TOTAL_CHARS} total characters`,
-        413,
-      );
-    }
-    out.push({ role: m.role, content: m.content });
-  }
-  return out;
 }

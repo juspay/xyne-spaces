@@ -445,6 +445,18 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     experiment: rawExperiment,
     planContinuation,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    // Single search + single answer pass instead of the full agentic tool
+    // loop — see instant-run.ts's processInstantTask, short-circuited at the
+    // top of processTask below. claw-auth's `/internal/run` proxy is the
+    // sole place this gets set, derived from agent.config.instantAgent, and
+    // resolves history/previousTurnContext/followUpAgentContext (Postgres
+    // reads instant mode needs but has no persistent claw-side session to
+    // carry forward on its own).
+    instant,
+    instantHistory,
+    previousTurnContext,
+    followUpAgentContext,
+    collectionId,
   } = req.body as {
     userId?: string;
     userName?: string;
@@ -570,6 +582,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  mode_switch debug event; behavior is identical to any other auto run. */
     planContinuation?: boolean;
     generateFollowUpSuggestions?: boolean;
+    instant?: boolean;
+    instantHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+    previousTurnContext?: string;
+    followUpAgentContext?: { name?: string; description?: string };
+    collectionId?: string;
   };
   const experiment = normalizeExperimentContext(rawExperiment);
 
@@ -825,6 +842,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       planContinuation,
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
+      instant,
+      instantHistory,
+      previousTurnContext,
+      followUpAgentContext,
+      collectionId,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       activeRuns.delete(sessionId);
@@ -950,6 +972,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         planContinuation,
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
+        instant,
+        instantHistory,
+        previousTurnContext,
+        followUpAgentContext,
+        collectionId,
       );
     } catch (err) {
       processTaskError = err;
@@ -1052,6 +1079,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     shouldGenerateFollowUpSuggestions,
     typeof callbackUrl === "string" ? callbackUrl : undefined,
+    instant,
+    instantHistory,
+    previousTurnContext,
+    followUpAgentContext,
+    collectionId,
   ).finally(() => {
     if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
     activeRuns.delete(sessionId);
@@ -1405,7 +1437,39 @@ async function processTask(
   planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
+  // Single search + single answer pass instead of the full agentic tool
+  // loop — see instant-run.ts's processInstantTask, short-circuited at the
+  // very top of this function, before any of the setup below runs.
+  instant?: boolean,
+  instantHistory?: Array<{ role: "user" | "assistant"; content: string }>,
+  previousTurnContext?: string,
+  instantFollowUpAgentContext?: { name?: string; description?: string },
+  collectionId?: string,
 ): Promise<void> {
+  if (instant === true) {
+    const { processInstantTask } = await import("../instant-run.js");
+    return processInstantTask({
+      sessionId,
+      sessionToken,
+      userId,
+      ...(userName ? { userName } : {}),
+      ...(userEmail ? { userEmail } : {}),
+      task,
+      ...(conversationId ? { conversationId } : {}),
+      ...(agentSlug ? { agentSlug } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
+      ...(provider ? { provider } : {}),
+      ...(providerConfigs ? { providerConfigs } : {}),
+      ...(collectionId ? { collectionId } : {}),
+      ...(instantHistory ? { history: instantHistory } : {}),
+      ...(previousTurnContext ? { previousTurnContext } : {}),
+      generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions === true,
+      ...(instantFollowUpAgentContext ? { followUpAgentContext: instantFollowUpAgentContext } : {}),
+      progressUrl,
+      callbackUrl,
+      sendCallback,
+    });
+  }
   let mcpCleanup: (() => Promise<void>) | undefined;
   // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
   // workspaces are deleted whole in the finally, but a persistent cwd survives
