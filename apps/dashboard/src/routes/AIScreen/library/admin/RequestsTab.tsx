@@ -2,10 +2,19 @@ import { useCallback, useMemo, useState, type ReactElement, type ReactNode } fro
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckTickCircle, Eye02On, FilterFunnel, MultipleCrossCancelCircle } from '@xyne/icons';
-import { Badge } from '@/components/ui/Badge';
+import { formatDistanceToNow } from 'date-fns';
+import {
+  Bot,
+  CheckTickCircle,
+  FilterFunnel,
+  GitBranch,
+  LayerTwo,
+  MultipleCrossCancelCircle,
+  PluginAddonDefault,
+} from '@xyne/icons';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import Tooltip from '@/components/ui/Tooltip';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import {
@@ -36,16 +45,10 @@ import {
   workflowRequestsKey,
 } from './hooks/adminQueryKeys';
 import { orgLabel } from './orgLabel';
+import { PersonPill } from '../../shared/PersonPill';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 type RequestKindTag = 'agent' | 'skill' | 'mcp' | 'workflow';
-
-const KIND_LABEL: Record<RequestKindTag, string> = {
-  agent: 'Agent',
-  skill: 'Skill',
-  mcp: 'MCP connector',
-  workflow: 'Workflow',
-};
 
 const KIND_OPTIONS = [
   { value: '', label: 'All types' },
@@ -59,7 +62,9 @@ interface UnifiedRequest {
   key: string;
   kind: RequestKindTag;
   title: string;
-  meta: string;
+  requesterId?: string | null;
+  requesterName: string;
+  occurredAt?: string | null;
   extra?: string | null;
   orgName?: string | null;
   detail?: ReactNode;
@@ -71,6 +76,12 @@ interface UnifiedRequest {
   rejectPlaceholder: string;
   sortAt: number;
 }
+
+const relativeTime = (value: string): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return formatDistanceToNow(date, { addSuffix: true });
+};
 
 const timestamp = (value: string | null | undefined): number => {
   const parsed = value ? new Date(value).getTime() : Number.NaN;
@@ -97,9 +108,26 @@ const connectorDefinition = (server: McpPublishRequest): string =>
     2,
   );
 
-const mcpOwner = (server: McpPublishRequest): string => {
+const mcpOwnerId = (server: McpPublishRequest): string | null => {
   const owner = (server.connectorMeta ?? {})['ownerUserId'];
-  return typeof owner === 'string' ? owner : (server.publishRequestedByUserId ?? 'unknown');
+  if (typeof owner === 'string' && owner) return owner;
+  return server.publishRequestedByUserId ?? null;
+};
+
+const mcpOwner = (server: McpPublishRequest): string => mcpOwnerId(server) ?? 'unknown';
+
+const KIND_ICON: Record<RequestKindTag, ReactNode> = {
+  agent: <Bot className='size-4' aria-hidden />,
+  skill: <LayerTwo className='size-4' aria-hidden />,
+  mcp: <PluginAddonDefault className='size-4' aria-hidden />,
+  workflow: <GitBranch className='size-4' aria-hidden />,
+};
+
+const KIND_TOOLTIP: Record<RequestKindTag, string> = {
+  agent: 'Agent request',
+  skill: 'Skill request',
+  mcp: 'MCP connector request',
+  workflow: 'Workflow request',
 };
 
 const mcpRequestedAt = (server: McpPublishRequest): string | null => {
@@ -264,8 +292,9 @@ export function RequestsTab({
         key: `agent-${request.id}`,
         kind: isSkill ? 'skill' : 'agent',
         title: agentRequestTitle(request),
-        meta: `by ${requester} · ${new Date(request.createdAt).toLocaleString()}`,
-        extra: request.agentOwnerName ? `Agent created by: ${request.agentOwnerName}` : null,
+        requesterId: request.requesterId,
+        requesterName: requester,
+        occurredAt: request.createdAt,
         orgName: orgLabel(request.orgId, request.orgName, orgNamesById),
         approveLabel: isSkill ? 'Approve' : 'Approve & Setup',
         approveDisabled: !isSkill && !slug,
@@ -293,9 +322,9 @@ export function RequestsTab({
         key: `mcp-${server.id}`,
         kind: 'mcp',
         title: server.name,
-        meta: `Owner: ${mcpOwner(server)}${
-          at ? ` · Requested ${new Date(at).toLocaleString()}` : ''
-        }`,
+        requesterId: mcpOwnerId(server),
+        requesterName: mcpOwner(server),
+        occurredAt: at,
         extra: server.description ?? null,
         orgName: null,
         detail: (
@@ -326,7 +355,9 @@ export function RequestsTab({
         key: `workflow-${request.id}`,
         kind: 'workflow',
         title: request.workflow?.name ?? request.workflowId,
-        meta: `Requested by ${who} · ${new Date(request.createdAt).toLocaleString()}`,
+        requesterId: request.requestedByUserId,
+        requesterName: who,
+        occurredAt: request.createdAt,
         extra: request.workflow?.description ?? null,
         orgName: orgLabel(request.orgId, request.orgName, orgNamesById),
         approveLabel: 'Allow',
@@ -387,63 +418,80 @@ export function RequestsTab({
     <ul className='flex flex-col gap-2'>
       {visible.map(row => (
         <li key={row.key} className='rounded-xl border border-border p-4'>
-          <div className='flex flex-wrap items-start justify-between gap-3'>
-            <div className='flex min-w-0 flex-col gap-1'>
-              <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                <span className='truncate text-sm font-medium text-foreground'>{row.title}</span>
-                <Badge variant='secondary'>{KIND_LABEL[row.kind]}</Badge>
+          <div className='flex items-start justify-between gap-3'>
+            <div className='flex min-w-0 flex-1 flex-col gap-1'>
+              <div className='flex min-w-0 items-center gap-2'>
+                <Tooltip content={KIND_TOOLTIP[row.kind]} side='top'>
+                  <span className='flex shrink-0 items-center text-muted-foreground'>
+                    {KIND_ICON[row.kind]}
+                  </span>
+                </Tooltip>
+                {row.onView ? (
+                  <button
+                    type='button'
+                    onClick={row.onView}
+                    className='min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline'
+                    data-track-category='Claw Admin'
+                    data-track-name='View requested agent'
+                  >
+                    {row.title}
+                  </button>
+                ) : (
+                  <span className='truncate text-sm font-medium text-foreground'>{row.title}</span>
+                )}
                 {showOrgLabels && row.orgName && <OrgBadge orgName={row.orgName} />}
               </div>
 
-              <div className='flex flex-col gap-1'>
-                <p className='text-xs text-muted-foreground'>{row.meta}</p>
-                {row.extra && <p className='text-xs text-muted-foreground'>{row.extra}</p>}
-              </div>
+              <p className='flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground'>
+                Requested by <PersonPill userId={row.requesterId} name={row.requesterName} />
+                {row.occurredAt && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span title={new Date(row.occurredAt).toLocaleString()}>
+                      {relativeTime(row.occurredAt)}
+                    </span>
+                  </>
+                )}
+              </p>
+
+              {row.extra && <p className='text-xs text-muted-foreground'>{row.extra}</p>}
             </div>
 
-            <div className='ml-auto flex shrink-0 items-center gap-2'>
-              <Button
-                type='button'
-                size='sm'
-                disabled={busy || row.approveDisabled}
-                onClick={row.onApprove}
-                data-track-category='Claw Admin'
-                data-track-name={`Approve ${row.kind} request`}
-              >
-                <CheckTickCircle className='size-4' />
-                {row.approveLabel}
-              </Button>
-
-              {row.onView && (
+            <div className='flex shrink-0 items-center gap-1'>
+              <Tooltip content={row.approveLabel} side='top'>
                 <Button
                   type='button'
                   variant='ghost'
-                  size='sm'
-                  disabled={busy}
-                  onClick={row.onView}
+                  size='icon'
+                  aria-label={row.approveLabel}
+                  disabled={busy || row.approveDisabled}
+                  onClick={row.onApprove}
+                  className='text-muted-foreground hover:text-status-success'
                   data-track-category='Claw Admin'
-                  data-track-name='View requested agent'
+                  data-track-name={`Approve ${row.kind} request`}
                 >
-                  <Eye02On className='size-4' />
-                  View
+                  <CheckTickCircle className='size-4' />
                 </Button>
-              )}
+              </Tooltip>
 
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                disabled={busy}
-                onClick={() => {
-                  setRejectNote('');
-                  setRejectingKey(prev => (prev === row.key ? null : row.key));
-                }}
-                data-track-category='Claw Admin'
-                data-track-name={`Reject ${row.kind} request`}
-              >
-                <MultipleCrossCancelCircle className='size-4' />
-                Reject
-              </Button>
+              <Tooltip content='Reject' side='top'>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon'
+                  aria-label='Reject'
+                  disabled={busy}
+                  onClick={() => {
+                    setRejectNote('');
+                    setRejectingKey(prev => (prev === row.key ? null : row.key));
+                  }}
+                  className='text-muted-foreground hover:text-destructive'
+                  data-track-category='Claw Admin'
+                  data-track-name={`Reject ${row.kind} request`}
+                >
+                  <MultipleCrossCancelCircle className='size-4' />
+                </Button>
+              </Tooltip>
             </div>
           </div>
 
