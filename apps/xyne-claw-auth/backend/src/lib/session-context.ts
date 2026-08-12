@@ -71,6 +71,8 @@ export interface SessionContext {
    * Undefined until the first todo-write of the run.
    */
   planMessageId?: string;
+  /** Live PR cards posted during this run, keyed by deterministic PR screenId. */
+  prMessageIds?: Record<string, string>;
   /**
    * Auto-draft forward URL. Present only when this run was triggered by the
    * Spaces email auto-draft (a synthetic APP_MENTIONED, not a real mention).

@@ -14,6 +14,7 @@ import { buildTwinDeliverMandate } from "./twin-deliver.js";
 import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction.js";
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
+import { prWidgetFromInvocation } from "./pr-widget.js";
 import { metric } from "./metrics.js";
 import { compactionExtension } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
@@ -1004,10 +1005,44 @@ function isEmitter(dest: ProgressDest): dest is ProgressEmitter {
   return !!dest && typeof dest !== "string";
 }
 
+function pushPrWidget(progressDest: ProgressDest, sessionId: string, invocation: unknown): void {
+  const widget = prWidgetFromInvocation(invocation);
+  if (!widget || !progressDest) return;
+  if (isEmitter(progressDest)) {
+    try {
+      progressDest.uiWidget(sessionId, widget);
+    } catch (err) {
+      log.warn(`[pr-widget] SSE emit failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  void fetch(progressDest, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({ sessionId, kind: "ui-widget", widget }),
+    signal: AbortSignal.timeout(15_000),
+  }).then(async (response) => {
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      log.warn(`[pr-widget] delivery failed: HTTP ${response.status}${detail ? ` ${detail.slice(0, 160)}` : ""}`);
+    }
+  }).catch((err) => {
+    log.warn(`[pr-widget] delivery failed: ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
 // Send a single tool invocation to the progress endpoint — NOT throttled,
 // fires on every tool_execution_end so the Control Center sees live tool streams.
 export function pushInvocation(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
   if (!progressUrl) return;
+  // PR create/merge operations are MCP/subagent tools rather than custom tools,
+  // so normalize their completed invocation at this common tool-result choke
+  // point and publish through the same UiWidget transport as every other card.
+  pushPrWidget(progressUrl, sessionId, invocation);
   if (isEmitter(progressUrl)) {
     try { progressUrl.invocation(sessionId, invocation); } catch (err) {
       log.warn(`[agent] Tool invocation emit failed: ${err instanceof Error ? err.message : String(err)}`);

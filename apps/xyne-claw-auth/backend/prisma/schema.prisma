@@ -1044,6 +1044,32 @@ model AgentRun {
   @@map("agent_runs")
 }
 
+/// Durable mapping from an agent-authored widget to the Spaces thread where it
+/// was posted. PR provider webhooks use externalKey after the run/session ends.
+model AgentWidgetBinding {
+  id              String   @id @default(cuid())
+  orgId           String
+  kind            String
+  screenId        String
+  externalKey     String?
+  conversationId  String
+  channelId       String
+  messageId       String?
+  spacesAppId     String
+  spacesAppUserId String
+  agentSlug       String?
+  status          String?
+  data            Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([kind, screenId, conversationId, spacesAppId], map: "agent_widget_bindings_scope_key")
+  @@index([kind, externalKey])
+  @@index([orgId])
+  @@index([conversationId, updatedAt])
+  @@map("agent_widget_bindings")
+}
+
 model ChatMessage {
   id             String   @id @default(cuid())
   conversationId String

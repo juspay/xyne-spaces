@@ -1,5 +1,6 @@
 import type { ChartArtifact } from "../flow/builder.js";
 import type { Todo } from "../flow/plan-flow.js";
+import type { PrProvider, PrStatus } from "../flow/pr-flow.js";
 
 /**
  * Domain payloads that the claw runtime may ask a UI surface to render.
@@ -32,6 +33,18 @@ interface UiWidgetBase {
   id: string;
 }
 
+export interface PrWidgetPayload {
+  provider: PrProvider;
+  status: PrStatus;
+  title: string;
+  url?: string;
+  desc?: string;
+  ticketId?: string;
+  detailsUrl?: string;
+  number?: string | number;
+  repo?: string;
+}
+
 export type UiWidget =
   | (UiWidgetBase & {
       type: "plan";
@@ -57,6 +70,11 @@ export type UiWidget =
       type: "chart";
       operation: "create";
       payload: ChartArtifact;
+    })
+  | (UiWidgetBase & {
+      type: "pr";
+      operation: "upsert";
+      payload: PrWidgetPayload;
     });
 
 export type UiWidgetType = UiWidget["type"];
@@ -91,6 +109,23 @@ function hasValidChartPayload(payload: Record<string, unknown>): boolean {
   return false;
 }
 
+const PR_PROVIDERS = new Set(["github", "bitbucket", "gitlab", "other"]);
+const PR_STATUSES = new Set(["created", "merged", "reverted", "deleted", "declined"]);
+
+function hasValidPrPayload(payload: Record<string, unknown>): boolean {
+  if (typeof payload["provider"] !== "string" || !PR_PROVIDERS.has(payload["provider"])) return false;
+  if (typeof payload["status"] !== "string" || !PR_STATUSES.has(payload["status"])) return false;
+  if (typeof payload["title"] !== "string" || !payload["title"].trim()) return false;
+  for (const field of ["url", "desc", "ticketId", "detailsUrl", "repo"] as const) {
+    const value = payload[field];
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) return false;
+  }
+  const number = payload["number"];
+  return number === undefined ||
+    (typeof number === "string" && !!number.trim()) ||
+    (typeof number === "number" && Number.isFinite(number));
+}
+
 export function isUiWidget(value: unknown): value is UiWidget {
   if (!isRecord(value)) return false;
   const candidate = value;
@@ -104,6 +139,9 @@ export function isUiWidget(value: unknown): value is UiWidget {
       typeof todo["title"] === "string" &&
       (todo["status"] === "pending" || todo["status"] === "in_progress" || todo["status"] === "completed" || todo["status"] === "failed"),
     );
+  }
+  if (candidate.type === "pr") {
+    return candidate.operation === "upsert" && hasValidPrPayload(payload);
   }
   if (candidate.operation !== "create") return false;
   if (candidate.type === "question") {

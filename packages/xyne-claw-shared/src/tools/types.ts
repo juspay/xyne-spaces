@@ -6,7 +6,7 @@
 import type { Citation } from "../types/citation.js";
 import type { UiWidget, UserQuestion } from "../types/ui-widget.js";
 
-export type { UiWidget, UserQuestion, UserQuestionType } from "../types/ui-widget.js";
+export type { UiWidget, UserQuestion, UserQuestionType, PrWidgetPayload } from "../types/ui-widget.js";
 
 export interface ToolInputSchema {
   type: "object";

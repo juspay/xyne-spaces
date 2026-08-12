@@ -29,6 +29,7 @@ type FlowComponentType =
   | 'image'
   | 'link'
   | 'plan'
+  | 'pr'
   | 'user_question'
   | 'code'
   | 'diff'
