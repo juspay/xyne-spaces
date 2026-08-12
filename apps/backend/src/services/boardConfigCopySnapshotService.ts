@@ -42,20 +42,25 @@ export interface BoardSnapshotResult {
  *
  * Written as gzipped NDJSON — one JSON record per line, each tagged with a `type` — so the
  * writer never has to hold the whole document in memory and a reader can stream it back
- * record by record. Only compressed bytes accumulate in memory; rows are read in batches.
+ * record by record. Rows are read in batches and piped straight to object storage as they're
+ * compressed — nothing accumulates in process memory, compressed or not.
  */
 class BoardConfigCopySnapshotService {
   async captureSnapshot(params: CaptureSnapshotParams): Promise<BoardSnapshotResult> {
     const { targetBoardId, sourceBoardId, workspaceId, actorUserId } = params;
     const startedAt = new Date();
+    const path = `${SNAPSHOT_PREFIX}/${workspaceId}/${targetBoardId}/${startedAt.toISOString().replace(/[:.]/g, '-')}.ndjson.gz`;
 
     const gzip = createGzip();
-    const compressed: Buffer[] = [];
-    gzip.on('data', (chunk: Buffer) => compressed.push(chunk));
-    const gzipFinished = new Promise<void>((resolve, reject) => {
-      gzip.on('end', resolve);
-      gzip.on('error', reject);
-    });
+
+    // Pipe straight to object storage instead of buffering the whole compressed file in
+    // process memory — a large board's snapshot could otherwise be tens to hundreds of MB
+    // held in the API server's heap. Attached before any writes so backpressure on `gzip`
+    // is actually relieved by a real consumer, and given a no-op .catch() up front so a
+    // write-side failure below (which never awaits this promise) can't surface as an
+    // unhandled rejection.
+    const uploadPromise = storageService.uploadStreamToPath(gzip, { path, contentType: 'application/gzip' });
+    uploadPromise.catch(() => {});
 
     const writeRecord = async (type: string, data: unknown): Promise<void> => {
       if (!gzip.write(`${JSON.stringify({ type, data })}\n`)) {
@@ -120,25 +125,21 @@ class BoardConfigCopySnapshotService {
       if (stageIds.length > 0) await this.writeTicketStageEtas(stageIds, writeRecord);
 
       gzip.end();
-      await gzipFinished;
     } catch (error) {
       gzip.destroy();
       throw error;
     }
 
-    const buffer = Buffer.concat(compressed);
-    const path = `${SNAPSHOT_PREFIX}/${workspaceId}/${targetBoardId}/${startedAt.toISOString().replace(/[:.]/g, '-')}.ndjson.gz`;
-
-    await storageService.uploadFileV2(buffer, { path, contentType: 'application/gzip' });
+    const uploadResult = await uploadPromise;
 
     logger.info(`${TAG} Wrote snapshot for board ${targetBoardId}`, {
       path,
-      sizeBytes: buffer.length,
+      sizeBytes: uploadResult.size,
       ticketCount,
       stageCount: stages.length,
     });
 
-    return { path, sizeBytes: buffer.length, ticketCount };
+    return { path, sizeBytes: uploadResult.size, ticketCount };
   }
 
   /** Only the columns the copy actually rewrites, plus enough identity to match rows back up. */

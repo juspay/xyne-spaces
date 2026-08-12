@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { runAsServiceActor } from '@/database/tenant/context';
 import {
   boardConfigCopyQueue,
   BoardConfigCopyJobData,
@@ -40,7 +41,13 @@ class BoardConfigCopyWorker {
     if (this.isStarted) return;
 
     const queue = boardConfigCopyQueue.getQueue();
-    queue.process(async job => this.processJob(job.data));
+    // The Bull processor runs outside any HTTP request, so there is no ambient tenant
+    // context — every db.* call inside processJob would otherwise run fully unscoped (see
+    // acl-extension.ts's no-context fallback). runAsServiceActor opens one bound to the
+    // job's own workspace, matching etaDeadlineWorker.ts / autoDraftWorker.ts.
+    queue.process(async job =>
+      runAsServiceActor(job.data.actorUserId, job.data.workspaceId, () => this.processJob(job.data)),
+    );
     this.isStarted = true;
     logger.info(`${TAG} Started, ready to process jobs`);
   }

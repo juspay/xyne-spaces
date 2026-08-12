@@ -376,7 +376,7 @@ export class App {
     // Ticket migration route (admin-only)
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
-    this.app.use('/api/admin/board-config-copy', boardConfigCopyRoutes);
+    this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
