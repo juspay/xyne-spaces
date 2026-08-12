@@ -568,8 +568,8 @@ const AppRoot = (): ReactElement => {
                 <AIOnboardingTrigger isOnboarding={isOnboarding} />
                 <AIOnboardingOverlay />
                 <SlashCommandArtifactSideEffectProvider>
-                {!isInPanelWebview && <SlashCommandArtifactBanner />}
-                <EditProvider>
+                  {!isInPanelWebview && <SlashCommandArtifactBanner />}
+                  <EditProvider>
                     {shouldShowMobileHeader && externalId && (
                       <MobileCallHeader
                         participants={participants}
@@ -592,10 +592,8 @@ const AppRoot = (): ReactElement => {
                     ) : isOnboarding ? (
                       // Onboarding screen - full width without sidebar
                       <main
-                     
-                      className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                    
-                    >
+                        className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                      >
                         <EditWarningModal />
                         <Outlet />
                       </main>
@@ -613,10 +611,8 @@ const AppRoot = (): ReactElement => {
                             defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
                           >
                             <div
-                           
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          
-                          >
+                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            >
                               <AppSidebar />
                               <main className='flex-1 no-scrollbar overflow-auto'>
                                 <EditWarningModal />
@@ -678,16 +674,15 @@ const AppRoot = (): ReactElement => {
                             id='app-root-left'
                             panelRef={browserPanelLeftRef}
                             defaultSize={
-                              browserPanelState === 'open' && !location.pathname.endsWith('/browser')
+                              browserPanelState === 'open' &&
+                              !location.pathname.endsWith('/browser')
                                 ? '65%'
                                 : '100%'
                             }
                           >
                             <div
-                           
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          
-                          >
+                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            >
                               <AppSidebar />
                               <main className='flex-1 no-scrollbar overflow-auto'>
                                 <EditWarningModal />
@@ -696,24 +691,23 @@ const AppRoot = (): ReactElement => {
                             </div>
                           </Panel>
                           {browserPanelState === 'open' &&
-                         
-                          !location.pathname.endsWith('/browser') && (
-                                <>
-                                  <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                                  </Separator>
-                                  <Panel
-                                    id='app-root-browser'
-                                    panelRef={browserPanelRightRef}
-                                    defaultSize='35%'
-                                    maxSize='50%'
-                                  >
-                                    <div className='h-full'>
-                                      <BrowserPanel />
-                                    </div>
-                                  </Panel>
-                                </>
-                              )}
+                            !location.pathname.endsWith('/browser') && (
+                              <>
+                                <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                </Separator>
+                                <Panel
+                                  id='app-root-browser'
+                                  panelRef={browserPanelRightRef}
+                                  defaultSize='35%'
+                                  maxSize='50%'
+                                >
+                                  <div className='h-full'>
+                                    <BrowserPanel />
+                                  </div>
+                                </Panel>
+                              </>
+                            )}
                         </ResizableGroup>
                       </div>
                     ) : (
@@ -726,10 +720,8 @@ const AppRoot = (): ReactElement => {
                         >
                           <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
                             <div
-                           
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          
-                          >
+                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            >
                               <AppSidebar />
                               <main className='flex-1 no-scrollbar overflow-auto'>
                                 <EditWarningModal />
@@ -751,47 +743,51 @@ const AppRoot = (): ReactElement => {
                     duplicated call UIs, etc. inside the embedded view).
                     AttachmentGalleryModal stays because it's triggered by
                     attachments inside the conversation itself. */}
-                  {!isInPanelWebview && (
-                    <>
-                      <IncomingCallModal />
-                      <GlobalCallOverlay />
-                      {recordingVersion === 'v2' ? <NoteTakerOverlayHost /> : <RecordingOverlay />}
-                      <GlobalUploadProgress />
-                      <NotificationHandler />
-                      <ElectronBadgeSync />
-                      <ElectronUpdateNudge />
-                      <SosAlertBanner />
-                      <CallFromRecentsHandler />
-                      <CloudAgentFloatingHost />
-                      <BrowserPanelHandler />
-                      <GlobalCommandMenu />
-                      <ShortcutsHelpModal
-                        isOpen={isShortcutsModalOpen}
-                        onClose={() => setIsShortcutsModalOpen(false)}
-                      />
-                    </>
-                  )}
-                  <AttachmentGalleryModal />
-                  <ThreadCitationModal />
-                  <TranscriptCitationModal />
-                  <AttachmentCitationPreview />
-                  <ErrorReportModal
-                    isOpen={isErrorReportOpen}
-                    onClose={() => setIsErrorReportOpen(false)}
-                    pendingRecording={pendingRecording}
-                    pendingRecordingFilePath={pendingRecordingFilePath}
-                    onSourceSelected={(source: ScreenSource, withMic: boolean) =>
-                      void startRecording(source, withMic)
-                    }
-                    onSubmitSuccess={() => {
-                      setPendingRecording(null);
-                      setPendingRecordingFilePath(null);
-                    }}
-                    onDiscard={() => {
-                      setPendingRecording(null);
-                      setPendingRecordingFilePath(null);
-                    }}
-                  />
+                    {!isInPanelWebview && (
+                      <>
+                        <IncomingCallModal />
+                        <GlobalCallOverlay />
+                        {recordingVersion === 'v2' ? (
+                          <NoteTakerOverlayHost />
+                        ) : (
+                          <RecordingOverlay />
+                        )}
+                        <GlobalUploadProgress />
+                        <NotificationHandler />
+                        <ElectronBadgeSync />
+                        <ElectronUpdateNudge />
+                        <SosAlertBanner />
+                        <CallFromRecentsHandler />
+                        <CloudAgentFloatingHost />
+                        <BrowserPanelHandler />
+                        <GlobalCommandMenu />
+                        <ShortcutsHelpModal
+                          isOpen={isShortcutsModalOpen}
+                          onClose={() => setIsShortcutsModalOpen(false)}
+                        />
+                      </>
+                    )}
+                    <AttachmentGalleryModal />
+                    <ThreadCitationModal />
+                    <TranscriptCitationModal />
+                    <AttachmentCitationPreview />
+                    <ErrorReportModal
+                      isOpen={isErrorReportOpen}
+                      onClose={() => setIsErrorReportOpen(false)}
+                      pendingRecording={pendingRecording}
+                      pendingRecordingFilePath={pendingRecordingFilePath}
+                      onSourceSelected={(source: ScreenSource, withMic: boolean) =>
+                        void startRecording(source, withMic)
+                      }
+                      onSubmitSuccess={() => {
+                        setPendingRecording(null);
+                        setPendingRecordingFilePath(null);
+                      }}
+                      onDiscard={() => {
+                        setPendingRecording(null);
+                        setPendingRecordingFilePath(null);
+                      }}
+                    />
 
                     {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
                       <div className='hidden' aria-hidden='true'>
@@ -842,7 +838,7 @@ const AppRoot = (): ReactElement => {
                     )}
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
-            </AIOnboardingProvider>
+              </AIOnboardingProvider>
             </InitialStateLoader>
           </ZeroFallbackProvider>
         </ZeroProvider>
