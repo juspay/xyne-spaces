@@ -609,19 +609,6 @@ export function buildSubscriptionConfirmationFlow(envelope: SnsEnvelope): FlowDe
       style: { gap: '8px' },
       children: [
         {
-          id: 'sns-confirm-copy',
-          type: 'button',
-          props: {
-            label: 'Copy Subscribe URL',
-            variant: 'secondary',
-            action: {
-              type: 'copy',
-              value: subscribeUrl,
-              successMessage: 'Subscribe URL copied',
-            },
-          },
-        },
-        {
           id: 'sns-confirm-submit',
           type: 'button',
           props: {
@@ -632,6 +619,19 @@ export function buildSubscriptionConfirmationFlow(envelope: SnsEnvelope): FlowDe
               actionId: SNS_CONFIRM_ACTION_ID,
               successMessage: 'Subscription confirmed',
               errorMessage: 'Could not confirm the subscription',
+            },
+          },
+        },
+        {
+          id: 'sns-confirm-copy',
+          type: 'button',
+          props: {
+            label: 'Copy Subscribe URL',
+            variant: 'secondary',
+            action: {
+              type: 'copy',
+              value: subscribeUrl,
+              successMessage: 'Subscribe URL copied',
             },
           },
         },
