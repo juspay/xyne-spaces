@@ -1053,7 +1053,10 @@ export class CallRepository {
             startedAt: now,
             lastActivityAt: now,
             updatedAt: now,
-            metadata: { systemMessageId: messageId, conversationId },
+            // Merge (not replace) so calendar-derived fields already on the call
+            // (organizer, attendees, provider, etc. — set by the calendar sync
+            // upsert) survive activation instead of being wiped out.
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
           },
         });
       } else if (!callMetadata?.systemMessageId) {
@@ -1095,7 +1098,7 @@ export class CallRepository {
             startedAt: now,
             lastActivityAt: now,
             updatedAt: now,
-            metadata: { systemMessageId: messageId, conversationId },
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
           },
         });
       } else {
@@ -1972,6 +1975,16 @@ export class CallRepository {
 
     if (!hasExternalCallChanged(existing as unknown as ExistingCallRow, data)) return;
 
+    // Merge (not replace): once a call is activated, its metadata also carries
+    // `conversationId`/`systemMessageId` (see activateScheduledCall). A plain
+    // overwrite here would wipe those out on the next calendar resync, causing
+    // the following join to think it's a fresh call and create a duplicate
+    // conversation + "started a call" system message instead of reusing them.
+    const mergedMetadata = {
+      ...(existing.metadata as Prisma.InputJsonObject ?? {}),
+      ...data.metadata,
+    };
+
     const updated = await DatabaseClient.getInstance().call.update({
       where: { externalId: data.externalId },
       data: {
@@ -1984,7 +1997,7 @@ export class CallRepository {
         timezone: data.timezone,
         xyneManaged: data.xyneManaged ?? false,
         channelId: data.channelId,
-        metadata: data.metadata,
+        metadata: mergedMetadata,
         updatedAt: data.updatedAt,
         lastActivityAt: data.lastActivityAt,
       },
@@ -2034,6 +2047,15 @@ function stableStringify(val: unknown): string {
   return `{${sorted.join(',')}}`;
 }
 
+/** Strips the activation-only keys (`conversationId`, `systemMessageId`) that
+ * activateScheduledCall stamps onto call.metadata, so calendar-resync change
+ * detection only looks at calendar-derived fields. */
+function omitActivationKeys(metadata: Prisma.JsonValue): unknown {
+  if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
+  const { conversationId, systemMessageId, ...rest } = metadata as Record<string, unknown>;
+  return rest;
+}
+
 function hasExternalCallChanged(
   existing: ExistingCallRow,
   data: {
@@ -2059,6 +2081,10 @@ function hasExternalCallChanged(
     existing.timezone !== data.timezone ||
     existing.xyneManaged !== (data.xyneManaged ?? false) ||
     existing.channelId !== data.channelId ||
-    stableStringify(existing.metadata) !== stableStringify(data.metadata)
+    // Compare only the calendar-derived subset of existing.metadata: once activated,
+    // existing.metadata also carries conversationId/systemMessageId (see
+    // activateScheduledCall), which never appear in the freshly computed data.metadata
+    // and would otherwise make this always report "changed".
+    stableStringify(omitActivationKeys(existing.metadata)) !== stableStringify(data.metadata)
   );
 }
