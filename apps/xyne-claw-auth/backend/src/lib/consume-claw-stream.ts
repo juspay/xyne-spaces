@@ -26,7 +26,6 @@ export interface ClawStreamHandlers {
   onAttachment?: (sessionId: string, attachment: Extract<ClawStreamEvent, { event: "attachment" }>["attachment"]) => void | Promise<void>;
   onSandboxPreview?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "sandbox-preview" }>["payload"]) => void | Promise<void>;
   onPlan?: (sessionId: string, todos: Todo[]) => void | Promise<void>;
-  onPr?: (sessionId: string, pr: Extract<ClawStreamEvent, { event: "pr" }>["pr"]) => void | Promise<void>;
   onProgressLabel?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "progress-label" }>["payload"]) => void | Promise<void>;
   onDebug?: (sessionId: string, debugEvent: unknown) => void | Promise<void>;
   onCancelled?: (sessionId: string, reason: string | undefined) => void | Promise<void>;
@@ -174,9 +173,6 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
       case "plan":
         await handlers.onPlan?.(event.sessionId, event.todos);
         return;
-      case "pr":
-        await handlers.onPr?.(event.sessionId, event.pr);
-        return;
       case "progress-label":
         await handlers.onProgressLabel?.(event.sessionId, event.payload);
         return;
@@ -204,7 +200,7 @@ function logHandlerError(eventName: string, err: unknown): void {
 // ── SSE-to-legacy-POSTs bridge ─────────────────────────────────────────────
 //
 // Used by the /internal/run proxy when the caller did NOT request SSE itself
-// (i.e. it's webhook.ts / agent-chat.ts / app-callback.ts / chain-workflows.ts /
+// (i.e. it's webhook.ts / agent-chat.ts / flow-action.ts / chain-workflows.ts /
 // flow-action.ts / scheduled-jobs-worker / run-recovery-worker). The proxy
 // still opens SSE to claw (so the wire from claw-auth → claw is unified) and
 // this helper translates each SSE frame back into the JSON POST body the
@@ -281,9 +277,6 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         },
         onPlan: async (sessionId, todos) => {
           await postProgress({ sessionId, kind: "plan", todos });
-        },
-        onPr: async (sessionId, pr) => {
-          await postProgress({ sessionId, kind: "pr", pr });
         },
         onProgressLabel: async (sessionId, payload) => {
           await postProgress({ sessionId, ...payload });

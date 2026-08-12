@@ -1530,6 +1530,13 @@ interface Props {
   // a one-click "Run autonomously" button at the end of multi-turn planning.
   draftSuggestGoal: boolean;
   onDraftSuggestGoalChange: (v: boolean) => void;
+  // Post TODOs to Spaces opt-OUT (agent.config.postTodos). Default ON: the
+  // live plan/TODO card from the todo-write tool is posted into the thread.
+  // Turning it OFF sets postTodos=false, suppressing the card at claw-auth's
+  // doRenderPlanCard. The agent still tracks TODOs internally for loop
+  // discipline — only the Spaces render is hidden.
+  draftPostTodos: boolean;
+  onDraftPostTodosChange: (v: boolean) => void;
   // Verify-responses opt-in (agent.config.verifyResponses). When on, the agent
   // delivers its final answer via the submit-response tool, which checks the
   // draft's factual claims against gathered tool evidence before it's posted.
@@ -1710,6 +1717,8 @@ export function AgentDetailLeftColumn({
   researchAgentRepositoryOptions,
   draftSuggestGoal,
   onDraftSuggestGoalChange,
+  draftPostTodos,
+  onDraftPostTodosChange,
   draftVerifyResponses,
   draftVerifyResponseCriteria,
   onDraftVerifyResponseCriteriaChange,
@@ -2547,7 +2556,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftAutoGoal || draftPlanMode ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftAutoGoal || draftPlanMode || !draftPostTodos ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -2756,6 +2765,38 @@ export function AgentDetailLeftColumn({
                 aria-label="Enable Suggest Goals"
               />
               <span className="text-[12px] text-xyne-fg-primary">{draftSuggestGoal ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Post TODOs to Spaces — opt-OUT switch (agent.config.postTodos). The
+          todo-write tool renders a live, in-place checklist card in the thread
+          by default. Turning this OFF suppresses that card (claw-auth's
+          doRenderPlanCard early-returns) — the agent keeps tracking TODOs
+          internally, only the Spaces render is hidden. On by default; surface
+          when canEdit OR when already OFF so read-only viewers see the state. */}
+      {(canEdit || !draftPostTodos) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Post TODOs to Spaces</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Show this agent&apos;s TODO checklist as a live, in-place-updating card in the thread while it works.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Turn off for agents where the plan is noise (advice-only or single-shot agents). The agent still tracks its TODOs internally — only the card is hidden.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftPostTodos}
+                onChange={(e) => onDraftPostTodosChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Post TODOs to Spaces"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftPostTodos ? "On" : "Off"}</span>
             </label>
           </div>
         </div>

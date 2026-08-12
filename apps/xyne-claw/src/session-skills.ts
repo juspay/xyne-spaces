@@ -15,6 +15,7 @@
 import { join, resolve } from "node:path";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { PATHS } from "./config.js";
+import { documentBufferToMarkdown } from "./attachment-ingest.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("session-skills");
@@ -66,6 +67,68 @@ function isBinaryContentType(contentType: string | undefined | null, relativePat
     ".bin", ".dat",
   ]);
   return BINARY_EXTS.has(ext);
+}
+
+// ── Skill-document markdown extraction ──────────────────────────────────────
+// Binary documents bundled in a skill (PDF/DOCX/XLSX/PPTX) are written to disk
+// as raw bytes for tool use — but the model can't read bytes, so a skill that
+// ships a handbook.pdf as KNOWLEDGE silently behaves as if it were empty. Fix:
+// at materialization we run the SAME converters the chat-attachment pipeline
+// uses (attachment-ingest.ts) and emit a `<name>.md` sibling next to the
+// binary. Raw file stays for tools; the .md sibling makes the text readable.
+// Always on: conversion never throws (error-stub contract), is size-capped
+// and time-boxed below, so there is nothing a kill switch would save us from.
+
+/** Skip conversion above this size — a hostile/huge document must not stall run startup. */
+const SKILL_MD_MAX_BYTES = 25 * 1024 * 1024;
+/** Per-file conversion budget; on timeout the raw binary is still materialized. */
+const SKILL_MD_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolvePromise, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label}: conversion timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolvePromise(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+/**
+ * Best-effort: write `<binaryPath>.md` with the document's extracted text.
+ * Never throws — on failure/timeout/unsupported type the run proceeds with
+ * just the raw binary (exactly yesterday's behavior). `authorPaths` guards
+ * precedence: if the skill already ships `<binaryPath>.md`, the author's
+ * file wins and no auto-generated sibling is written.
+ */
+async function writeMarkdownSibling(
+  skillSubdir: string,
+  safePath: string,
+  buf: Buffer,
+  contentType: string | null | undefined,
+  authorPaths: ReadonlySet<string>,
+): Promise<void> {
+  const siblingRel = `${safePath}.md`;
+  if (authorPaths.has(siblingRel)) return; // author-provided .md wins
+  if (buf.length > SKILL_MD_MAX_BYTES) {
+    log.warn(`[skill] Skipped md-conversion of ${safePath}: ${buf.length} bytes > ${SKILL_MD_MAX_BYTES} cap`);
+    return;
+  }
+  const startedAt = Date.now();
+  try {
+    const markdown = await withTimeout(
+      documentBufferToMarkdown(buf, safePath, contentType ?? ""),
+      SKILL_MD_TIMEOUT_MS,
+      safePath,
+    );
+    if (markdown === null) return; // not a convertible document type
+    await writeFile(join(skillSubdir, siblingRel), markdown, "utf8");
+    log.info(`[skill] Converted ${safePath} → ${siblingRel} (${buf.length}B in ${Date.now() - startedAt}ms)`);
+  } catch (err) {
+    log.warn(
+      `[skill] md-conversion failed for ${safePath} after ${Date.now() - startedAt}ms (raw file kept): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 interface SplitContent {
@@ -209,6 +272,13 @@ export async function writeSessionSkills(
     // but re-check defensively here so a hand-rolled /run caller can't
     // smuggle in absolute paths or '..' traversal.
     if (skill.files && skill.files.length > 0) {
+      // Author-provided paths, normalized — used by writeMarkdownSibling so an
+      // intentional `doc.pdf.md` in the upload is never clobbered by ours.
+      const authorPaths = new Set(
+        skill.files
+          .map((f) => normalizeRelativePath(f.relativePath))
+          .filter((p): p is string => p !== null),
+      );
       for (const f of skill.files) {
         const safePath = normalizeRelativePath(f.relativePath);
         if (!safePath) {
@@ -220,6 +290,10 @@ export async function writeSessionSkills(
         if (isBinaryContentType(f.contentType, safePath)) {
           const buf = Buffer.from(f.content, "base64");
           await writeFile(filePath, buf);
+          // PDF/DOCX/XLSX/PPTX knowledge docs: also emit the extracted-text
+          // sibling so the model can read them (chat attachments already get
+          // this via the same converters in attachment-ingest.ts).
+          await writeMarkdownSibling(skillSubdir, safePath, buf, f.contentType, authorPaths);
         } else {
           await writeFile(filePath, f.content, "utf8");
         }
