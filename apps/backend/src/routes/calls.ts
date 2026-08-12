@@ -8,8 +8,8 @@ import { uploadSingle } from '@/middleware/upload';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
-import { transcriptionSwitchController } from '@/controllers/transcriptionSwitchController';
-import { authorizeTranscriptionSwitch } from '@/middleware/transcriptionSwitchAuth';
+import { testTranscriptionController } from '@/controllers/testTranscriptionController';
+import { authorizeTestTranscription } from '@/middleware/testTranscriptionAuth';
 
 const router = Router();
 
@@ -21,9 +21,9 @@ router.post('/initiate', callController.initiateCall);
 router.post('/join', callController.joinCall);
 router.post('/schedule', scheduleCallController.scheduleCall);
 router.post(
-  '/:callId/transcription-agent/switch',
-  authorizeTranscriptionSwitch,
-  transcriptionSwitchController.switchAgent,
+  '/:callId/test-transcription',
+  authorizeTestTranscription,
+  testTranscriptionController.start,
 );
 
 // Recordings endpoints (HEADLESS calls)

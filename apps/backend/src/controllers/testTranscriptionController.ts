@@ -1,20 +1,25 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { config } from '@/config/env';
 import {
   isLiveKitNotFoundError,
   livekitService,
 } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
 
-const SwitchTranscriptionAgentSchema = z.object({
+const TestTranscriptionSchema = z.object({
   agentName: z.string().trim().min(1).max(128),
 }).strict();
 
-export class TranscriptionSwitchController {
-  switchAgent = async (req: Request, res: Response): Promise<void> => {
-    const parsed = SwitchTranscriptionAgentSchema.safeParse(req.body);
+export class TestTranscriptionController {
+  start = async (req: Request, res: Response): Promise<void> => {
+    const parsed = TestTranscriptionSchema.safeParse(req.body);
     if (!parsed.success) {
+      logger.warn('[TestTranscription] Invalid request body', {
+        userId: req.user?.id,
+        userEmail: req.user?.email,
+        callId: req.params.callId,
+        validationError: parsed.error.errors[0]?.message,
+      });
       res.status(400).json({
         success: false,
         error: parsed.error.errors[0]?.message ?? 'Invalid request body',
@@ -24,21 +29,25 @@ export class TranscriptionSwitchController {
 
     const callId = req.params.callId;
     const userId = req.user!.id;
+    const userEmail = req.user!.email;
     const { agentName } = parsed.data;
 
-    if (!config.transcriptionSwitch.allowedAgentNames.includes(agentName)) {
-      logger.warn('[TranscriptionSwitch] Target agent is not allowlisted', {
-        callId,
-        userId,
-        agentName,
-      });
-      res.status(403).json({ success: false, error: 'Target agent is not allowed' });
-      return;
-    }
+    logger.info('[TestTranscription] Starting agent replacement', {
+      userId,
+      userEmail,
+      callId,
+      agentName,
+    });
 
     try {
       const room = await livekitService.getRoomInfo(callId);
       if (!room) {
+        logger.warn('[TestTranscription] Active LiveKit room not found', {
+          userId,
+          userEmail,
+          callId,
+          agentName,
+        });
         res.status(404).json({ success: false, error: 'Active LiveKit room not found' });
         return;
       }
@@ -54,6 +63,14 @@ export class TranscriptionSwitchController {
       // A transcription room is expected to have at most one agent. Refusing an
       // ambiguous switch is safer than disconnecting an unrelated room agent.
       if (dispatches.length > 1 || agentParticipants.length > 1) {
+        logger.warn('[TestTranscription] Ambiguous agent state; replacement refused', {
+          userId,
+          userEmail,
+          callId,
+          agentName,
+          dispatchCount: dispatches.length,
+          agentParticipantCount: agentParticipants.length,
+        });
         res.status(409).json({
           success: false,
           error: 'Multiple agents are present; refusing an ambiguous switch',
@@ -65,17 +82,6 @@ export class TranscriptionSwitchController {
 
       const previousDispatch = dispatches[0];
       const previousParticipant = agentParticipants[0];
-
-      if (
-        previousDispatch &&
-        !config.transcriptionSwitch.allowedAgentNames.includes(previousDispatch.agentName)
-      ) {
-        res.status(409).json({
-          success: false,
-          error: 'The current dispatch is not managed by the transcription switch API',
-        });
-        return;
-      }
 
       if (previousDispatch) {
         await livekitService.deleteAgentDispatch(callId, previousDispatch.id);
@@ -92,14 +98,15 @@ export class TranscriptionSwitchController {
       }
 
       const dispatch = await livekitService.dispatchAgent(callId, agentName, {
-        source: 'transcription-switch-api',
+        source: 'test-transcription-api',
         requestedBy: userId,
         callId,
       });
 
-      logger.info('[TranscriptionSwitch] Agent switched', {
+      logger.info('[TestTranscription] Test agent dispatched', {
         callId,
         userId,
+        userEmail,
         previousAgentName: previousDispatch?.agentName ?? null,
         previousParticipantIdentity: previousParticipant?.identity ?? null,
         agentName,
@@ -120,15 +127,16 @@ export class TranscriptionSwitchController {
         },
       });
     } catch (error) {
-      logger.error('[TranscriptionSwitch] Failed to switch agent', {
+      logger.error('[TestTranscription] Failed to switch agent', {
         callId,
         userId,
+        userEmail,
         agentName,
         error,
       });
-      res.status(502).json({ success: false, error: 'Failed to switch transcription agent' });
+      res.status(502).json({ success: false, error: 'Failed to start test transcription' });
     }
   };
 }
 
-export const transcriptionSwitchController = new TranscriptionSwitchController();
+export const testTranscriptionController = new TestTranscriptionController();
