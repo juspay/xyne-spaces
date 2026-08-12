@@ -121,32 +121,16 @@ export async function listAccessibleRootCollections(
         where: {
             parentId: null,
             deletedAt: null,
+            workspaceId,
             ...(options?.scopeType ? { scopeType: options.scopeType } : {}),
             ...(options?.scopeId ? { scopeId: options.scopeId } : {}),
-            AND: [
-                {
-                    OR: [
-                        { ownerId: userId },
-                        { isPrivate: false },
-                        { permissions: { some: { userId } } },
-                        ...(userGroupIds.length > 0
-                            ? [{ permissions: { some: { userGroupId: { in: userGroupIds } } } }]
-                            : []),
-                    ],
-                },
-                // workspaceId is a denormalized tenant key stamped on insert
-                // (nullable — see schema.prisma), so rows predating the
-                // backfill may have it unset. Treat those as visible
-                // everywhere (unchanged legacy behavior) while enforcing the
-                // match for anything that does carry a workspaceId — mirrors
-                // CollectionsACL's Zero-side rule (packages/shared/src/zero/
-                // acl/tables/collections-acl.ts).
-                {
-                    OR: [
-                        { workspaceId: null },
-                        { workspaceId },
-                    ],
-                },
+            OR: [
+                { ownerId: userId },
+                { isPrivate: false },
+                { permissions: { some: { userId } } },
+                ...(userGroupIds.length > 0
+                    ? [{ permissions: { some: { userGroupId: { in: userGroupIds } } } }]
+                    : []),
             ],
         },
         include: {
