@@ -16,6 +16,7 @@ import {
   DAILY_BRIEF_SLUG,
   type DailyBriefPayload,
 } from "../services/dailyBrief.js";
+import { recordDailyBriefRegeneration } from "../otel/daily-brief-metrics.js";
 
 const log = createLogger("daily-brief-routes");
 const MAX_INSTRUCTIONS = 8000;
@@ -192,10 +193,12 @@ router.post("/regenerate", async (req: Request, res: Response) => {
     if (!res.writableEnded) abort.abort();
   });
 
+  void recordDailyBriefRegeneration(userId);
   send("start", { date: briefDateBucket() });
   try {
     const result = await generateDailyBrief(userId, {
       signal: abort.signal,
+      trigger: "regenerate",
       onProgress: (label) => send("progress", { label }),
     });
     if (result) {

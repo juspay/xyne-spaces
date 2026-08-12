@@ -12,6 +12,7 @@ import {
   ThreeDotsMenuVertical,
   UserShield,
   UserTwo,
+  File02Ai,
 } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -25,6 +26,7 @@ import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
+import { MorningBriefCard } from './MorningBriefCard';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { cn } from '../../utils/classNames';
 
@@ -64,6 +66,12 @@ const NAV_ITEMS: AINavItem[] = [
   { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
   { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
   { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
+  {
+    key: 'daily-brief',
+    label: 'Morning Brief',
+    icon: File02Ai as NavIcon,
+    to: '/ai/daily-brief',
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -362,6 +370,21 @@ export function AISidebar({
             />
             {visibleNavItems.map(({ key, label, icon: Icon, to }) => {
               const isActive = routedActiveItem?.key === key;
+              if (key === 'daily-brief') {
+                return (
+                  <MorningBriefCard
+                    key={key}
+                    to={prefixWs(to)}
+                    label={label}
+                    active={isActive}
+                    className={cn(
+                      NAV_ITEM_CLASS,
+                      'shrink-0 items-start',
+                      isActive ? NAV_ITEM_ACTIVE_CLASS : NAV_ITEM_IDLE_CLASS,
+                    )}
+                  />
+                );
+              }
               return (
                 <Link
                   key={key}

@@ -22,12 +22,14 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { buildThreadCitationMeta } from "../lib/citations.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import {
   generatedContentRepository,
   userAgentInstructionRepository,
   DAILY_BRIEF_KIND,
 } from "../repositories/index.js";
+import { recordDailyBriefGenerated, type DailyBriefTrigger } from "../otel/daily-brief-metrics.js";
 
 const log = createLogger("daily-brief");
 
@@ -113,11 +115,17 @@ export interface GenerateBriefResult {
  *
  * @param onProgress optional coarse progress callback (used by the SSE regenerate
  *   route to stream "generating…" labels to the dashboard).
+ * @param trigger which path asked for this brief — only labels the OTel counter.
  */
 export async function generateDailyBrief(
   userId: string,
-  opts: { onProgress?: (label: string) => void; signal?: AbortSignal } = {},
+  opts: {
+    onProgress?: (label: string) => void;
+    signal?: AbortSignal;
+    trigger?: DailyBriefTrigger;
+  } = {},
 ): Promise<GenerateBriefResult | null> {
+  const trigger = opts.trigger ?? "scheduled";
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { orgId: true, name: true, email: true },
@@ -187,17 +195,21 @@ export async function generateDailyBrief(
     // The terminal `done` payload carries the structured brief as `dailyBrief`
     // (see xyne-claw run.ts). ClawDoneStatus doesn't type our new field, so read
     // it off loosely.
-    const done = streamResult.result as unknown as { dailyBrief?: DailyBriefPayload } | undefined;
+    const done = streamResult.result as unknown as
+      | { dailyBrief?: DailyBriefPayload; toolInvocations?: unknown }
+      | undefined;
     const brief = done?.dailyBrief;
     if (!brief) {
       log.warn(
         `[daily-brief] run for ${userId} finished without a dailyBrief payload (lastEvent=${streamResult.lastEventName}, error=${streamResult.errorReason ?? "none"})`,
       );
       await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket);
+      recordDailyBriefGenerated(trigger, "failed");
       return null;
     }
 
     const content = renderBriefMarkdown(brief);
+    const citationMeta = buildThreadCitationMeta(done?.toolInvocations, content);
     await generatedContentRepository.saveReady({
       userId,
       orgId,
@@ -205,15 +217,20 @@ export async function generateDailyBrief(
       dateBucket,
       agentSlug,
       content,
-      data: brief as unknown as import("@prisma/client").Prisma.InputJsonValue,
+      data: {
+        ...brief,
+        ...(citationMeta ?? {}),
+      } as unknown as import("@prisma/client").Prisma.InputJsonValue,
       sessionId: sessionId ?? null,
       generatedAt: new Date(),
     });
     log.info(`[daily-brief] generated + persisted for ${userId} (session=${sessionId ?? "?"})`);
+    recordDailyBriefGenerated(trigger, "ready");
     return { brief, content, sessionId };
   } catch (err) {
     log.error(`[daily-brief] generation failed for ${userId}:`, err instanceof Error ? err.message : String(err));
     await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket).catch(() => {});
+    recordDailyBriefGenerated(trigger, "failed");
     return null;
   }
 }
