@@ -3,6 +3,7 @@ import { Channel } from '@prisma/client';
 import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
@@ -226,16 +227,31 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
-    // Self-DM: channel name is stored as single userId, scopeType DM
-    if (userId1 === userId2) {
+    // "Does a DM already exist for this pair?" is a WORKSPACE-level question, not a
+    // "my rows" question. The default db client ANDs the per-user channel ACL onto every
+    // read (PUBLIC OR participants.some.userId = caller). A caller who is not a participant
+    // of the target DM — e.g. an automation submitter probing an admin's bot DM during the
+    // approval fan-out — would therefore never see the existing PRIVATE DM, get null back,
+    // and mint a duplicate. Run the existence probe under withWorkspaceScope so it executes
+    // as a service actor (workspace scope only, per-user predicate dropped). Tenant
+    // isolation is unchanged; only the participant filter is skipped.
+    //
+    // orderBy createdAt asc makes resolution deterministic: if duplicates already exist,
+    // every caller collapses onto the SAME (oldest) canonical DM instead of a random one.
+    return withWorkspaceScope(async () => {
+      // Self-DM: channel name is stored as single userId, scopeType DM
+      if (userId1 === userId2) {
+        return await this.db.channel.findFirst({
+          where: { name: userId1, scopeType: ChannelScopeType.DM },
+          orderBy: { createdAt: 'asc' },
+        });
+      }
+      // For 1:1 DM channels, name is sorted user IDs joined by comma
+      const name = [userId1, userId2].sort().join(",");
       return await this.db.channel.findFirst({
-        where: { name: userId1, scopeType: ChannelScopeType.DM },
+        where: { name },
+        orderBy: { createdAt: 'asc' },
       });
-    }
-    // For 1:1 DM channels, name is sorted user IDs joined by comma
-    const name = [userId1, userId2].sort().join(",");
-    return await this.db.channel.findFirst({
-      where: { name },
     });
   }
 
@@ -274,14 +290,18 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getGroupChannelByMembers(memberIds: string[]): Promise<Channel | null> {
-    // Get all GROUP_DM scope channels
+    // Same rationale as getDMChannel: the existence probe must not be filtered by the
+    // caller's participation, and must resolve to a single canonical (oldest) row.
     const name = memberIds.sort().join(",");
-    return await this.db.channel.findFirst({
-      where: {
-        scopeType: ChannelScopeType.GROUP_DM,
-        name: name
-      }
-    });
+    return withWorkspaceScope(async () =>
+      this.db.channel.findFirst({
+        where: {
+          scopeType: ChannelScopeType.GROUP_DM,
+          name: name,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    );
   }
 
   async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {
