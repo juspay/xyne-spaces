@@ -252,7 +252,7 @@ export class DeskMetricsRepository {
         : Prisma.sql``;
     const ticketScopeExists = Prisma.sql`${activeTicketFilter(
       assigneeIds
-    )} ${ticketAttributeExists} ${customFieldExists}`;
+    )} ${ticketAttributeExists} ${customFieldExists} ${tagExists}`;
 
     const cohortCte = Prisma.sql`
       cohort AS (
@@ -262,7 +262,6 @@ export class DeskMetricsRepository {
           AND ta."activityType" = 'TICKET_CREATED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
           ${ticketScopeExists}
-          ${tagExists}
       )`;
 
     const frtStop = frtStopSql();

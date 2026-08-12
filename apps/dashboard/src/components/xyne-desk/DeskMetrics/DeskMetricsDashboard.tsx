@@ -107,7 +107,7 @@ const TagsInCategorySubmenu = ({
 
   React.useEffect(() => {
     setLoading(true);
-    Promise.all(channelIds.map(id => tagsConfigApi.getAllGeneratedTags(id).catch(() => [])))
+    void Promise.all(channelIds.map(id => tagsConfigApi.getAllGeneratedTags(id).catch(() => [])))
       .then(results => {
         // Deduplicate by "category:tag" key across all channels
         const seen = new Set<string>();
@@ -155,6 +155,8 @@ const TagsInCategorySubmenu = ({
                   key={tagKey}
                   type='button'
                   onClick={() => toggle(tagKey)}
+                  data-track-category='DeskMetrics'
+                  data-track-name='ToggleTagValue'
                   className={cn(
                     'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
                     isSelected
@@ -294,7 +296,10 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     formatDuration(t.frtSeconds),
     formatDuration(t.rtSeconds),
     t.csatScore !== null ? `${t.csatScore.toFixed(1)}/5` : (t.csatRating ?? '—'),
-    `"${(t.tags ?? []).map(tg => `${tg.tagCategory}:${tg.tag}`).join('; ').replace(/"/g, '""')}"`,
+    `"${(t.tags ?? [])
+      .map(tg => `${tg.tagCategory}:${tg.tag}`)
+      .join('; ')
+      .replace(/"/g, '""')}"`,
     ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
     `"${new Date(t.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}"`,
   ]);
@@ -981,10 +986,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee' | 'tags'>('priority');
-  const [expandedChart, setExpandedChart] = useState<'priority' | 'trend' | 'assignee' | 'tags' | null>(
-    null,
+  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee' | 'tags'>(
+    'priority',
   );
+  const [expandedChart, setExpandedChart] = useState<
+    'priority' | 'trend' | 'assignee' | 'tags' | null
+  >(null);
   const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
   const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
   const timeRangeParam = `${rangeStartMs}_${rangeEndMs}`;
@@ -1056,7 +1063,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     (!isMultiDesk && selectedStageNames.length > 0) ||
     selectedPriorities.length > 0 ||
     selectedUserGroupIds.length > 0 ||
-    selectedTagCategory !== null ||
     selectedTagValues.length > 0 ||
     (!isMultiDesk && activeCustomFieldKeys.length > 0);
   const hasAnyFiltersActive = selectedAssigneeIds.length > 0 || hasMoreFiltersActive;
@@ -1677,6 +1683,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                           );
                                           setActiveSubmenu(null);
                                         }}
+                                        data-track-category='DeskMetrics'
+                                        data-track-name='SelectTagCategory'
                                         className={cn(
                                           'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
                                           selectedTagCategory === tc.tagCategory
@@ -1702,9 +1710,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       {selectedTagCategory !== null && (
                         <PopoverPrimitive.Root
                           open={activeSubmenu === '__tags'}
-                          onOpenChange={nextOpen =>
-                            setActiveSubmenu(nextOpen ? '__tags' : null)
-                          }
+                          onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__tags' : null)}
                         >
                           <PopoverPrimitive.Trigger asChild>
                             <button
@@ -2212,7 +2218,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           {chartView === 'trend' &&
                             `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                           {chartView === 'assignee' && 'Tickets by assignee'}
-                          {chartView === 'tags' && (activeTagCategory ? `Tags in "${activeTagCategory}"` : 'Tickets by tag category')}
+                          {chartView === 'tags' &&
+                            (activeTagCategory
+                              ? `Tags in "${activeTagCategory}"`
+                              : 'Tickets by tag category')}
                         </div>
                         <div className='flex items-center gap-2'>
                           <div className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'>
@@ -2478,7 +2487,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {expandedChart === 'trend' &&
                   `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                 {expandedChart === 'assignee' && 'Tickets by assignee'}
-                {expandedChart === 'tags' && (activeTagCategory ? `Tags in "${activeTagCategory}"` : 'Tickets by tag category')}
+                {expandedChart === 'tags' &&
+                  (activeTagCategory
+                    ? `Tags in "${activeTagCategory}"`
+                    : 'Tickets by tag category')}
               </h2>
               <button
                 type='button'
