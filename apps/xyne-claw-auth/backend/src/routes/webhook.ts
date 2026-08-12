@@ -95,8 +95,8 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildCodeFlow, buildDiffFlow, buildChartFlow, isTwinDelivery, isUiWidget } from "xyne-claw-shared";
-import type { TwinDelivery, UiWidget } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildCodeFlow, buildDiffFlow, buildChartFlow, buildPrFlow, prScreenId, isTwinDelivery, isUiWidget } from "xyne-claw-shared";
+import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
 const clog = createLogger("webhook");
@@ -390,6 +390,14 @@ import {
   AUTOMATION_RUN_DEDUP_TTL,
 } from "../lib/session-context.js";
 export { setSession, getSession, getSessionByConv, type SessionContext };
+import {
+  findPrBindingByUrl,
+  buildWidgetBindingData,
+  normalizePrUrl,
+  readPrBindingData,
+  setWidgetBindingStatus,
+  upsertWidgetBinding,
+} from "../lib/agent-widget-binding.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -6179,6 +6187,51 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   }
 });
 
+type PlanUiWidget = Extract<UiWidget, { type: "plan" }>;
+type PrUiWidget = Extract<UiWidget, { type: "pr" }>;
+
+function renderedWidgetStatus(widget: UiWidget): string {
+  if (widget.type === "pr") return widget.payload.status;
+  if (widget.type === "question") return "pending";
+  if (widget.type === "plan") {
+    const todos = widget.payload.todos;
+    if (todos.length > 0 && todos.every((todo) => todo.status === "completed" || todo.status === "failed")) return "done";
+    if (todos.some((todo) => todo.status === "in_progress")) return "executing";
+    return "pending";
+  }
+  return "created";
+}
+
+/** Persist only after Spaces accepted the corresponding post/update. */
+async function persistRenderedWidgetBinding(
+  ctx: SessionContext,
+  widget: UiWidget,
+  screenId: string,
+  messageId?: string,
+): Promise<void> {
+  const externalKey = widget.type === "pr" && widget.payload.url
+    ? normalizePrUrl(widget.payload.url) || null
+    : null;
+  try {
+    await upsertWidgetBinding({
+      orgId: ctx.agentOrgId ?? "",
+      kind: widget.type,
+      screenId,
+      externalKey,
+      conversationId: ctx.conversationId,
+      channelId: ctx.channelId,
+      messageId: messageId ?? null,
+      spacesAppId: ctx.spacesAppId,
+      spacesAppUserId: ctx.spacesAppUserId,
+      agentSlug: ctx.agentSlug ?? null,
+      status: renderedWidgetStatus(widget),
+      data: buildWidgetBindingData(widget),
+    });
+  } catch (err) {
+    clog.warn(`[ui-widget] durable binding failed for ${widget.type}/${screenId}:`, err instanceof Error ? err.message : err);
+  }
+}
+
 // ── Plan card render (todo-write → ui-widget progress event) ────────────────
 // Post the live todo checklist once, then updateMessage it IN PLACE on every
 // subsequent todo-write. Renders are serialized per session so a burst of
@@ -6187,10 +6240,11 @@ const planRenderQueue = new Map<string, Promise<void>>();
 
 async function doRenderPlanCard(
   sessionId: string,
-  todos: Todo[],
+  widget: PlanUiWidget,
   conversationId?: string | null,
   agentSlug?: string | null,
 ): Promise<void> {
+  const todos = widget.payload.todos;
   // Resolve via the SAME robust path every other /webhook/progress branch uses
   // (sessionId → recovery → conversationId+agentSlug conv-index), not a bare
   // getSession(sessionId). Plan mode splits work across Turn-1 and Turn-2
@@ -6264,7 +6318,8 @@ async function doRenderPlanCard(
     // re-stamped per render), so the audit footer's "· <time>" stays stable.
     ...(execMeta?.approvedAt ? { approvedAt: execMeta.approvedAt } : {}),
   });
-  if (!ctx.planMessageId) {
+  let messageId = ctx.planMessageId;
+  if (!messageId) {
     // postMessage takes the partial `flow` field; chatController wraps it.
     // Include conversationId so the card lands IN THE THREAD (channelId alone
     // posts to the channel root) — mirrors the result-handler reply targeting.
@@ -6273,30 +6328,117 @@ async function doRenderPlanCard(
       { channelId: ctx.channelId, conversationId: ctx.conversationId, flow, userId: ctx.spacesAppUserId },
       ctx.appToken,
     )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
-    const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
+    messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
     if (messageId) await setSession(sessionId, { ...ctx, planMessageId: messageId });
   } else {
     // updateMessage takes the full `flowJSON` field; needs channelId for
     // validateChannelAccessForPost.
     await spacesAppFetch(
       "/chat/updateMessage",
-      { messageId: ctx.planMessageId, flowJSON: flow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
+      { messageId, flowJSON: flow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
       ctx.appToken,
     );
   }
+  const renderedWidget: PlanUiWidget = { ...widget, payload: { todos: renderTodos } };
+  await persistRenderedWidgetBinding(ctx, renderedWidget, flow.screenId, messageId);
 }
 
 function renderPlanCard(
   sessionId: string,
-  todos: Todo[],
+  widget: PlanUiWidget,
   conversationId?: string | null,
   agentSlug?: string | null,
 ): Promise<void> {
   const prev = planRenderQueue.get(sessionId) ?? Promise.resolve();
-  const next = prev.catch(() => {}).then(() => doRenderPlanCard(sessionId, todos, conversationId, agentSlug));
+  const next = prev.catch(() => {}).then(() => doRenderPlanCard(sessionId, widget, conversationId, agentSlug));
   planRenderQueue.set(sessionId, next);
   void next.finally(() => {
     if (planRenderQueue.get(sessionId) === next) planRenderQueue.delete(sessionId);
+  });
+  return next;
+}
+
+// ── Live PR widget lifecycle ────────────────────────────────────────────────
+// PR create/merge MCP calls are normalized by claw into a typed UiWidget. The
+// deterministic screen id lets this path post once and update the same message
+// as the PR advances. A durable binding also lets later provider webhooks find
+// the originating thread after SessionContext has expired.
+const prRenderQueue = new Map<string, Promise<void>>();
+
+async function doRenderPrWidget(
+  sessionId: string,
+  widget: PrUiWidget,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
+  const pr = widget.payload;
+  const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
+
+  const identity = {
+    provider: pr.provider,
+    ...(pr.repo ? { repo: pr.repo } : {}),
+    ...(pr.number !== undefined ? { number: pr.number } : {}),
+    ...(pr.url ? { url: pr.url } : {}),
+  };
+  const screenId = prScreenId(identity);
+  const flow = withSpacesAppId(buildPrFlow({
+    provider: pr.provider,
+    status: pr.status,
+    title: pr.title,
+    ...(pr.url ? { url: pr.url } : {}),
+    ...(pr.desc ? { desc: pr.desc } : {}),
+    ...(pr.ticketId ? { ticketId: pr.ticketId } : {}),
+    ...(pr.detailsUrl ? { detailsUrl: pr.detailsUrl } : {}),
+  }, {
+    screenId,
+    data: {
+      agentSlug: ctx.agentSlug,
+      conversationId: ctx.conversationId,
+      channelId: ctx.channelId,
+    },
+  }), ctx.spacesAppId);
+
+  const existingMessageId = ctx.prMessageIds?.[screenId];
+  let messageId = existingMessageId;
+  if (existingMessageId) {
+    await spacesAppFetch("/chat/updateMessage", {
+      messageId: existingMessageId,
+      flowJSON: flow,
+      userId: ctx.spacesAppUserId,
+      channelId: ctx.channelId,
+    }, ctx.appToken);
+  } else {
+    const response = await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, ctx.appToken) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+    messageId = response.messageId ?? response.id ?? response.data?.messageId ?? response.data?.id;
+    if (messageId) {
+      const fresh = await getSession(sessionId).catch(() => null) ?? ctx;
+      await setSession(sessionId, {
+        ...fresh,
+        prMessageIds: { ...(fresh.prMessageIds ?? {}), [screenId]: messageId },
+      }).catch(() => {});
+    }
+  }
+
+  await persistRenderedWidgetBinding(ctx, widget, screenId, messageId);
+}
+
+function renderPrWidget(
+  sessionId: string,
+  widget: PrUiWidget,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
+  const previous = prRenderQueue.get(sessionId) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(() => doRenderPrWidget(sessionId, widget, conversationId, agentSlug));
+  prRenderQueue.set(sessionId, next);
+  void next.finally(() => {
+    if (prRenderQueue.get(sessionId) === next) prRenderQueue.delete(sessionId);
   });
   return next;
 }
@@ -6350,7 +6492,11 @@ async function renderUiWidget(
   knownContext?: SessionContext,
 ): Promise<boolean> {
   if (widget.type === "plan") {
-    await renderPlanCard(sessionId, widget.payload.todos, conversationId, agentSlug);
+    await renderPlanCard(sessionId, widget, conversationId, agentSlug);
+    return true;
+  }
+  if (widget.type === "pr") {
+    await renderPrWidget(sessionId, widget, conversationId, agentSlug);
     return true;
   }
 
@@ -6405,19 +6551,116 @@ async function renderUiWidget(
         break;
     }
 
-    await spacesAppFetch("/chat/postMessage", {
+    const response = await spacesAppFetch("/chat/postMessage", {
       channelId: ctx.channelId,
       conversationId: ctx.conversationId,
       flow,
       userId: ctx.spacesAppUserId,
-    }, ctx.appToken);
+    }, ctx.appToken) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+    const messageId = response.messageId ?? response.id ?? response.data?.messageId ?? response.data?.id;
     delivered = true;
+    await persistRenderedWidgetBinding(ctx, widget, flow.screenId, messageId);
     log.info(`Posted ${widget.type} UI widget ${widget.id} in thread ${ctx.conversationId}`);
     return true;
   } finally {
     await finishCreateWidget(sessionId, widget.id, claim, delivered).catch(() => {});
   }
 }
+
+// ── Provider webhook PR lifecycle ──────────────────────────────────────────
+// The Spaces backend has already authenticated and normalized the Bitbucket
+// webhook. This callback is separate from UiWidget because it originates from
+// Spaces after the agent run may have ended.
+interface PrEventInput {
+  provider: PrProvider;
+  status: PrStatus;
+  prUrl: string;
+}
+
+const PR_PROVIDERS = new Set<PrProvider>(["github", "bitbucket", "gitlab", "other"]);
+const PR_STATUSES = new Set<PrStatus>(["created", "merged", "reverted", "deleted", "declined"]);
+
+function parsePrEvent(raw: unknown): PrEventInput | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as Record<string, unknown>;
+  const provider = data["provider"];
+  const status = data["status"];
+  const prUrl = data["prUrl"] ?? data["url"];
+  if (typeof provider !== "string" || !PR_PROVIDERS.has(provider as PrProvider)) return null;
+  if (typeof status !== "string" || !PR_STATUSES.has(status as PrStatus)) return null;
+  if (typeof prUrl !== "string" || !prUrl.trim()) return null;
+  return { provider: provider as PrProvider, status: status as PrStatus, prUrl: prUrl.trim() };
+}
+
+async function postWebhookPrStatusCard(event: PrEventInput): Promise<string> {
+  const binding = await findPrBindingByUrl(event.prUrl);
+  if (!binding) return "no-binding";
+  if (binding.status === event.status) return "dedup-same-status";
+
+  const card = readPrBindingData(binding);
+  if (!card || !PR_PROVIDERS.has(card.provider as PrProvider)) return "invalid-binding";
+  const agent = await agentRepository.findBySpacesAppId(binding.spacesAppId);
+  if (!agent?.spacesAppToken) return "agent-unresolved";
+  if (binding.orgId && agent.orgId && binding.orgId !== agent.orgId) return "org-mismatch";
+  const userId = binding.spacesAppUserId || agent.spacesAppUserId || "";
+  if (!userId) return "no-bot-user";
+
+  const flow = withSpacesAppId(buildPrFlow({
+    provider: card.provider as PrProvider,
+    status: event.status,
+    title: card.title,
+    ...(card.url ? { url: card.url } : {}),
+    ...(card.desc ? { desc: card.desc } : {}),
+    ...(card.ticketId ? { ticketId: card.ticketId } : {}),
+    ...(card.detailsUrl ? { detailsUrl: card.detailsUrl } : {}),
+  }, {
+    screenId: `${binding.screenId}-${event.status}`,
+    data: {
+      ...(binding.agentSlug ? { agentSlug: binding.agentSlug } : {}),
+      conversationId: binding.conversationId,
+      channelId: binding.channelId,
+      source: "webhook",
+    },
+  }), binding.spacesAppId);
+
+  const response = await spacesAppFetch("/chat/postMessage", {
+    channelId: binding.channelId,
+    conversationId: binding.conversationId,
+    flow,
+    userId,
+  }, decryptStoredField(agent.spacesAppToken)) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+  const messageId = response.messageId ?? response.id ?? response.data?.messageId ?? response.data?.id;
+  await setWidgetBindingStatus(binding.id, event.status, messageId).catch((err) =>
+    clog.warn(`[webhook/pr-event] failed to persist status:`, err instanceof Error ? err.message : err),
+  );
+  return "posted";
+}
+
+const prEventQueue = new Map<string, Promise<void>>();
+
+router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) => {
+  res.json({ success: true });
+  const event = parsePrEvent(req.body);
+  if (!event) {
+    clog.warn(`[webhook/pr-event] rejected malformed payload`);
+    return;
+  }
+
+  const key = normalizePrUrl(event.prUrl);
+  const previous = prEventQueue.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(async () => {
+    try {
+      const result = await postWebhookPrStatusCard(event);
+      clog.info(`[webhook/pr-event] ${event.status} ${key} → ${result}`);
+    } catch (err) {
+      clog.warn(`[webhook/pr-event] failed for ${key}:`, err instanceof Error ? err.message : err);
+    }
+  });
+  prEventQueue.set(key, next);
+  void next.finally(() => {
+    if (prEventQueue.get(key) === next) prEventQueue.delete(key);
+  });
+});
 
 // ── POST /webhook/progress — live tool-call update from xyne-claw ───────────
 //
@@ -6487,6 +6730,13 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       type: "diff",
       operation: "create",
       payload: { path: body["path"], patch: body["patch"] },
+    };
+  } else if (!widget && body["kind"] === "pr" && body["pr"] && typeof body["pr"] === "object") {
+    widget = {
+      id: `legacy-pr:${crypto.randomUUID()}`,
+      type: "pr",
+      operation: "upsert",
+      payload: body["pr"] as PrUiWidget["payload"],
     };
   } else if (!widget && body["kind"] === "chart") {
     const caption = typeof body["caption"] === "string" && body["caption"].trim() ? body["caption"].trim() : undefined;
