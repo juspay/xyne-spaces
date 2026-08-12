@@ -5595,6 +5595,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           visibility: visibility || CanvasVisibility.PRIVATE,
           isTemplate: false,
+          isArchived: false,
           isCollaborative: false,
           docType: DocType.Canvas,
           lastEditedBy: ctx.userID,
@@ -5734,6 +5735,46 @@ export const mutators = defineMutators({
 
       await tx.mutate.canvases.delete({ id });
     }),
+    archiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can archive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: true,
+        });
+      },
+    ),
+    unarchiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can unarchive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: false,
+        });
+      },
+    ),
     addParticipants: defineMutator(
       z.object({
         canvasId: z.string(),

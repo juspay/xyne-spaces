@@ -2869,6 +2869,7 @@ model Canvas {
   editAccessId String? @unique // Random ID for edit access
   visibility   String           @default("PRIVATE")
   isTemplate   Boolean          @default(false)
+  isArchived   Boolean          @default(false)
   lastEditedBy String? // Last user who edited (no FK constraint)
   lastEditedAt DateTime?
   createdAt    DateTime         @default(now())
