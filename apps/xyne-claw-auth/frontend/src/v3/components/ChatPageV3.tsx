@@ -39,6 +39,7 @@ import {
   ArrowSquareOutIcon,
   LinkBreakIcon,
   FileIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
@@ -2534,6 +2535,12 @@ export interface InputAreaProps {
   /** Open / close the ContextPicker popover (parent owns positioning). */
   mentionOpen: boolean;
   onToggleMention: () => void;
+  /** Single search + single answer pass instead of the full agentic tool
+   *  loop for the NEXT send() call. Optional — omit to hide the toggle
+   *  entirely (e.g. composers, like Xyne Doctor's follow-up panel, whose
+   *  send() doesn't understand instant at all). */
+  instant?: boolean;
+  onToggleInstant?: () => void;
   /** The ContextPicker JSX is rendered by the parent (it needs auth/userId);
    *  we slot it in as a render prop so positioning relative to the input
    *  card lives here. */
@@ -2568,6 +2575,8 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     onRemoveContext,
     mentionOpen,
     onToggleMention,
+    instant,
+    onToggleInstant,
     renderMentionPicker,
   },
   ref,
@@ -2792,6 +2801,24 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               >
                 <AtIcon size={14} />
               </button>
+              {onToggleInstant && (
+                <button
+                  type="button"
+                  data-id="input-btn-instant"
+                  title={instant ? "Instant answer enabled" : "Answer from Knowledge Base only, instantly"}
+                  aria-label="Instant answer"
+                  onClick={onToggleInstant}
+                  aria-pressed={instant}
+                  className={`flex h-8 items-center justify-center gap-1 rounded-full px-2.5 transition-colors ${
+                    instant
+                      ? "bg-xyne-brand text-xyne-fg-inverse"
+                      : "bg-xyne-surface-subtle text-xyne-fg-tertiary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  }`}
+                >
+                  <LightningIcon size={14} />
+                  <span className="text-xs font-medium">Instant</span>
+                </button>
+              )}
             </div>
 
             {sending ? (
@@ -4788,8 +4815,11 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const [contextQuery, setContextQuery] = useState("");
   const [contextTab, setContextTab] = useState<ContextSearchType>("all");
   const [selectedContext, setSelectedContext] = useState<ContextItem[]>([]);
+  // Single search + single answer pass instead of the full agentic tool loop.
+  const [instant, setInstant] = useState(false);
 
   const handleToggleMention = useCallback(() => setMentionOpen((v) => !v), []);
+  const handleToggleInstant = useCallback(() => setInstant((v) => !v), []);
   const handleAddContext = useCallback((item: ContextItem) => {
     setSelectedContext((prev) => {
       if (prev.some((c) => c.type === item.type && c.id === item.id)) return prev;
@@ -5488,6 +5518,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
+          ...(instant ? { instant: true } : {}),
         });
         if (designSelectionSnapshot) setDesignSelection(null);
         if (manualEditsSnapshot.length > 0) {
@@ -5508,7 +5539,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml, instant]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -5790,6 +5821,8 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                   onRemoveContext={handleRemoveContext}
                   mentionOpen={mentionOpen}
                   onToggleMention={handleToggleMention}
+                  instant={instant}
+                  onToggleInstant={handleToggleInstant}
                   renderMentionPicker={() => (
                     <ContextPicker
                       slug={activeAgent.slug}

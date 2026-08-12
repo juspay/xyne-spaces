@@ -34,6 +34,9 @@ export interface SendOptions {
   modelOverride?: string;
   /** Repository selected in the SDLC Agent composer. */
   researchContext?: { type: "repository"; id: string; name?: string };
+  /** Single search + single answer pass instead of the full agentic tool
+   *  loop — see backend routes/agent-chat.ts's instant branch. */
+  instant?: boolean;
 }
 
 /** A live event delivered by the /live SSE for a conversation being viewed. */
@@ -571,6 +574,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ...(opts?.designSelection ? { designSelection: opts.designSelection } : {}),
             ...(opts?.modelOverride ? { providerOverride: { provider: "litellm", model: opts.modelOverride } } : {}),
             ...(opts?.researchContext ? { researchContext: opts.researchContext } : {}),
+            ...(opts?.instant ? { instant: true } : {}),
           },
         );
 

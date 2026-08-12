@@ -15,12 +15,15 @@ import {
   buildLateFollowUpInvocations,
   extractLateFollowUpSessionId,
   extractFollowUpSuggestions,
+  extractFollowUpSuggestionsFromInvocations,
   isInternalFollowUpInvocation,
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
+import { answerInstantAsk, resolveInstantAgentContext } from "../lib/instant-ask.js";
+import { persistInstantDebugTrace } from "../lib/instant-debug-store.js";
 import { redisService } from "../redis.js";
 import {
   branchPiConversationId,
@@ -359,7 +362,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       parentUserMessageId,
       parentAssistantMessageId,
       editedUserMessageId,
+      // Single search + single answer pass — bypasses the full claw agentic
+      // tool loop entirely. See lib/instant-ask.ts.
+      instant,
     } = req.body as Record<string, unknown>;
+    const instantEnabled = instant === true;
 
     if (!task || typeof task !== "string") {
       res.status(400).json({ success: false, error: "task is required" });
@@ -395,6 +402,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         name: true,
         description: true,
         config: true,
+        systemPrompt: true,
       },
     }).catch(() => null);
     if (!agentRow) {
@@ -607,6 +615,191 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (msgErr) {
         log.warn("[run-stream] Failed to pre-create assistant placeholder:", msgErr instanceof Error ? msgErr.message : String(msgErr));
       }
+    }
+
+    // Single search + single answer pass, no claw dispatch at all — no PI
+    // session, no webhook round trip, no pendingStreams/resultPromise
+    // machinery (nothing async ever calls back into this pod). See
+    // lib/instant-ask.ts for the full rationale.
+    if (instantEnabled) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.write(`event: meta\ndata: ${JSON.stringify({ streamId, conversationId: convId })}\n\n`);
+
+      const instantSessionId = `instant-${randomUUID()}`;
+      // Mirrors the claw-dispatch branch's early `event: run` (written the
+      // instant claw reports `started`, before any tool/debug/delta frames).
+      // apps/backend's SSE relay (clawAgentService.ts) maps `event: run` to a
+      // `type: "start"` frame carrying the resolved sessionId/conversationId
+      // — the only place a fresh conversation's real (server-assigned) id
+      // reaches the dashboard before the run finishes. Instant mode never
+      // wrote this, so a brand-new instant conversation had no early id
+      // signal; the dashboard's debug panel ended up holding a stale/local
+      // id and "Debug this response" 404'd against claw-auth (id never
+      // existed there) even though the run itself completed and persisted
+      // fine.
+      res.write(`event: run\ndata: ${JSON.stringify({ sessionId: instantSessionId, conversationId: convId })}\n\n`);
+
+      // Awaited (unlike the fire-and-forget start() below the claw-dispatch
+      // branch) — there, a real webhook round trip to claw provides a wide
+      // window before finalize() runs. Here the whole flow is one fast
+      // in-process call, so start() must actually land before finalize()
+      // tries to UPDATE the same row.
+      let instantRunStarted = true;
+      await agentRunRepository.start({
+        sessionId: instantSessionId,
+        userId,
+        agentSlug: slug,
+        orgId,
+        triggerSource: "chat",
+        task: task.trim(),
+        conversationId: convId,
+      }).catch((e: unknown) => {
+        instantRunStarted = false;
+        log.warn("[run-stream] instant AgentRun.start failed:", e instanceof Error ? e.message : String(e));
+      });
+
+      try {
+        const instantHistory = existingMessageRows
+          .filter((m) => m.agentSlug === slug && (m.role === "user" || m.role === "assistant") && m.content.trim())
+          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+        const { agentPrompt, providerConfig } = await resolveInstantAgentContext(agentRow);
+
+        const instantStartedAt = new Date().toISOString();
+
+        // Debug events and answer tokens stream to the client live, as they
+        // happen — same `event: debug`/`event: delta` shapes and timing the
+        // full agentic dispatch produces (run-stream/sse's onDebug/onTextDelta
+        // below), just sourced from this in-process call instead of claw's
+        // SSE stream. Only the FINAL `done` frame still waits on persistence
+        // (see the comment above it) — the live frames above have nothing to
+        // race against, since a message still receiving `delta` chunks isn't
+        // "done" yet from the client's perspective.
+        const instantResult = await answerInstantAsk({
+          userId,
+          agentSlug: slug,
+          conversationId: convId,
+          sessionId: instantSessionId,
+          task: task.trim(),
+          history: instantHistory,
+          ...(agentPrompt ? { agentPrompt } : {}),
+          ...(providerConfig ? { providerConfig } : {}),
+          ...(generateFollowUpSuggestions === true
+            ? {
+                generateFollowUpSuggestions: true,
+                followUpAgentContext: { name: agentRow.name, description: agentRow.description },
+              }
+            : {}),
+          onDebugEvent: (debugEvent) => {
+            res.write(`event: debug\ndata: ${JSON.stringify({ debugEvent })}\n\n`);
+          },
+          onTextDelta: (delta) => {
+            res.write(`event: delta\ndata: ${JSON.stringify({ content: delta })}\n\n`);
+            if (CONFIG.liveToolCallsEnabled) {
+              pushDelta(instantSessionId, convId, slug, assistantMsg?.id, delta, undefined, userId);
+            }
+          },
+          // Mirrors the claw-dispatch branch's `event: invocation` — this is
+          // what the dashboard actually resolves `[clf-<toolCallId>#N]`
+          // citation tokens against for the message on screen right now
+          // (XyneAIStreamManager.ts's `tool_invocation` handler builds
+          // `msg.toolInvocations` from exactly this frame). Without it the
+          // model's citations had nothing to resolve against until the page
+          // reloaded and refetched the persisted message.
+          onToolInvocation: (toolInvocation) => {
+            res.write(`event: invocation\ndata: ${JSON.stringify(toolInvocation)}\n\n`);
+          },
+        });
+
+        // Persist BEFORE writing the terminal `done` frame — the client treats
+        // `done` as "turn finished" and immediately enables "Debug this
+        // response", which fetches the debug trace fresh via GET (now served
+        // from claw-auth's own local+GCS store, see instant-debug-store.ts).
+        // Writing `done` first (as this used to, back when the whole answer
+        // arrived as one `delta` indistinguishable from `done`) raced that
+        // fetch against this very persist step — a fast click landed before
+        // the trace existed and surfaced as "Failed to fetch debug artifacts"
+        // even though the turn succeeded.
+        await Promise.all([
+          assistantMsg
+            ? persistRunStreamResult({
+                conversationId: convId,
+                agentSlug: slug,
+                userId,
+                orgId,
+                content: instantResult.content,
+                status: "completed",
+                assistantMessageId: assistantMsg.id,
+              }).catch((e: unknown) => log.warn("[run-stream] instant persist failed:", e instanceof Error ? e.message : String(e)))
+            : Promise.resolve(),
+          instantRunStarted
+            ? agentRunRepository.finalize(instantSessionId, {
+                status: "completed",
+                result: instantResult.content,
+                toolsUsed: ["kb-search"],
+                toolInvocations: instantResult.toolInvocations,
+                ...(assistantMsg ? { chatMessageId: assistantMsg.id } : {}),
+              }).catch((e: unknown) => log.warn("[run-stream] instant AgentRun.finalize failed:", e instanceof Error ? e.message : String(e)))
+            : Promise.resolve(),
+          // Debug trace storage — claw-auth's own local dir + GCS, mirroring
+          // claw's own session-store.ts pattern (see lib/instant-debug-store.ts).
+          // Neither Postgres nor claw's PVC are involved for this data anymore.
+          persistInstantDebugTrace({
+            conversationId: convId,
+            agentSlug: slug,
+            userId,
+            sessionId: instantSessionId,
+            task: task.trim(),
+            startedAt: instantStartedAt,
+            finishedAt: new Date().toISOString(),
+            lastAssistantText: instantResult.content,
+            toolInvocations: instantResult.toolInvocations,
+            events: instantResult.debugEvents,
+            totalMs: Date.now() - Date.parse(instantStartedAt),
+          }).catch(() => false),
+        ]);
+
+        // Mirrors the claw-dispatch branch's `event: debug_artifacts_ready`
+        // (written right after AgentRun.finalize(), same spot) — this is what
+        // the dashboard's debug panel actually listens for to auto-refetch
+        // (bumps `debugArtifactsReadyVersion`, see AskAIDebugPanel.tsx). The
+        // `done` frame alone doesn't trigger that refetch; without this event
+        // the panel went blank at turn-end and only recovered on a manual
+        // "Refresh" click, even though the data was already persisted fine.
+        res.write(`event: debug_artifacts_ready\ndata: ${JSON.stringify({ sessionId: instantSessionId, conversationId: convId })}\n\n`);
+
+        if (CONFIG.liveToolCallsEnabled) {
+          publishLiveEvent(convId, { type: "done", conversationId: convId, agentSlug: slug, userId, status: "completed", ts: Date.now() });
+        }
+        endDeltaCoalescer(instantSessionId);
+
+        const instantFollowUpSuggestions = extractFollowUpSuggestionsFromInvocations(instantResult.toolInvocations);
+        res.write(`event: done\ndata: ${JSON.stringify({
+          content: instantResult.content,
+          status: "completed",
+          conversationId: convId,
+          ...(assistantMsg ? { id: assistantMsg.id } : {}),
+          ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
+          ...(assistantParentId ? { parentId: assistantParentId } : {}),
+          ...(instantFollowUpSuggestions?.length ? { followUpSuggestions: instantFollowUpSuggestions } : {}),
+        })}\n\n`);
+        res.end();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Instant answer failed";
+        log.error("[run-stream] instant answer failed:", message);
+        if (assistantMsg) {
+          await chatMessageRepository.update(assistantMsg.id, { content: message, status: "failed" }).catch(() => {});
+        }
+        if (!res.writableEnded) {
+          res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+          res.end();
+        }
+      }
+      return;
     }
 
     // Branched PI session clone (regenerate / edit-user).
