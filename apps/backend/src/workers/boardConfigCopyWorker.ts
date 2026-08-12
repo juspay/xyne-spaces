@@ -57,18 +57,28 @@ class BoardConfigCopyWorker {
    * stage names onto its resolved destination. Safe to run repeatedly — a ticket that has
    * already moved simply no longer matches the query, and `applyStageRemap` itself
    * re-checks the stage name at write time. Returns how many tickets it actually moved.
+   *
+   * `phase` only labels the log lines: the same pass runs as the main migration and again
+   * as the straggler sweep, and without it the two are indistinguishable in the log.
    */
   private async remapPass(
     data: BoardConfigCopyJobData,
     destinations: Map<string, BoardConfigCopyTicketRemap>,
     summary: BoardConfigCopySummary,
+    phase: string,
   ): Promise<number> {
     const stageNames = [...destinations.keys()];
     if (stageNames.length === 0) return 0;
 
+    const startedAt = Date.now();
     let movedInPass = 0;
+    let batchesInPass = 0;
     let cursor: string | null = null;
     let hasMore = true;
+
+    logger.info(`${TAG} [${phase}] Started for board ${data.targetBoardId}`, {
+      retiredStages: stageNames,
+    });
 
     while (hasMore) {
       const tickets = await boardConfigCopyService.findTicketsOnOldStages(
@@ -83,6 +93,7 @@ class BoardConfigCopyWorker {
         continue;
       }
       summary.batches += 1;
+      batchesInPass += 1;
 
       for (const ticket of tickets) {
         summary.processed += 1;
@@ -113,21 +124,44 @@ class BoardConfigCopyWorker {
         } catch (error) {
           summary.errors += 1;
           summary.failedTicketIds.push(ticket.id);
-          logger.warn(`${TAG} Failed to remap ticket ${ticket.id}`, {
+          logger.warn(`${TAG} [${phase}] Failed to remap ticket ${ticket.id}`, {
             error: error instanceof Error ? error.message : String(error),
           });
         }
       }
 
       cursor = tickets[tickets.length - 1]?.id ?? null;
+
+      // One line per batch. With BATCH_SIZE tickets and DELAY_MS between batches this is
+      // at most ~1 line/sec, which is what makes a long run legible while it's happening —
+      // without it, a board with thousands of tickets is silent for minutes.
+      logger.info(`${TAG} [${phase}] Batch ${batchesInPass} done for board ${data.targetBoardId}`, {
+        movedInPass,
+        processedTotal: summary.processed,
+        updatedTotal: summary.updated,
+        skippedTotal: summary.skipped,
+        errorsTotal: summary.errors,
+        elapsedMs: Date.now() - startedAt,
+      });
+
       if (DELAY_MS > 0) await sleep(DELAY_MS);
     }
+
+    logger.info(`${TAG} [${phase}] Finished for board ${data.targetBoardId}`, {
+      batchesInPass,
+      movedInPass,
+      elapsedMs: Date.now() - startedAt,
+    });
 
     return movedInPass;
   }
 
   private async processJob(data: BoardConfigCopyJobData): Promise<BoardConfigCopySummary> {
-    logger.info(`${TAG} Starting ticket migration for targetBoardId=${data.targetBoardId}`);
+    const jobStartedAt = Date.now();
+    logger.info(`${TAG} Starting ticket migration for board ${data.targetBoardId}`, {
+      retiredStageCount: data.ticketRemap.length,
+      fieldRepointCount: data.fieldRepoints.length,
+    });
 
     const summary: BoardConfigCopySummary = {
       batches: 0,
@@ -145,6 +179,10 @@ class BoardConfigCopyWorker {
     // remap below, and cheap enough that doing it up front keeps pre-existing tickets
     // editable as early as possible.
     if (data.fieldRepoints.length > 0 && data.targetOldFormId && data.clonedFormId) {
+      const repointStartedAt = Date.now();
+      logger.info(`${TAG} [REPOINT_FIELD_VALUES] Started for board ${data.targetBoardId}`, {
+        fieldCount: data.fieldRepoints.length,
+      });
       const { repointed, warnings } = await boardConfigCopyService.repointFormEntityValues(
         data.targetBoardId,
         data.targetOldFormId,
@@ -154,17 +192,21 @@ class BoardConfigCopyWorker {
       );
       summary.fieldValuesRepointed = repointed;
       summary.warnings.push(...warnings);
+      logger.info(`${TAG} [REPOINT_FIELD_VALUES] Finished for board ${data.targetBoardId}`, {
+        repointed,
+        elapsedMs: Date.now() - repointStartedAt,
+      });
     }
 
     const destinations = new Map(data.ticketRemap.map(remap => [remap.oldStageName, remap]));
 
     if (destinations.size > 0) {
-      await this.remapPass(data, destinations, summary);
+      await this.remapPass(data, destinations, summary, 'REMAP_TICKETS');
 
       // One final sweep for anything created on a retired stage name while the main pass
       // was running. Those stages no longer exist, so nothing new can legitimately land on
       // them — this only catches writes that were already in flight when the config changed.
-      const healed = await this.remapPass(data, destinations, summary);
+      const healed = await this.remapPass(data, destinations, summary, 'STRAGGLER_SWEEP');
       if (healed > 0) {
         summary.warnings.push(
           `${healed} ticket(s) were still being written to a retired stage as it was removed, and were moved onto the new stage set.`,
@@ -172,7 +214,13 @@ class BoardConfigCopyWorker {
       }
     }
 
-    logger.info(`${TAG} Completed ticket migration for targetBoardId=${data.targetBoardId}`, summary);
+    logger.info(`${TAG} Completed ticket migration for board ${data.targetBoardId}`, {
+      ...summary,
+      // Bounded: a badly-wrong run could otherwise dump thousands of ids into the log line.
+      failedTicketIds: summary.failedTicketIds.slice(0, 20),
+      failedTicketIdCount: summary.failedTicketIds.length,
+      elapsedMs: Date.now() - jobStartedAt,
+    });
     return summary;
   }
 }
