@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { RecordingType, CallType } from '@xyne/shared';
 import type { WebhookEvent } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
@@ -10,6 +9,7 @@ import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptServic
 import { callRecordingService } from '@/services/callRecordingService';
 import { livekitService } from '@/services/liveKitService';
 import { emitCallStarted, emitCallEnded } from '@/automations/triggers/call.trigger';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Deferred the same way as the conversation-based flow's fallback reconcile —
 // see livekitWebhookController's former room_finished comment for the full
@@ -106,7 +106,7 @@ class NoteTakerWebhookController {
     }
 
     const callId = uuidv4();
-    const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=AUDIO`;
+    const roomLink = buildCallInviteUrl(roomName);
 
     let call;
     try {

@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -19,6 +18,7 @@ import {
   sendCallInvitationReply,
 } from '@/services/callInvitationEmailService';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -321,7 +321,7 @@ export class ScheduleCallController {
       const externalId = uuidv4();
 
       // Generate room link for scheduled call
-      const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
+      const roomLink = buildCallInviteUrl(externalId);
 
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
       const hasExternals = !!(
