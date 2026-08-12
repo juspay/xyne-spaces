@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
@@ -50,6 +51,8 @@ export const ReactionAddedActivityV2 = ({
     return null;
   }
 
+  const reactionPreview = getReactionMessagePreview(message.content);
+
   // Format description text
   let descriptionText: string;
   if (uniqueReactorCount <= 1) {
@@ -81,10 +84,9 @@ export const ReactionAddedActivityV2 = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
       ) : (
-        <RenderMessageWithHTML
-          message={getReactionMessagePreview(message.content)}
-          showEdited={message.edited}
-        />
+        (getFlowJsonPreviewText(reactionPreview) ?? (
+          <RenderMessageWithHTML message={reactionPreview} showEdited={message.edited} />
+        ))
       )}
     </ActivityItemCard>
   );
