@@ -88,6 +88,8 @@ const ConversationPanelV2 = ({
   showHeader = true,
   hideComposer = false,
   skipMarkAsRead = false,
+  unreadsOnly,
+  onThreadClick,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -99,6 +101,8 @@ const ConversationPanelV2 = ({
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
   skipMarkAsRead?: boolean;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -260,7 +264,9 @@ const ConversationPanelV2 = ({
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
-                ></ChatListV4>
+                  unreadsOnly={unreadsOnly ?? false}
+                  {...(onThreadClick && { onThreadClick })}
+                />
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
