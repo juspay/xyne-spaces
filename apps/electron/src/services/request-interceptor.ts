@@ -81,7 +81,7 @@ function setupDownloadHandler(): void {
 
 /**
  * Sets up a User-Agent rewrite on the `persist:xyne-spaces` partition — the
- * session used by Xyne-internal tabs inside the browser panel.
+ * session used by first-party tabs inside the browser panel.
  *
  * Why: `authV2Controller.detectPlatform` classifies a request as `electron`
  * when the UA contains "electron". If auth ever has to run inside this
@@ -151,7 +151,7 @@ export function setupXyneSpacesInterceptor(): void {
  */
 const RESTRICTED_MEDIA_PERMISSIONS = new Set(['media', 'display-capture', 'mediaKeySystem']);
 
-// First-party Xyne content loaded outside the main window (e.g. in-app browser panel →
+// First-party content loaded outside the main window (e.g. in-app browser panel →
 // persist:xyne-spaces) is allowed this narrow set of low-risk permissions — clipboard
 // writes for "copy" buttons and fullscreen for the media/pptx/pdf viewers. Only this set,
 // and only for first-party origins; all other permissions stay denied except the main window.
@@ -167,10 +167,10 @@ function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): bo
 function isFirstPartyUrl(rawUrl: string | undefined): boolean {
   if (!rawUrl) return false;
   try {
-    const { protocol, hostname } = new URL(rawUrl);
+    const { protocol, hostname, origin } = new URL(rawUrl);
     if (protocol.startsWith('xyne-spaces')) return true;              // bundled UI custom scheme
     if (protocol === 'file:') return true;                            // bundled local HTML
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) return true;
+    if (config.TRUSTED_ORIGINS.includes(origin)) return true;
     if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
     return false;
   } catch {
@@ -226,24 +226,24 @@ function setupMediaPermissionGuard(): void {
 }
 
 function installFrontendCsp(): void {
-  const xyneHosts = 'https://*.xyne.juspay.net';
-  const xyneWs = 'wss://*.xyne.juspay.net';
   const googleApis = 'https://apis.google.com https://accounts.google.com';
   const googleFontsCss = 'https://fonts.googleapis.com';
   const googleFontsFiles = 'https://fonts.gstatic.com';
+  const appOrigins = config.CSP_ALLOWED_ORIGINS.join(' ');
+  const appWsOrigins = config.CSP_ALLOWED_WS_ORIGINS.join(' ');
   const cspDirectives = [
-    `default-src 'self' ${xyneHosts}`,
-    `script-src 'self' ${xyneHosts} ${googleApis}`,
-    `style-src 'self' 'unsafe-inline' ${xyneHosts} ${googleFontsCss}`,
+    `default-src 'self' ${appOrigins}`,
+    `script-src 'self' ${appOrigins} ${googleApis}`,
+    `style-src 'self' 'unsafe-inline' ${appOrigins} ${googleFontsCss}`,
     `img-src 'self' data: blob: https:`,
-    `media-src 'self' blob: ${xyneHosts}`,
-    `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com`,
-    `font-src 'self' data: ${xyneHosts} ${googleFontsFiles}`,
-    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://accounts.google.com https://docs.google.com`,
+    `media-src 'self' blob: ${appOrigins}`,
+    `connect-src 'self' ${appOrigins} ${appWsOrigins} https://accounts.google.com https://*.googleapis.com`,
+    `font-src 'self' data: ${appOrigins} ${googleFontsFiles}`,
+    `frame-src 'self' blob: ${appOrigins} https://www.youtube.com https://accounts.google.com https://docs.google.com`,
     `worker-src 'self' blob:`,
     `object-src 'none'`,
     `base-uri 'none'`,
-    `form-action 'self' ${xyneHosts}`,
+    `form-action 'self' ${appOrigins}`,
     `frame-ancestors 'none'`,
   ].join('; ');
 

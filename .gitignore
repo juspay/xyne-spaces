@@ -205,6 +205,12 @@ Thumbs.db
 apps/electron/release/
 apps/electron/dist/
 apps/electron/ui-active/
+apps/electron/build.prod.json
+apps/electron/build.sbx.json
+apps/electron/certs/
+apps/electron/*.p12
+apps/electron/*.pfx
+apps/electron/*.mobileprovision
 
 # App Specific
 apps/xyne-spaces/.yarn/*

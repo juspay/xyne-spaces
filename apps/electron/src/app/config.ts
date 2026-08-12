@@ -1,8 +1,10 @@
 /**
- * Application configuration constants
+ * Public/development Electron configuration.
+ *
+ * Production and sandbox configuration lives in the private repository overlay.
+ * Keep this file free of private domains, internal service URLs, and signing
+ * metadata.
  */
-
-const { APP_ENV } = require('../../package.json');
 
 export interface AppConfig {
   BACKEND_URL: string;
@@ -12,7 +14,7 @@ export interface AppConfig {
   UNPROTECTED_URL: string;
   FRONTEND_URL: string;
   DEEP_LINK_PROTOCOL: string;
-  USER_DATA_SUFFIX: string;         // Appended to userData dir to isolate flavors
+  USER_DATA_SUFFIX: string;
   APP_NAME: string;
   APP_CONFIG: string;
   APP_ID: string;
@@ -34,6 +36,9 @@ export interface AppConfig {
     method: string;
   };
   preProdKey: string;
+  TRUSTED_ORIGINS: string[];
+  CSP_ALLOWED_ORIGINS: string[];
+  CSP_ALLOWED_WS_ORIGINS: string[];
 }
 
 const devConfig: AppConfig = {
@@ -47,11 +52,11 @@ const devConfig: AppConfig = {
   USER_DATA_SUFFIX: '-dev',
   APP_NAME: 'Xyne Spaces DEV',
   APP_CONFIG: 'dev',
-  APP_ID: "com.xyne.spaces.dev",
+  APP_ID: 'com.xyne.spaces.dev',
   window: {
     width: 1200,
     height: 800,
-    title: 'Xyne Spaces',
+    title: 'Xyne Spaces DEV',
   },
   enableMtls: false,
   useBundledUI: false,
@@ -59,84 +64,41 @@ const devConfig: AppConfig = {
   enableOtelMetrics: true,
   RELEASE_CONFIG_URL: 'http://localhost:3456',
   UI_ZIP_URL: 'http://localhost:8888/releases/dashboard.zip',
-  uiUpdateCheckIntervalMs: 60 * 1000, // 1 minute for dev
+  uiUpdateCheckIntervalMs: 60 * 1000,
   agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
-  preProdKey: 'preProdFeaturesEnabled'
-};
-
-const prodConfig: AppConfig = {
-  BACKEND_URL: 'https://app.spaces.xyne.juspay.net',
-  MTLS_BACKEND_URL: 'https://auth.spaces.xyne.juspay.net',
-  MTLS_FRONTEND_URL: 'https://auth.spaces.xyne.juspay.net',
-  MTLS_IDENTITY_NAME: 'Web Simulation Client',
-  UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
-  FRONTEND_URL: 'https://app.spaces.xyne.juspay.net',
-  DEEP_LINK_PROTOCOL: 'xyne-spaces',
-  USER_DATA_SUFFIX: '',             // Empty — prod keeps original path, no migration needed
-  APP_NAME: 'Xyne Spaces',
-  APP_CONFIG: 'prod',
-  APP_ID: "com.xyne.spaces",
-  window: {
-    width: 1200,
-    height: 800,
-    title: 'Xyne Spaces',
-  },
-  enableMtls: true,
-  useBundledUI: false,
-  sendLogs: true,
-  enableOtelMetrics: true,
-  loginTempHeader: true,
-  RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
-  UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
-  uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
+    endpoint: '/api/query',
+    method: 'POST',
   },
   preProdKey: 'preProdFeaturesEnabled',
+  TRUSTED_ORIGINS: [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:4001',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:4001',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+  ],
+  CSP_ALLOWED_ORIGINS: [
+    'http://localhost:*',
+    'https://localhost:*',
+    'http://127.0.0.1:*',
+    'https://127.0.0.1:*',
+  ],
+  CSP_ALLOWED_WS_ORIGINS: [
+    'ws://localhost:*',
+    'wss://localhost:*',
+    'ws://127.0.0.1:*',
+    'wss://127.0.0.1:*',
+  ],
 };
-
-const sandboxConfig: AppConfig = {
-  BACKEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
-  MTLS_BACKEND_URL: 'https://auth.spaces.sandbox.xyne.juspay.net',
-  MTLS_FRONTEND_URL: 'https://auth.spaces.sandbox.xyne.juspay.net',
-  MTLS_IDENTITY_NAME: 'Web Simulation Client Sandbox',
-  UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
-  FRONTEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
-  DEEP_LINK_PROTOCOL: 'xyne-spaces-sandbox',
-  USER_DATA_SUFFIX: '-sandbox',
-  APP_NAME: 'Xyne Spaces Sandbox',
-  APP_CONFIG: 'sandbox',
-  APP_ID: "com.xyne.spaces.sandbox",
-  window: {
-    width: 1200,
-    height: 800,
-    title: 'Xyne Spaces Sandbox',
-  },
-  enableMtls: true,
-  useBundledUI: false,
-  sendLogs: true,
-  enableOtelMetrics: true,
-  RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
-  UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
-  uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
-  preProdKey: 'preProdFeaturesEnabled'
-};
-
-
-const baseConfig: AppConfig = process.env.NODE_ENV === 'development' ? devConfig
-  : (APP_ENV === 'sandbox' ? sandboxConfig : prodConfig);
 
 export const config: AppConfig = {
-  ...baseConfig,
-  useBundledUI: process.env.USE_BUNDLED_UI === 'true' ? true : baseConfig.useBundledUI,
-  RELEASE_CONFIG_URL: process.env.RELEASE_CONFIG_URL || baseConfig.RELEASE_CONFIG_URL,
-  UI_ZIP_URL: process.env.UI_ZIP_URL || baseConfig.UI_ZIP_URL,
+  ...devConfig,
+  useBundledUI: process.env.USE_BUNDLED_UI === 'true' ? true : devConfig.useBundledUI,
+  RELEASE_CONFIG_URL: process.env.RELEASE_CONFIG_URL || devConfig.RELEASE_CONFIG_URL,
+  UI_ZIP_URL: process.env.UI_ZIP_URL || devConfig.UI_ZIP_URL,
 };

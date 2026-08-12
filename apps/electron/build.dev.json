@@ -1,43 +1,56 @@
 {
   "appId": "com.xyne.spaces.dev",
   "productName": "Xyne Spaces DEV",
-
   "directories": {
-    "output": "release/local"
+    "output": "release/dev/${os}"
   },
-
   "protocols": [
     {
       "name": "Xyne Spaces DEV",
       "schemes": ["xyne-spaces-dev"]
     }
   ],
-
   "files": [
     "dist",
     "assets",
-    "certs",
     "ui-active",
     "native/mic-monitor/mic-monitor"
   ],
-
   "asarUnpack": [
     "native/mic-monitor/mic-monitor"
   ],
-
+  "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
   "mac": {
     "icon": "assets/images/xyne.png",
-
+    "category": "public.app-category.productivity",
     "target": [
       {
         "target": "dir"
       }
     ],
-
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Xyne Spaces needs access to your microphone for audio calls and meetings",
       "NSCameraUsageDescription": "Xyne Spaces needs access to your camera for video calls and meetings",
       "NSScreenCaptureUsageDescription": "Xyne Spaces needs access to screen recording for screen sharing in meetings"
     }
+  },
+  "win": {
+    "icon": "assets/images/xyne.png",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "linux": {
+    "icon": "build/icons",
+    "category": "Utility",
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      }
+    ]
   }
 }

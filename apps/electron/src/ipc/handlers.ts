@@ -171,24 +171,25 @@ export function setupIpcHandlers(): void {
     event.returnValue = preloadPath;
   });
 
-  // Copy Xyne auth cookies from defaultSession to the persist:xyne-spaces
-  // partition before opening a Xyne URL in the browser panel. Called by the
+  // Copy first-party auth cookies from defaultSession to the persist:xyne-spaces
+  // partition before opening a first-party URL in the browser panel. Called by the
   // renderer (CMD+click / open-in-panel flow) right before dispatching the
   // browserPanelActor OPEN event.
   ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (event, url: string) => {
     if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    // Only sync auth cookies for first-party Xyne origins.
-    let host: string;
+    // Only sync auth cookies for configured first-party origins.
+    let parsed: URL;
     try {
-      host = new URL(url).hostname.toLowerCase();
+      parsed = new URL(url);
     } catch {
       throw new Error('Invalid sync URL');
     }
-    const isXyne = host === 'xyne.juspay.net' || host.endsWith('.xyne.juspay.net');
+    const host = parsed.hostname.toLowerCase();
+    const isTrustedOrigin = config.TRUSTED_ORIGINS.includes(parsed.origin);
     const isLocal = host === 'localhost' || host === '127.0.0.1';
-    if (!isXyne && !isLocal) {
-      errorLogger.warn('[sync-cookies] Rejected non-Xyne origin');
-      throw new Error('Cookie sync only allowed for Xyne origins');
+    if (!isTrustedOrigin && !isLocal) {
+      errorLogger.warn('[sync-cookies] Rejected non-first-party origin');
+      throw new Error('Cookie sync only allowed for first-party origins');
     }
     await syncXyneCookiesToBrowserPanel(url);
   });

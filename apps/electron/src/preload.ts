@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { config } = require('./app/config');
 
 // Preload runs in the renderer, but the electron tsconfig omits the DOM lib.
 // Declare the minimal `window` surface the origin check actually reads.
@@ -11,7 +12,7 @@ declare const window: {
 // certificate storage, cookie/session control, screen recording, native file
 // access, app reload, and more. It is attached to the main window, the
 // certificate-health-check window, and the local popup windows (meeting popup,
-// recording pill) — all of which load first-party Xyne content or bundled
+// recording pill) — all of which load first-party app content or bundled
 // file:// assets.
 //
 // If the renderer is ever navigated to — or embeds a sub-frame of — an
@@ -21,19 +22,16 @@ declare const window: {
 // `window.electronAPI`, so it cannot reach any privileged IPC channel.
 function isTrustedOrigin(): boolean {
   try {
-    const { protocol, hostname } = window.location;
+    const { protocol, hostname, origin } = window.location;
     // Bundled UI custom scheme: xyne-spaces / xyne-spaces-dev / xyne-spaces-sandbox
     if (protocol.startsWith('xyne-spaces')) return true;
     // Bundled local HTML: loading/error pages, meeting popup, recording pill, recorder
     if (protocol === 'file:') return true;
-    // First-party Xyne web app + auth origins (prod + sandbox live under *.xyne.juspay.net)
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) {
+    if (Array.isArray(config.TRUSTED_ORIGINS) && config.TRUSTED_ORIGINS.includes(origin)) {
       return true;
     }
-    // Local development
-    if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) {
-      return true;
-    }
+    // Local development fallback for dynamic ports.
+    if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
     return false;
   } catch {
     return false;
@@ -63,8 +61,8 @@ const electronAPI = {
     ipcRenderer.send('clear-all-cookies');
   },
 
-  // Mirrors the main session's Xyne cookies into the `persist:xyne-spaces`
-  // partition (used only by Xyne-origin tabs inside the browser panel) so the
+  // Mirrors the main session's app cookies into the `persist:xyne-spaces`
+  // partition (used only by first-party tabs inside the browser panel) so the
   // panel inherits the main-app sign-in. Safe to call with any Xyne URL —
   // cookie domain/sameSite attributes are preserved and enforced by Chromium.
   syncXyneCookiesToBrowserPanel: (url: string): Promise<void> => {

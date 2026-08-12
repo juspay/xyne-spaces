@@ -15,7 +15,7 @@
     "notifications"
   ],
   "host_permissions": [
-    "https://app.spaces.xyne.juspay.net/*"
+    "http://localhost:3001/*"
   ],
   "background": {
     "service_worker": "background.js"

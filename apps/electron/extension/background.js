@@ -8,8 +8,8 @@
  */
 
 const CONFIG = {
-  HEALTH_CHECK_URL: 'https://app.spaces.xyne.juspay.net/api/health',
-  DEEP_LINK_PROTOCOL: 'xyne-spaces',
+  HEALTH_CHECK_URL: 'http://localhost:3001/api/health',
+  DEEP_LINK_PROTOCOL: 'xyne-spaces-dev',
   VPN_CHECK_INTERVAL_MS: 30000, // 30 seconds
   VPN_CHECK_TIMEOUT_MS: 5000, // 5 second timeout
 };
