@@ -215,6 +215,7 @@ export class DeskMetricsRepository {
         ? Prisma.sql`AND EXISTS (
             SELECT 1 FROM "public"."tickets" ft
             JOIN "public"."emails" e ON e."conversationId" = ft."conversationId"
+              AND e."createdAt" = ft."lastEmailAt"
             JOIN non_zero.tags tg
               ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
               AND (${tagPairs
@@ -447,6 +448,7 @@ export class DeskMetricsRepository {
             FROM cohort c
             JOIN "public"."tickets" t ON t.id = c."ticketId"
             JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
+              AND e."createdAt" = t."lastEmailAt"
             JOIN non_zero.tags tg
               ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
           ) deduped
@@ -506,14 +508,19 @@ export class DeskMetricsRepository {
   ): Promise<Array<{ tagCategory: string; count: number }>> {
     const rows = await db.$queryRaw<Array<{ tag_category: string; count: number }>>(
       Prisma.sql`
-        WITH ${cohortCte}
-        SELECT tg."tagCategory" AS tag_category, COUNT(DISTINCT c."ticketId")::int AS count
-        FROM cohort c
-        JOIN "public"."tickets" t ON t.id = c."ticketId"
-        JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
-        JOIN non_zero.tags tg
-          ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
-        GROUP BY tg."tagCategory"
+        WITH ${cohortCte},
+        latest_tag_rows AS (
+          SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category
+          FROM cohort c
+          JOIN "public"."tickets" t ON t.id = c."ticketId"
+          JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
+            AND e."createdAt" = t."lastEmailAt"
+          JOIN non_zero.tags tg
+            ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+        )
+        SELECT tag_category, COUNT(DISTINCT "ticketId")::int AS count
+        FROM latest_tag_rows
+        GROUP BY tag_category
         ORDER BY count DESC
       `
     );
@@ -526,14 +533,19 @@ export class DeskMetricsRepository {
   ): Promise<Array<{ tag: string; tagCategory: string; count: number }>> {
     const rows = await db.$queryRaw<Array<{ tag: string; tag_category: string; count: number }>>(
       Prisma.sql`
-        WITH ${cohortCte}
-        SELECT tg.tag, tg."tagCategory" AS tag_category, COUNT(DISTINCT c."ticketId")::int AS count
-        FROM cohort c
-        JOIN "public"."tickets" t ON t.id = c."ticketId"
-        JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
-        JOIN non_zero.tags tg
-          ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
-        GROUP BY tg.tag, tg."tagCategory"
+        WITH ${cohortCte},
+        latest_tag_rows AS (
+          SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category, tg.tag
+          FROM cohort c
+          JOIN "public"."tickets" t ON t.id = c."ticketId"
+          JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
+            AND e."createdAt" = t."lastEmailAt"
+          JOIN non_zero.tags tg
+            ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
+        )
+        SELECT tag_category, tag, COUNT(DISTINCT "ticketId")::int AS count
+        FROM latest_tag_rows
+        GROUP BY tag_category, tag
         ORDER BY count DESC
       `
     );

@@ -1154,15 +1154,24 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
   const activeTagCategory = selectedTagCategory;
 
-  const tagCategoryData = useMemo(
-    () =>
-      (data?.tagCategories ?? []).map((tc, i) => ({
-        name: tc.tagCategory,
-        value: tc.count,
-        color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
-      })),
-    [data?.tagCategories],
-  );
+  const tagCategoryData = useMemo(() => {
+    const cats = data?.tagCategories ?? [];
+    const top = cats.slice(0, 9);
+    const rest = cats.slice(9);
+    const result = top.map((tc, i) => ({
+      name: tc.tagCategory,
+      value: tc.count,
+      color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
+    }));
+    if (rest.length > 0) {
+      result.push({
+        name: `+${rest.length} more`,
+        value: rest.reduce((s, r) => s + r.count, 0),
+        color: '#94a3b8',
+      });
+    }
+    return result;
+  }, [data?.tagCategories]);
 
   const tagBreakdownData = useMemo(() => {
     let rows = activeTagCategory
@@ -1172,11 +1181,30 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       const tagSet = new Set(selectedTagValues.map(tv => tv.slice(tv.indexOf(':') + 1)));
       rows = rows.filter(tb => tagSet.has(tb.tag));
     }
-    return rows.map((tb, i) => ({
+    // When specific tags are selected (Level 3), show all of them — user explicitly chose them.
+    // Otherwise cap at top 9 + Others to keep the chart readable.
+    if (selectedTagValues.length > 0) {
+      return rows.map((tb, i) => ({
+        name: tb.tag,
+        value: tb.count,
+        color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
+      }));
+    }
+    const top = rows.slice(0, 9);
+    const rest = rows.slice(9);
+    const result = top.map((tb, i) => ({
       name: tb.tag,
       value: tb.count,
       color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
     }));
+    if (rest.length > 0) {
+      result.push({
+        name: `+${rest.length} more`,
+        value: rest.reduce((s, r) => s + r.count, 0),
+        color: '#94a3b8',
+      });
+    }
+    return result;
   }, [data?.tagBreakdown, activeTagCategory, selectedTagValues]);
 
   const trendData = useMemo(
