@@ -64,6 +64,8 @@ import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { RecordingLayout } from '../../../stores/recordingStore';
+import { disconnectCalendar } from '../../../services/clients/calendarApi';
+import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
@@ -553,7 +555,22 @@ const LAYOUT_OPTIONS: LayoutOption[] = [
   },
 ];
 
-const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
+const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+
+  const handleDisconnectCalendar = async () => {
+    setIsDisconnecting(true);
+    try {
+      await disconnectCalendar('GOOGLE');
+      toast.success('Calendar disconnected. Reconnect to grant updated permissions.');
+    } catch {
+      toast.error('Failed to disconnect calendar. Please try again.');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
+
+  return (
   <div className='space-y-6'>
     <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
 
@@ -674,8 +691,35 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         );
       })}
     </div>
+
+    {/* Calendar connection */}
+    <div className='pt-2'>
+      <p className='text-sm font-semibold text-foreground'>Calendar</p>
+      <p className='text-xs text-muted-foreground mt-0.5'>
+        Disconnect to revoke access and reconnect with updated permissions.
+      </p>
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Disconnect Calendar</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Stops calendar sync and clears the stored connection.
+        </p>
+      </div>
+      <Button
+        variant='outline'
+        size='sm'
+        disabled={isDisconnecting}
+        onClick={handleDisconnectCalendar}
+        data-track-category='PREFERENCES'
+        data-track-name='DisconnectCalendar'
+      >
+        {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+      </Button>
+    </div>
   </div>
-);
+  );
+};
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.

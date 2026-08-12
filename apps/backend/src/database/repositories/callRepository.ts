@@ -1935,6 +1935,7 @@ export class CallRepository {
     startsAt?: Date;
     endsAt?: Date;
     timezone: string;
+    xyneManaged?: boolean;
     channelId: null;
     isRecurring: boolean;
     recordingEnabled: boolean;
@@ -1953,6 +1954,7 @@ export class CallRepository {
       startsAt: true,
       endsAt: true,
       timezone: true,
+      xyneManaged: true,
       metadata: true,
     });
 
@@ -1977,6 +1979,7 @@ export class CallRepository {
         startsAt: data.startsAt,
         endsAt: data.endsAt,
         timezone: data.timezone,
+        xyneManaged: data.xyneManaged ?? false,
         metadata: data.metadata,
         updatedAt: data.updatedAt,
         lastActivityAt: data.lastActivityAt,
@@ -2011,6 +2014,7 @@ interface ExistingCallRow {
   startsAt: Date | null;
   endsAt: Date | null;
   timezone: string;
+  xyneManaged: boolean;
   metadata: Prisma.JsonValue;
 }
 
@@ -2035,6 +2039,7 @@ function hasExternalCallChanged(
     startsAt?: Date;
     endsAt?: Date;
     timezone: string;
+    xyneManaged?: boolean;
     metadata: Prisma.InputJsonObject;
   },
 ): boolean {
@@ -2046,6 +2051,7 @@ function hasExternalCallChanged(
     existing.startsAt?.getTime() !== data.startsAt?.getTime() ||
     existing.endsAt?.getTime() !== data.endsAt?.getTime() ||
     existing.timezone !== data.timezone ||
+    existing.xyneManaged !== (data.xyneManaged ?? false) ||
     stableStringify(existing.metadata) !== stableStringify(data.metadata)
   );
 }

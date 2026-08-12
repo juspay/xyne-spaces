@@ -43,6 +43,7 @@ export interface ExternalCalendarCallData {
   startsAt?: Date;
   endsAt?: Date;
   timezone: string;
+  xyneManaged?: boolean;
   metadata: Prisma.InputJsonObject;
 }
 
@@ -86,6 +87,7 @@ export async function upsertExternalCalendarCall(
     startsAt: data.startsAt,
     endsAt: data.endsAt,
     timezone: data.timezone,
+    xyneManaged: data.xyneManaged ?? false,
     channelId: null,
     isRecurring: false,
     recordingEnabled: false,
