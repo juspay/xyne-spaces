@@ -1613,6 +1613,13 @@ export class EmailService {
               data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+
+            try {
+              await syncUserWorkload(primaryUserId, userGroupId, boardId, userId);
+              logger.info(`[EmailService] Synced workload for user ${primaryUserId}`);
+            } catch (workloadError) {
+              logger.error('[EmailService] Error syncing workload:', workloadError);
+            }
           }
         } else {
         const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, ticket.projectId, channelId);
