@@ -124,6 +124,7 @@ import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
+import { releaseDevTicketNotifyService } from '@/services/release/releaseDevTicketNotifyService';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -6100,6 +6101,36 @@ export function createMutators(
                 );
               }
             });
+          }
+
+          // Notify each bundled dev ticket when the release is picked up / deployed.
+          if (
+            params.statusV2 !== undefined
+            && params.statusV2 !== ticket.statusV2
+            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
+          ) {
+            const milestone =
+              params.statusV2 === TicketStatusV2.COMPLETED
+                ? 'DEPLOYED'
+                : params.statusV2 === TicketStatusV2.STARTED
+                  ? 'PICKED_UP'
+                  : null;
+            if (milestone) {
+              asyncTasks.push(async () => {
+                try {
+                  await releaseDevTicketNotifyService.notifyDevTicketsOnReleaseMilestone({
+                    releaseTicketId: params.id,
+                    milestone,
+                    workspaceId: authData.workspaceId,
+                  });
+                } catch (error) {
+                  logger.error(
+                    `[ReleaseDevNotify] failed to notify dev tickets for release ${params.id}:`,
+                    error,
+                  );
+                }
+              });
+            }
           }
 
           // Sync workload for assignedTo changes (async, non-blocking)
