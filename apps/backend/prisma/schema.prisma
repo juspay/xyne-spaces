@@ -880,6 +880,11 @@ model UserPreference {
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
   channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
+  channelFilterMode        String?          // Channels group filter (null = app default)
+  starredFilterMode        String?          // Starred group filter (null = app default)
+  starredSortOrder         String?          // Starred group sort (null = app default)
+  dmFilterMode             String?          // DM group filter (null = app default)
+  dmSortOrder              String?          // DM group sort (null = app default)
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
   showThreadTags           Boolean  @default(false) // Render thread classification chips in chat; opt-in
@@ -1883,6 +1888,7 @@ model ChannelSection {
   isCollapsed Boolean           @default(false) // Per-user collapse state, synced across devices
   isDeleted   Boolean           @default(false) // Soft delete flag
   sortOrder   String?           // Optional per-section channel sort order
+  filterMode  String?           // Per-section channel filter (null = app default)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
 
@@ -2719,6 +2725,7 @@ model SummaryTemplate {
   defaultOutlet     String   @default("EMAIL") // EMAIL/MESSAGE (see DefaultOutlet in @xyne/shared; app-validated, no DB enum)
   createdBy         String
   createdAt         DateTime @default(now())
+  visibility        String   @default("PRIVATE") // PRIVATE | WAITING_FOR_APPROVAL | PUBLIC
 
   @@index([workspaceId, name])
   @@unique([workspaceId, name, version])
@@ -3554,6 +3561,9 @@ model ApplicationReleaseTicket {
   testedBy              String?                         // User ID (no FK constraint)
   testedAt              DateTime?
   failureReason         String?
+  // Nullable, no DB default: Zero client inserts don't run Postgres defaults, so
+  // it's written app-side; NULL = not a hotfix. Release-scoped.
+  isHotfix              Boolean?
   createdAt             DateTime                        @default(now())
   // No @default(now()): see Application.updatedAt — every write sets it explicitly.
   updatedAt             DateTime?                        @updatedAt
@@ -3587,6 +3597,9 @@ model ReleaseEvent {
   @@index([channelId, conversationId])
   @@index([eventType])
   @@index([createdAt])
+  // Serves releaseEventsByReleaseId (filter releaseId, order createdAt desc, id desc);
+  // avoids a zero-cache TEMP B-TREE sort. Built CONCURRENTLY in a raw migration.
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_events_releaseId_createdAt_id_idx")
   @@map("release_events")
   @@schema("public")
 }
@@ -3636,6 +3649,8 @@ model ReleaseChangeType {
   @@index([releaseId])
   @@index([applicationReleaseId])
   @@index([devTicketXyneId])
+  // Partial unique dedupe indexes (release_change_types_release_dedupe_key +
+  // _nocommit_key) live in a raw migration — Prisma can't express filtered indexes.
   @@map("release_change_types")
   @@schema("public")
 }

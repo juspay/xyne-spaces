@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { Hashtag } from '@xyne/icons';
@@ -51,7 +52,9 @@ export const KeywordMatchActivity = ({
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+          {getFlowJsonPreviewText(message.content) ?? (
+            <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+          )}
         </div>
       )}
     </ActivityItemCard>

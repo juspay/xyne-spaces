@@ -9,7 +9,9 @@ import { stepRegistry } from '../steps/step-registry';
 import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
 import {
   AUTOMATION_WORKFLOW_TYPE,
+  buildAutomationMetadata,
   parseAutomationConfig,
+  parseAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
   type AutomationView,
@@ -79,10 +81,12 @@ class AutomationService {
     );
 
     const headersEncrypted = encryptWebhookStepHeaders(config.steps);
+    const { drainInFlight: _drained, ...metadata } = parseAutomationMetadata(existing.metadata);
     const updated = await repositories.workflows.update(id, {
       status: AutomationStatus.ACTIVE,
       eventType: triggerTypeToEventType(config.trigger.type),
       ...(headersEncrypted ? { context: JSON.stringify(config) } : {}),
+      metadata: buildAutomationMetadata(metadata),
       updatedAt: new Date(),
     });
 
@@ -92,9 +96,9 @@ class AutomationService {
     return { automation: workflowToAutomation(updated), validation };
   }
 
-  async disable(id: string): Promise<AutomationView> {
+  async disable(id: string, cancelQueued = true): Promise<AutomationView> {
     const t0 = Date.now();
-    logger.info(`[AUTOMATION-SERVICE] disable START id=${id}`);
+    logger.info(`[AUTOMATION-SERVICE] disable START id=${id} cancelQueued=${cancelQueued}`);
     const existing = await repositories.workflows.findById(id);
     if (!existing || existing.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
       logger.warn(`[AUTOMATION-SERVICE] disable REJECT id=${id} reason=not-found`);
@@ -103,6 +107,10 @@ class AutomationService {
 
     const updated = await repositories.workflows.update(id, {
       status: AutomationStatus.DISABLED,
+      metadata: buildAutomationMetadata({
+        ...parseAutomationMetadata(existing.metadata),
+        drainInFlight: !cancelQueued,
+      }),
       updatedAt: new Date(),
     });
     logger.info(

@@ -1661,6 +1661,29 @@ export class CallRepository {
   }
 
   /**
+   * Return only the fields needed to decide whether a public invite can route
+   * into an authenticated workspace session. Kept separate from
+   * getPublicCallInfo so workspaceId is never exposed by the public lobby API.
+   */
+  async getCallInviteRoutingInfo(externalId: string): Promise<{
+    status: CallStatus;
+    workspaceId: string;
+  } | null> {
+    const call = await DatabaseClient.getInstance().call.findUnique({
+      where: { externalId },
+      select: {
+        status: true,
+        workspaceId: true,
+      },
+    });
+    if (!call?.workspaceId) return null;
+    return {
+      status: call.status as CallStatus,
+      workspaceId: call.workspaceId,
+    };
+  }
+
+  /**
    * Create a CallParticipant row for an external lobby request.
    * userId is a random UUID (external users have no real account).
    */

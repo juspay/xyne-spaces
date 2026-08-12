@@ -6,6 +6,13 @@ declare const window: {
   location: { protocol: string; hostname: string; origin: string };
 };
 
+interface RecordingPillState {
+  startTime: number;
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
+}
+
 // ── Renderer trust boundary ────────────────────────────────────────────────
 // This preload injects a *privileged* IPC bridge: mTLS key generation,
 // certificate storage, cookie/session control, screen recording, native file
@@ -153,6 +160,18 @@ const electronAPI = {
     const listener = () => callback();
     ipcRenderer.on('recording:system-suspend', listener);
     return () => ipcRenderer.removeListener('recording:system-suspend', listener);
+  },
+
+  onRecordingResumeRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:resume-requested', listener);
+    return () => ipcRenderer.removeListener('recording:resume-requested', listener);
+  },
+
+  onRecordingPauseRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:pause-requested', listener);
+    return () => ipcRenderer.removeListener('recording:pause-requested', listener);
   },
 
   onAuthSuccess: (callback: (data?: ElectronAuthData) => void) => {
@@ -329,8 +348,8 @@ const electronAPI = {
 
   // Recording pill (persistent floating pill while recording is active)
   recordingPill: {
-    onShow: (callback: (startTime: number) => void) => {
-      const listener = (_event: unknown, startTime: number) => callback(startTime);
+    onShow: (callback: (state: RecordingPillState) => void) => {
+      const listener = (_event: unknown, state: RecordingPillState) => callback(state);
       ipcRenderer.on('recording-pill:show', listener);
       return () => ipcRenderer.removeListener('recording-pill:show', listener);
     },
@@ -350,6 +369,7 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('recording:minimized-changed', listener);
     },
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
+    resumeRecording: () => ipcRenderer.send('recording-pill:resume-recording'),
     openApp: () => ipcRenderer.send('recording-pill:open-app'),
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('recording-pill:set-ignore-mouse', ignore),
     dragStart: () => ipcRenderer.send('recording-pill:drag-start'),

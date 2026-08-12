@@ -14,6 +14,12 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+import { clearAllSessionKeys } from '../services/sessionKeyStore';
+import { indexedDBService } from '../services/indexedDBService';
+import { resetEncryption } from './encryptionMachine';
+import { decryptionCache } from '@xyne/shared';
+import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
+import { dropAllDatabases } from '@rocicorp/zero';
 
 export interface User {
   id: string;
@@ -1163,6 +1169,10 @@ export const authMachine = createMachine(
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         clearOnboardingCookie();
+        decryptionCache.clear();
+        resetEncryption();
+        resetGlobalEncryptionBootstrap();
+        void clearAllSessionKeys();
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();
@@ -1327,6 +1337,9 @@ export const authMachine = createMachine(
         } catch {
           /* empty */
         }
+
+        await dropAllDatabases();
+        await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);

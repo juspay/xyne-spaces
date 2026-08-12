@@ -37,6 +37,7 @@ import {
   CanvasRole,
   CanvasVisibility,
   ChannelAddUserPolicy,
+  ChannelFilterMode,
   ChannelRole,
   ChannelScopeType,
   ChannelSortOrder,
@@ -613,6 +614,11 @@ export const userPreferenceTable = table('user_preferences')
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
+    channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
+    starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter
+    starredSortOrder: enumeration<ChannelSortOrder>().optional(),   // Starred group sort
+    dmFilterMode: enumeration<ChannelFilterMode>().optional(),      // DM group filter
+    dmSortOrder: enumeration<ChannelSortOrder>().optional(),        // DM group sort
     enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     allowThreadBroadcastMentions: boolean(), // Allow @channel/@here in thread replies
     // Global notification settings
@@ -849,6 +855,7 @@ export const channelSectionTable = table('channel_sections') // Prisma model: Ch
     createdAt: number(),
     updatedAt: number().optional(),
     sortOrder: enumeration<ChannelSortOrder>().optional(),
+    filterMode: enumeration<ChannelFilterMode>().optional(),
   })
   .primaryKey('id');
 
@@ -1191,6 +1198,7 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey('id');
 
@@ -1847,6 +1855,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(), // release-scoped: dev ticket entered as a hotfix
     createdAt: number(),
     updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
@@ -3590,7 +3599,7 @@ export const entityAccessTableRelationships = relationships(
 
 export const summaryTemplateTableRelationships = relationships(
   summaryTemplateTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     workspace: one({
       sourceField: ['workspaceId'],
       destField: ['id'],
@@ -3600,6 +3609,16 @@ export const summaryTemplateTableRelationships = relationships(
       sourceField: ['createdBy'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    shares: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: entityAccessTable,
+    }),
+    workspaceResourceAccess: many({
+      sourceField: ['workspaceId'],
+      destField: ['workspaceId'],
+      destSchema: resourceAccessTable,
     }),
   }),
 );
@@ -4858,8 +4877,8 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
-export type FormFields = Row<typeof schema.tables.form_fields>;
 export type GlobalField = Row<typeof schema.tables.global_fields>;
+export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;

@@ -338,28 +338,47 @@ export type PlanPhase = PlanProps['phase'];
 // ── PR artifact ───────────────────────────────────────────────────────────
 // A read-only status card for a pull request. Unlike the plan, the field set is
 // status-INVARIANT: every status carries the same fields, and the only thing
-// that varies by status is presentation (badge colour + label) — which is
-// derived in the renderer, never shipped on the wire. So a discriminated union
-// would be four byte-identical branches: pure boilerplate with no illegal-state
-// to prevent. The real invariant ("status is one of exactly four") is already
-// enforced by z.enum, so the robust, reality-matching shape is a flat object.
+// that varies by status is presentation (badge colour + label, provider glyph +
+// link label) — all derived in the renderer, never shipped on the wire. So a
+// discriminated union would be four byte-identical branches: pure boilerplate
+// with no illegal-state to prevent. The real invariant ("status is one of
+// exactly four") is already enforced by z.enum, so the robust, reality-matching
+// shape is a flat object.
 //
 // The card is fully static: nothing lives in flow-state, there is no action.
-// Each status is a FRESH post (unique screenId); the card never updates in place.
+// It is PROVIDER-AGNOSTIC — `provider` selects the glyph and the "Open in
+// <Provider>" label, and any host the runtime can't classify is 'other' (generic
+// git glyph + neutral "Open pull request").
+//
+// LIFECYCLE: at creation time the runtime posts once with a screenId keyed on PR
+// identity, then `updateMessage`s the SAME screenId to advance status in place
+// (created → merged / reverted / deleted). AFTER the session ends, an inbound
+// git-host webhook (e.g. Bitbucket pr:merged / pr:declined / pr:deleted) posts a
+// FRESH status card into the same thread — see AgentWidgetBinding in claw-auth.
+// `declined` is the webhook-only terminal status (a PR closed without merging);
+// the agent tool path never emits it.
 // ticketId/desc are optional (not every PR is ticket-linked or described). Each
 // URL is optional so "no link" is representable as `undefined` (honest) rather
 // than "" (a sentinel that conflates absent with empty); the renderer hides a
 // button whose URL is absent, and drops the footer when both are.
-export const prStatusSchema = z.enum(['created', 'merged', 'reverted', 'deleted']);
+export const prStatusSchema = z.enum(['created', 'merged', 'reverted', 'deleted', 'declined']);
+
+// Which git host the PR lives on. Drives ONLY presentation (glyph + link label),
+// never behaviour; anything the runtime can't classify normalizes to 'other'.
+export const prProviderSchema = z.enum(['github', 'bitbucket', 'gitlab', 'other']);
 
 export const prPropsSchema = z
   .object({
     status: prStatusSchema,
+    provider: prProviderSchema,
     title: z.string().min(1),
     ticketId: z.string().min(1).optional(),
     desc: z.string().optional(),
+    // Ticket / issue link — surfaced inside the details dialog.
     detailsUrl: z.string().min(1).optional(),
-    bitbucketUrl: z.string().min(1).optional(),
+    // The pull request URL (provider-neutral). Renamed from the old
+    // provider-locked `bitbucketUrl`.
+    url: z.string().min(1).optional(),
   })
   .strict();
 
@@ -370,6 +389,7 @@ export const prComponentSchema = baseComponentSchema.extend({
 
 // TS mirrors inferred from the schema so the two can't drift.
 export type PrStatus = z.infer<typeof prStatusSchema>;
+export type PrProvider = z.infer<typeof prProviderSchema>;
 export type PrProps = z.infer<typeof prPropsSchema>;
 
 // ── PR approval artifact (interactive HITL) ─────────────────────────────────

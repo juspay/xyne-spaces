@@ -6,20 +6,31 @@ import {
   focusMainWindow,
   getRecordingSnapshot,
   onRecordingStateChange,
+  pauseRecordingFromOutside,
+  resumeRecordingFromOutside,
   startRecordingFromOutside,
   stopRecording,
   type RecordingSnapshot,
 } from './recording-controller';
 import { RECORDING_SHORTCUT } from './global-shortcuts';
 
+const PAUSED_TITLE = ' Paused';
+
 let tray: Tray | null = null;
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 
-function formatElapsed(startTime: number): string {
-  const totalSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+function formatElapsed(snapshot: RecordingSnapshot): string {
+  const startTime = snapshot.startTime ?? Date.now();
+  const until = snapshot.pauseStartedAt ?? Date.now();
+  const elapsedMs = until - startTime - snapshot.accumulatedPausedMs;
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatTitle(snapshot: RecordingSnapshot): string {
+  return snapshot.paused ? PAUSED_TITLE : ` ${formatElapsed(snapshot)}`;
 }
 
 async function openXyne(): Promise<void> {
@@ -32,20 +43,35 @@ async function openXyne(): Promise<void> {
 }
 
 function buildMenu(snapshot: RecordingSnapshot): Menu {
-  return Menu.buildFromTemplate([
-    snapshot.active
-      ? {
+  const template: Electron.MenuItemConstructorOptions[] = snapshot.active
+    ? [
+        {
           label: 'Stop Recording',
           accelerator: RECORDING_SHORTCUT,
           registerAccelerator: false,
           click: () => stopRecording('tray'),
-        }
-      : {
+        },
+        snapshot.paused
+          ? {
+              label: 'Resume Recording',
+              click: () => resumeRecordingFromOutside('tray'),
+            }
+          : {
+              label: 'Pause Recording',
+              click: () => pauseRecordingFromOutside('tray'),
+            },
+      ]
+    : [
+        {
           label: 'Start Recording',
           accelerator: RECORDING_SHORTCUT,
           registerAccelerator: false,
           click: () => void startRecordingFromOutside('tray'),
         },
+      ];
+
+  return Menu.buildFromTemplate([
+    ...template,
     { type: 'separator' },
     {
       label: 'Open Xyne',
@@ -67,10 +93,10 @@ function syncTrayToState(snapshot: RecordingSnapshot): void {
   if (process.platform !== 'darwin') return;
 
   if (snapshot.active && snapshot.startTime) {
-    const start = snapshot.startTime;
-    tray.setTitle(` ${formatElapsed(start)}`, { fontType: 'monospacedDigit' });
+    tray.setTitle(formatTitle(snapshot), { fontType: 'monospacedDigit' });
+    if (snapshot.paused) return;
     timerInterval = setInterval(() => {
-      tray?.setTitle(` ${formatElapsed(start)}`, { fontType: 'monospacedDigit' });
+      tray?.setTitle(formatTitle(snapshot), { fontType: 'monospacedDigit' });
     }, 1000);
   } else {
     tray.setTitle('');

@@ -1754,6 +1754,31 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Delete every GCS object that holds this call's transcript. Used when the host
+   * chooses to discard the transcript at end-of-call (fully private / incognito).
+   * Best-effort and idempotent — a missing file is treated as already-deleted.
+   */
+  async deleteTranscriptArtifacts(callId: string): Promise<void> {
+    const paths = [
+      `transcriptions/${callId}.jsonl`,
+      `transcriptions/${callId}_identified.jsonl`,
+      `attachments/${callId}_formatted.txt`,
+      `attachments/${callId}_identified_formatted.txt`,
+    ];
+    for (const path of paths) {
+      try {
+        const exists = await this.transcriptStorage.fileExists(path);
+        if (exists) {
+          await this.transcriptStorage.deleteFile(path);
+          logger.info(`[${callId}] transcript_artifact_deleted`, { path });
+        }
+      } catch (error) {
+        logger.warn(`[${callId}] transcript_artifact_delete_failed`, { path, error });
+      }
+    }
+  }
+
+  /**
    * NOTE_TAKER (HEADLESS / "Xyne Oats") calls never reach this method — their
    * entire pipeline (transcriptReady webhook, reconcile) is routed straight to
    * noteTakerTranscriptService, which never creates or posts a message. This
@@ -1794,6 +1819,20 @@ Output ONLY the processed transcript, nothing else.`;
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
         logger.error(`[${callId}] call_not_found`, { context: 'summary_generation' });
+        return;
+      }
+
+      // Host kill-switch: if the host chose to discard at end-of-call (transcription was
+      // off), delete whatever was captured and skip all artifacts/indexing. This gate sits
+      // in the single processing chokepoint, so it covers the agent webhook, the legacy
+      // webhook, and the +30s room_finished reconcile alike.
+      const dispositionMeta =
+        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>).transcriptDisposition
+          : undefined;
+      if (dispositionMeta === 'discard') {
+        logger.info(`[${callId}] transcript_discarded_by_host`, { message_id: messageId });
+        await this.deleteTranscriptArtifacts(callId);
         return;
       }
 
