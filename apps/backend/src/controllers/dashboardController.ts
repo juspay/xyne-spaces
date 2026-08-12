@@ -168,6 +168,18 @@ const createDataSourceBodySchema = z.object({
     password: z.string().min(1).max(1024),
     database: z.string().min(1).max(255),
     ssl: z.boolean().default(true),
+    ca: z
+      .string()
+      .max(32_768)
+      .refine(
+        (s) => s.includes('-----BEGIN CERTIFICATE-----'),
+        'Must be a PEM certificate starting with -----BEGIN CERTIFICATE-----',
+      )
+      .refine(
+        (s) => !/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(s),
+        'This looks like a private key. Upload the CA certificate (server-ca.pem), not the key.',
+      )
+      .optional(),
   }),
   includedTables: z.array(includedTableSchema).max(10000).optional(),
 });
