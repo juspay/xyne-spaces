@@ -1775,11 +1775,10 @@ model ChannelBoardMapping {
   channelId   String
   boardId     String
   workspaceId String
-  isDefault   Boolean  @default(false)
+  isDefault   Boolean
   createdBy   String
-  updatedBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime
+  updatedAt   DateTime
 
   channel Channel @relation(fields: [channelId], references: [id])
   board   Board   @relation(fields: [boardId], references: [id])
