@@ -363,6 +363,7 @@ export function AutomationBuilder({
           createdAt: new Date(now).toISOString(),
           updatedAt: new Date(now).toISOString(),
           automationSeriesId: savedId ?? targetId,
+          eventType,
         },
         validation: validationResult,
       };

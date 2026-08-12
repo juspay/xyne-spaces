@@ -34,29 +34,18 @@ import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import type { Automation } from '../Automation.types';
-import { AutomationStatusValues, isLiveStatus, isProposalStatus } from '../Automation.types';
+import { AutomationStatusValues, isLiveStatus } from '../Automation.types';
 import { workflowToAutomation } from '../automation.adapter';
 import type { AutomationsListProps } from './AutomationsList.types';
+import { formatRelative, statusPillClasses, summarizeAutomation } from './AutomationsList.utils';
+import { AutomationFiltersBar } from './AutomationFiltersBar/AutomationFiltersBar';
 import {
-  categoryForTrigger,
+  EMPTY_AUTOMATION_FILTERS,
   filterAutomations,
-  formatRelative,
-  LIST_CATEGORIES,
-  LIST_CATEGORY_DESCRIPTIONS,
-  LIST_CATEGORY_LABELS,
-  statusPillClasses,
-  summarizeAutomation,
-  type ListCategory,
-} from './AutomationsList.utils';
-
-function isHistoryRow(a: Automation): boolean {
-  return (
-    a.status === AutomationStatusValues.ARCHIVED ||
-    a.status === AutomationStatusValues.REJECTED ||
-    a.status === AutomationStatusValues.REVOKED ||
-    a.status === AutomationStatusValues.AUTO_REVOKED
-  );
-}
+  hasActiveFilters,
+  isVisibleToUser,
+  type AutomationFilters,
+} from './AutomationFiltersBar/filters';
 
 export function AutomationsList({
   onCreate,
@@ -65,7 +54,7 @@ export function AutomationsList({
   filterPredicate,
 }: AutomationsListProps): React.ReactElement {
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<ListCategory>('all');
+  const [filters, setFilters] = useState<AutomationFilters>(EMPTY_AUTOMATION_FILTERS);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
@@ -73,7 +62,6 @@ export function AutomationsList({
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
   const { workspaceId } = useAuthContextValues();
-  const isArchivedTab = category === 'archived';
 
   const triggerCatalogQuery = useQuery({
     queryKey: ['automations', 'schema', 'triggers'],
@@ -95,19 +83,10 @@ export function AutomationsList({
     return filterPredicate ? mapped.filter(filterPredicate) : mapped;
   }, [rows, filterPredicate]);
 
-  const items: Automation[] = useMemo(() => {
-    if (isArchivedTab) {
-      return adapted.filter(isHistoryRow);
-    }
+  const visibleItems: Automation[] = useMemo(() => {
     const meId = me?.id ?? null;
-    return adapted.filter(
-      a =>
-        isLiveStatus(a.status) ||
-        (isProposalStatus(a.status) && !isHistoryRow(a) && meId !== null && a.createdById === meId),
-    );
-  }, [adapted, me, isArchivedTab]);
-
-  const archivedCount = useMemo(() => adapted.filter(isHistoryRow).length, [adapted]);
+    return adapted.filter(a => isVisibleToUser(a, meId));
+  }, [adapted, me]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
@@ -167,36 +146,12 @@ export function AutomationsList({
     }
     void navigate(`/automations/new?fork=${item.id}`);
   };
-  const liveItems = useMemo(() => {
-    const meId = me?.id ?? null;
-    return adapted.filter(
-      a =>
-        isLiveStatus(a.status) ||
-        (isProposalStatus(a.status) && !isHistoryRow(a) && meId !== null && a.createdById === meId),
-    );
-  }, [adapted, me]);
+  const filtered = useMemo(
+    () => filterAutomations(visibleItems, query, filters),
+    [visibleItems, query, filters],
+  );
 
-  const counts = useMemo(() => {
-    const out: Record<ListCategory, number> = {
-      all: liveItems.length,
-      tickets: 0,
-      email: 0,
-      archived: archivedCount,
-    };
-    for (const item of liveItems) {
-      const c = categoryForTrigger(item.config?.trigger?.type);
-      if (c !== 'all') out[c] += 1;
-    }
-    return out;
-  }, [liveItems, archivedCount]);
-
-  const categoryFiltered =
-    category === 'all' || category === 'archived'
-      ? items
-      : items.filter(item => categoryForTrigger(item.config?.trigger?.type) === category);
-  const filtered = filterAutomations(categoryFiltered, query);
-
-  const hasAnyFilter = !!query.trim() || category !== 'all';
+  const hasAnyFilter = hasActiveFilters(query, filters);
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
@@ -233,13 +188,17 @@ export function AutomationsList({
             New automation
           </Button>
         </div>
-        <CategoryTabs category={category} counts={counts} onChange={setCategory} />
+        <AutomationFiltersBar
+          query={query}
+          filters={filters}
+          onChange={setFilters}
+          onClearQuery={() => setQuery('')}
+        />
       </div>
 
       <div className='flex-1 overflow-y-auto bg-muted/30'>
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 px-6 py-6'>
-          <p className='text-xs text-muted-foreground'>{LIST_CATEGORY_DESCRIPTIONS[category]}</p>
-          {isLoading && items.length === 0 ? (
+          {isLoading && visibleItems.length === 0 ? (
             <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>
               <Loader2 className='mr-2 size-4 animate-spin' />
               Loading automations…
@@ -381,59 +340,6 @@ export function AutomationsList({
           </div>
         </div>
       </Dialog>
-    </div>
-  );
-}
-
-function CategoryTabs({
-  category,
-  counts,
-  onChange,
-}: {
-  category: ListCategory;
-  counts: Record<ListCategory, number>;
-  onChange: (next: ListCategory) => void;
-}): React.ReactElement {
-  return (
-    <div
-      role='tablist'
-      aria-label='Filter automations by trigger category'
-      className='flex items-center gap-1'
-    >
-      {LIST_CATEGORIES.map(c => {
-        const active = c === category;
-        return (
-          <button
-            key={c}
-            type='button'
-            role='tab'
-            tabIndex={active ? 0 : -1}
-            aria-selected={active}
-            aria-label={`${LIST_CATEGORY_LABELS[c]}, ${counts[c]} ${counts[c] === 1 ? 'automation' : 'automations'}`}
-            onClick={() => onChange(c)}
-            data-track-category='automations-list'
-            data-track-name={`category-tab-${c}`}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-              active
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/40',
-            )}
-          >
-            {LIST_CATEGORY_LABELS[c]}
-            <span
-              aria-hidden='true'
-              className={cn(
-                'rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
-                active ? 'bg-background/20 text-background' : 'bg-muted text-muted-foreground',
-              )}
-            >
-              {counts[c]}
-            </span>
-          </button>
-        );
-      })}
     </div>
   );
 }

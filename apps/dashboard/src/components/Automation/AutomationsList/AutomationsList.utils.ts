@@ -1,33 +1,4 @@
-import type { Automation, AutomationStatus } from '../Automation.types';
-
-export const LIST_CATEGORIES = ['all', 'tickets', 'email', 'archived'] as const;
-export type ListCategory = (typeof LIST_CATEGORIES)[number];
-
-export const LIST_CATEGORY_LABELS: Record<ListCategory, string> = {
-  all: 'Current',
-  tickets: 'Tickets',
-  email: 'Email',
-  archived: 'Archived',
-};
-
-export function categoryForTrigger(
-  triggerType: string | undefined | null,
-): Exclude<ListCategory, 'archived'> {
-  if (!triggerType) return 'all';
-  if (triggerType.startsWith('EMAIL_')) return 'email';
-  if (triggerType.startsWith('TICKET_')) return 'tickets';
-  return 'all';
-}
-
-export const LIST_CATEGORY_DESCRIPTIONS: Record<ListCategory, string> = {
-  all: 'Live automations and your in-flight drafts. Archived versions live under their own tab.',
-  tickets:
-    'These run whenever a ticket is created, assigned, has its status changed, or is updated. Use them to auto-route, escalate, or annotate tickets.',
-  email:
-    'These run when an inbound email lands on a watched inbox. Use them to auto-reply, assign, tag, or filter mail before a ticket is touched.',
-  archived:
-    'Previous versions of your automations and any proposals that didn’t become live — rejected, revoked, or auto-revoked when a sibling proposal won.',
-};
+import type { AutomationStatus } from '../Automation.types';
 
 type CatalogLike = { type: string; name: string };
 
@@ -87,17 +58,6 @@ export function statusPillClasses(status: AutomationStatus): string {
     default:
       return 'bg-muted text-muted-foreground border-border';
   }
-}
-
-export function filterAutomations(list: Automation[], query: string): Automation[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return list;
-  return list.filter(a => {
-    if (a.name.toLowerCase().includes(q)) return true;
-    if (a.description && a.description.toLowerCase().includes(q)) return true;
-    if (a.config?.trigger?.type?.toLowerCase().includes(q)) return true;
-    return false;
-  });
 }
 
 export function formatRelative(iso: string | null | undefined): string {

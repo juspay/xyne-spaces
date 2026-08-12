@@ -1,3 +1,4 @@
+import { WorkflowEventType } from '@xyne/shared';
 import { apiInstance } from '../services/clients/apiClient';
 
 interface SuccessEnvelope<T> {
@@ -226,6 +227,7 @@ export interface Automation {
   createdAt: string;
   updatedAt: string;
   automationSeriesId: string | null;
+  eventType: WorkflowEventType;
 }
 
 export interface DeskLabelRulesPayload {
