@@ -2050,6 +2050,21 @@ const BoardStageConfigScreen = ({
   const handleSave = useCallback(async () => {
     if (!boardId) return;
 
+    if (isTransitionsLoading || (stages.some(s => s.id) && !hasLoadedTransitions.current)) {
+      toast.error('Stage transitions are still loading, please wait a moment and try again');
+      return;
+    }
+
+    if (
+      boardType === BoardType.NON_LINEAR &&
+      !Array.from(transitionsByTempId.values()).some(targets => targets.size > 0)
+    ) {
+      const proceed = window.confirm(
+        'No stage transitions are configured. Tickets will not be able to move between stages. Save anyway?',
+      );
+      if (!proceed) return;
+    }
+
     const invalidStages = stages.filter(s => !s.name.trim());
     if (invalidStages.length > 0) {
       toast.error('Please fill in all stage names');
@@ -2175,6 +2190,8 @@ const BoardStageConfigScreen = ({
     boardType,
     syncStageTransitions,
     reloadTransitionsFromServer,
+    isTransitionsLoading,
+    transitionsByTempId,
   ]);
 
   if (!isOpen) return null;
