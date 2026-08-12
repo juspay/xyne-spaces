@@ -1,19 +1,18 @@
-import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+import crypto from "node:crypto";
+import type { ToolDefinition, ToolExecutionContext, UiWidget } from "../types.js";
+import { publishUiWidget } from "../ui-widget.js";
 
-function pushArtifactCard(
-  ctx: ToolExecutionContext | undefined,
-  body: Record<string, unknown>,
-): void {
-  const url = ctx?.progressUrl;
-  if (!url || !ctx?.sessionId) return;
-  void fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(ctx.s2sKey ? { "x-s2s-key": ctx.s2sKey } : {}),
-    },
-    body: JSON.stringify({ sessionId: ctx.sessionId, ...body }),
-  }).catch(() => {});
+function widgetId(context: ToolExecutionContext | undefined, type: UiWidget["type"]): string {
+  return `${type}:${context?.toolCallId ?? crypto.randomUUID()}`;
+}
+
+async function postWidget(context: ToolExecutionContext | undefined, widget: UiWidget): Promise<string | null> {
+  try {
+    await publishUiWidget(context, widget);
+    return null;
+  } catch (err) {
+    return `Error publishing ${widget.type} widget: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 export const postCodeBlock: ToolDefinition = {
@@ -43,7 +42,13 @@ export const postCodeBlock: ToolDefinition = {
     const rawLanguage = params["language"];
     const language = typeof rawLanguage === "string" && rawLanguage.trim() ? rawLanguage.trim() : undefined;
 
-    pushArtifactCard(context, { kind: "code", code, ...(language ? { language } : {}) });
+    const error = await postWidget(context, {
+      id: widgetId(context, "code"),
+      type: "code",
+      operation: "create",
+      payload: { code, ...(language ? { language } : {}) },
+    });
+    if (error) return error;
     return `Posted a ${language ?? "code"} snippet (${code.split("\n").length} lines) to the thread. Do not repeat it in your reply — the user can already see and copy it.`;
   },
 };
@@ -77,7 +82,13 @@ export const postDiff: ToolDefinition = {
       return "Error: patch must be unified-diff text (at least one @@ hunk header).";
     }
 
-    pushArtifactCard(context, { kind: "diff", path, patch });
+    const error = await postWidget(context, {
+      id: widgetId(context, "diff"),
+      type: "diff",
+      operation: "create",
+      payload: { path, patch },
+    });
+    if (error) return error;
     return `Posted a diff card for ${path} to the thread. Do not repeat the patch in your reply — the user can already see it.`;
   },
 };
@@ -142,7 +153,13 @@ export const postChart: ToolDefinition = {
         if (typeof y !== "number" || !Number.isFinite(y)) return `Error: series point ${i + 1} needs a finite y.`;
         series.push({ x, y, ...(name ? { series: name } : {}) });
       }
-      pushArtifactCard(context, { kind: "chart", type, series, ...(caption ? { caption } : {}) });
+      const error = await postWidget(context, {
+        id: widgetId(context, "chart"),
+        type: "chart",
+        operation: "create",
+        payload: { type, series, ...(caption ? { caption } : {}) },
+      });
+      if (error) return error;
       const lines = new Set(series.map((point) => point.series ?? "")).size;
       return `Posted a ${type} chart (${series.length} points, ${lines} series) to the thread. Do not list the values again — state what the shape means.`;
     }
@@ -162,7 +179,13 @@ export const postChart: ToolDefinition = {
         }
         points.push({ label, value });
       }
-      pushArtifactCard(context, { kind: "chart", type, points, ...(caption ? { caption } : {}) });
+      const error = await postWidget(context, {
+        id: widgetId(context, "chart"),
+        type: "chart",
+        operation: "create",
+        payload: { type, points, ...(caption ? { caption } : {}) },
+      });
+      if (error) return error;
       return `Posted a ${points.length}-point ${type} chart to the thread. Do not list the values again — state what the shape means.`;
     }
 

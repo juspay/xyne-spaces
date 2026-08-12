@@ -66,7 +66,7 @@ export interface SessionContext {
    */
   progressMessageId?: string;
   /**
-   * MessageId of the live plan/todo card (todo-write → kind:"plan" progress
+   * MessageId of the live plan/todo card (todo-write → ui-widget progress
    * event). Posted once, then updated in place on every subsequent todo-write.
    * Undefined until the first todo-write of the run.
    */
@@ -401,4 +401,3 @@ export async function deleteSession(sessionId: string): Promise<void> {
     } catch { /* malformed — nothing to clean up */ }
   }
 }
-

@@ -192,9 +192,8 @@ register(skillManagement.updateSkillTool);
 
 // Register plan-tracking tools (todo-write / todo-read). The agent maintains an
 // explicit todo list that renders as a live, in-place-updating card in the
-// Spaces thread (via claw-auth's kind:"plan" progress handler). todo-write
-// fires the render using ctx.progressUrl/sessionId/s2sKey — threaded by
-// loadCustomTools — so no extra wiring is needed here.
+// Spaces thread. todo-write publishes the shared ui-widget envelope, so the
+// same tool works over legacy progress POSTs and the unified SSE transport.
 register(todo.todoWriteTool);
 register(todo.todoReadTool);
 

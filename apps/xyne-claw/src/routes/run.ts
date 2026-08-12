@@ -29,6 +29,7 @@ import {
   type ClawStreamMeta,
   type ClawDoneStatus,
   type Todo,
+  type UiWidget,
   type ToolExecutionContext,
   cleanupSdlcSandboxCredentialsForContext,
 } from "xyne-claw-shared";
@@ -1175,6 +1176,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     attachment: (sid, attachment: ClawAttachmentPayload) => write({ event: "attachment", seq: next(), sessionId: sid, attachment }),
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
+    uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -1907,9 +1909,9 @@ async function processTask(
     // (URL or emitter, whichever is plumbed).
     const progressEmitter = progressUrl && typeof progressUrl !== "string" ? progressUrl : undefined;
     const progressUrlForCustom = typeof progressUrl === "string" ? progressUrl : undefined;
-    const emitPlanForCustom =
+    const emitUiWidgetForCustom =
       progressEmitter
-        ? (todos: Todo[]) => progressEmitter.plan(sessionId, todos)
+        ? async (widget: UiWidget) => progressEmitter.uiWidget(sessionId, widget)
         : undefined;
     customToolsResult = loadCustomTools(
       effectiveConfig,
@@ -1922,7 +1924,7 @@ async function processTask(
       sessionToken,
       undefined,
       runtimeProviderConfig,
-      emitPlanForCustom,
+      emitUiWidgetForCustom,
       taskCommand?.autoTools ?? [],
     );
     const {
@@ -2388,7 +2390,7 @@ async function processTask(
           calleeSessionToken,
           undefined,
           calleeProviderConfigForTools,
-          emitPlanForCustom,
+          emitUiWidgetForCustom,
         );
         const calleeGroupsWithoutKb = calleeMcp.groups.filter((g) => g.serverType !== "knowledge-base");
         const calleeKbTools = calleeMcp.groups.find((g) => g.serverType === "knowledge-base")?.tools ?? [];

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { ToolDefinition, UserQuestion, UserQuestionType } from "../types.js";
+import { publishUiWidget } from "../ui-widget.js";
 
 const SKIP_QUESTION_OPTION = "Skip this question";
 
@@ -98,6 +99,20 @@ export const askUserQuestion: ToolDefinition = {
 
     // Push to pendingQuestions collector so it's included in callback
     context.pendingQuestions?.push({ questionId, questions });
+
+    // Publish immediately when the run has a live widget transport. The final
+    // callback retains pendingQuestions as a retry path; claw-auth deduplicates
+    // both deliveries by this stable widget id.
+    try {
+      await publishUiWidget(context, {
+        id: `question:${questionId}`,
+        type: "question",
+        operation: "create",
+        payload: { questionId, questions },
+      });
+    } catch {
+      // The final callback remains the durable fallback for questions.
+    }
 
     return `STOP — Posted ${questions.length} question(s) to the user. Do NOT continue working. Do NOT call any more tools. Do NOT assume an answer. Simply tell the user you've asked the questions and wait. A new agent run will start automatically when they answer.`;
   },
