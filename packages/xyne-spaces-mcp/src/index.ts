@@ -11,10 +11,24 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  type ServerNotification,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js"
 
 import { spacesFetch } from "./auth.js"
+import {
+  ClawClient,
+  clawErrorMessage,
+  clearClawConfig,
+  formatAgents,
+  formatSessions,
+  getClawConfigPath,
+  loadClawConfig,
+  performClawLogin,
+  requireClawConfig,
+  resolveClawBaseUrl,
+  runAndWait,
+} from "./claw.js"
 import {
   queryTickets,
   queryMessages,
@@ -280,6 +294,84 @@ const tools: Tool[] = [
     },
   },
   {
+    name: "claw-login",
+    description:
+      "Log in to Xyne Claw (remote agents) using device flow. Opens your browser to an authorization " +
+      "page and polls until a token is minted, then stores it at ~/.xyne/agent/claw.json — the same " +
+      "file the Xyne CLI uses, so one login covers both. Claw auth is SEPARATE from the Spaces tools, " +
+      "which use the desktop app; being logged into one says nothing about the other.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        timeoutSeconds: { type: "number", description: "Max seconds to wait for authorization (default: the server's expiry)" },
+      },
+    },
+  },
+  {
+    name: "claw-logout",
+    description: "Log out of Xyne Claw by deleting the stored ~/.xyne/agent/claw.json token. Does not affect Spaces tools.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "claw-whoami",
+    description:
+      "Show the stored Xyne Claw login (email, userId, base URL), or report that no login is stored. " +
+      "Use this to check Claw auth before dispatching an agent.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "claw-list-agents",
+    description:
+      "List the Xyne Claw remote agents this account can dispatch to. Returns each agent's slug — the " +
+      "value claw-run-agent needs. Requires claw-login first.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "claw-list-sessions",
+    description:
+      "List recent Xyne Claw runs with their session ids and statuses. Use a session id with claw-get-run " +
+      "to fetch the full result. Requires claw-login first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", minimum: 1, maximum: 100, default: 20, description: "Max sessions (default 20)" },
+      },
+    },
+  },
+  {
+    name: "claw-run-agent",
+    description:
+      "Dispatch a task to a remote Xyne Claw agent and wait for it to finish. Blocks while polling, so " +
+      "prefer a generous timeout for long jobs; on timeout the run usually continues and can be picked up " +
+      "with claw-get-run. Optionally deliver the agent's reply into a Spaces thread — pass channelId " +
+      "(get one from spaces-channels) to post into that channel, or deliverTo='dm' for the user's own DM. " +
+      "Requires claw-login first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent: { type: "string", description: "Agent slug from claw-list-agents" },
+        task: { type: "string", description: "The task or prompt to send to the agent" },
+        timeoutSeconds: { type: "number", minimum: 1, default: 300, description: "Max seconds to wait (default 300)" },
+        channelId: { type: "string", description: "Optional Spaces ChannelID (from spaces-channels) — the agent posts its reply into that channel" },
+        deliverTo: { type: "string", enum: ["cli", "dm"], description: "'cli' (default) returns the result here; 'dm' also delivers it to your Spaces DM" },
+      },
+      required: ["agent", "task"],
+    },
+  },
+  {
+    name: "claw-get-run",
+    description:
+      "Get the status and full detail of one Xyne Claw run by session id, including tool calls, timing, " +
+      "and token usage. Use this to check on a run that timed out or was started earlier. Requires claw-login first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "The session id from claw-run-agent or claw-list-sessions" },
+      },
+      required: ["sessionId"],
+    },
+  },
+  {
     name: "spaces-webfetch",
     description:
       "Fetch an external URL and return its content as markdown or text. " +
@@ -327,7 +419,20 @@ function formatSearchResult(r: SearchResult): string {
   return lines.join("\n")
 }
 
-async function handleToolCall(name: string, args: Record<string, unknown>): Promise<string> {
+/**
+ * Per-call context. Long-running Claw tools report progress and honour
+ * cancellation; every Spaces tool ignores this.
+ */
+interface ToolContext {
+  notify: (message: string) => Promise<void>
+  signal?: AbortSignal
+}
+
+async function handleToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<string> {
   switch (name) {
     case "spaces-search": {
       const params = new URLSearchParams()
@@ -591,6 +696,102 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
       ].join("\n")
     }
 
+    case "claw-login": {
+      const baseUrl = resolveClawBaseUrl()
+      const { config, verifyUrl, userCode } = await performClawLogin(
+        baseUrl,
+        args.timeoutSeconds as number | undefined,
+        ctx.notify
+      )
+      return [
+        `Logged in to Xyne Claw${config.email ? ` as ${config.email}` : ""}.`,
+        `  Base URL: ${config.baseUrl}`,
+        `  Verification URL: ${verifyUrl}`,
+        `  User code: ${userCode}`,
+        `  Token stored at: ${getClawConfigPath()}`,
+      ].join("\n")
+    }
+
+    case "claw-logout": {
+      const cleared = clearClawConfig()
+      return cleared
+        ? `Logged out of Claw. Removed ${getClawConfigPath()}.`
+        : "Not logged in to Claw — nothing to remove."
+    }
+
+    case "claw-whoami": {
+      const config = loadClawConfig()
+      if (!config) return "Not logged in to Claw. Run claw-login first."
+      return [
+        `Claw login:`,
+        `  Email: ${config.email ?? "(unknown)"}`,
+        `  UserID: ${config.userId ?? "(unknown)"}`,
+        `  Base URL: ${config.baseUrl}`,
+        `  Token: ${config.tokenPrefix ?? "(stored)"}…`,
+        `  Since: ${config.createdAt ?? "(unknown)"}`,
+      ].join("\n")
+    }
+
+    case "claw-list-agents": {
+      const config = requireClawConfig()
+      const agents = await new ClawClient(resolveClawBaseUrl(), config.token).listAgents()
+      return formatAgents(agents)
+    }
+
+    case "claw-list-sessions": {
+      const config = requireClawConfig()
+      const limit = Math.max(1, Math.min((args.limit as number) ?? 20, 100))
+      const sessions = await new ClawClient(resolveClawBaseUrl(), config.token).listSessions(limit)
+      return formatSessions(sessions)
+    }
+
+    case "claw-run-agent": {
+      const config = requireClawConfig()
+      const agent = args.agent as string
+      const task = args.task as string
+      const timeoutMs = Math.max(1, (args.timeoutSeconds as number) ?? 300) * 1000
+
+      // Explicit channelId wins; deliverTo:'dm' asks the server to resolve the user's own DM.
+      const channelId = args.channelId as string | undefined
+      const wantsDm = !channelId && args.deliverTo === "dm"
+
+      const client = new ClawClient(resolveClawBaseUrl(), config.token)
+      const run = await runAndWait(
+        client,
+        agent,
+        task,
+        timeoutMs,
+        ctx.signal,
+        (sessionId) => ctx.notify(`Running ${agent} (session ${sessionId})…`),
+        channelId,
+        wantsDm ? "dm" : undefined
+      )
+
+      const delivery = channelId
+        ? `\n(reply delivered to Spaces channel ${channelId})`
+        : wantsDm
+          ? `\n(delivery requested to your Spaces DM)`
+          : ""
+
+      if (run.status.toLowerCase() === "completed") {
+        return `${run.result ?? "(completed with no output)"}${delivery}\n\nSession: ${run.sessionId}`
+      }
+      throw new Error(
+        `Claw run ${run.status}: ${run.error ?? run.result ?? "(no detail)"}${delivery}\nSession: ${run.sessionId}`
+      )
+    }
+
+    case "claw-get-run": {
+      const config = requireClawConfig()
+      const { run, detail } = await new ClawClient(
+        resolveClawBaseUrl(),
+        config.token
+      ).getRunWithDetail(args.sessionId as string)
+
+      const summary = run.error ?? run.result ?? "(no result yet)"
+      return `Run ${run.sessionId}: ${run.status}\n${summary}\n\nFull detail:\n${JSON.stringify(detail, null, 2)}`
+    }
+
     case "spaces-webfetch": {
       const url = args.url as string
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -662,18 +863,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools }
 })
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const { name, arguments: args } = request.params
 
+  const ctx: ToolContext = {
+    // Progress is best-effort — the final result carries the same information.
+    notify: async (message: string) => {
+      try {
+        await extra.sendNotification({
+          method: "notifications/message",
+          params: { level: "info", logger: "xyne-spaces-mcp", data: message },
+        } satisfies ServerNotification)
+      } catch {
+        // Client does not support notifications; ignore.
+      }
+    },
+    signal: extra.signal,
+  }
+
   try {
-    const result = await handleToolCall(name, (args ?? {}) as Record<string, unknown>)
+    const result = await handleToolCall(name, (args ?? {}) as Record<string, unknown>, ctx)
     return {
       content: [{ type: "text", text: result }],
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    // clawErrorMessage turns a 401 into "run claw-login", which is the single
+    // most common failure and not obvious from the raw HTTP message.
     return {
-      content: [{ type: "text", text: `Error: ${message}` }],
+      content: [{ type: "text", text: `Error: ${clawErrorMessage(error)}` }],
       isError: true,
     }
   }
