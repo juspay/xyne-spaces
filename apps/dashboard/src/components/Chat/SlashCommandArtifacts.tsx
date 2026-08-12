@@ -24,7 +24,6 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { formatTimeAmPm } from '../../utils/dateUtils';
 import { formatElapsedTime } from '../../utils/recordingUtils';
 import { Event, logger } from '../../utils/logger';
-import { callLobbyService } from '../../services/Call/callLobbyService';
 import { roomActor } from '../../machines/roomMachine';
 import { queries } from '../../zero/queries';
 import { useFlow } from '../flowUI/FlowContext';
@@ -360,7 +359,8 @@ export const Sev2SlashCommandArtifact: React.FC<Sev2SlashCommandArtifactProps> =
     if (!activeCallExternalId || isCopying) return;
     setIsCopying(true);
     try {
-      const inviteUrl = await callLobbyService.getInviteUrl(activeCallExternalId);
+      const inviteUrl = activeCall?.roomLink;
+      if (!inviteUrl) throw new Error('Call invite link is unavailable');
       await navigator.clipboard.writeText(inviteUrl);
       logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
         action: 'copy_call_link',
