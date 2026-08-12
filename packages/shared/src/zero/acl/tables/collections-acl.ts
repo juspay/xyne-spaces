@@ -13,12 +13,20 @@ export class CollectionsACL extends BaseQueryACL<'collections'> {
       return denyGuestSelect(query, 'id');
     }
 
-    return query.where(({ or, cmp, exists }) =>
-      or(
-        cmp('isPrivate', '=', false),
-        cmp('ownerId', '=', this.ctx.userID),
-        exists('permissions', (p) => p.where('userId', this.ctx.userID))
+    // workspaceId is a denormalized tenant key stamped on insert (nullable —
+    // see schema.ts), so rows predating the backfill may have it unset.
+    // Treat those as visible everywhere (unchanged legacy behavior) while
+    // enforcing the match for anything that does carry a workspaceId.
+    return query
+      .where(({ or, cmp }) =>
+        or(cmp('workspaceId', 'IS', null), cmp('workspaceId', '=', this.ctx.workspaceId))
       )
-    );
+      .where(({ or, cmp, exists }) =>
+        or(
+          cmp('isPrivate', '=', false),
+          cmp('ownerId', '=', this.ctx.userID),
+          exists('permissions', (p) => p.where('userId', this.ctx.userID))
+        )
+      );
   }
 }

@@ -13,16 +13,24 @@ export class CollectionItemsACL extends BaseQueryACL<'collection_items'> {
       return denyGuestSelect(query, 'id');
     }
 
-    return query.where(({ exists }) =>
-      exists('collection', (c) =>
-        c.where(({ or, cmp, exists: innerExists }) =>
-          or(
-            cmp('isPrivate', '=', false),
-            cmp('ownerId', '=', this.ctx.userID),
-            innerExists('permissions', (p) => p.where('userId', this.ctx.userID))
+    // Same nullable-workspaceId grandfather rule as CollectionsACL — see its
+    // comment. Checked on the item's own denormalized copy rather than
+    // hopping through `collection` since both copies are independently
+    // stamped at insert and neither is more authoritative than the other.
+    return query
+      .where(({ or, cmp }) =>
+        or(cmp('workspaceId', 'IS', null), cmp('workspaceId', '=', this.ctx.workspaceId))
+      )
+      .where(({ exists }) =>
+        exists('collection', (c) =>
+          c.where(({ or, cmp, exists: innerExists }) =>
+            or(
+              cmp('isPrivate', '=', false),
+              cmp('ownerId', '=', this.ctx.userID),
+              innerExists('permissions', (p) => p.where('userId', this.ctx.userID))
+            )
           )
         )
-      )
-    );
+      );
   }
 }
