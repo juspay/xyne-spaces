@@ -102,6 +102,7 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
                 icon={<McpServerIcon server={server} size='sm' />}
                 name={server.name}
                 description={server.description ?? undefined}
+                meta={server.oauth ? 'OAuth' : undefined}
               />
             );
           }),

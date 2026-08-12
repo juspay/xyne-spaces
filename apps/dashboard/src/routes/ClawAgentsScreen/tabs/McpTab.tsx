@@ -40,6 +40,11 @@ const McpCard = ({
         <span className='truncate text-sm font-medium leading-snug text-foreground'>
           {server.name}
         </span>
+        {server.oauth && (
+          <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
+            OAuth
+          </span>
+        )}
       </div>
       {server.description && (
         <p className='line-clamp-2 text-sm text-muted-foreground'>{server.description}</p>
