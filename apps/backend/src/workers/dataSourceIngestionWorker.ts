@@ -5,6 +5,8 @@ import {
   type DataSourceIngestJobData,
 } from '@/queues/dataSourceIngestQueue';
 import { runDataSourceIngestion } from '@/services/dynamicDashboard/dataSource/ingestion/ingestionService';
+import { runAsServiceActor } from '@/database/tenant/context';
+import { repositories } from '@/database/repositories/index';
 
 class DataSourceIngestionWorker {
   private isInitialized = false;
@@ -29,7 +31,15 @@ class DataSourceIngestionWorker {
   private async processJob(job: Bull.Job<DataSourceIngestJobData>): Promise<void> {
     const { dataSourceId, includedTables } = job.data;
     logger.info(`[DS-INGEST-WORKER] Processing job ${job.id} dataSourceId=${dataSourceId}`);
-    await runDataSourceIngestion(dataSourceId, includedTables);
+
+    const ds = await repositories.dataSources.findById(dataSourceId);
+    if (!ds) {
+      throw new Error(`[DS-INGEST-WORKER] Data source not found: ${dataSourceId}`);
+    }
+
+    await runAsServiceActor('data-source-ingestion-worker', ds.workspaceId, () =>
+      runDataSourceIngestion(dataSourceId, includedTables),
+    );
     logger.info(`[DS-INGEST-WORKER] Completed job ${job.id} dataSourceId=${dataSourceId}`);
   }
 
