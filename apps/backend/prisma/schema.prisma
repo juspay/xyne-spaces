@@ -1785,8 +1785,6 @@ model ChannelBoardMapping {
 
   @@unique([channelId, boardId])
   @@index([channelId])
-  @@index([boardId])
-  @@index([workspaceId, channelId])
   @@map("channel_board_mappings")
   @@schema("public")
 }
