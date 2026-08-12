@@ -135,6 +135,16 @@ class NoteTakerWebhookController {
         // Give the metadata event a brief opportunity to reach the connected
         // recorder so it can show the specific save-failure message.
         await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (notificationError) {
+        // Notification is best-effort. A failure must never prevent teardown of
+        // the ghost room below.
+        logger.error('[NoteTaker Webhook] recording_start_failure_notification_failed', {
+          room: roomName,
+          error: notificationError,
+        });
+      }
+
+      try {
         await livekitService.deleteRoom(roomName);
         logger.info('[NoteTaker Webhook] ghost_recording_terminated', {
           room: roomName,

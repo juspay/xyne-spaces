@@ -25,6 +25,9 @@ import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
+// `Room.disconnect()` emits Disconnected asynchronously. Mark a normal user
+// stop first so its callback cannot be mistaken for a server-side failure.
+const intentionallyDisconnectedRooms = new WeakSet<Room>();
 
 export interface TranscriptEntry {
   id: number;
@@ -258,6 +261,8 @@ export const recordingStore = createStore({
       };
 
       const handleRoomDisconnected = (): void => {
+        if (intentionallyDisconnectedRooms.delete(room)) return;
+
         const current = recordingStore.getSnapshot().context;
         if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
 
@@ -411,6 +416,7 @@ export const recordingStore = createStore({
 
       // Cleanup room
       if (context.room) {
+        intentionallyDisconnectedRooms.add(context.room);
         void context.room.disconnect();
       }
 
