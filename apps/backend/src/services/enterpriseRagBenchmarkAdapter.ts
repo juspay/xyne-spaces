@@ -1,23 +1,4 @@
 import { createHash } from 'crypto';
-import {
-  BoardType,
-  CallOrigin,
-  CallStatus,
-  ChannelScopeType,
-  ChannelType,
-  ChannelVisibility,
-  IngestionStatus,
-  MessageType,
-  TicketPriority,
-} from '@xyne/shared';
-import { DatabaseClient } from '@/database/client';
-import { CollectionRepository } from '@/database/repositories/collectionRepository';
-import { createTicketWithConversation } from '@/apps/core/ticketutils';
-import { conversationService } from '@/services/conversationService';
-import { emailService } from '@/services/emailService';
-import { getStorageService } from '@/services/storage/storageServiceFactory';
-import { config } from '@/config/env';
-import { vespaQueue } from '@/queues/vespaQueue';
 import { vespaService } from '@/services/vespaSearch';
 import {
   channelSchema,
@@ -25,9 +6,11 @@ import {
   mailSchema,
   messageSchema,
   projectSchema,
-  SubApp,
   ticketSchema,
+  type VespaSchema,
 } from '@/vespa/src/types';
+import { logger } from '@/utils/logger';
+
 export const ENTERPRISE_RAG_SOURCE_TYPES = [
   'confluence',
   'fireflies',
@@ -76,6 +59,21 @@ interface EnterpriseRagAdapterPayload extends EnterpriseRagDocumentInput {
   };
 }
 
+export interface EnterpriseRagIngestResult {
+  success: true;
+  status: 'queued' | 'duplicate';
+  benchmarkDocId: string;
+  sourceType: EnterpriseRagSourceType;
+  classification: EnterpriseRagIngestionPath;
+  ingestionPath: EnterpriseRagIngestionPath;
+  entityIds: string[];
+  schemas: string[];
+  queueJobs: Array<{ id: string; queue: string; schema: string; docId: string }>;
+}
+
+const RESOURCE_PREFIX = 'EnterpriseRAG Bench';
+const VESPA_NAMESPACE = 'benchmark';
+
 const classifySource = (sourceType: EnterpriseRagSourceType): EnterpriseRagIngestionPath => {
   if (sourceType === 'slack') return 'conversation';
   if (sourceType === 'gmail') return 'mail';
@@ -84,11 +82,9 @@ const classifySource = (sourceType: EnterpriseRagSourceType): EnterpriseRagInges
   return 'knowledge_base';
 };
 
-const mapEnterpriseRagRow = (
-  input: EnterpriseRagDocumentInput,
-): EnterpriseRagAdapterPayload => {
+const mapEnterpriseRagRow = (input: EnterpriseRagDocumentInput): EnterpriseRagAdapterPayload => {
   const digest = createHash('sha256')
-    .update(`${input.sourceType}\u0000${input.docId}`)
+    .update(`${input.sourceType}${input.docId}`)
     .digest('hex')
     .slice(0, 24);
   return {
@@ -104,463 +100,272 @@ const mapEnterpriseRagRow = (
   };
 };
 
-const db = DatabaseClient.getInstance();
-const collectionRepository = new CollectionRepository();
-const RESOURCE_PREFIX = 'EnterpriseRAG Bench';
+// Deterministic synthetic ids — no DB anywhere in this file, Vespa only.
+const syntheticUserId = (workspaceId: string): string => `bench-user-${workspaceId}`;
+const syntheticChannelId = (workspaceId: string, sourceType: EnterpriseRagSourceType): string =>
+  `bench-ch-${workspaceId}-${sourceType}`;
+const syntheticProjectId = (workspaceId: string): string => `bench-proj-${workspaceId}`;
 
-interface BenchmarkResources {
-  projectId: string;
-  boardId: string;
-  channelId: string;
-  collectionId?: string;
-}
+const channelRefId = (channelId: string): string =>
+  `id:${VESPA_NAMESPACE}:${channelSchema}::${channelId}`;
+const projectRefId = (projectId: string): string =>
+  `id:${VESPA_NAMESPACE}:${projectSchema}::${projectId}`;
 
-export interface EnterpriseRagIngestResult {
-  success: true;
-  status: 'queued' | 'duplicate';
-  benchmarkDocId: string;
-  sourceType: EnterpriseRagSourceType;
-  classification: EnterpriseRagIngestionPath;
-  ingestionPath: EnterpriseRagIngestionPath;
-  entityIds: string[];
-  schemas: string[];
-  queueJobs: Array<{ id: string; queue: string; schema: string; docId: string }>;
-}
+const metadataString = (payload: EnterpriseRagAdapterPayload): string =>
+  JSON.stringify({ enterpriseRag: payload.metadata });
 
-const resourcePromises = new Map<string, Promise<BenchmarkResources>>();
+const nowMs = (): number => Date.now();
 
-const channelTypeFor = (path: EnterpriseRagIngestionPath): ChannelType => {
-  if (path === 'mail') return ChannelType.EMAIL;
-  if (path === 'conversation') return ChannelType.SLACK;
-  if (path === 'transcript') return ChannelType.CALL;
-  return ChannelType.DEFAULT;
-};
+const insertOpts = (schema: string) => ({ namespace: VESPA_NAMESPACE, schema: schema as VespaSchema });
 
-const ensureBenchmarkResourcesUncached = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-): Promise<BenchmarkResources> => {
-  const [workspace, user] = await Promise.all([
-    db.workspace.findUnique({ where: { id: context.workspaceId }, select: { id: true } }),
-    db.user.findUnique({ where: { id: context.userId }, select: { id: true, workspaceId: true } }),
-  ]);
-  if (!workspace) throw new Error(`Workspace ${context.workspaceId} was not found`);
-  if (!user || user.workspaceId !== context.workspaceId) {
-    throw new Error(`User ${context.userId} does not belong to workspace ${context.workspaceId}`);
-  }
+let workspaceContainerPromise = new Map<string, Promise<void>>();
 
-  const project = await db.project.upsert({
-    where: { name_workspaceId: { name: RESOURCE_PREFIX, workspaceId: context.workspaceId } },
-    update: { description: 'Synthetic containers for EnterpriseRAG-Bench ingestion' },
-    create: {
-      name: RESOURCE_PREFIX,
-      code: 'ERB',
-      description: 'Synthetic containers for EnterpriseRAG-Bench ingestion',
+/**
+ * Ensure the parent `chat_container` exists for (workspaceId, sourceType). Without
+ * it, every child schema's imported ACL fields (channelId, workspaceId,
+ * permissions) come back empty and all queries filter out our docs.
+ *
+ * `permissions: ['*']` means "visible to everyone" — the multi-workspace filter
+ * still applies via `workspaceId`, but within the workspace all users can see
+ * benchmark docs. That's intentional for a benchmark setup.
+ */
+const ensureChatContainer = async (context: EnterpriseRagContext, sourceType: EnterpriseRagSourceType): Promise<void> => {
+  const key = `${context.workspaceId}:${sourceType}`;
+  let pending = workspaceContainerPromise.get(key);
+  if (pending) return pending;
+
+  const channelId = syntheticChannelId(context.workspaceId, sourceType);
+  pending = (async () => {
+    const fields = {
+      docId: channelId,
+      docType: sourceType,
+      orgId: context.orgId,
       workspaceId: context.workspaceId,
+      channelName: `${RESOURCE_PREFIX} ${sourceType}`,
+      scopeType: 'DEFAULT',
+      visibility: 'PUBLIC',
+      isIm: false,
+      isMpim: false,
+      isPrivate: false,
+      permissions: ['*'],
       createdBy: context.userId,
-      updatedBy: context.userId,
-    },
+      ownerId: context.userId,
+      projectId: syntheticProjectId(context.workspaceId),
+      lastActivityAt: nowMs(),
+      createdAt: nowMs(),
+      updatedAt: nowMs(),
+      lastSyncedAt: nowMs(),
+      topic: sourceType,
+      description: `Synthetic ${sourceType} benchmark channel`,
+      isArchived: false,
+      memberCount: 1,
+    };
+    await vespaService.vespaClient.insert(fields as never, insertOpts(channelSchema));
+  })().catch(err => {
+    workspaceContainerPromise.delete(key);
+    throw err;
   });
-
-  const board = await db.board.upsert({
-    where: { name_projectId: { name: `${RESOURCE_PREFIX} Tickets`, projectId: project.id } },
-    update: {},
-    create: {
-      name: `${RESOURCE_PREFIX} Tickets`,
-      boardType: BoardType.DEFAULT,
-      projectId: project.id,
-      workspaceId: context.workspaceId,
-      createdBy: context.userId,
-      updatedBy: context.userId,
-      description: 'Synthetic Jira and Linear benchmark tickets',
-    },
-  });
-
-  const stage = await db.stage.findFirst({ where: { boardId: board.id }, select: { id: true } });
-  if (!stage) {
-    await db.stage.create({
-      data: {
-        name: 'Benchmark',
-        boardId: board.id,
-        sequenceNumber: 0,
-        createdBy: context.userId,
-        updatedBy: context.userId,
-        workspaceId: context.workspaceId,
-      },
-    });
-  }
-
-  const channelName = `${RESOURCE_PREFIX} ${payload.sourceType}`;
-  let channel = await db.channel.findFirst({
-    where: { workspaceId: context.workspaceId, name: channelName },
-  });
-  if (!channel) {
-    channel = await db.channel.create({
-      data: {
-        name: channelName,
-        description: `Synthetic ${payload.sourceType} ingestion channel`,
-        type: channelTypeFor(payload.ingestionPath),
-        scopeType: ChannelScopeType.DEFAULT,
-        visibility: ChannelVisibility.PRIVATE,
-        createdBy: context.userId,
-        projectId: project.id,
-        workspaceId: context.workspaceId,
-        metadata: { benchmark: 'EnterpriseRAG-Bench', sourceType: payload.sourceType },
-      },
-    });
-  }
-
-  await db.channelParticipant.upsert({
-    where: { channelId_userId: { channelId: channel.id, userId: context.userId } },
-    update: {},
-    create: {
-      channelId: channel.id,
-      userId: context.userId,
-      workspaceId: context.workspaceId,
-      role: 'ADMIN',
-    },
-  });
-
-  // Supporting documents also use the normal queue; no benchmark code writes Vespa documents.
-  await Promise.all([
-    vespaQueue.addJob({
-      schema: projectSchema,
-      docId: project.id,
-      jobType: 'feed',
-      userId: context.userId,
-      workspaceId: context.workspaceId,
-    }),
-    vespaQueue.addJob({
-      schema: channelSchema,
-      docId: channel.id,
-      jobType: 'feed',
-      userId: context.userId,
-      workspaceId: context.workspaceId,
-    }),
-  ]);
-
-  let collectionId: string | undefined;
-  if (payload.ingestionPath === 'knowledge_base') {
-    const collectionName = `${RESOURCE_PREFIX} ${payload.sourceType} KB`;
-    let collection = await db.collection.findFirst({
-      where: {
-        parentId: null,
-        ownerId: context.userId,
-        name: collectionName,
-        scopeType: 'CHANNEL',
-        scopeId: channel.id,
-        deletedAt: null,
-      },
-    });
-    if (!collection) {
-      collection = await db.collection.create({
-        data: {
-          name: collectionName,
-          ownerId: context.userId,
-          workspaceId: context.workspaceId,
-          scopeType: 'CHANNEL',
-          scopeId: channel.id,
-          description: `EnterpriseRAG-Bench ${payload.sourceType} documents`,
-          isPrivate: true,
-          createdAt: new Date(),
-        },
-      });
-    }
-    await db.collectionPermission.upsert({
-      where: { collectionId_userId: { collectionId: collection.id, userId: context.userId } },
-      update: { role: 'OWNER', canShare: true },
-      create: {
-        collectionId: collection.id,
-        userId: context.userId,
-        workspaceId: context.workspaceId,
-        role: 'OWNER',
-        canShare: true,
-        grantedBy: context.userId,
-        createdAt: new Date(),
-      },
-    });
-    collectionId = collection.id;
-  }
-
-  return { projectId: project.id, boardId: board.id, channelId: channel.id, collectionId };
-};
-
-const ensureBenchmarkResources = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-): Promise<BenchmarkResources> => {
-  const key = `${context.workspaceId}:${context.userId}:${payload.sourceType}`;
-  let pending = resourcePromises.get(key);
-  if (!pending) {
-    pending = ensureBenchmarkResourcesUncached(payload, context);
-    resourcePromises.set(key, pending);
-    pending.catch(() => resourcePromises.delete(key));
-  }
+  workspaceContainerPromise.set(key, pending);
   return pending;
 };
 
-const queueInfo = (
-  jobs: Awaited<ReturnType<typeof vespaQueue.addJob>>,
-  schema: string,
-  docId: string,
-): EnterpriseRagIngestResult['queueJobs'] =>
-  jobs.map(job => ({ id: String(job.id), queue: job.queue.name, schema, docId }));
-
-const ingestConversation = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-  resources: BenchmarkResources,
-): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
-  const existing = await db.message.findFirst({
-    where: {
+const ensureProject = async (context: EnterpriseRagContext): Promise<void> => {
+  const key = `${context.workspaceId}:__project__`;
+  let pending = workspaceContainerPromise.get(key);
+  if (pending) return pending;
+  const projectId = syntheticProjectId(context.workspaceId);
+  pending = (async () => {
+    const fields = {
+      docId: projectId,
+      docType: 'benchmark',
+      orgId: context.orgId,
       workspaceId: context.workspaceId,
-      metadata: { path: ['enterpriseRag', 'benchmarkDocId'], equals: payload.docId },
-    },
-    select: { messageId: true },
-  });
-  if (existing) {
-    return { status: 'duplicate', entityIds: [existing.messageId], schemas: [messageSchema], queueJobs: [] };
-  }
-
-  const result = await conversationService.createConversationWithMessage({
-    channelId: resources.channelId,
-    userId: context.userId,
-    content: payload.content,
-    msgType: MessageType.BOT,
-    isBot: true,
-    isMarkdown: false,
-    metadata: { enterpriseRag: payload.metadata },
-    messageMetadata: { enterpriseRag: payload.metadata, syntheticId: payload.syntheticId },
-  });
-  return {
-    status: 'queued',
-    entityIds: [result.message.messageId],
-    schemas: [messageSchema],
-    queueJobs: [],
-  };
-};
-
-const ingestMail = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-  resources: BenchmarkResources,
-): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
-  const existing = await db.email.findUnique({
-    where: {
-      externalMessageId_channelId: {
-        externalMessageId: payload.syntheticId,
-        channelId: resources.channelId,
-      },
-    },
-    select: { id: true },
-  });
-  if (existing) {
-    return { status: 'duplicate', entityIds: [existing.id], schemas: [mailSchema, ticketSchema], queueJobs: [] };
-  }
-
-  const result = await emailService.createConversationWithEmail({
-    channelId: resources.channelId,
-    boardId: resources.boardId,
-    userId: context.userId,
-    emailSubject: payload.title,
-    emailBody: payload.content,
-    emailTo: [context.userEmail],
-    emailFrom: context.userEmail,
-    externalThreadId: payload.syntheticId,
-    externalMessageId: payload.syntheticId,
-    ticketMetadata: { enterpriseRag: payload.metadata, syntheticId: payload.syntheticId },
-  });
-  if ('blocked' in result || 'isDuplicate' in result) {
-    return { status: 'duplicate', entityIds: [], schemas: [mailSchema, ticketSchema], queueJobs: [] };
-  }
-  return {
-    status: 'queued',
-    entityIds: [result.email.id, result.ticket.id],
-    schemas: [mailSchema, ticketSchema],
-    queueJobs: [],
-  };
-};
-
-const ingestTicket = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-  resources: BenchmarkResources,
-): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
-  const existing = await db.ticket.findFirst({
-    where: {
-      workspaceId: context.workspaceId,
-      metadata: { path: ['enterpriseRag', 'benchmarkDocId'], equals: payload.docId },
-    },
-    select: { id: true },
-  });
-  if (existing) {
-    return { status: 'duplicate', entityIds: [existing.id], schemas: [ticketSchema], queueJobs: [] };
-  }
-
-  const result = await createTicketWithConversation({
-    title: payload.title,
-    description: payload.content,
-    projectId: resources.projectId,
-    boardId: resources.boardId,
-    channelId: resources.channelId,
-    userId: context.userId,
-    priority: TicketPriority.LOW,
-    text: payload.content,
-    ticketType: payload.sourceType.toUpperCase(),
-  });
-  await db.ticket.update({
-    where: { id: result.ticketId },
-    data: { metadata: { enterpriseRag: payload.metadata, syntheticId: payload.syntheticId } },
-  });
-  return {
-    status: 'queued',
-    entityIds: [result.ticketId, result.messageId],
-    schemas: [ticketSchema, messageSchema],
-    queueJobs: [],
-  };
-};
-
-const ingestTranscript = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-  resources: BenchmarkResources,
-): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
-  const transcriptPath = `attachments/${payload.syntheticId}.txt`;
-  const transcriptStorage = getStorageService(config.gcs.transcriptionBucketName);
-  await transcriptStorage.uploadFileV2(Buffer.from(payload.content, 'utf8'), {
-    path: transcriptPath,
-    contentType: 'text/plain',
-    metadata: {
-      benchmark: 'EnterpriseRAG-Bench',
-      benchmarkDocId: payload.docId,
-      benchmarkSourceType: payload.sourceType,
-    },
-  });
-
-  const existing = await db.call.findUnique({
-    where: { externalId: payload.syntheticId },
-    select: { id: true },
-  });
-  const call = await db.call.upsert({
-    where: { externalId: payload.syntheticId },
-    update: {
-      title: payload.title,
-      transcript: transcriptPath,
-      metadata: { enterpriseRag: payload.metadata, syntheticId: payload.syntheticId },
-    },
-    create: {
-      externalId: payload.syntheticId,
-      title: payload.title,
-      createdByUserId: context.userId,
-      organizerId: context.userId,
-      channelId: resources.channelId,
-      callOrigin: CallOrigin.CHANNEL,
-      status: CallStatus.ENDED,
-      transcript: transcriptPath,
-      endedAt: new Date(),
-      workspaceId: context.workspaceId,
-      metadata: { enterpriseRag: payload.metadata, syntheticId: payload.syntheticId },
-    },
-  });
-  await db.callParticipant.upsert({
-    where: { callId_userId: { callId: call.id, userId: context.userId } },
-    update: {},
-    create: {
-      callId: call.id,
-      userId: context.userId,
-      invitedBy: context.userId,
-      workspaceId: context.workspaceId,
-      displayName: context.userName,
-      isExternal: false,
-    },
-  });
-  const jobs = await vespaQueue.addJob({
-    schema: fileSchema,
-    docId: call.id,
-    jobType: 'feed',
-    userId: context.userId,
-    app: SubApp.TRANSCRIPT,
-    workspaceId: context.workspaceId,
-  });
-  return {
-    status: existing ? 'duplicate' : 'queued',
-    entityIds: [call.id],
-    schemas: [fileSchema],
-    queueJobs: queueInfo(jobs, fileSchema, call.id),
-  };
-};
-
-const ingestKnowledgeBaseDocument = async (
-  payload: EnterpriseRagAdapterPayload,
-  context: EnterpriseRagContext,
-  resources: BenchmarkResources,
-): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
-  if (!resources.collectionId) throw new Error('Benchmark KB collection was not initialized');
-  const safeTitle = payload.title.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 100) || 'document';
-  const fileName = `${safeTitle}-${payload.syntheticId.slice(-12)}.txt`;
-  const existing = await collectionRepository.findItemByPath(resources.collectionId, fileName);
-  if (existing) {
-    await db.collectionItem.update({
-      where: { id: existing.id },
-      data: { ingestionStatus: IngestionStatus.PENDING },
-    });
-    const jobs = await vespaQueue.addJob({
-      schema: fileSchema,
-      docId: existing.fileId,
-      jobType: 'feed',
-      userId: context.userId,
-      app: SubApp.COLLECTIONS,
-      workspaceId: context.workspaceId,
-    });
-    return {
-      status: 'duplicate',
-      entityIds: [existing.fileId],
-      schemas: [fileSchema],
-      queueJobs: queueInfo(jobs, fileSchema, existing.fileId),
+      name: RESOURCE_PREFIX,
+      description: 'Synthetic project for EnterpriseRAG-Bench tickets',
+      createdBy: context.userId,
+      updatedBy: context.userId,
+      createdAt: nowMs(),
+      updatedAt: nowMs(),
     };
-  }
+    await vespaService.vespaClient.insert(fields as never, insertOpts(projectSchema));
+  })().catch(err => {
+    workspaceContainerPromise.delete(key);
+    throw err;
+  });
+  workspaceContainerPromise.set(key, pending);
+  return pending;
+};
 
-  const content = Buffer.from(payload.content, 'utf8');
-  const upload = await getStorageService().uploadFile(content, {
-    filename: fileName,
-    contentType: 'text/plain',
-    scopeType: 'collection',
-    scopeId: resources.collectionId,
-    metadata: {
-      benchmark: 'EnterpriseRAG-Bench',
-      benchmarkDocId: payload.docId,
-      benchmarkSourceType: payload.sourceType,
-    },
-  });
-  const item = await collectionRepository.createFileItem({
-    rootCollectionId: resources.collectionId,
-    collectionId: resources.collectionId,
-    name: fileName,
-    storageKey: upload.path,
-    mimeType: 'text/plain',
-    fileSize: content.length,
-    ownerId: context.userId,
-    workspaceId: context.workspaceId,
-    ingestionStatus: IngestionStatus.PENDING,
-  });
-  await db.messageAttachment.updateMany({
-    where: { entityId: item.id, entityType: 'COLLECTION' },
-    data: { metadata: { enterpriseRag: payload.metadata, syntheticId: payload.syntheticId } },
-  });
-  const jobs = await vespaQueue.addJob({
-    schema: fileSchema,
-    docId: item.fileId,
-    jobType: 'feed',
-    userId: context.userId,
-    app: SubApp.COLLECTIONS,
-    workspaceId: context.workspaceId,
-  });
-  return {
-    status: 'queued',
-    entityIds: [item.fileId],
-    schemas: [fileSchema],
-    queueJobs: queueInfo(jobs, fileSchema, item.fileId),
+const chunksFor = (text: string, chunkSize: number = 1900): string[] => {
+  if (!text) return [];
+  if (text.length <= chunkSize) return [text];
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += chunkSize) out.push(text.slice(i, i + chunkSize));
+  return out;
+};
+
+const feedConversation = async (
+  payload: EnterpriseRagAdapterPayload,
+  context: EnterpriseRagContext,
+): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
+  await ensureChatContainer(context, payload.sourceType);
+  const channelId = syntheticChannelId(context.workspaceId, payload.sourceType);
+  const fields = {
+    docId: payload.syntheticId,
+    docType: payload.sourceType,
+    text: payload.title,
+    chunks: chunksFor(payload.content),
+    userId: syntheticUserId(context.workspaceId),
+    username: context.userName,
+    userEmail: context.userEmail,
+    createdAtTimestamp: nowMs(),
+    createdAt: new Date().toISOString(),
+    messageType: 'MESSAGE',
+    threadId: payload.syntheticId,
+    isRootMessage: true,
+    channelRef: channelRefId(channelId),
+    attachmentIds: [],
+    reactions: 0,
+    replyCount: 0,
+    replyUsersCount: 0,
+    mentions: [],
+    channelMentions: [],
+    updatedAt: new Date().toISOString(),
+    deletedAt: 0,
+    metadata: metadataString(payload),
+    messageChannelName: `${RESOURCE_PREFIX} ${payload.sourceType}`,
+    threadMentions: [],
+    threadSenders: [],
   };
+  await vespaService.vespaClient.insert(fields as never, insertOpts(messageSchema));
+  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [messageSchema], queueJobs: [] };
+};
+
+const feedMail = async (
+  payload: EnterpriseRagAdapterPayload,
+  context: EnterpriseRagContext,
+): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
+  await ensureChatContainer(context, payload.sourceType);
+  const channelId = syntheticChannelId(context.workspaceId, payload.sourceType);
+  const fields = {
+    docId: payload.syntheticId,
+    docType: 'mail',
+    orgId: context.orgId,
+    workspaceId: context.workspaceId,
+    threadId: payload.syntheticId,
+    mailId: payload.syntheticId,
+    xyneId: payload.syntheticId,
+    subject: payload.title,
+    chunks: chunksFor(payload.content),
+    timestamp: nowMs(),
+    app: 'benchmark',
+    entity: 'benchmark',
+    channelRef: channelRefId(channelId),
+    from: context.userEmail,
+    to: [context.userEmail],
+    cc: [],
+    bcc: [],
+    attachmentFilenames: [],
+    generatedTags: [],
+  };
+  await vespaService.vespaClient.insert(fields as never, insertOpts(mailSchema));
+  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [mailSchema], queueJobs: [] };
+};
+
+const feedTicket = async (
+  payload: EnterpriseRagAdapterPayload,
+  context: EnterpriseRagContext,
+): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
+  await Promise.all([ensureChatContainer(context, payload.sourceType), ensureProject(context)]);
+  const channelId = syntheticChannelId(context.workspaceId, payload.sourceType);
+  const projectId = syntheticProjectId(context.workspaceId);
+  const fields = {
+    docId: payload.syntheticId,
+    docType: 'ticket',
+    convId: payload.syntheticId,
+    userGroupId: '',
+    channelRef: channelRefId(channelId),
+    projectRef: projectRefId(projectId),
+    threadId: payload.syntheticId,
+    status: 'OPEN',
+    ownerEmail: context.userEmail,
+    assignedTo: context.userEmail,
+    createdBy: context.userEmail,
+    closedBy: '',
+    title: payload.title,
+    workflowType: 'BENCH',
+    description: payload.content.slice(0, 4000),
+    chunks: chunksFor(payload.content),
+    ticketType: payload.sourceType.toUpperCase(),
+    priority: 'LOW',
+    stage: 'Benchmark',
+    createdAtTimestamp: nowMs(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    closedAt: '',
+    deletedAt: '',
+    parentTicketId: '',
+    boardId: '',
+    attachmentIds: [],
+    metadata: metadataString(payload),
+    formFields: [],
+    eta: '',
+    channelName: `${RESOURCE_PREFIX} ${payload.sourceType}`,
+    boardName: 'Benchmark',
+    xyneId: payload.syntheticId,
+    tags: [],
+    generatedTags: [],
+    createdByName: context.userName,
+    assignedToName: context.userName,
+    closedByName: '',
+    projectName: RESOURCE_PREFIX,
+    ticketMentions: [],
+    threadMentions: [],
+    threadSenders: [],
+    replyCount: 0,
+    initialMessage: '',
+    initialMessageSender: '',
+    parentTicketXyneId: '',
+    childTicketXyneIds: [],
+  };
+  await vespaService.vespaClient.insert(fields as never, insertOpts(ticketSchema));
+  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [ticketSchema], queueJobs: [] };
+};
+
+const feedFile = async (
+  payload: EnterpriseRagAdapterPayload,
+  context: EnterpriseRagContext,
+  opts: { subApp: string },
+): Promise<Pick<EnterpriseRagIngestResult, 'status' | 'entityIds' | 'schemas' | 'queueJobs'>> => {
+  await ensureChatContainer(context, payload.sourceType);
+  const channelId = syntheticChannelId(context.workspaceId, payload.sourceType);
+  const fields = {
+    docId: payload.syntheticId,
+    docType: 'file',
+    orgId: context.orgId,
+    workspaceId: context.workspaceId,
+    fileName: payload.title,
+    description: payload.content.slice(0, 4000),
+    chunks: chunksFor(payload.content),
+    chunks_pos: chunksFor(payload.content).map((_, i) => String(i)),
+    image_chunks: [],
+    image_chunks_pos: [],
+    metadata: metadataString(payload),
+    createdBy: syntheticUserId(context.workspaceId),
+    createdAt: nowMs(),
+    updatedAt: nowMs(),
+    ownerId: syntheticUserId(context.workspaceId),
+    permissions: [context.userEmail],
+    urlInternal: '',
+    urlOriginal: '',
+    fileSize: Buffer.byteLength(payload.content, 'utf8'),
+    isPrivate: false,
+    mimeType: 'text/plain',
+    subApp: opts.subApp,
+    channelRef: channelRefId(channelId),
+  };
+  await vespaService.vespaClient.insert(fields as never, insertOpts(fileSchema));
+  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [fileSchema], queueJobs: [] };
 };
 
 export const ingestEnterpriseRagDocument = async (
@@ -568,17 +373,23 @@ export const ingestEnterpriseRagDocument = async (
   context: EnterpriseRagContext,
 ): Promise<EnterpriseRagIngestResult> => {
   const payload = mapEnterpriseRagRow(input);
-  const resources = await ensureBenchmarkResources(payload, context);
+  logger.info('[EnterpriseRAG] Ingesting document (direct Vespa)', {
+    docId: payload.docId,
+    syntheticId: payload.syntheticId,
+    path: payload.ingestionPath,
+    sourceType: payload.sourceType,
+  });
 
-  const result = payload.ingestionPath === 'conversation'
-    ? await ingestConversation(payload, context, resources)
-    : payload.ingestionPath === 'mail'
-      ? await ingestMail(payload, context, resources)
-      : payload.ingestionPath === 'ticket'
-        ? await ingestTicket(payload, context, resources)
-        : payload.ingestionPath === 'transcript'
-          ? await ingestTranscript(payload, context, resources)
-          : await ingestKnowledgeBaseDocument(payload, context, resources);
+  const result =
+    payload.ingestionPath === 'conversation'
+      ? await feedConversation(payload, context)
+      : payload.ingestionPath === 'mail'
+        ? await feedMail(payload, context)
+        : payload.ingestionPath === 'ticket'
+          ? await feedTicket(payload, context)
+          : payload.ingestionPath === 'transcript'
+            ? await feedFile(payload, context, { subApp: 'transcript' })
+            : await feedFile(payload, context, { subApp: 'knowledge_base' });
 
   return {
     success: true,
@@ -603,15 +414,6 @@ const countByChannel = async (schema: string, channelId: string): Promise<number
   return response.root?.fields?.totalCount ?? 0;
 };
 
-const countByCollection = async (collectionId: string): Promise<number> => {
-  const response = await vespaService.vespaClient.search<VespaCountResponse>({
-    yql: `select * from ${fileSchema} where clId contains @collectionId`,
-    collectionId,
-    hits: 0,
-  });
-  return response.root?.fields?.totalCount ?? 0;
-};
-
 export const getEnterpriseRagDocumentCounts = async (
   workspaceId: string,
 ): Promise<{
@@ -620,66 +422,42 @@ export const getEnterpriseRagDocumentCounts = async (
   bySchema: Record<string, number>;
   bySource: Record<EnterpriseRagSourceType, number>;
 }> => {
-  const channels = await db.channel.findMany({
-    where: { workspaceId, name: { startsWith: `${RESOURCE_PREFIX} ` } },
-    select: { id: true, name: true },
-  });
-  const channelBySource = new Map(
-    channels.map(channel => [channel.name.slice(`${RESOURCE_PREFIX} `.length), channel.id]),
-  );
-  const collections = await db.collection.findMany({
-    where: {
-      workspaceId,
-      name: { startsWith: `${RESOURCE_PREFIX} `, endsWith: ' KB' },
-      deletedAt: null,
-    },
-    select: { id: true, name: true },
-  });
-
-  const [messages, mails, gmailTickets, jiraTickets, linearTickets, transcripts, collectionCounts] = await Promise.all([
-    channelBySource.get('slack') ? countByChannel(messageSchema, channelBySource.get('slack')!) : 0,
-    channelBySource.get('gmail') ? countByChannel(mailSchema, channelBySource.get('gmail')!) : 0,
-    channelBySource.get('gmail') ? countByChannel(ticketSchema, channelBySource.get('gmail')!) : 0,
-    channelBySource.get('jira') ? countByChannel(ticketSchema, channelBySource.get('jira')!) : 0,
-    channelBySource.get('linear') ? countByChannel(ticketSchema, channelBySource.get('linear')!) : 0,
-    channelBySource.get('fireflies') ? countByChannel(fileSchema, channelBySource.get('fireflies')!) : 0,
-    Promise.all(collections.map(async (collection): Promise<[string, number]> => {
-      const source = collection.name
-        .slice(`${RESOURCE_PREFIX} `.length, -' KB'.length);
-      return [source, await countByCollection(collection.id)];
-    })),
-  ] as const);
-
   const bySource = Object.fromEntries(
     ENTERPRISE_RAG_SOURCE_TYPES.map(source => [source, 0]),
   ) as Record<EnterpriseRagSourceType, number>;
-  bySource.slack = messages;
-  bySource.gmail = mails;
-  bySource.jira = jiraTickets;
-  bySource.linear = linearTickets;
-  bySource.fireflies = transcripts;
-  for (const [source, count] of collectionCounts) {
-    if (ENTERPRISE_RAG_SOURCE_TYPES.includes(source as EnterpriseRagSourceType)) {
-      bySource[source as EnterpriseRagSourceType] += count;
-    }
-  }
 
-  const kbFiles = collectionCounts.reduce((sum, [, count]) => sum + count, 0);
-  const tickets = gmailTickets + jiraTickets + linearTickets;
-  const files = transcripts + kbFiles;
+  const perSourceCounts = await Promise.all(
+    ENTERPRISE_RAG_SOURCE_TYPES.map(async source => {
+      const channelId = syntheticChannelId(workspaceId, source);
+      const path = classifySource(source);
+      let count = 0;
+      if (path === 'conversation') {
+        count = await countByChannel(messageSchema, channelId);
+      } else if (path === 'mail') {
+        count = await countByChannel(mailSchema, channelId);
+      } else if (path === 'ticket') {
+        count = await countByChannel(ticketSchema, channelId);
+      } else {
+        count = await countByChannel(fileSchema, channelId);
+      }
+      return [source, count] as const;
+    }),
+  );
+  for (const [source, count] of perSourceCounts) bySource[source] = count;
+
   const bySchema = {
-    [messageSchema]: messages,
-    [fileSchema]: files,
-    [mailSchema]: mails,
-    [ticketSchema]: tickets,
+    [messageSchema]: bySource.slack,
+    [mailSchema]: bySource.gmail,
+    [ticketSchema]: bySource.jira + bySource.linear,
+    [fileSchema]:
+      bySource.fireflies +
+      bySource.confluence +
+      bySource.github +
+      bySource.google_drive +
+      bySource.hubspot,
     sam_transcript: 0,
   };
-  const total = Object.values(bySchema).reduce((sum, count) => sum + count, 0);
-  const sourceRows = Object.values(bySource).reduce((sum, count) => sum + count, 0);
-  return {
-    total,
-    sourceRows,
-    bySchema,
-    bySource,
-  };
+  const total = Object.values(bySchema).reduce((sum, n) => sum + n, 0);
+  const sourceRows = Object.values(bySource).reduce((sum, n) => sum + n, 0);
+  return { total, sourceRows, bySchema, bySource };
 };
