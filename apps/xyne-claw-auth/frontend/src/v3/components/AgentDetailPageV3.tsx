@@ -175,6 +175,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // a plan. Pre-filled with the default; only a CUSTOM value is persisted. Never
   // changes the propose→approve gate (enforced by the tool palette).
   const [draftPlanModePrompt, setDraftPlanModePrompt] = useState(DEFAULT_PLAN_MODE_PROMPT);
+  // Instant agent opt-in (agent.config.instantAgent). When on, every chat
+  // request to this agent runs the single-search/single-answer instant KB
+  // path instead of the full agentic tool loop — enforced server-side
+  // (agent-chat.ts, run-stream.ts), this just persists the flag. Default false.
+  const [draftInstantAgent, setDraftInstantAgent] = useState(false);
   // Opt-in response verification (agent.config.verifyResponses). When on, the
   // agent delivers its final answer via submit-response, which checks factual
   // claims against gathered tool evidence before posting. Default false.
@@ -295,6 +300,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           const pmp = (agentData.config as { planModePrompt?: string }).planModePrompt;
           setDraftPlanModePrompt(typeof pmp === "string" && pmp.trim() ? pmp : DEFAULT_PLAN_MODE_PROMPT);
         }
+        setDraftInstantAgent((agentData.config as { instantAgent?: boolean }).instantAgent === true);
         setDraftVerifyResponses((agentData.config as { verifyResponses?: boolean }).verifyResponses === true);
         setDraftCitationReflection((agentData.config as { citationReflection?: boolean }).citationReflection === true);
         setDraftAutoToolCitations((agentData.config as { autoToolCitations?: boolean }).autoToolCitations === true);
@@ -399,6 +405,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       typeof basePlanModePromptRaw === "string" && basePlanModePromptRaw.trim()
         ? basePlanModePromptRaw
         : DEFAULT_PLAN_MODE_PROMPT;
+    const baseInstantAgent = (agent.config as { instantAgent?: boolean }).instantAgent === true;
     const baseVerifyResponses = (agent.config as { verifyResponses?: boolean }).verifyResponses === true;
     const baseCitationReflection = (agent.config as { citationReflection?: boolean }).citationReflection === true;
     const baseAutoToolCitations = (agent.config as { autoToolCitations?: boolean }).autoToolCitations === true;
@@ -439,6 +446,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       // Only counts as a change when plan mode is on (a prompt with no plan mode
       // is never persisted).
       (draftPlanMode && draftPlanModePrompt !== basePlanModePrompt) ||
+      draftInstantAgent !== baseInstantAgent ||
       draftVerifyResponses !== baseVerifyResponses ||
       draftCitationReflection !== baseCitationReflection ||
       draftAutoToolCitations !== baseAutoToolCitations ||
@@ -450,7 +458,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftInstantAgent, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -573,6 +581,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         delete nextConfig.planMode;
         delete nextConfig.planModePrompt;
       }
+      if (draftInstantAgent) {
+        nextConfig.instantAgent = true;
+      } else {
+        delete nextConfig.instantAgent;
+      }
       // Structured output. Parse + lightly validate here so the user gets an
       // inline error instead of a backend 400 on save (the backend re-validates
       // in agent-config-validation.ts).
@@ -658,7 +671,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPostTodos, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftInstantAgent, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1056,6 +1069,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftPlanModeChange={setDraftPlanMode}
             draftPlanModePrompt={draftPlanModePrompt}
             onDraftPlanModePromptChange={setDraftPlanModePrompt}
+            draftInstantAgent={draftInstantAgent}
+            onDraftInstantAgentChange={setDraftInstantAgent}
             draftOutputFormatEnabled={draftOutputFormatEnabled}
             onDraftOutputFormatEnabledChange={setDraftOutputFormatEnabled}
             draftOutputType={draftOutputType}

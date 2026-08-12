@@ -126,6 +126,10 @@ export interface AgentLight {
    *  allowlist via `collections`. "USER" = inherits whatever the calling
    *  user can access in spaces. */
   readonly kbScope?: "COLLECTIONS" | "USER";
+  /** Derived from config.instantAgent (see agents.ts's lightAgentProjection) —
+   *  when true, every chat request to this agent runs the single-search/
+   *  single-answer instant KB path, never the full agentic tool loop. */
+  readonly instantAgent?: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly owner?: {

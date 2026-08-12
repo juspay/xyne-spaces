@@ -66,6 +66,23 @@ import { createLogger } from "../logger.js";
 const log = createLogger("instant-ask");
 
 /**
+ * Whether this agent is configured to ONLY ever run in instant mode — a
+ * persisted per-agent setting (`agent.config.instantAgent`, a plain key on
+ * the existing free-form `Agent.config` Json column, no schema migration),
+ * not a per-message opt-in. Both call sites (run-stream.ts, agent-chat.ts)
+ * treat this as the sole source of truth for whether a given request runs
+ * instant — a client-sent `instant` request flag is no longer honored on
+ * its own, in either direction: an instant agent always runs instant even
+ * if the client omits the flag, and a non-instant agent never runs instant
+ * even if the client sends one, so there's no way to bypass the setting
+ * from either side.
+ */
+export function isInstantAgent(config: unknown): boolean {
+  return Boolean(config) && typeof config === "object" && !Array.isArray(config) &&
+    (config as Record<string, unknown>)["instantAgent"] === true;
+}
+
+/**
  * Copies the normal agentic flow's agent-config resolution (its own
  * systemPrompt + resolveAgentProviderConfigs' "bring your own key" LiteLLM
  * credential) WITHOUT the tool-loop/subagent machinery that also reads from

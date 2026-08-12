@@ -22,7 +22,7 @@ import {
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
-import { answerInstantAsk, resolveInstantAgentContext } from "../lib/instant-ask.js";
+import { answerInstantAsk, resolveInstantAgentContext, isInstantAgent } from "../lib/instant-ask.js";
 import { persistInstantDebugTrace } from "../lib/instant-debug-store.js";
 import { redisService } from "../redis.js";
 import {
@@ -362,11 +362,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       parentUserMessageId,
       parentAssistantMessageId,
       editedUserMessageId,
-      // Single search + single answer pass — bypasses the full claw agentic
-      // tool loop entirely. See lib/instant-ask.ts.
-      instant,
     } = req.body as Record<string, unknown>;
-    const instantEnabled = instant === true;
 
     if (!task || typeof task !== "string") {
       res.status(400).json({ success: false, error: "task is required" });
@@ -411,6 +407,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
     const orgId = agentRow.orgId;
+    // Gated on the AGENT's own config, not a client-sent `instant` request
+    // flag — see isInstantAgent's doc comment (lib/instant-ask.ts) for why
+    // the flag is no longer honored on its own in either direction.
+    const instantEnabled = isInstantAgent(agentRow.config);
 
     const sdlcResolution = slug === "sdlc-agent"
       ? await resolveSdlcRepositoryForUser(

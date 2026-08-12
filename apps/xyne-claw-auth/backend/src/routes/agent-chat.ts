@@ -31,7 +31,7 @@ import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
-import { answerInstantAsk, resolveInstantAgentContext } from "../lib/instant-ask.js";
+import { answerInstantAsk, resolveInstantAgentContext, isInstantAgent } from "../lib/instant-ask.js";
 import { persistInstantDebugTrace, readInstantDebugTrace } from "../lib/instant-debug-store.js";
 
 import { createLogger } from "../logger.js";
@@ -871,16 +871,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designArtifactAttachmentId,
       designSelection,
       researchContext,
-      // Single search + single answer pass instead of the full agentic tool
-      // loop — see run-stream.ts's instant branch / lib/instant-ask.ts.
-      instant,
     } = req.body as {
       message?: string;
       conversationId?: string;
       attachmentIds?: string[];
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
-      instant?: boolean;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -1178,8 +1174,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // session, no webhook round trip, none of the studioMode/design-selection/
     // attached-context machinery below (all irrelevant to a KB-only answer).
     // Mirrors run-stream.ts's instant branch; see lib/instant-ask.ts for the
-    // full rationale.
-    if (instant === true) {
+    // full rationale. Gated on the AGENT's own config, not the client-sent
+    // `instant` flag — see isInstantAgent's doc comment.
+    if (isInstantAgent(agent.config)) {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",

@@ -87,6 +87,10 @@ function lightAgentProjection(agent: Record<string, unknown>, orgNames?: Map<str
     spacesAppUserId: agent["spacesAppUserId"],
     spacesAppTokenConfigured: Boolean(agent["spacesAppToken"]),
     signingSecretConfigured: Boolean(agent["signingSecret"]),
+    // Derived from config.instantAgent rather than exposing the whole config
+    // blob in the light list — the chat composer needs only this bit to
+    // decide whether to show a locked "Instant" indicator vs. hide it.
+    instantAgent: asRecord(agent["config"])?.["instantAgent"] === true,
     createdAt: agent["createdAt"],
     updatedAt: agent["updatedAt"],
     ...(owner ? { owner: { id: owner.id, name: owner.name, email: owner.email } } : {}),
