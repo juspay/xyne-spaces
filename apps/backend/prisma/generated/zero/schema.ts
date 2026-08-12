@@ -527,6 +527,11 @@ export const userPreferenceTable = table("user_preferences")
     userId: string(),
     askai_custom_instruction: string().optional(),
     channelSortOrder: string(),
+    channelFilterMode: string().optional(),
+    starredFilterMode: string().optional(),
+    starredSortOrder: string().optional(),
+    dmFilterMode: string().optional(),
+    dmSortOrder: string().optional(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
@@ -1063,6 +1068,20 @@ export const channelTable = table("channels")
   })
   .primaryKey("id");
 
+export const channelBoardMappingTable = table("channel_board_mappings")
+  .columns({
+    id: string(),
+    channelId: string(),
+    boardId: string(),
+    workspaceId: string(),
+    isDefault: boolean(),
+    createdBy: string(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const channelStatsTable = table("channel_stats")
   .columns({
     workspaceId: string(),
@@ -1127,6 +1146,7 @@ export const channelSectionTable = table("channel_sections")
     isCollapsed: boolean(),
     isDeleted: boolean(),
     sortOrder: string().optional(),
+    filterMode: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1676,6 +1696,7 @@ export const summaryTemplateTable = table("summary_templates")
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey("id");
 
@@ -1823,6 +1844,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
     blockId: string(),
     anchorText: string().optional(),
     initialCommentId: string().optional(),
+    commentCount: number(),
     status: string(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
@@ -2219,6 +2241,7 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -3848,6 +3871,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ["id"],
     destField: ["boardId"],
     destSchema: appIncomingWebhookTable,
+  }),
+  channelMappings: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: channelBoardMappingTable,
   })
 }));
 
@@ -3932,6 +3960,24 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: emailTable,
+  }),
+  boardMappings: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: channelBoardMappingTable,
+  })
+}));
+
+export const channelBoardMappingTableRelationships = relationships(channelBoardMappingTable, ({ one }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
   })
 }));
 
@@ -4742,6 +4788,7 @@ export const schema = createSchema(
       stagePrStatusMappingTable,
       stageTransitionTable,
       channelTable,
+      channelBoardMappingTable,
       channelStatsTable,
       channelParticipantTable,
       channelUserStatusTable,
@@ -4902,6 +4949,7 @@ export const schema = createSchema(
       stageTableRelationships,
       stageTransitionTableRelationships,
       channelTableRelationships,
+      channelBoardMappingTableRelationships,
       channelStatsTableRelationships,
       channelParticipantTableRelationships,
       channelUserStatusTableRelationships,
@@ -5027,6 +5075,7 @@ export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
