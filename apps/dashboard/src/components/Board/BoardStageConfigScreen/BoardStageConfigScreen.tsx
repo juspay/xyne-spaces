@@ -19,6 +19,8 @@ import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
+import { Dialog } from '../../../components/ui/Dialog';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -488,6 +490,7 @@ const BoardStageConfigScreen = ({
   initialBoard,
 }: BoardStageConfigScreenProps): ReactElement | null => {
   const zero = useZero();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   // initialBoard may only replace the query when it actually carries stage
@@ -683,6 +686,7 @@ const BoardStageConfigScreen = ({
     new Map(),
   );
   const [isTransitionsLoading, setIsTransitionsLoading] = useState(false);
+  const [showTransitionsLoadingNotice, setShowTransitionsLoadingNotice] = useState(false);
   const hasLoadedTransitions = useRef(false);
 
   // ── Transition Metadata (non-linear boards) ─────────────────────────────────
@@ -2051,7 +2055,7 @@ const BoardStageConfigScreen = ({
     if (!boardId) return;
 
     if (isTransitionsLoading || (stages.some(s => s.id) && !hasLoadedTransitions.current)) {
-      toast.error('Stage transitions are still loading, please wait a moment and try again');
+      setShowTransitionsLoadingNotice(true);
       return;
     }
 
@@ -2059,9 +2063,13 @@ const BoardStageConfigScreen = ({
       boardType === BoardType.NON_LINEAR &&
       !Array.from(transitionsByTempId.values()).some(targets => targets.size > 0)
     ) {
-      const proceed = window.confirm(
-        'No stage transitions are configured. Tickets will not be able to move between stages. Save anyway?',
-      );
+      const proceed = await confirm({
+        title: 'No transitions configured',
+        description:
+          'Tickets will not be able to move between stages. Save without any transitions?',
+        confirmLabel: 'Save anyway',
+        cancelLabel: 'Cancel',
+      });
       if (!proceed) return;
     }
 
@@ -2192,6 +2200,7 @@ const BoardStageConfigScreen = ({
     reloadTransitionsFromServer,
     isTransitionsLoading,
     transitionsByTempId,
+    confirm,
   ]);
 
   if (!isOpen) return null;
@@ -2609,6 +2618,29 @@ const BoardStageConfigScreen = ({
           </div>
         </div>
       </div>
+      <Dialog
+        open={showTransitionsLoadingNotice}
+        onOpenChange={setShowTransitionsLoadingNotice}
+        title='Please wait'
+        description='Loading transitions, please wait...'
+      >
+        <div className='p-6'>
+          <p className='text-[14px] text-muted-foreground mb-6'>
+            Loading transitions, please wait...
+          </p>
+          <div className='flex justify-end'>
+            <Button
+              type='button'
+              onClick={() => setShowTransitionsLoadingNotice(false)}
+              data-track-category='board_config'
+              data-track-name='transitions_loading_notice_ok'
+            >
+              OK
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+      <ConfirmDialog />
     </div>
   );
 };
