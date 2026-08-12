@@ -44,6 +44,8 @@ import { linkOpenPrefIsRelevant } from '../../../utils/openLink';
 import { logger } from '../../../utils/logger';
 
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
+import { MenuBarIconToggle } from '../MenuBarIconToggle';
+import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
@@ -619,6 +621,10 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
       />
     </div>
+
+    <MenuBarIconToggle />
+
+    <RecordingPillToggle />
 
     {/* Recording section divider */}
     <div className='pt-2'>

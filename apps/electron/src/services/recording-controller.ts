@@ -1,7 +1,13 @@
 import { app, BrowserWindow, powerMonitor, powerSaveBlocker } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
-import { showRecordingPill, hideRecordingPill, isPillWindow } from './recording-pill-window';
+import {
+  showRecordingPill,
+  hideRecordingPill,
+  isPillWindow,
+  isRecordingPillEnabled,
+  persistRecordingPillEnabled,
+} from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
 
@@ -157,7 +163,7 @@ function cancelPendingPillSync(): void {
 
 function syncPillVisibility(): void {
   cancelPendingPillSync();
-  if (active && (minimized || !isMainWindowFocused())) {
+  if (active && isRecordingPillEnabled() && (minimized || !isMainWindowFocused())) {
     showRecordingPill({
       startTime: startTime ?? Date.now(),
       paused,
@@ -175,6 +181,12 @@ function scheduleSyncPillVisibility(): void {
     pillSyncTimer = null;
     syncPillVisibility();
   }, PILL_SYNC_DEBOUNCE_MS);
+}
+
+export function setRecordingPillEnabled(enabled: boolean): void {
+  persistRecordingPillEnabled(enabled);
+  syncPillVisibility();
+  log.info(`[RecordingController] Recording pill ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 export function setOverlayMinimized(next: boolean): void {
