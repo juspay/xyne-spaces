@@ -272,7 +272,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const scopeType = typeof req.query.scopeType === 'string' ? req.query.scopeType : undefined;
             const scopeId = typeof req.query.scopeId === 'string' ? req.query.scopeId : undefined;
 
-            const roots = await listAccessibleRootCollections(user.id, { scopeType, scopeId });
+            const roots = await listAccessibleRootCollections(user.id, user.workspaceId, { scopeType, scopeId });
             const collections = includeItems ? await expandCollectionTrees(roots) : roots;
 
             res.status(200).json({ success: true, collections });

@@ -105,11 +105,13 @@ export async function resolveCollectionAccess(
 
 /**
  * Return every root collection (parentId IS NULL) the user can access — owner,
- * direct grant, group grant, or public (non-private). Returns the row PLUS the
- * resolved `effectiveRole` so the caller doesn't need to re-derive it.
+ * direct grant, group grant, or public (non-private), scoped to the caller's
+ * workspace. Returns the row PLUS the resolved `effectiveRole` so the caller
+ * doesn't need to re-derive it.
  */
 export async function listAccessibleRootCollections(
     userId: string,
+    workspaceId: string,
     options?: { scopeType?: string; scopeId?: string }
 ): Promise<Array<AccessibleCollectionNode>> {
     const db = DatabaseClient.getInstance();
@@ -121,13 +123,30 @@ export async function listAccessibleRootCollections(
             deletedAt: null,
             ...(options?.scopeType ? { scopeType: options.scopeType } : {}),
             ...(options?.scopeId ? { scopeId: options.scopeId } : {}),
-            OR: [
-                { ownerId: userId },
-                { isPrivate: false },
-                { permissions: { some: { userId } } },
-                ...(userGroupIds.length > 0
-                    ? [{ permissions: { some: { userGroupId: { in: userGroupIds } } } }]
-                    : []),
+            AND: [
+                {
+                    OR: [
+                        { ownerId: userId },
+                        { isPrivate: false },
+                        { permissions: { some: { userId } } },
+                        ...(userGroupIds.length > 0
+                            ? [{ permissions: { some: { userGroupId: { in: userGroupIds } } } }]
+                            : []),
+                    ],
+                },
+                // workspaceId is a denormalized tenant key stamped on insert
+                // (nullable — see schema.prisma), so rows predating the
+                // backfill may have it unset. Treat those as visible
+                // everywhere (unchanged legacy behavior) while enforcing the
+                // match for anything that does carry a workspaceId — mirrors
+                // CollectionsACL's Zero-side rule (packages/shared/src/zero/
+                // acl/tables/collections-acl.ts).
+                {
+                    OR: [
+                        { workspaceId: null },
+                        { workspaceId },
+                    ],
+                },
             ],
         },
         include: {
