@@ -415,13 +415,18 @@ export const EmailComposer = ({
 
   const lastLoadedContentRef = React.useRef<string>('');
   const justLoadedDraftRef = React.useRef(false);
+  const isDirty = emailContent !== lastLoadedContentRef.current;
+  const hydratedConversationRef = React.useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (isComposeMode) return;
+    const draftKey = conversationId ?? null;
+    if (hydratedConversationRef.current === draftKey && isDirty) return;
     const next = draft?.draftContent ?? '';
     setEmailContent(next);
     lastLoadedContentRef.current = next;
     justLoadedDraftRef.current = true;
-  }, [draft?.draftContent, conversationId, isComposeMode]);
+    hydratedConversationRef.current = draftKey;
+  }, [draft?.draftContent, conversationId, isComposeMode, isDirty]);
 
   const handleEditorChange = useCallback((html: string): void => {
     setEmailContent(html);
@@ -432,7 +437,6 @@ export const EmailComposer = ({
   }, []);
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
-  const isDirty = emailContent !== lastLoadedContentRef.current;
   const hasInlineImages = useMemo(
     () =>
       /\sdata-att-id=["']/i.test(emailContent) ||
