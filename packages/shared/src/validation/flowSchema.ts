@@ -51,6 +51,12 @@ export const flowActionSchema = z.discriminatedUnion('type', [
     type: z.literal('navigate'),
     target: z.string(),
   }),
+  // Client-only: writes `value` to the clipboard. No network call, no app backend.
+  z.object({
+    type: z.literal('copy'),
+    value: z.string(),
+    successMessage: z.string().optional(),
+  }),
 ]);
 
 // ============================================================================

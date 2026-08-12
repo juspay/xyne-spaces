@@ -464,6 +464,7 @@ export enum UserType {
 export enum AppIncomingWebhookType {
   SLACK = 'SLACK',
   SENTINELONE = 'SENTINELONE',
+  AMAZON_SNS = 'AMAZON_SNS',
 }
 
 // @ts-ignore TS1294
