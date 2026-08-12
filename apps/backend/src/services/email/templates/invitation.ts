@@ -1,11 +1,21 @@
 import { SendInvitationEmailParams } from '../base-email-service';
 
+const getDownloadUrl = (): string => {
+  const configuredFrontendUrl = process.env.PUBLIC_SPACES_URL || process.env.FRONTEND_URL;
+  if (!configuredFrontendUrl && process.env.NODE_ENV === 'production') {
+    throw new Error('PUBLIC_SPACES_URL or FRONTEND_URL is required to generate invitation download URLs');
+  }
+  return `${(configuredFrontendUrl || 'http://localhost:5173').replace(/\/+$/, '')}/invite`;
+};
+
 export function invitationEmailHtml({
   inviterName,
   workspaceName,
   invitationLink,
   tempPassword,
 }: Pick<SendInvitationEmailParams, 'inviterName' | 'workspaceName' | 'invitationLink' | 'tempPassword'>): string {
+  const downloadUrl = getDownloadUrl();
+
   return `
 <!DOCTYPE html>
 <html>
@@ -62,9 +72,9 @@ export function invitationEmailHtml({
                   <td valign="top">
                     <strong style="display:block;color:#1f2937;font-size:15px;margin-bottom:6px;">Download &amp; Install the Xyne Spaces Desktop App</strong>
                     <p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;">The desktop app is required to access your workspace. Download it for your platform from the link below and complete the installation before proceeding.</p>
-                    <a href="https://spaces.xyne.juspay.net/invite" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:11px 24px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
+                    <a href="${downloadUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:11px 24px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
                     <p style="color:#6b7280;font-size:12px;margin:10px 0 0 0;">
-                      Or visit: <a href="https://spaces.xyne.juspay.net/invite" style="color:#6366f1;word-break:break-all;">https://spaces.xyne.juspay.net/invite</a>
+                      Or visit: <a href="${downloadUrl}" style="color:#6366f1;word-break:break-all;">${downloadUrl}</a>
                     </p>
                   </td>
                 </tr>
@@ -140,6 +150,8 @@ export function invitationEmailText({
   invitationLink,
   tempPassword,
 }: Pick<SendInvitationEmailParams, 'inviterName' | 'workspaceName' | 'invitationLink' | 'tempPassword'>): string {
+  const downloadUrl = getDownloadUrl();
+
   return `
 You've been invited to join ${workspaceName} on Xyne Spaces!
 
@@ -152,7 +164,7 @@ STEP 1 — Download & Install the Desktop App (REQUIRED)
 ──────────────────────────────────────────
 Before doing anything else, download and install the Xyne Spaces desktop app for your platform:
 
-  https://spaces.xyne.juspay.net/invite
+  ${downloadUrl}
 
 Complete the installation before moving to Step 2.
 

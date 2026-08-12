@@ -99,7 +99,7 @@ export class BitbucketService {
         }
 
         // Handle rate limiting. Besides the standard 429, the WAF in front of
-        // bitbucket.juspay.net rejects rate-limited requests with a 403 whose
+        // Some Bitbucket Server deployments reject rate-limited requests with a 403 whose
         // body says "you've exceeded the Rate limit Number in WAF" — treat that
         // as retryable too, or a burst of paginated calls fails the whole run.
         const isWafRateLimit = response.status === 403 && /rate ?limit/i.test(bodyText);

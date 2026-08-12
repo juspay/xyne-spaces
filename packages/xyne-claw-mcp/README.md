@@ -81,7 +81,7 @@ claude mcp add xyne-claw -- node /Users/anurag.dwivedi/work_dir/xyne-spaces/xyne
 
 The server uses stdio transport and `@modelcontextprotocol/sdk`. It defaults to:
 
-- Base URL: `https://app.spaces.xyne.juspay.net`
+- Base URL: set `XYNE_CLAW_BASE_URL` to your deployment URL. Local default: `http://localhost:5173`.
 - API path: `/claw/api/v1`
 - Token file: `~/.xyne/agent/claw.json`
 

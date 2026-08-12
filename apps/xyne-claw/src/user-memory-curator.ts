@@ -35,7 +35,7 @@ import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import { createLogger } from "./logger.js";
 const log = createLogger("user-memory-curator");
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = (process.env["LITELLM_URL"] ?? "").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 // Model name passed to LiteLLM for the distill call. Reads from `LITELLM_MODEL`
 // to share the same env var with other LiteLLM-backed paths in this service

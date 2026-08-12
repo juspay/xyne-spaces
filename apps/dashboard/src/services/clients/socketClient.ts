@@ -64,7 +64,7 @@ class WebSocketService {
       }
       this.connectionAttemptStartTime = Date.now();
       const apiUrl = API_BASE_URL;
-      const serverUrl = apiUrl?.replace('/api', '') || 'http://localhost:3001';
+      const serverUrl = apiUrl?.replace('/api', '') || window.location.origin;
 
       // Disconnect any existing socket before creating a new one
       if (this.socket) {

@@ -4,7 +4,7 @@ import type { HttpMcpAdapter } from "../types.js";
  * Jusbiz Expense MCP adapter (remote streamable-HTTP MCP).
  *
  * Hosted HTTP MCP endpoint:
- *   https://sandbox.expense.juspay.in/jusbiz-mcp/jusbiz-mcp/mcp
+ *   Set JUSBIZ_MCP_URL to the remote streamable-HTTP endpoint.
  *
  * Auth: static HTTP Basic. The connection stores the base64 credential
  * (the part after "Basic ") as `authToken`; we send it as the Authorization
@@ -39,8 +39,12 @@ export const jusbizMcpAdapter: HttpMcpAdapter = {
     if (typeof authToken !== "string" || authToken.length === 0) {
       throw new Error("jusbiz-mcp credentials missing authToken (base64 Basic value)");
     }
+    const url = process.env["JUSBIZ_MCP_URL"] ?? "";
+    if (!url) {
+      throw new Error("JUSBIZ_MCP_URL is required for jusbiz-mcp");
+    }
     return {
-      url: "https://sandbox.expense.juspay.in/jusbiz-mcp/jusbiz-mcp/mcp",
+      url,
       headers: {
         Authorization: `Basic ${authToken}`,
       },

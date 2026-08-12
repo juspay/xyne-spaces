@@ -917,10 +917,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
    * Supports: PRs, commits, files, repos, branches, and generic Bitbucket links.
    * 
    * Examples:
-   * - PR: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/pull-requests/2
-   * - Commit: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/commits/abc123
-   * - File: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/browse/src/file.ts
-   * - Repo: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces
+   * - PR: https://<bitbucket-base-url>/projects/XYNE/repos/xyne-spaces/pull-requests/2
+   * - Commit: https://<bitbucket-base-url>/projects/XYNE/repos/xyne-spaces/commits/abc123
+   * - File: https://<bitbucket-base-url>/projects/XYNE/repos/xyne-spaces/browse/src/file.ts
+   * - Repo: https://<bitbucket-base-url>/projects/XYNE/repos/xyne-spaces
    */
   private parseBitbucketUrl(url: string): {
     type: 'pr' | 'commit' | 'file' | 'repo' | 'branch' | 'generic';
@@ -938,7 +938,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       // Extract Bitbucket domain from config or use default
       const bitbucketDomain = config.bitbucket.baseUrl 
         ? new URL(config.bitbucket.baseUrl).hostname 
-        : 'bitbucket.juspay.net';
+        : '';
+      if (!bitbucketDomain) {
+        return null;
+      }
       
       // Only handle configured Bitbucket domain
       if (!urlObj.hostname.includes(bitbucketDomain)) {
@@ -1038,7 +1041,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         title: 'Bitbucket',
         description: '',
         siteName: 'Bitbucket',
-        favicon: 'https://bitbucket.example.com/favicon.ico',
+        favicon: undefined,
       };
     }
 

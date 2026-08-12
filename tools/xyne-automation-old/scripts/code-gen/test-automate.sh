@@ -406,7 +406,7 @@ for INPUT_FILE in "$@"; do
         CLOUD_ML_REGION="" \
         GOOGLE_VERTEX_PROJECT="" \
         ANTHROPIC_VERTEX_PROJECT_ID="" \
-        ANTHROPIC_BASE_URL="https://grid.ai.example.com/" \
+        ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:?Set ANTHROPIC_BASE_URL}" \
         ANTHROPIC_AUTH_TOKEN="$JUSPAY_API_KEY" \
         ANTHROPIC_MODEL="$MODEL" \
         ANTHROPIC_SMALL_FAST_MODEL="$MODEL" \
@@ -813,7 +813,7 @@ $(cat "$ef")
             CLOUD_ML_REGION="" \
             GOOGLE_VERTEX_PROJECT="" \
             ANTHROPIC_VERTEX_PROJECT_ID="" \
-            ANTHROPIC_BASE_URL="https://grid.ai.example.com/" \
+            ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:?Set ANTHROPIC_BASE_URL}" \
             ANTHROPIC_AUTH_TOKEN="$JUSPAY_API_KEY" \
             ANTHROPIC_MODEL="$MODEL" \
             ANTHROPIC_SMALL_FAST_MODEL="$MODEL" \
@@ -1432,7 +1432,7 @@ BROWSER_REUSE_EOF
         CLOUD_ML_REGION="" \
         GOOGLE_VERTEX_PROJECT="" \
         ANTHROPIC_VERTEX_PROJECT_ID="" \
-        ANTHROPIC_BASE_URL="https://grid.ai.example.com/" \
+        ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:?Set ANTHROPIC_BASE_URL}" \
         ANTHROPIC_AUTH_TOKEN="$JUSPAY_API_KEY" \
         ANTHROPIC_MODEL="$MODEL" \
         ANTHROPIC_SMALL_FAST_MODEL="$MODEL" \

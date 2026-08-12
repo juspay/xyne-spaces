@@ -364,7 +364,7 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   // Extract agent slugs from webhook URLs
-  // Production URL format: https://spaces.xyne.juspay.net/claw/api/v1/webhook/{agent-slug}
+  // Production URL format: https://<deployment-spaces-host>/claw/api/v1/webhook/{agent-slug}
   // The agent slug is the last segment of the URL path after /webhook/
   const agentSlugsFromApps: Array<{ userId: string; agentSlug: string }> = [];
   for (const app of installedApps) {

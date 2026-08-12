@@ -4,6 +4,14 @@ import { BitbucketManager } from '@/bitbucket/apis';
 import { logger } from '@/utils/logger';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
 
+const spacesBaseUrl = () => {
+  const configuredFrontendUrl = process.env.PUBLIC_SPACES_URL || process.env.FRONTEND_URL;
+  if (!configuredFrontendUrl && process.env.NODE_ENV === 'production') {
+    throw new Error('PUBLIC_SPACES_URL or FRONTEND_URL is required to generate PR validation status URLs');
+  }
+  return (configuredFrontendUrl || 'http://localhost:5173').replace(/\/+$/, '');
+};
+
 // Bitbucket PR validation configuration constants
 const BITBUCKET_PR_CONFIG = {
   PR_TITLE_PATTERN: /^(?:(?:feat|fix):\s+)?([^\s-]+)-\s*(\d+)\s*[:\s]/i,
@@ -19,8 +27,8 @@ const BITBUCKET_PR_CONFIG = {
   BUILD_STATUS: {
     KEY: 'xyne-ticket-check',
     NAME: 'Ticket Validation',
-    SUCCESS_URL: 'https://xyne.juspay.net',
-    FAILED_URL: 'https://spaces.xyne.juspay.net',
+    SUCCESS_URL: spacesBaseUrl(),
+    FAILED_URL: spacesBaseUrl(),
   },
 } as const;
 

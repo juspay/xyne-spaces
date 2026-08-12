@@ -2,9 +2,10 @@ import subprocess
 import csv
 import sys
 import re
+import os
 
 # Bitbucket PR base URL
-REPO_BASE_URL = "https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/pull-requests"
+REPO_BASE_URL = os.environ.get("BITBUCKET_PR_BASE_URL", "")
 
 
 def extract_pr_number(message):
@@ -20,7 +21,7 @@ def extract_pr_number(message):
 
 def generate_pr_link(pr_number):
     """Generate PR link URL"""
-    if not pr_number:
+    if not pr_number or not REPO_BASE_URL:
         return ""
     return f"{REPO_BASE_URL}/{pr_number}/overview"
 

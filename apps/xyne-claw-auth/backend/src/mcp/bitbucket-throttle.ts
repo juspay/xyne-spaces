@@ -78,7 +78,8 @@ async function probeBitbucketStatus(
   const username = credentials["username"] as string | undefined;
   const token = credentials["token"] as string | undefined;
   if (!username || !token) return null;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
+  const baseUrl = (credentials["baseUrl"] as string | undefined)?.replace(/\/+$/, "");
+  if (!baseUrl) return null;
   const url = `${baseUrl}/rest/api/1.0/projects/${project}/repos/${repo}/pull-requests/${prId}`;
   try {
     const res = await fetch(url, {

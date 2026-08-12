@@ -18,7 +18,7 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("twin-respond-gate");
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = (process.env["LITELLM_URL"] ?? "").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 // Model for the gate. Defaults to LITELLM_MODEL (the platform default the rest of
 // the twin uses) for consistency, then haiku as a last resort. The gate's latency

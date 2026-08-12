@@ -19,7 +19,7 @@ import {
 const JENKINS_CONFIG_SCHEMA: Record<string, ConfigField> = {
   JENKINS_BASE_URL: {
     label: "Jenkins Base URL",
-    default: "https://jenkins.internal.example.com",
+    default: "",
     required: true,
   },
   JENKINS_JOB_PATH: {
@@ -36,11 +36,12 @@ function getConfig(ctx?: ToolExecutionContext): ApiConfig {
   if (!cfg) throw new Error("Jenkins tools require config");
   const username = cfg["JENKINS_USERNAME"];
   const apiToken = cfg["JENKINS_API_TOKEN"];
-  if (!username || !apiToken) {
-    throw new Error("Jenkins tools require JENKINS_USERNAME and JENKINS_API_TOKEN");
+  const baseUrl = cfg["JENKINS_BASE_URL"];
+  if (!baseUrl || !username || !apiToken) {
+    throw new Error("Jenkins tools require JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN");
   }
   return {
-    baseUrl: cfg["JENKINS_BASE_URL"] || "https://jenkins.internal.example.com",
+    baseUrl,
     jobPath: cfg["JENKINS_JOB_PATH"] || "/job/xyne/job/xyne-spaces",
     username,
     apiToken,

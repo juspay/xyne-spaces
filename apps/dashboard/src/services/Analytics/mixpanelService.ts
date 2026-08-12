@@ -41,19 +41,20 @@ class MixpanelService {
   private readonly THROTTLE_DELAY = 1000; // 1 second
   private readonly ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart'] as const;
 
-  // Production URL configuration
-  private readonly PRODUCTION_URLS = [
-    'https://spaces.xyne.juspay.net',
-    'https://app.spaces.xyne.juspay.net',
-  ];
-
   /**
    * Check if the current URL is a production URL
    * Only send events to Mixpanel on production URLs
    */
   private isProductionUrl(): boolean {
+    const productionUrls = (import.meta.env['VITE_ANALYTICS_PRODUCTION_URLS'] ?? '')
+      .split(',')
+      .map(url => url.trim())
+      .filter(Boolean);
+    if (productionUrls.length === 0) {
+      return import.meta.env.MODE === 'production' && window.location.protocol === 'https:';
+    }
     const currentUrl = window.location.origin;
-    return this.PRODUCTION_URLS.some(prodUrl => currentUrl.startsWith(prodUrl));
+    return productionUrls.some(prodUrl => currentUrl.startsWith(prodUrl));
   }
 
   initialize(): void {

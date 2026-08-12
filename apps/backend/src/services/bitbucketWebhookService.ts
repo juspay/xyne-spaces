@@ -229,8 +229,14 @@ export class BitbucketWebhookService {
     const repoSlug = repo.slug;
 
     // Build repository URL (web URL, not SSH)
-    const repositoryURL = pr.links?.self?.[0]?.href?.replace(`/pull-requests/${pr.id}`, '') ||
-      `https://bitbucket.example.com/projects/${projectName}/repos/${repoSlug}`;
+    const repositoryURL =
+      pr.links?.self?.[0]?.href?.replace(`/pull-requests/${pr.id}`, '') ||
+      (config.bitbucket.baseUrl
+        ? `${config.bitbucket.baseUrl.replace(/\/rest\/api\/latest\/?$/, '').replace(/\/+$/, '')}/projects/${projectName}/repos/${repoSlug}`
+        : '');
+    if (!repositoryURL) {
+      throw new Error('BITBUCKET_BASE_URL is required when webhook payload does not include repository self link');
+    }
     
     // Build PR URL from repository URL
     const prUrl = `${repositoryURL}/pull-requests/${pr.id}`;

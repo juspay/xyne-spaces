@@ -464,7 +464,7 @@ const Step3Applications = ({
                   type='text'
                   value={sharedRepoUrl}
                   onChange={e => onSharedRepoUrlChange(e.target.value)}
-                  placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
+                  placeholder='Set repository clone URL'
                   className={INPUT_CLASS}
                 />
                 <Button

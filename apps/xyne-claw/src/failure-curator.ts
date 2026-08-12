@@ -22,7 +22,7 @@ const log = createLogger("failure-curator");
 
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = (process.env["LITELLM_URL"] ?? "").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["FAILURE_CURATOR_TIMEOUT_MS"] ?? 90_000);

@@ -25,7 +25,7 @@ This single command does **everything** automatically:
 
 - **macOS or Linux**
 - **Git** (to clone the repo)
-- **JUSPAY Grid API Key** — get it from [grid.ai.example.com](https://grid.ai.example.com)
+- **LLM API key** — get it from your deployment's LiteLLM provider
 
 ---
 
@@ -36,7 +36,7 @@ The setup script adds these to your `~/.zshrc` (persisted across all terminals):
 ```bash
 # Xyne Automation - Claude Config
 export JUSPAY_API_KEY="<your-key>"
-export ANTHROPIC_BASE_URL="https://grid.ai.example.com"
+export ANTHROPIC_BASE_URL="<your-litellm-endpoint>"
 export ANTHROPIC_AUTH_TOKEN="$JUSPAY_API_KEY"
 export ANTHROPIC_MODEL="kimi-latest"
 export ANTHROPIC_SMALL_FAST_MODEL="open-fast"
@@ -106,7 +106,7 @@ source ~/.zshrc
 
 ### "API key not working"
 
-1. Verify your key at [grid.ai.example.com](https://grid.ai.example.com)
+1. Verify your key with your deployment's LiteLLM provider
 2. Check: `echo $JUSPAY_API_KEY`
 3. Re-run: `npm run setup`
 
@@ -158,7 +158,7 @@ cat >> ~/.zshrc << 'EOF'
 
 # Xyne Automation - Claude Config
 export JUSPAY_API_KEY="YOUR_KEY_HERE"
-export ANTHROPIC_BASE_URL="https://grid.ai.example.com"
+export ANTHROPIC_BASE_URL="<your-litellm-endpoint>"
 export ANTHROPIC_AUTH_TOKEN="$JUSPAY_API_KEY"
 export ANTHROPIC_MODEL="kimi-latest"
 export ANTHROPIC_SMALL_FAST_MODEL="open-fast"

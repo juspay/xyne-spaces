@@ -12,6 +12,9 @@ import { checkUserAuthorization } from './command';
 import { getSyncParticipantsModal } from './utils/blockKit';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { getBotConfigByTeamId, getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
+import { config } from '../../config/env';
+
+const spacesBaseUrl = () => (process.env.PUBLIC_SPACES_URL || config.frontendUrl).replace(/\/+$/, '');
 
 export async function handleSyncParticipantsCommand(req: Request, res: Response): Promise<Response> {
   try {
@@ -87,7 +90,7 @@ export async function runSyncParticipants({
   const token = wsConfig.slackBotToken;
   const client = new WebClient(token);
   const logChannelId = wsConfig.slackMigrationLogChannelId || slackChannelId;
-  const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
+  const xyneSpaceChannelLink = `<${spacesBaseUrl()}/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
   const startedTs = await postMessage({
     channelId: logChannelId,
     text: `🔄 <@${userId}> :: Started Participant sync for xyne-space channel ${xyneSpaceChannelLink}...`,

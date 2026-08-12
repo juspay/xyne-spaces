@@ -16,7 +16,7 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("twin-soul-synthesizer");
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = (process.env["LITELLM_URL"] ?? "").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 const SYNTH_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
 const SYNTH_TIMEOUT_MS = Number(process.env["TWIN_SYNTH_TIMEOUT_MS"] ?? 120_000);

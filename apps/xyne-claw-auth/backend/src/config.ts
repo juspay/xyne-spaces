@@ -4,6 +4,12 @@ const requiredEnv = (name: string): string => {
   return val;
 };
 
+const optionalSpacesAppUrl =
+  process.env["PUBLIC_SPACES_URL"]
+  ?? process.env["SPACES_APP_URL"]
+  ?? process.env["VITE_XYNE_BACKEND_URL"]
+  ?? process.env["SPACES_BACKEND_URL"];
+
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
   selfUrl: process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
@@ -46,7 +52,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -90,14 +96,10 @@ export const CONFIG = {
   // Public user-facing Spaces URL — used for citation links + ticket deep links
   // (anything a human will click). PUBLIC_SPACES_URL is the canonical env;
   // older deployments may still set SPACES_APP_URL / VITE_XYNE_BACKEND_URL /
-  // SPACES_BACKEND_URL, so those remain in the fallback chain. Default is the
-  // production public domain — dev environments set one of the existing envs
-  // to point at localhost as usual.
-  spacesAppUrl: process.env["PUBLIC_SPACES_URL"]
-    ?? process.env["SPACES_APP_URL"]
-    ?? process.env["VITE_XYNE_BACKEND_URL"]
-    ?? process.env["SPACES_BACKEND_URL"]
-    ?? "https://app.spaces.xyne.juspay.net",
+  // SPACES_BACKEND_URL, so those remain in the fallback chain. Production must
+  // provide one; development falls back to localhost.
+  spacesAppUrl: optionalSpacesAppUrl
+    ?? (process.env["NODE_ENV"] === "production" ? requiredEnv("PUBLIC_SPACES_URL") : "http://localhost:5173"),
   defaultAgentSlug: process.env["DEFAULT_AGENT_SLUG"] ?? "assistant",
   minCronIntervalMinutes: Number(process.env["MIN_CRON_INTERVAL_MINUTES"] ?? 30),
   // Daily Brief fan-out throttle. `concurrency` is the HARD cap on parallel brief
@@ -165,7 +167,7 @@ export const CONFIG = {
    */
   bitbucketDashboardUsername: process.env["BITBUCKET_DASHBOARD_USERNAME"] ?? "",
   bitbucketDashboardToken: process.env["BITBUCKET_DASHBOARD_TOKEN"] ?? "",
-  bitbucketDashboardBaseUrl: (process.env["BITBUCKET_DASHBOARD_BASE_URL"] ?? "https://bitbucket.example.com").replace(/\/+$/, ""),
+  bitbucketDashboardBaseUrl: (process.env["BITBUCKET_DASHBOARD_BASE_URL"] ?? "").replace(/\/+$/, ""),
   bitbucketDashboardProjectKey: process.env["BITBUCKET_DASHBOARD_PROJECT_KEY"] ?? "XYNE",
   bitbucketDashboardRepoSlug: process.env["BITBUCKET_DASHBOARD_REPO_SLUG"] ?? "xyne-spaces",
   bitbucketDashboardAuthorEmail: process.env["BITBUCKET_DASHBOARD_AUTHOR_EMAIL"] ?? "john.doe@gmail.com",

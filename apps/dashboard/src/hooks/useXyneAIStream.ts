@@ -92,7 +92,7 @@ You MUST perform these steps after completing your analysis:
    - markdown: Your complete response formatted in markdown with proper headings, sections, and structure
 
 2. After the tool returns, you MUST include the canvas URL from the tool output in your response.
-   The tool will return: "Canvas created successfully! Title: ... URL: https://spaces.xyne.juspay.net/chat/canvas/..."
+   The tool will return: "Canvas created successfully! Title: ... URL: https://<deployment-spaces-host>/chat/canvas/..."
    Extract and display this URL so the user can click on it.
 
 This is MANDATORY - the user requires the output in a canvas document with a clickable link.

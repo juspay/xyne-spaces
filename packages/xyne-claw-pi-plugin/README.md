@@ -40,7 +40,7 @@ Then start `xyne` and run `/claw login`.
 
 ## Configuration
 
-- `XYNE_CLAW_BASE_URL` — override the Claw origin (default `https://app.spaces.xyne.juspay.net`). Handy for local dev: `XYNE_CLAW_BASE_URL=http://localhost:3003`.
+- `XYNE_CLAW_BASE_URL` — override the Claw origin (default `http://localhost:5173`). Set this to your deployment URL in production.
 - `/claw login http://localhost:3003` — log in against a specific backend (also persisted).
 - `XYNE_AGENT_DIR` — override where `claw.json` is stored (matches the CLI).
 

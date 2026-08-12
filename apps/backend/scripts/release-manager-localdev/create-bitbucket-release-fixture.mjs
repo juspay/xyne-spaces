@@ -10,7 +10,7 @@
  * (which has an email) is required — a repository access token will fail.
  *
  * Auth:  export BITBUCKET_TOKEN=BBDC-xxxx   (personal HTTP access token, Repo Write+Admin)
- * Base:  export BITBUCKET_BASE=https://bitbucket.juspay.net   (default)
+ * Base:  export BITBUCKET_BASE=https://your-bitbucket-host.example.com
  *
  * Full:   BITBUCKET_TOKEN=… node backend/scripts/release-manager-localdev/create-bitbucket-release-fixture.mjs
  * Hotfix: BITBUCKET_TOKEN=… node backend/scripts/release-manager-localdev/create-bitbucket-release-fixture.mjs hotfix
@@ -25,7 +25,11 @@ import { join, dirname } from 'node:path';
 import crypto from 'node:crypto';
 
 const TOKEN = process.env.BITBUCKET_TOKEN;
-const BASE = (process.env.BITBUCKET_BASE || 'https://bitbucket.juspay.net').replace(/\/+$/, '');
+const BASE = (process.env.BITBUCKET_BASE || '').replace(/\/+$/, '');
+if (!BASE) {
+  console.error('BITBUCKET_BASE is required, e.g. https://your-bitbucket-host.example.com');
+  process.exit(1);
+}
 const API = `${BASE}/rest/api/1.0`;
 
 // ---------- input helpers (TTY or piped) ----------

@@ -28,7 +28,7 @@ export const xyneDashboardAdapter: StdioMcpAdapter = {
   // live in the editor and every plan is server-validated before persisting.
   writeTools: [],
   credentialFields: [
-    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
+    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "" },
     { name: "token", label: "Session token", type: "password", placeholder: "" },
   ],
   buildCommand(credentials) {

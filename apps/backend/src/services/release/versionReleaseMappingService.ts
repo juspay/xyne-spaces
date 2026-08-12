@@ -42,7 +42,7 @@ function buildBitbucketServiceConfig(): BitbucketConfig {
       ? (bitbucketConfig.baseUrl.endsWith('/rest/api/latest')
         ? bitbucketConfig.baseUrl
         : `${bitbucketConfig.baseUrl}/rest/api/latest`)
-      : 'https://bitbucket.example.com/rest/api/latest',
+      : '',
     username: bitbucketConfig.apiUsername || '',
     password: bitbucketConfig.password || '',
     token: bitbucketConfig.apiToken || '',

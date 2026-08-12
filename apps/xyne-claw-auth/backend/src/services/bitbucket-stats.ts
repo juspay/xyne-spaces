@@ -246,8 +246,8 @@ function envelope(
 }
 
 export function isBitbucketDashboardConfigured(): boolean {
-  // Token alone is enough — without a username we fall back to Bearer auth.
-  return Boolean(CONFIG.bitbucketDashboardToken);
+  // Token alone is enough for auth, but the public base URL must come from env.
+  return Boolean(CONFIG.bitbucketDashboardToken && CONFIG.bitbucketDashboardBaseUrl);
 }
 
 /**

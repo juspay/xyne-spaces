@@ -80,7 +80,7 @@ const unescapePreviewValue = (value: string): string => {
  *
  * Format:
  * :::message_preview
- * url: https://spaces.xyne.juspay.net/chat/dir/ch123#origin=conv456
+ * url: https://<deployment-spaces-host>/chat/dir/ch123#origin=conv456
  * messageId: msg789
  * channelId: ch123
  * channelName: general

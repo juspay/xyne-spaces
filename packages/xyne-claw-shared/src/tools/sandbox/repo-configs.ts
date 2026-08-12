@@ -150,7 +150,7 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       "No services auto-start; agent runs `rails s` (torana → :3000), " +
       "`npm run dev` (ashfall → :3001 / :5173 Vite), or `nix run ./#<x>` " +
       "(pluto) on demand.",
-    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/lp/torana.git",
+    repoUrl: process.env["SANDBOX_LOTUS_TORANA_REPO_URL"] ?? "",
     defaultBranch: "master",
     cloneDepth: 1,
     workDir: "/workspace/torana",
@@ -159,8 +159,8 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     idleTimeoutMs: 60 * 60 * 1000,
     readyTimeoutMs: 10 * 60 * 1000,
     auxRepos: [
-      { name: "pluto",   url: "ssh://git@ssh.bitbucket.juspay.net/lp/pluto.git",   defaultBranch: "master",  workDir: "/workspace/pluto" },
-      { name: "ashfall", url: "ssh://git@ssh.bitbucket.juspay.net/lp/ashfall.git", defaultBranch: "develop", workDir: "/workspace/ashfall" },
+      { name: "pluto",   url: process.env["SANDBOX_LOTUS_PLUTO_REPO_URL"] ?? "",   defaultBranch: "master",  workDir: "/workspace/pluto" },
+      { name: "ashfall", url: process.env["SANDBOX_LOTUS_ASHFALL_REPO_URL"] ?? "", defaultBranch: "develop", workDir: "/workspace/ashfall" },
     ],
     steps: [],
     ports: {
@@ -187,7 +187,7 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       "  - cd clms-retail    && yarn start:sandbox\n" +
       "(npm install / yarn install / yarn re:build are already baked; " +
       "re-run only if package.json or .res files change.)",
-    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/ax/lamf-dashboard.git",
+    repoUrl: process.env["SANDBOX_LAMF_DASHBOARD_REPO_URL"] ?? "",
     defaultBranch: "master",
     cloneDepth: 1,
     workDir: "/workspace/lamf-dashboard",
@@ -199,8 +199,8 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     // is master, clms-corp is main, clms-retail is master. Override per-claim
     // via auxBranches if needed.
     auxRepos: [
-      { name: "clms-corp",   url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-corp.git",   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
-      { name: "clms-retail", url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-retail.git", defaultBranch: "master", workDir: "/workspace/clms-retail" },
+      { name: "clms-corp",   url: process.env["SANDBOX_LAMF_CLMS_CORP_REPO_URL"] ?? "",   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
+      { name: "clms-retail", url: process.env["SANDBOX_LAMF_CLMS_RETAIL_REPO_URL"] ?? "", defaultBranch: "master", workDir: "/workspace/clms-retail" },
     ],
     steps: [],
     ports: {

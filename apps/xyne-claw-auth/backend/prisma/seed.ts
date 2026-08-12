@@ -89,7 +89,7 @@ const SERVERS = [
       fields: [
         { name: "username", label: "Bitbucket Username", type: "text", placeholder: "your-username" },
         { name: "token", label: "Bitbucket Token", type: "password", placeholder: "Enter your Bitbucket access token" },
-        { name: "baseUrl", label: "Bitbucket Base URL", type: "text", placeholder: "https://bitbucket.example.com", optional: true },
+        { name: "baseUrl", label: "Bitbucket Base URL", type: "text", placeholder: "Set Bitbucket Base URL", optional: true },
       ],
     },
     launchConfigTemplate: {

@@ -17,7 +17,7 @@ import {
 
 // ── Config (self-contained; mirrors the CLI's ~/.xyne/agent convention) ─────
 
-const DEFAULT_CLAW_BASE_URL = "https://spaces.xyne.juspay.net";
+const DEFAULT_CLAW_BASE_URL = "http://localhost:5173";
 const API_PATH = "/claw/api/v1";
 
 interface ClawConfig {

@@ -28,6 +28,14 @@ const SOURCE_NAME_PREFIX = 'google-';
 const DEFAULT_PUBSUB_TOPIC = 'gmail-notifications';
 const PUBSUB_ACK_DEADLINE_SECONDS = 600;
 const DEFAULT_BACKEND_URL = 'http://localhost:3000';
+
+function getBackendUrlForWebhooks(): string {
+  const backendUrl = process.env.BACKEND_URL;
+  if (!backendUrl && process.env.NODE_ENV === 'production') {
+    throw new Error('BACKEND_URL is required to generate Google webhook URLs');
+  }
+  return backendUrl || DEFAULT_BACKEND_URL;
+}
 // One shared Pub/Sub subscription per env handles every Google source — body's
 // emailAddress routes to the right ExternalSource at request time. Env suffix
 // keeps dev/staging/prod from overwriting each other's pushConfig.
@@ -656,7 +664,7 @@ export class GoogleService {
   }
 
   static generateWebhookUrl(): string {
-    const baseUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
+    const baseUrl = getBackendUrlForWebhooks();
     return `${baseUrl}${SHARED_GOOGLE_WEBHOOK_PATH}`;
   }
 
@@ -664,7 +672,7 @@ export class GoogleService {
     // Env classification from BACKEND_URL — keeps detection in sync with how
     // urlUtils.ts already distinguishes deployments, and avoids needing a new
     // dedicated env var:
-    //   spaces.sandbox.xyne.juspay.net → sandbox
+    //   <sandbox-spaces-host> → sandbox
     //   localhost / ngrok / trycloudflare / 127.0.0.1 → dev
     //   anything else (prod domain) → prod
     const backendUrl = (process.env.BACKEND_URL || '').toLowerCase();

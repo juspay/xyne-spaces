@@ -8,7 +8,7 @@ import { logger } from './logger.js';
  * (comma-separated) if a new internal host is introduced.
  */
 const ALLOWED_CLONE_HOSTS: ReadonlySet<string> = new Set(
-  (process.env['GIT_CLONE_ALLOWED_HOSTS'] ?? 'ssh.bitbucket.juspay.net,bitbucket.juspay.net')
+  (process.env['GIT_CLONE_ALLOWED_HOSTS'] ?? '')
     .split(',')
     .map((h) => h.trim())
     .filter(Boolean),

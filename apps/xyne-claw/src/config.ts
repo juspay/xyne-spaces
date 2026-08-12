@@ -1,7 +1,15 @@
+function requiredProductionEnv(name: string): string {
+  const value = process.env[name];
+  if (!value && process.env["NODE_ENV"] === "production") {
+    throw new Error(`${name} is required in production`);
+  }
+  return value ?? "";
+}
+
 export const SERVER = {
   port: Number(process.env["XYNE_CLAW_PORT"] ?? 3002),
   s2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
-  authServiceUrl: process.env["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003",
+  authServiceUrl: process.env["XYNE_CLAW_AUTH_URL"] ?? (process.env["NODE_ENV"] === "production" ? requiredProductionEnv("XYNE_CLAW_AUTH_URL") : "http://localhost:3003"),
 } as const;
 
 // SSRF guard for caller-supplied callback/progress URLs. These arrive in the
@@ -41,7 +49,7 @@ const litellmModel = process.env["LITELLM_MODEL"]?.trim() || "kimi-latest";
 const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmModel;
 
 export const LITELLM = {
-  url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
+  url: process.env["LITELLM_URL"] ?? (process.env["NODE_ENV"] === "production" ? requiredProductionEnv("LITELLM_URL") : "http://localhost:4000"),
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
   model: litellmModel,
   // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
@@ -97,7 +105,7 @@ function normalizeFakeGcsHost(): string {
 //   ${baseUrl}/claw-preview/<sandboxId>/  →  redirects to vnc.html?autoconnect=…
 // Empty string disables the announce.
 export const SANDBOX_PREVIEW = {
-  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "https://app.spaces.xyne.juspay.net",
+  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? (process.env["NODE_ENV"] === "production" ? "" : "http://localhost:5173"),
 } as const;
 
 // Hindsight long-term memory.

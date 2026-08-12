@@ -126,7 +126,7 @@ prompt_api_key() {
     if [ -z "$current_key" ] || [ "$current_key" = "your-llm-key" ]; then
         echo "" >&2
         echo -e "  ${YELLOW}You need a Juspay Grid API key to use Claude.${NC}" >&2
-        echo -e "  ${CYAN}Get your key from: https://grid.ai.example.com${NC}" >&2
+        echo -e "  ${CYAN}Set ANTHROPIC_BASE_URL to your deployment's LiteLLM endpoint${NC}" >&2
         echo "" >&2
         read -p "  Enter your JUSPAY_API_KEY: " current_key </dev/tty
 
@@ -285,8 +285,8 @@ configure_env() {
     # Core API key
     add_to_shell_rc "JUSPAY_API_KEY" "$API_KEY"
 
-    # Claude / Anthropic config — routed through Juspay Grid
-    add_to_shell_rc "ANTHROPIC_BASE_URL" "https://grid.ai.example.com"
+    # Claude / Anthropic config — routed through the configured LiteLLM endpoint
+    add_to_shell_rc "ANTHROPIC_BASE_URL" "\${ANTHROPIC_BASE_URL:-}"
     add_to_shell_rc "ANTHROPIC_AUTH_TOKEN" "\$JUSPAY_API_KEY"
     add_to_shell_rc "ANTHROPIC_MODEL" "kimi-latest"
     add_to_shell_rc "ANTHROPIC_SMALL_FAST_MODEL" "open-fast"

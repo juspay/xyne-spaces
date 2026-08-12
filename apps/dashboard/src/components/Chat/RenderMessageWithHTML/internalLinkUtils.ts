@@ -23,14 +23,7 @@ export type AnchorTargetProps = Pick<
   'target' | 'rel'
 >;
 
-const INTERNAL_XYNE_HOSTS = new Set([
-  'spaces.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net',
-  'xyne-spaces.web.app',
-  'localhost',
-  '127.0.0.1',
-]);
+const INTERNAL_XYNE_HOSTS = new Set(['xyne-spaces.web.app', 'localhost', '127.0.0.1']);
 
 /** Paths that should be treated as external (no internal router handling) */
 const EXTERNAL_PATH_PREFIXES = ['/claw', '/claw-preview', '/changelog'];

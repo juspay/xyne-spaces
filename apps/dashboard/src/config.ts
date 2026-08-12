@@ -12,34 +12,42 @@ export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
-const ELECTRON_BACKEND_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:3001';
-const ELECTRON_BACKEND_ZERO_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:4848';
+const configuredApiBaseUrl = (import.meta.env['VITE_API_URL'] as string | undefined)?.replace(
+  /\/+$/,
+  '',
+);
+const configuredZeroServer = (import.meta.env['VITE_ZERO_SERVER'] as string | undefined)?.replace(
+  /\/+$/,
+  '',
+);
+const configuredApiOrigin = configuredApiBaseUrl?.replace(/\/api$/, '');
+const configuredZeroOrigin = configuredZeroServer?.replace(/\/zero$/, '');
+
+const ELECTRON_BACKEND_URL =
+  configuredApiOrigin ||
+  (import.meta.env['VITE_API_ORIGIN'] as string) ||
+  (isProd ? '' : 'http://localhost:3001');
+const ELECTRON_BACKEND_ZERO_URL =
+  configuredZeroOrigin ||
+  (import.meta.env['VITE_ZERO_ORIGIN'] as string) ||
+  (isProd ? '' : 'http://localhost:4848');
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
 export const API_BASE_URL = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/api`
-  : `${protocol}://${hostname}${backendPort}/api`;
+  : configuredApiBaseUrl || `${protocol}://${hostname}${backendPort}/api`;
 
 export const APPS_PUBLIC_BASE_URL = isLocalhost
   ? 'http://localhost:3001/api/apps'
-  : isSandBox
-    ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
-    : 'https://spaces.xyne.juspay.net/api/apps';
+  : (import.meta.env['VITE_APPS_PUBLIC_BASE_URL'] as string) ||
+    `${protocol}://${hostname}/api/apps`;
 
 // Zero Cache
 const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
 export const VITE_ZERO_SERVER = isElectronBundled
   ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-  : `${protocol}://${hostname}${zeroCachePort}/zero`;
+  : configuredZeroServer || `${protocol}://${hostname}${zeroCachePort}/zero`;
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;

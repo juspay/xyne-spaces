@@ -1,8 +1,19 @@
 import type { Metadata, Viewport } from "next";
 
+function getSiteUrl(): string {
+  const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (!configuredSiteUrl && process.env.NODE_ENV === "production") {
+    throw new Error("NEXT_PUBLIC_SITE_URL is required for production site metadata");
+  }
+  return configuredSiteUrl || "http://localhost:3000/changelog";
+}
+
+const siteUrl = getSiteUrl();
+const siteHostname = new URL(siteUrl).hostname;
+
 export const SITE_MANIFEST = {
   name: "Xyne Space",
-  short_name: "spaces.xyne.juspay.net",
+  short_name: siteHostname,
   description: "Xyne Space",
   start_url: "/",
   display: "standalone" as const,
@@ -20,7 +31,7 @@ export const SITE_MANIFEST = {
       type: "image/png",
     },
   ],
-  url: "https://spaces.xyne.juspay.net/changelog",
+  url: siteUrl,
   author: {
     name: "Harsh Sharma",
     twitter: "@imharshin",

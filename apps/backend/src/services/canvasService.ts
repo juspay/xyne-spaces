@@ -302,7 +302,11 @@ export async function createKnowledgeCanvas(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
+  const configuredFrontendUrl = process.env.PUBLIC_SPACES_URL || process.env.FRONTEND_URL;
+  if (!configuredFrontendUrl && process.env.NODE_ENV === 'production') {
+    throw new Error('PUBLIC_SPACES_URL or FRONTEND_URL is required to generate canvas URLs');
+  }
+  const frontendUrl = (configuredFrontendUrl || 'http://localhost:5173').replace(/\/+$/, '');
   const path = workspaceId
     ? `/${workspaceId}/chat/canvas/${canvasId}`
     : `/chat/canvas/${canvasId}`;

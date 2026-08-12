@@ -8,10 +8,11 @@
  * Keep this as the single source of truth; do not copy-paste into other files.
  */
 export const TRUSTED_ORIGINS: string[] = [
-  'https://spaces.xyne.juspay.net',
-  'https://app.spaces.xyne.juspay.net',
-  'https://app.spaces.sandbox.xyne.juspay.net',
-  'https://xyne-spaces.web.app',
-  'https://xyne-spaces.web',
-  'https://spaces.sandbox.xyne.juspay.net',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+  'xyne-spaces://.',
+  'xyne-spaces-dev://.',
+  'xyne-spaces-sandbox://.',
 ];

@@ -46,9 +46,14 @@ RUN pnpm --filter xyne-spaces-dashboard run validate:raw
 ARG SOURCE_COMMIT
 ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
-# Accept build argument for API URL
-ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
-ENV VITE_ZERO_SERVER=https://spaces.xyne.juspay.net/zero
+# Accept build arguments for deployment URLs. Empty defaults let the app derive
+# same-origin URLs; production deployments can inject real public endpoints.
+ARG VITE_API_URL=""
+ARG VITE_ZERO_SERVER=""
+ARG VITE_APPS_PUBLIC_BASE_URL=""
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_ZERO_SERVER=${VITE_ZERO_SERVER}
+ENV VITE_APPS_PUBLIC_BASE_URL=${VITE_APPS_PUBLIC_BASE_URL}
 
 # Mixpanel token (public client-side analytics; injected at build time)
 ARG VITE_MIXPANEL_TOKEN=""

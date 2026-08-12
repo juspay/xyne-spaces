@@ -1,7 +1,7 @@
 jest.mock('@/config/env', () => ({
   config: {
     backendUrl: 'http://localhost:3000',
-    bitbucket: { baseUrl: 'https://bitbucket.juspay.net/rest/api/latest' },
+    bitbucket: { baseUrl: 'https://bitbucket.example.com/rest/api/latest' },
   },
 }));
 jest.mock('@/database/client', () => ({ db: {} }));
@@ -14,7 +14,7 @@ jest.mock('@xyne/shared', () => ({ MessageType: { BOT: 'BOT' } }));
 import { extractPrLink } from './prCheckApprovalService';
 
 describe('extractPrLink', () => {
-  const PR_URL = 'https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/8594';
+  const PR_URL = 'https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/pull-requests/8594';
 
   it('extracts a plain PR link', () => {
     expect(extractPrLink(`please merge ${PR_URL}`)).toEqual({
@@ -22,7 +22,7 @@ describe('extractPrLink', () => {
       prId: 8594,
       projectKey: 'XYNE',
       repositorySlug: 'xyne-spaces',
-      hostname: 'bitbucket.juspay.net',
+      hostname: 'bitbucket.example.com',
     });
   });
 
@@ -36,33 +36,33 @@ describe('extractPrLink', () => {
   });
 
   it('returns the first PR when multiple are present', () => {
-    const other = 'https://bitbucket.juspay.net/projects/EULER/repos/euler-api/pull-requests/12';
+    const other = 'https://bitbucket.example.com/projects/EULER/repos/euler-api/pull-requests/12';
     expect(extractPrLink(`${PR_URL} ${other}`)?.prId).toBe(8594);
   });
 
   it('rejects lookalike hosts', () => {
     expect(
-      extractPrLink('https://bitbucket.juspay.net.evil.com/projects/XYNE/repos/xyne-spaces/pull-requests/1')
+      extractPrLink('https://bitbucket.example.com.evil.com/projects/XYNE/repos/xyne-spaces/pull-requests/1')
     ).toBeNull();
     expect(
-      extractPrLink('https://evilbitbucket.juspay.net.attacker.io/projects/A/repos/b/pull-requests/2')
+      extractPrLink('https://evilbitbucket.example.com.attacker.io/projects/A/repos/b/pull-requests/2')
     ).toBeNull();
   });
 
   it('skips a lookalike host and returns a later valid link', () => {
-    const evil = 'https://bitbucket.juspay.net.evil.com/projects/A/repos/b/pull-requests/1';
+    const evil = 'https://bitbucket.example.com.evil.com/projects/A/repos/b/pull-requests/1';
     expect(extractPrLink(`${evil} then ${PR_URL}`)?.prId).toBe(8594);
   });
 
   it('accepts subdomains of the configured host', () => {
     expect(
-      extractPrLink('https://mirror.bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/3')?.prId
+      extractPrLink('https://mirror.bitbucket.example.com/projects/XYNE/repos/xyne-spaces/pull-requests/3')?.prId
     ).toBe(3);
   });
 
   it('ignores non-PR Bitbucket URLs', () => {
-    expect(extractPrLink('https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/commits/abc123')).toBeNull();
-    expect(extractPrLink('https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces')).toBeNull();
+    expect(extractPrLink('https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/commits/abc123')).toBeNull();
+    expect(extractPrLink('https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces')).toBeNull();
   });
 
   it('returns null for content without links', () => {

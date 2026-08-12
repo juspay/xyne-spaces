@@ -16,7 +16,7 @@ export const WEBSITES: Website[] = [
   {
     id: 'mimir',
     name: 'MIMIR',
-    url: 'https://lightbox.sso.internal.svc.k8s.apoc.mum.juspay.net/',
+    url: import.meta.env['VITE_MIMIR_URL'] || '',
     iconImage: '/images/autorca.png',
     useDynamicUrl: true, // Will extract order_id and merchant_id from selected text
   },

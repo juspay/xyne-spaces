@@ -399,10 +399,10 @@ async function main() {
     console.log('\n🔑 Seeding org LLM service account credentials...');
     try {
       const litellmApiKey = process.env.LITELLM_API_KEY;
-      const litellmBaseUrl = process.env.LITELLM_BASE_URL || 'https://grid.ai.example.com/';
+      const litellmBaseUrl = process.env.LITELLM_BASE_URL || '';
 
-      if (!litellmApiKey) {
-        console.log('  ⚠️  LITELLM_API_KEY not set in environment, skipping org LLM credential seeding');
+      if (!litellmApiKey || !litellmBaseUrl) {
+        console.log('  ⚠️  LITELLM_API_KEY / LITELLM_BASE_URL not set in environment, skipping org LLM credential seeding');
       } else {
         const defaultOrg = await prisma.organization.findFirst({
           where: { name: 'Xyne Default' },

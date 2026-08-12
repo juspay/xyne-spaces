@@ -11,28 +11,28 @@ import type { AgentWidgetBinding } from "@prisma/client";
 describe("normalizePrUrl", () => {
   it("strips protocol, lowercases, and drops trailing slashes", () => {
     expect(normalizePrUrl("HTTPS://Bitbucket.Juspay.net/projects/XYN/repos/spaces/pull-requests/42/")).toBe(
-      "bitbucket.juspay.net/projects/xyn/repos/spaces/pull-requests/42",
+      "bitbucket.example.com/projects/xyn/repos/spaces/pull-requests/42",
     );
   });
 
   it("drops query string and fragment", () => {
     expect(
-      normalizePrUrl("https://bitbucket.juspay.net/projects/XYN/repos/spaces/pull-requests/42?at=refs%2Fheads%2Fmain#comment-1"),
-    ).toBe("bitbucket.juspay.net/projects/xyn/repos/spaces/pull-requests/42");
+      normalizePrUrl("https://bitbucket.example.com/projects/XYN/repos/spaces/pull-requests/42?at=refs%2Fheads%2Fmain#comment-1"),
+    ).toBe("bitbucket.example.com/projects/xyn/repos/spaces/pull-requests/42");
   });
 
   it("collapses the agent-side and webhook-side URL of the SAME PR to one key", () => {
     // Agent (from create_pull_request response, links.self href):
-    const agentUrl = "https://bitbucket.juspay.net/projects/XYN/repos/spaces/pull-requests/42";
+    const agentUrl = "https://bitbucket.example.com/projects/XYN/repos/spaces/pull-requests/42";
     // Webhook (extractPRContext builds `${repositoryURL}/pull-requests/${pr.id}`) —
     // may arrive http, mixed-case host, or with a trailing slash. All must match.
-    const webhookUrl = "http://Bitbucket.juspay.net/projects/xyn/repos/spaces/pull-requests/42/";
+    const webhookUrl = "http://Bitbucket.example.com/projects/xyn/repos/spaces/pull-requests/42/";
     expect(normalizePrUrl(agentUrl)).toBe(normalizePrUrl(webhookUrl));
   });
 
   it("keeps DIFFERENT PRs distinct", () => {
-    const a = normalizePrUrl("https://bitbucket.juspay.net/projects/XYN/repos/spaces/pull-requests/42");
-    const b = normalizePrUrl("https://bitbucket.juspay.net/projects/XYN/repos/spaces/pull-requests/43");
+    const a = normalizePrUrl("https://bitbucket.example.com/projects/XYN/repos/spaces/pull-requests/42");
+    const b = normalizePrUrl("https://bitbucket.example.com/projects/XYN/repos/spaces/pull-requests/43");
     expect(a).not.toBe(b);
   });
 });
@@ -48,7 +48,7 @@ describe("readPrBindingData", () => {
       bindingWith({
         provider: "bitbucket",
         title: "XYN-42 fix login",
-        url: "https://bitbucket.juspay.net/projects/XYN/repos/spaces/pull-requests/42",
+        url: "https://bitbucket.example.com/projects/XYN/repos/spaces/pull-requests/42",
         ticketId: "XYN-42",
         desc: "root cause + fix",
         repo: "XYN/spaces",

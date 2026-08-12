@@ -65,7 +65,10 @@ spec:
         - name: XYNE_CLAW_PORT
           value: "80"
         - name: LITELLM_URL
-          value: https://grid.ai.example.com
+          valueFrom:
+            secretKeyRef:
+              key: LITELLM_URL
+              name: litellm-claw
         - name: LITELLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -133,7 +136,7 @@ spec:
                   touch /root/.ssh/known_hosts
                 fi
                 ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null || true
-                ssh-keyscan -t rsa,ecdsa,ed25519 ssh.bitbucket.juspay.net >> /root/.ssh/known_hosts 2>/dev/null || true
+                if [ -n "${BITBUCKET_SSH_HOST:-}" ]; then ssh-keyscan -t rsa,ecdsa,ed25519 "$BITBUCKET_SSH_HOST" >> /root/.ssh/known_hosts 2>/dev/null || true; fi
                 echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> /root/.ssh/known_hosts
                 echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> /root/.ssh/known_hosts
                 echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKrunivqI2bdI8Ih6h68fOvW0oUwMBvJ1iBOuEspLTvpqMaHyDVRSHJ9dkD/P8rS7pLGpF4JvQSvqLJMrVJ3vXNpIx3QLTHf2C0Vc3RQDOl4bqLIUMv8hLhtZKmPTiPMYFaAV8YmFRq9KpfQSFUgWDcZXQl9f0HdLiKlHfFLLNPMXMVDJ2jP+Vgp8L+nJYVqHv7VwQQmYF6hYbPfFgdXQnFfJWxBHfR7sHdHgHpXQnMnPj6xYS2mYmKh2jCyqJQvCfG5pNJGpvHfLGN5nX7vhBm7tZL6pLGpF4JvQvLJM" >> /root/.ssh/known_hosts

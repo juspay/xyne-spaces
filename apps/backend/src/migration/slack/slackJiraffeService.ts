@@ -26,6 +26,7 @@ import { vespaBackfillQueue } from '../../queues/vespaQueue';
 import { syncConversationTicketMdFromPrismaTicket } from '../../utils/ticketMd';
 
 const ENABLE_NOTIFICATIONS = true;
+const spacesBaseUrl = () => (process.env.PUBLIC_SPACES_URL || config.frontendUrl).replace(/\/+$/, '');
 
 // Jiraffe team name -> Xyne usergroup alias
 const TEAM_NAME_TO_USERGROUP_ALIAS = new Map<string, string>([
@@ -136,7 +137,10 @@ async function fetchTicketsFromBitbot(
   slackChannelId: string,
   syncDate?: string
 ): Promise<BitbotTicket[]> {
-  const baseUrl = 'https://bitbot.internal.svc.k8s.office.mum.juspay.net';
+  const baseUrl = process.env.BITBOT_BASE_URL || '';
+  if (!baseUrl) {
+    throw new Error('BITBOT_BASE_URL is required to fetch Bitbot migration tickets');
+  }
   const url = new URL(`${baseUrl}/api/internal/migration/tickets`);
   url.searchParams.set('slackChannelId', slackChannelId);
   if (syncDate) {
@@ -554,7 +558,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
     if (xyneChannel) {
       const channelName = xyneChannel.name;
-      xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      xyneSpaceChannelLink = `<${spacesBaseUrl()}/chat/${input.xyneSpaceChannelId}|${channelName}>`;
       jiraffeBotToken = getBotConfigByWorkspaceId(xyneChannel.workspaceId).slackBotToken;
     }
   }

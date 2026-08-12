@@ -20,7 +20,7 @@ import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefa
 
 /**
  * Extract the hostname from an Origin header value.
- * e.g. "https://external.spaces.xyne.juspay.io" → "external.spaces.xyne.juspay.io"
+ * e.g. "https://<external-spaces-host>" → "<external-spaces-host>"
  */
 function extractDomainFromOrigin(origin: string): string | null {
   try {
@@ -35,7 +35,7 @@ function extractDomainFromOrigin(origin: string): string | null {
  *
  * 1. Extract the domain from the request Origin header
  * 2. Look up `frontend_url` in CAC (Superposition) with { domain } context
- *    — this lets us map e.g. "spaces.xyne.juspay.net" → "https://app.spaces.xyne.juspay.net"
+ *    — this lets us map a request host to the configured frontend URL
  * 3. If CAC has no override, use the Origin itself (for domains where origin = frontend)
  * 4. If no Origin, fall back to SLACK_FRONTEND_URL env
  */

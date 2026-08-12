@@ -1,7 +1,7 @@
 ---
 description: |
   **AUTO-TRIGGER** when user mentions:
-  - Jenkins URLs (https://jenkins.*.juspay.net/*)
+  - Jenkins URLs from the configured Jenkins deployment
   - Build numbers with failure context ("failed", "broken", "automation")
   - Phrases: "what happened in this build", "why did automation fail",
     "investigate build failure", "run automation tests locally"
@@ -24,7 +24,7 @@ When triggered by a Jenkins URL or build failure query, investigate the build an
 
 ## Input Patterns to Handle
 
-1. **Jenkins URL**: `https://jenkins.internal.example.com/job/xyne/job/xyne-spaces/job/main/1234/`
+1. **Jenkins URL**: `<jenkins-base-url>/job/xyne/job/xyne-spaces/job/main/1234/`
    - Extract: branch = `main`, buildNumber = `1234`
 
 2. **Build reference**: "build #1234 on main"

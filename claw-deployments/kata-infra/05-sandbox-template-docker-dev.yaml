@@ -89,14 +89,15 @@ spec:
                       sed 's/^[[:space:]]*//' /tmp/github-ssh-keys/id_rsa.pub > /root/.ssh/github_id_rsa.pub
                       chmod 644 /root/.ssh/github_id_rsa.pub
                     fi
-                    printf 'Host github.com\n  HostName github.com\n  User git\n  IdentityFile /root/.ssh/github_id_rsa\n  IdentitiesOnly yes\nHost bitbucket.juspay.net\n  HostName ssh.bitbucket.juspay.net\n  User git\n  IdentityFile /root/.ssh/id_rsa\n  IdentitiesOnly yes\n' > /root/.ssh/config
+                    printf 'Host github.com\n  HostName github.com\n  User git\n  IdentityFile /root/.ssh/github_id_rsa\n  IdentitiesOnly yes\n' > /root/.ssh/config
+                    if [ -n "${BITBUCKET_SSH_HOST:-}" ]; then printf 'Host %s\n  HostName %s\n  User git\n  IdentityFile /root/.ssh/id_rsa\n  IdentitiesOnly yes\n' "$BITBUCKET_SSH_HOST" "$BITBUCKET_SSH_HOST" >> /root/.ssh/config; fi
                     chmod 600 /root/.ssh/config
                     touch /root/.ssh/known_hosts
                     if [ -f /tmp/ssh-keys/known_hosts ]; then
                       cat /tmp/ssh-keys/known_hosts >> /root/.ssh/known_hosts
                     fi
                     ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null || true
-                    ssh-keyscan -t rsa,ecdsa,ed25519 ssh.bitbucket.juspay.net >> /root/.ssh/known_hosts 2>/dev/null || true
+                    if [ -n "${BITBUCKET_SSH_HOST:-}" ]; then ssh-keyscan -t rsa,ecdsa,ed25519 "$BITBUCKET_SSH_HOST" >> /root/.ssh/known_hosts 2>/dev/null || true; fi
                     chmod 644 /root/.ssh/known_hosts
                     npm config set registry http://verdaccio.xyne-apps.svc.cluster.local:4873/
                     mkdir -p /root/.config/pnpm

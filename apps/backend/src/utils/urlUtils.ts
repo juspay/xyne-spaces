@@ -127,9 +127,17 @@ export function extractFirstUrl(text: string): string | null {
 // ---------------------------------------------------------------------------
 
 const INTERNAL_HOSTS = [
-  'spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
+  ...[
+    process.env.PUBLIC_SPACES_URL,
+    process.env.FRONTEND_URL,
+  ].flatMap((raw) => {
+    if (!raw) return [];
+    try {
+      return [new URL(raw).hostname];
+    } catch {
+      return [];
+    }
+  }),
   'xyne-spaces.web.app',
 ];
 
@@ -139,10 +147,10 @@ const INTERNAL_HOSTS_WITH_PORT = [
 ];
 
 // Pre-compiled regex for internal URL extraction (avoids creating new RegExp on each call)
-// Matches: production and sandbox domains. Allows an optional `/{workspaceId}` segment
+// Matches: candidate app URLs. Allows an optional `/{workspaceId}` segment
 // between the host and `/chat/...` (introduced by org/workspace routing, XYNE-11716).
 const INTERNAL_URL_REGEX =
-  /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net|app\.spaces\.xyne\.juspay\.net|xyne-spaces\.web\.app|localhost:\d+|127\.0\.0\.1:\d+)(?:\/[^/\s]+)?\/chat\/[^\s<>"'\)\]]*/i;
+  /https?:\/\/[^\s<>"'\)\]]+(?:\/[^/\s]+)?\/chat\/[^\s<>"'\)\]]*/i;
 
 export interface InternalLinkInfo {
   type: 'message' | 'conversation' | 'ticket';
