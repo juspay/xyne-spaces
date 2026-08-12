@@ -210,7 +210,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
               setEmojiOpen(false);
             }}
             customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: false }}
+            previewConfig={{ showPreview: true }}
           />
 
           {/* Add Emoji Button */}
