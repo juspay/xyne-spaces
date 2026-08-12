@@ -26,7 +26,8 @@ interface TestUserData {
 export class TestAuthController {
   private userService: UserService;
   private userSessionService: UserSessionService;
-  private static readonly TEST_USER_EMAIL_REGEX = /^test-(user|admin)-email-(\d+)@xyne-test\.local$/;
+  private static readonly TEST_USER_EMAIL_REGEX =
+    /^test-(user|admin)-email-(\d+)@xyne-test\.local$/;
 
   private static parseBooleanFlag(value: unknown): boolean | undefined {
     if (value === true || value === 'true') {
@@ -90,7 +91,8 @@ export class TestAuthController {
     const requestId = `TEST_LOGIN_${Date.now()}`;
 
     try {
-      const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+      const enableDevAuth =
+        process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
       if (!config.isTestEnv && !enableDevAuth) {
         logger.error(`[${requestId}] Test login attempted in non-test environment!`);
         res.status(403).json({
@@ -103,11 +105,12 @@ export class TestAuthController {
       const setAsNewUser = TestAuthController.parseBooleanFlag(
         req.query.setAsNewUser ?? req.body.setAsNewUser
       );
-      const email = typeof req.query.email === 'string'
-        ? req.query.email
-        : typeof req.body.email === 'string'
-          ? req.body.email
-          : null;
+      const email =
+        typeof req.query.email === 'string'
+          ? req.query.email
+          : typeof req.body.email === 'string'
+            ? req.body.email
+            : null;
       const isAdminFlag = req.body.isAdmin === true || req.query.isAdmin === 'true';
       let useFixedUser = req.query.fixed === 'true' || req.body.fixed === true;
 
@@ -163,6 +166,37 @@ export class TestAuthController {
       let isNewUser = true;
       const db = DatabaseClient.getInstance();
 
+      // In local development, prefer the configured admin's existing workspace.
+      // This keeps dev-auth usable with restored databases where the real organization
+      // already exists and creating a second "Test Org" for the same domain is invalid.
+      if (enableDevAuth && process.env.DEFAULT_ADMIN_EMAIL) {
+        const existingDevUser = await db.user.findFirst({
+          where: {
+            email: testUserData.email,
+            ...(config.defaultWorkspaceId ? { workspaceId: config.defaultWorkspaceId } : {}),
+          },
+        });
+
+        if (existingDevUser) {
+          const existingDevWorkspace = await db.workspace.findUnique({
+            where: { id: existingDevUser.workspaceId },
+          });
+          const existingDevOrganization = existingDevWorkspace
+            ? await db.organization.findUnique({
+                where: { orgId: existingDevWorkspace.orgId },
+              })
+            : null;
+
+          if (existingDevWorkspace && existingDevOrganization) {
+            TestAuthController.testOrgId = existingDevOrganization.orgId;
+            TestAuthController.testWorkspaceId = existingDevWorkspace.id;
+            logger.info(
+              `[${requestId}] Reusing configured dev admin workspace: ${existingDevWorkspace.id}`
+            );
+          }
+        }
+      }
+
       // Recover org/workspace IDs from DB if lost after server restart
       if (!TestAuthController.testOrgId) {
         const existingOrg = await db.organization.findUnique({
@@ -182,7 +216,9 @@ export class TestAuthController {
 
       if (!TestAuthController.testOrgId) {
         // First test login: create org + workspace + user
-        logger.info(`[${requestId}] First test login - creating org, workspace, and user: ${testUserData.email}`);
+        logger.info(
+          `[${requestId}] First test login - creating org, workspace, and user: ${testUserData.email}`
+        );
 
         const result = await this.userService.createOrganizationWithUser(
           {
@@ -193,7 +229,7 @@ export class TestAuthController {
           },
           'Test Org',
           'Test Workspace',
-          'GOOGLE',
+          'GOOGLE'
         );
 
         organization = result.organization;
@@ -205,7 +241,9 @@ export class TestAuthController {
         TestAuthController.testWorkspaceId = workspace.id;
       } else {
         // Subsequent test logins: reuse existing org + workspace, reuse user if it already exists
-        logger.info(`[${requestId}] Subsequent test login - adding user to existing org/workspace: ${testUserData.email}`);
+        logger.info(
+          `[${requestId}] Subsequent test login - adding user to existing org/workspace: ${testUserData.email}`
+        );
 
         organization = await db.organization.findUnique({
           where: { orgId: TestAuthController.testOrgId! },
@@ -257,7 +295,9 @@ export class TestAuthController {
       }
 
       const effectiveIsNewUser = setAsNewUser ?? isNewUser;
-      logger.info(`[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id} (dbIsNew: ${isNewUser}, effectiveIsNew: ${effectiveIsNewUser})`);
+      logger.info(
+        `[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id} (dbIsNew: ${isNewUser}, effectiveIsNew: ${effectiveIsNewUser})`
+      );
 
       if (config.isSandboxTestMode) {
         await TestAuthSeeder.seedWorkspaceFixtures(workspace.id, user.id, requestId);
@@ -315,17 +355,24 @@ export class TestAuthController {
                   accessType: AccessType.ADMIN,
                 },
               });
-              logger.info(`[${requestId}] Granted ADMIN access to resource ${resource.name} for user ${user.email}`);
+              logger.info(
+                `[${requestId}] Granted ADMIN access to resource ${resource.name} for user ${user.email}`
+              );
             } else if (existingAccess.accessType !== AccessType.ADMIN) {
               await db.resourceAccess.update({
                 where: { id: existingAccess.id },
                 data: { accessType: AccessType.ADMIN },
               });
-              logger.info(`[${requestId}] Updated access to ADMIN for resource ${resource.name} for user ${user.email}`);
+              logger.info(
+                `[${requestId}] Updated access to ADMIN for resource ${resource.name} for user ${user.email}`
+              );
             }
           }
         } catch (orgError) {
-          logger.error(`[${requestId}] Failed to add user to default organization or grant admin access:`, orgError);
+          logger.error(
+            `[${requestId}] Failed to add user to default organization or grant admin access:`,
+            orgError
+          );
         }
       }
 

@@ -12,6 +12,7 @@ export interface DialogProps {
   title?: ReactNode;
   description?: ReactNode;
   className?: string;
+  overlayClassName?: string;
   /**
    * Tailwind z-index class for the overlay + content. Defaults to `z-50`. Raise
    * it (e.g. `z-[10000]`) when the dialog is opened from inside a higher-z
@@ -62,6 +63,7 @@ export const Dialog = ({
   title,
   description,
   className,
+  overlayClassName,
   zIndexClassName = 'z-50',
   focusRef,
   onOpenAutoFocus,
@@ -118,6 +120,7 @@ export const Dialog = ({
             zIndexClassName,
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            overlayClassName,
           )}
         />
 
@@ -165,10 +168,10 @@ export const Dialog = ({
             className,
           )}
         >
-          {/* Hidden title and description for accessibility */}
-          {title && <DialogPrimitive.Title className='hidden'>{title}</DialogPrimitive.Title>}
+          {/* Visually hidden, but retained in the accessibility tree. */}
+          {title && <DialogPrimitive.Title className='sr-only'>{title}</DialogPrimitive.Title>}
           {description && (
-            <DialogPrimitive.Description className='hidden'>
+            <DialogPrimitive.Description className='sr-only'>
               {description}
             </DialogPrimitive.Description>
           )}

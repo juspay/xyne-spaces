@@ -13,6 +13,7 @@ interface ConfirmDialogProps {
   danger?: boolean;
   loading?: boolean;
   onConfirm: () => void;
+  surface?: 'default' | 'digital-twin';
 }
 
 /**

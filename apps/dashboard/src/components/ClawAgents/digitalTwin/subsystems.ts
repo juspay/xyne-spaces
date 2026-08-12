@@ -3,18 +3,29 @@
 // port centralizes them here.
 
 import {
+  ChatChatting,
   Contact,
   FileText,
   FolderOpen,
   GitBranch,
   GraduationCap,
-  Pencil,
   SlidersHorizontal,
   Users,
-  type LucideIcon,
-} from 'lucide-react';
+  type DigitalTwinIcon,
+} from './icons';
 
 /** The 8 curated subsystems the backend groups memories into. */
+export const SUBSYSTEM_ORDER = [
+  'style',
+  'expertise',
+  'projects',
+  'relationships',
+  'preferences',
+  'decisions',
+  'docs',
+  'context',
+] as const;
+
 export const SUBSYSTEM_LABELS: Record<string, string> = {
   style: 'Communication style',
   expertise: 'Expertise',
@@ -26,8 +37,26 @@ export const SUBSYSTEM_LABELS: Record<string, string> = {
   docs: 'Documents',
 };
 
-export const SUBSYSTEM_ICONS: Record<string, LucideIcon> = {
-  style: Pencil,
+const SUBSYSTEM_ALIASES: Record<string, string> = {
+  communication: 'style',
+  people: 'relationships',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- backend category key
+  'working-style': 'preferences',
+  documents: 'docs',
+  world: 'context',
+  experience: 'context',
+  observation: 'context',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- normalized backend category key
+  'mental-model': 'context',
+};
+
+export const normalizeSubsystem = (subsystem: string): string => {
+  const normalized = subsystem.trim().toLowerCase().replaceAll('_', '-');
+  return SUBSYSTEM_ALIASES[normalized] ?? normalized;
+};
+
+export const SUBSYSTEM_ICONS: Record<string, DigitalTwinIcon> = {
+  style: ChatChatting,
   expertise: GraduationCap,
   projects: FolderOpen,
   relationships: Users,
@@ -39,22 +68,34 @@ export const SUBSYSTEM_ICONS: Record<string, LucideIcon> = {
 
 /** Chart fills (data-viz accents — literal hex is fine per the port convention). */
 export const SUBSYSTEM_COLORS: Record<string, string> = {
-  style: '#6366f1',
+  style: '#d16dff',
   expertise: '#0ea5e9',
   projects: '#10b981',
   relationships: '#f59e0b',
   preferences: '#ec4899',
-  decisions: '#8b5cf6',
+  decisions: '#6366f1',
   context: '#14b8a6',
   docs: '#94a3b8',
 };
 
 export const subsystemLabel = (subsystem: string): string =>
-  SUBSYSTEM_LABELS[subsystem] ?? subsystem;
+  SUBSYSTEM_LABELS[normalizeSubsystem(subsystem)] ?? subsystem;
+
+export const subsystemIcon = (subsystem: string): DigitalTwinIcon | undefined =>
+  SUBSYSTEM_ICONS[normalizeSubsystem(subsystem)];
+
+export const subsystemRank = (subsystem: string): number => {
+  const index = SUBSYSTEM_ORDER.indexOf(
+    normalizeSubsystem(subsystem) as (typeof SUBSYSTEM_ORDER)[number],
+  );
+  return index === -1 ? SUBSYSTEM_ORDER.length : index;
+};
 
 const FALLBACK_PALETTE = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
 export const subsystemColor = (subsystem: string, index = 0): string =>
-  SUBSYSTEM_COLORS[subsystem] ?? FALLBACK_PALETTE[index % FALLBACK_PALETTE.length] ?? '#6366f1';
+  SUBSYSTEM_COLORS[normalizeSubsystem(subsystem)] ??
+  FALLBACK_PALETTE[index % FALLBACK_PALETTE.length] ??
+  '#6366f1';
 
 /** Intake sources shown in the metrics "by source" breakdown. */
 export const SOURCE_LABELS: Record<string, string> = {
@@ -75,21 +116,21 @@ export interface CategoryStyle {
 /** Semantic-token classes for the four Hindsight memory categories. */
 export const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   world: {
-    label: 'WORLD',
-    className: 'border-emerald-500/60 text-emerald-600 dark:text-emerald-400',
+    label: 'World',
+    className: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
   },
   experience: {
-    label: 'EXPERIENCE',
-    className: 'border-primary/60 text-primary',
+    label: 'Experience',
+    className: 'border-primary/25 bg-primary/10 text-foreground',
   },
   observation: {
-    label: 'OBSERVATION',
-    className: 'border-amber-500/60 text-amber-600 dark:text-amber-400',
+    label: 'Observation',
+    className: 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300',
   },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- backend category key
   mental_model: {
-    label: 'MENTAL MODEL',
-    className: 'border-border text-muted-foreground',
+    label: 'Mental model',
+    className: 'border-border bg-muted text-muted-foreground',
   },
 };
 

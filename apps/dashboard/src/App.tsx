@@ -19,7 +19,6 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './hooks/useTheme';
 import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
-import Wallpaper from './components/Wallpaper/Wallpaper';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
@@ -122,7 +121,6 @@ const App = (): ReactElement => {
                 <ShortcutsProvider>
                   <TooltipProvider delayDuration={0}>
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
-                      <Wallpaper />
                       <RouterProvider router={router}></RouterProvider>
                     </main>
                     <SwitchLoadingOverlay />

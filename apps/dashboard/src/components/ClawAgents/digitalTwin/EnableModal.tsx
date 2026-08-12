@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ArrowRight, Brain } from 'lucide-react';
+import { ArrowRight, LockKeyhole } from './icons';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { useEnableDigitalTwin } from '@/hooks/useClawDigitalTwin';
@@ -56,16 +56,14 @@ export const EnableModal = ({
           </Button>
           <Button size='sm' onClick={submit} loading={enabling}>
             {ctaLabel}
-            {!enabling && <ArrowRight className='size-3.5' />}
+            {!enabling && <ArrowRight className='size-4' />}
           </Button>
         </>
       }
     >
-      <div className='flex items-center gap-3.5 rounded-xl border border-border bg-muted/40 p-3.5'>
-        <div className='flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary'>
-          <Brain className='size-5' />
-        </div>
-        <p className='text-xs leading-relaxed text-muted-foreground'>
+      <div className='flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3'>
+        <LockKeyhole className='mt-0.5 size-5 shrink-0 text-primary' />
+        <p className='text-sm leading-6 text-muted-foreground'>
           {mode === 'enable'
             ? 'Your Twin learns from your public Spaces activity — messages you sent, calls you hosted, canvases you authored. Nothing in DMs or private channels is read.'
             : 'Run another pass over your Spaces history. Adds candidate memories to your review queue.'}

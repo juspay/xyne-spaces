@@ -1,115 +1,150 @@
 import { ReactElement, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Flame, RefreshCw } from '@/components/ClawAgents/digitalTwin/icons';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
-import { cn } from '@/utils/classNames';
 import { useClawDigitalTwinStats, useDeleteDigitalTwinMemory } from '@/hooks/useClawDigitalTwin';
-import { CategoryBadge } from '@/components/ClawAgents/digitalTwin/CategoryBadge';
-import { fmtRelative } from '@/components/ClawAgents/digitalTwin/format';
-import type { MemoryRange } from '@/services/claw/digitalTwinTypes';
+import { MemoryCard } from '@/components/ClawAgents/digitalTwin/MemoryCard';
+import type { MemoryBankMemory, MemoryRange } from '@/services/claw/digitalTwinTypes';
 
-const RANGES: MemoryRange[] = ['7d', '30d', '90d'];
-const DELETE_COPY =
-  'This removes it from Hindsight and marks related review rows as rejected. Recall-hit history is retained.';
+const RANGES: Array<{ value: MemoryRange; label: string }> = [
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
+  { value: '90d', label: '90 days' },
+];
 
 const DigitalTwinHotTab = (): ReactElement => {
   const [range, setRange] = useState<MemoryRange>('7d');
-  const { data: stats, isLoading } = useClawDigitalTwinStats(range);
+  const statsQuery = useClawDigitalTwinStats(range);
   const deleteMutation = useDeleteDigitalTwinMemory();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-
-  const hot = stats?.hot ?? [];
+  const hot = statsQuery.data?.hot ?? [];
+  const rangeLabel = RANGES.find(option => option.value === range)?.label.toLowerCase() ?? range;
 
   return (
-    <div className='flex flex-col gap-2.5'>
-      <div className='flex items-center justify-between'>
-        <span className='text-xs text-muted-foreground'>Memories ranked by recall frequency</span>
-        <div className='flex items-center rounded-lg border border-border bg-muted/40 p-0.5'>
-          {RANGES.map(r => (
+    <div className='flex flex-col gap-7'>
+      <div className='grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end'>
+        <div>
+          <p className='dt-accent text-sm font-bold'>Inspect · Most recalled</p>
+          <h2 className='dt-display mt-1 text-2xl font-semibold text-[var(--dt-ink)]'>
+            Knowledge the Twin reaches for
+          </h2>
+          <p className='dt-muted mt-2 max-w-[68ch] text-base'>
+            Recall frequency reveals which memories are doing the most work in grounded replies.
+          </p>
+        </div>
+        <div className='flex items-center rounded-lg border dt-rule p-1' aria-label='Recall range'>
+          {RANGES.map(option => (
             <button
-              key={r}
+              key={option.value}
               type='button'
-              onClick={() => setRange(r)}
+              onClick={() => setRange(option.value)}
+              aria-pressed={range === option.value}
               data-track-category='Claw Agents'
-              data-track-name='Digital Twin hot range'
-              className={cn(
-                'rounded-md px-2.5 py-1 text-[11px] font-medium transition',
-                range === r
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
+              data-track-name='Digital Twin change recall range'
+              className={
+                range === option.value
+                  ? 'dt-control dt-transition rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
+                  : 'dt-control dt-transition rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
+              }
             >
-              {r}
+              {option.label}
             </button>
           ))}
         </div>
       </div>
 
-      {isLoading ? (
-        <div className='flex flex-col gap-1.5'>
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className='h-12 rounded-lg' />
+      {statsQuery.isError && (
+        <div
+          role='alert'
+          className='border border-[var(--dt-danger)] bg-[var(--dt-danger-soft)] p-4'
+        >
+          <p className='font-semibold text-[var(--dt-danger)]'>Recall rankings did not load.</p>
+          <Button
+            variant='outline'
+            className='dt-control mt-3'
+            onClick={() => void statsQuery.refetch()}
+          >
+            <RefreshCw className='size-4' />
+            Try again
+          </Button>
+        </div>
+      )}
+
+      {statsQuery.isLoading ? (
+        <div className='flex flex-col'>
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={index} className='h-28 border-b dt-rule rounded-none' />
           ))}
         </div>
-      ) : hot.length === 0 ? (
-        <div className='flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border py-12 text-center'>
-          <p className='text-[13px] text-muted-foreground'>No hot memories</p>
-          <p className='text-xs text-muted-foreground'>
-            Memories will appear here once they start getting recalled
+      ) : !statsQuery.isError && hot.length === 0 ? (
+        <div className='dt-grid-lines flex min-h-72 flex-col items-start justify-center border-y dt-rule px-8 py-12'>
+          <Flame className='size-7 text-[var(--dt-accent)]' />
+          <h3 className='dt-display mt-5 text-xl font-semibold text-[var(--dt-ink)]'>
+            No memories have been recalled yet
+          </h3>
+          <p className='dt-muted mt-2 max-w-[58ch] text-base'>
+            Rankings appear after approved memories begin grounding Twin replies.
           </p>
         </div>
       ) : (
-        <ol className='flex flex-col gap-1.5'>
-          {hot.map((m, idx) => {
-            const isRejected = m.status === 'rejected';
-            return (
+        !statsQuery.isError && (
+          <ol className='border-t dt-rule'>
+            {hot.map((memory, index) => (
               <li
-                key={m.hindsightMemoryId}
-                className='flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 p-2.5'
+                key={memory.hindsightMemoryId}
+                className='grid grid-cols-[48px_minmax(0,1fr)] gap-4'
               >
-                <span className='mt-px inline-flex h-5 min-w-[26px] shrink-0 items-center justify-center rounded-full bg-background px-1.5 text-[10px] font-semibold tabular-nums text-muted-foreground'>
-                  #{idx + 1}
+                <span className='dt-display text-xl font-semibold tabular-nums text-[var(--dt-muted)]'>
+                  {String(index + 1).padStart(2, '0')}
                 </span>
-                <div className='min-w-0 flex-1'>
-                  <p className='text-xs text-foreground'>{m.content}</p>
-                  <div className='mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground'>
-                    <CategoryBadge category={m.category} />
-                    <span>
-                      {m.hits} recall{m.hits !== 1 ? 's' : ''}
-                    </span>
-                    {m.lastRecalledAt && <span>last recalled {fmtRelative(m.lastRecalledAt)}</span>}
-                    {isRejected && (
-                      <span className='text-destructive'>(deleted from Hindsight)</span>
-                    )}
-                  </div>
+                <div className='min-w-0'>
+                  <MemoryCard
+                    memory={
+                      {
+                        id: memory.hindsightMemoryId,
+                        hindsightMemoryId: memory.hindsightMemoryId,
+                        ...(memory.title ? { title: memory.title } : {}),
+                        category: memory.category,
+                        content: memory.content,
+                        curatorReasoning: null,
+                        curatorConfidence: null,
+                        createdAt: memory.createdAt ?? '',
+                        recallHits7d: memory.hits,
+                        lastRecalledAt: memory.lastRecalledAt,
+                        pipelineEventId: null,
+                      } satisfies MemoryBankMemory
+                    }
+                    recallLabel={`${memory.hits.toLocaleString()} recall${memory.hits === 1 ? '' : 's'} in ${rangeLabel}`}
+                    showTrace={false}
+                    {...(memory.status === 'rejected'
+                      ? {}
+                      : {
+                          onDelete: (hindsightMemoryId: string): void =>
+                            setPendingDelete(hindsightMemoryId),
+                        })}
+                  />
+                  {memory.status === 'rejected' && (
+                    <p className='mb-4 text-sm font-semibold text-[var(--dt-danger)]'>
+                      Deleted from the current ledger; retained here only as recall history.
+                    </p>
+                  )}
                 </div>
-                {!isRejected && (
-                  <button
-                    type='button'
-                    onClick={() => setPendingDelete(m.hindsightMemoryId)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin delete hot memory'
-                    className='shrink-0 text-muted-foreground transition-colors hover:text-destructive'
-                    title='Delete memory'
-                    aria-label='Delete memory'
-                  >
-                    <Trash2 className='size-3.5' />
-                  </button>
-                )}
               </li>
-            );
-          })}
-        </ol>
+            ))}
+          </ol>
+        )
       )}
 
       <ConfirmDialog
+        surface='digital-twin'
         open={pendingDelete !== null}
         onOpenChange={open => {
           if (!open) setPendingDelete(null);
         }}
         title='Delete this memory?'
-        description={DELETE_COPY}
-        confirmLabel='Delete'
+        description='The memory leaves the ledger and related review rows become rejected. Recall history remains for audit purposes.'
+        confirmLabel='Delete memory'
         danger
         loading={deleteMutation.isPending}
         onConfirm={() => {

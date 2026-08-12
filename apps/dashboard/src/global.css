@@ -20,8 +20,14 @@
 
   /* Classic theme - default light theme */
   [data-theme="classic"] {
-    --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper-v2.png");
+    /* Figma Calls—Recordings 243:20622 — soft radial wash (no wallpaper/overlay) */
+    --root-bg: radial-gradient(
+      ellipse at 50% 0%,
+      #f6f5fa 0%,
+      #edf1f9 39.85%,
+      #fffaf7 83.2%,
+      #fcf4f9 100%
+    );
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -154,8 +160,14 @@
 
   /* Classic theme - default theme with current design */
   [data-theme="summer_breeze"] {
-    --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper-v2.png");
+    /* Figma Calls—Recordings 243:20622 — soft radial wash (no wallpaper/overlay) */
+    --root-bg: radial-gradient(
+      ellipse at 50% 0%,
+      #f6f5fa 0%,
+      #edf1f9 39.85%,
+      #fffaf7 83.2%,
+      #fcf4f9 100%
+    );
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -280,9 +292,8 @@
 
   /* Midnight theme - dark theme variant */
   [data-theme="midnight"] {
-    --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper-midnight.png");
-    --background: 232 9% 11%; /* #1A1A1F */
+    --root-bg: #22232a;
+    --background: 232 11% 15%; /* #22232A */
     --foreground: 210 8% 93%;
     --card: 233 11% 15%; /* #22232A */
     --card-foreground: 210 8% 93%;
@@ -312,9 +323,8 @@
     --sidebar: transparent;
     --sidebar-background-blur: 12.5px;
     /* Sidebar item states matched to Figma "Agent Hub" midnight frames.
-       Over the wallpaper these are translucent white so the backdrop shows
-       through: default text = white @ 60%, selected bg = white @ 12%,
-       selected border = white @ 20%, selected text = white. */
+       Translucent white over --root-bg: default text = white @ 60%,
+       selected bg = white @ 12%, selected border = white @ 20%, selected text = white. */
     --sidebar-foreground: rgba(255, 255, 255, 0.6);
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
@@ -478,13 +488,6 @@
     cursor: pointer;
     opacity: 1;
     filter: brightness(0) saturate(100%);
-  }
-
-  /* Wallpaper layer — see components/Wallpaper/Wallpaper.tsx. Reads a per-theme
-     CSS variable, so adding a theme only means setting --wallpaper-image in its
-     block. */
-  .app-wallpaper-image {
-    background-image: var(--wallpaper-image);
   }
 
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {

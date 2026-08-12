@@ -37,6 +37,8 @@ import DigitalTwinProposalsTab from './ClawAgentsScreen/tabs/DigitalTwinProposal
 import DigitalTwinRecallTab from './ClawAgentsScreen/tabs/DigitalTwinRecallTab';
 import DigitalTwinGraphTab from './ClawAgentsScreen/tabs/DigitalTwinGraphTab';
 import DigitalTwinSettingsTab from './ClawAgentsScreen/tabs/DigitalTwinSettingsTab';
+import DigitalTwinPersonaTab from './ClawAgentsScreen/tabs/DigitalTwinPersonaTab';
+import DigitalTwinActivityTab from './ClawAgentsScreen/tabs/DigitalTwinActivityTab';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
@@ -1161,6 +1163,8 @@ export const router = createBrowserRouter([
                       { path: 'graph', element: <DigitalTwinGraphTab /> },
                       { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
                       { path: 'settings', element: <DigitalTwinSettingsTab /> },
+                      { path: 'persona', element: <DigitalTwinPersonaTab /> },
+                      { path: 'activity', element: <DigitalTwinActivityTab /> },
                     ],
                   },
                   { path: 'metrics', element: <ClawMetricsScreen /> },

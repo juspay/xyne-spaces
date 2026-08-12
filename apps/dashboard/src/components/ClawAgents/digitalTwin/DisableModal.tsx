@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useDisableDigitalTwin } from '@/hooks/useClawDigitalTwin';
 import { DigitalTwinModal } from './DigitalTwinModal';
@@ -10,11 +10,10 @@ export const DisableModal = ({
   open: boolean;
   onClose: () => void;
 }): ReactElement => {
-  const [deleteMemories, setDeleteMemories] = useState(false);
   const disableMutation = useDisableDigitalTwin();
 
   const submit = (): void => {
-    disableMutation.mutate({ deleteMemories }, { onSuccess: () => onClose() });
+    disableMutation.mutate({ deleteMemories: false }, { onSuccess: () => onClose() });
   };
 
   return (
@@ -22,7 +21,7 @@ export const DisableModal = ({
       open={open}
       onClose={onClose}
       title='Disable Digital Twin'
-      description='Disabling stops the Twin from responding to mentions and pauses the nightly curator. Your approved memories and candidates remain unless you choose to delete them.'
+      description='Disabling stops the Twin from responding to mentions and pauses nightly learning. Your approved memories, Persona files, and review history remain available.'
       footer={
         <>
           <Button variant='ghost' size='sm' onClick={onClose} disabled={disableMutation.isPending}>
@@ -39,19 +38,10 @@ export const DisableModal = ({
         </>
       }
     >
-      <label className='flex cursor-pointer items-center gap-2 rounded-lg border border-border p-2.5'>
-        <input
-          type='checkbox'
-          checked={deleteMemories}
-          onChange={e => setDeleteMemories(e.target.checked)}
-          data-track-category='Claw Agents'
-          data-track-name='Digital Twin disable delete-all toggle'
-          className='accent-destructive'
-        />
-        <span className='text-xs text-foreground'>
-          Also delete all my memories and candidates — this cannot be undone
-        </span>
-      </label>
+      <p className='rounded-lg border border-border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground'>
+        No data is deleted by this action. Use Data controls in Settings if you want to remove
+        memories separately.
+      </p>
     </DigitalTwinModal>
   );
 };

@@ -4,7 +4,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import { API_BASE_URL, isTestEnv } from '../config';
+import { API_BASE_URL, isLocalDevAuthEnabled, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -246,6 +246,10 @@ export const authMachine = createMachine(
           {
             target: 'validatingSession',
             guard: 'hasStoredSession',
+          },
+          {
+            target: 'testAuthenticating',
+            guard: 'shouldUseDevelopmentAuth',
           },
           {
             target: 'unauthenticated',
@@ -708,14 +712,21 @@ export const authMachine = createMachine(
               }),
             },
           ],
-          onError: {
-            target: 'unauthenticated',
-            actions: [
-              'clearSessionCookies',
-              { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
-              assign(() => createClearedContext()),
-            ],
-          },
+          onError: [
+            {
+              target: 'testAuthenticating',
+              guard: 'shouldUseDevelopmentAuth',
+              actions: ['clearSessionCookies', assign(() => createClearedContext())],
+            },
+            {
+              target: 'unauthenticated',
+              actions: [
+                'clearSessionCookies',
+                { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
+                assign(() => createClearedContext()),
+              ],
+            },
+          ],
         },
       },
       authenticated: {
@@ -769,7 +780,7 @@ export const authMachine = createMachine(
         on: {
           GOOGLE_SIGNIN: [
             {
-              guard: 'isTestEnvironment',
+              guard: 'shouldUseDevelopmentAuth',
               target: 'testAuthenticating',
             },
             {
@@ -1104,7 +1115,7 @@ export const authMachine = createMachine(
         const userId = localStorage.getItem('user_id');
         return !!userId;
       },
-      isTestEnvironment: () => isTestEnv,
+      shouldUseDevelopmentAuth: () => isTestEnv || isLocalDevAuthEnabled,
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.user?.id;

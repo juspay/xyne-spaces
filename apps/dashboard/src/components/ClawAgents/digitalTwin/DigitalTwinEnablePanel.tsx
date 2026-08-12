@@ -1,224 +1,271 @@
 import { ReactElement } from 'react';
-import { ArrowRight, Brain, Loader2, MessageSquare, ShieldCheck } from 'lucide-react';
+import { ArrowRight, BookOpenCheck, Check, LockKeyhole, MessageSquareText } from './icons';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
-import { cn } from '@/utils/classNames';
+import { Input } from '@/components/ui/Input';
 import { useEnableDigitalTwin } from '@/hooks/useClawDigitalTwin';
 import { isoDate, QUICK_DAYS, useDigitalTwinRange } from './useDigitalTwinRange';
 
-const HIGHLIGHTS = [
+const PRINCIPLES = [
   {
-    icon: Brain,
-    title: 'Learns from your work',
-    body: 'Reads your public Spaces activity — messages you sent, calls you hosted, canvases you authored.',
+    number: '01',
+    icon: BookOpenCheck,
+    title: 'You decide what becomes memory',
+    body: 'New knowledge normally waits in Review before it enters the durable ledger.',
   },
   {
-    icon: ShieldCheck,
-    title: 'You approve every memory',
-    body: 'Nothing is saved until you review it. DMs and private channels are never read.',
+    number: '02',
+    icon: LockKeyhole,
+    title: 'Private conversations stay private',
+    body: 'The Twin reads your public Spaces messages, hosted calls, and authored canvases—not DMs or private channels.',
   },
   {
-    icon: MessageSquare,
-    title: 'Speaks in your voice',
-    body: 'When someone mentions you, it drafts a reply grounded only in memories you approved.',
+    number: '03',
+    icon: MessageSquareText,
+    title: 'Replies remain grounded and inspectable',
+    body: 'When mentioned, it drafts in your voice using approved knowledge and a traceable learning history.',
   },
-];
+] as const;
 
-/**
- * In-page enable experience shown when the Twin is off. On enable the status
- * query invalidates and the screen swaps to the normal sections automatically.
- */
 export const DigitalTwinEnablePanel = (): ReactElement => {
-  const r = useDigitalTwinRange('enable', true);
-  const enableMutation = useEnableDigitalTwin();
-
-  const submit = (): void => {
-    enableMutation.mutate(
-      { backfill: r.range },
-      { onSuccess: () => toast.success('Digital Twin enabled') },
-    );
-  };
-
-  const activeDescription =
-    r.selection === 'custom'
-      ? r.customDays > 0
-        ? `${r.customDays.toLocaleString()} days of history`
-        : 'Pick a start and end date'
-      : (r.activePreset?.sublabel ?? '');
+  const range = useDigitalTwinRange('enable', true);
+  const enable = useEnableDigitalTwin();
+  const customInvalid =
+    range.selection === 'custom' &&
+    (!range.customFrom || !range.customTo || range.customFrom > range.customTo);
 
   return (
-    <div className='w-full max-w-5xl animate-in fade-in-0 slide-in-from-bottom-1 duration-500 motion-reduce:animate-none'>
-      <div className='grid gap-x-16 gap-y-12 lg:grid-cols-2'>
-        {/* Narrative */}
-        <div className='flex flex-col'>
-          <p className='text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground'>
-            Personal AI
-          </p>
-          <h2 className='mt-3 text-2xl font-semibold tracking-tight text-foreground'>
-            Enable your Digital Twin
-          </h2>
-          <p className='mt-3 max-w-md text-sm leading-relaxed text-muted-foreground'>
-            It learns how you work and communicate from your Spaces history. Every memory is
-            reviewed and approved by you before it&apos;s ever used.
-          </p>
+    <div className='grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(420px,1.1fr)]'>
+      <section className='rounded-xl border border-border bg-card p-5'>
+        <p className='text-xs font-medium text-primary'>Personal AI, with a paper trail</p>
+        <h2 className='mt-1 text-lg font-semibold text-foreground'>
+          Build a Twin you can inspect and correct
+        </h2>
+        <p className='mt-2 max-w-[58ch] text-sm leading-6 text-muted-foreground'>
+          Digital Twin learns the durable context behind your work, then uses only the knowledge you
+          allow when it speaks on your behalf.
+        </p>
 
-          <ul className='mt-9 flex flex-col gap-6'>
-            {HIGHLIGHTS.map(highlight => {
-              const IconComponent = highlight.icon;
+        <ol className='mt-6 flex flex-col gap-2'>
+          {PRINCIPLES.map(principle => {
+            const Icon = principle.icon;
+            return (
+              <li
+                key={principle.number}
+                className='flex gap-3 rounded-lg border border-border bg-muted/20 p-3'
+              >
+                <div className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background'>
+                  <Icon className='size-4 text-muted-foreground' />
+                </div>
+                <div>
+                  <h3 className='text-sm font-medium text-foreground'>{principle.title}</h3>
+                  <p className='mt-1 max-w-[58ch] text-xs leading-5 text-muted-foreground'>
+                    {principle.body}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      <section
+        className='rounded-xl border border-border bg-card p-5'
+        aria-labelledby='enable-history-heading'
+      >
+        <p className='text-xs font-medium text-muted-foreground'>Start with relevant context</p>
+        <h3 id='enable-history-heading' className='mt-1 text-lg font-semibold text-foreground'>
+          Choose how much history to learn from
+        </h3>
+        <p className='mt-1 text-sm leading-6 text-muted-foreground'>
+          Six months is recommended. You can skip history and begin learning from today, or import
+          more later.
+        </p>
+
+        <fieldset className='mt-6'>
+          <legend className='sr-only'>History range</legend>
+          <div className='grid gap-2 sm:grid-cols-2'>
+            {range.presets.map((preset, index) => {
+              const selected = range.selection === 'preset' && range.presetIdx === index;
               return (
-                <li key={highlight.title} className='flex gap-3'>
-                  <IconComponent className='mt-0.5 size-4 shrink-0 text-primary' />
-                  <div>
-                    <p className='text-[13px] font-medium text-foreground'>{highlight.title}</p>
-                    <p className='mt-1 text-xs leading-relaxed text-muted-foreground'>
-                      {highlight.body}
-                    </p>
-                  </div>
-                </li>
+                <button
+                  key={preset.label}
+                  type='button'
+                  onClick={() => range.selectPreset(index)}
+                  aria-pressed={selected}
+                  className={
+                    selected
+                      ? 'flex min-h-20 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
+                      : 'flex min-h-20 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent'
+                  }
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin enable range preset'
+                >
+                  <span
+                    className={
+                      selected
+                        ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
+                        : 'flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
+                    }
+                  >
+                    {selected && <Check className='size-4' />}
+                  </span>
+                  <span>
+                    <span className='block text-sm font-medium text-foreground'>
+                      {preset.label}
+                    </span>
+                    <span className='mt-1 block text-xs text-muted-foreground'>
+                      {preset.sublabel}
+                    </span>
+                  </span>
+                </button>
               );
             })}
-          </ul>
-        </div>
-
-        {/* Configurator */}
-        <div className='flex max-w-md flex-col'>
-          <h3 className='text-sm font-semibold text-foreground'>Backfill your history</h3>
-          <p className='mt-1 text-xs leading-relaxed text-muted-foreground'>
-            Seed your Twin from past activity, or skip and start learning from today. You can run a
-            backfill any time.
-          </p>
-
-          {/* Time-range segmented selector */}
-          <div className='mt-6'>
-            <p className='mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-              How far back
-            </p>
-            <div className='inline-flex flex-wrap items-center gap-1 rounded-full bg-muted p-1'>
-              {r.presets.map((preset, i) => {
-                const active = r.selection === 'preset' && r.presetIdx === i;
-                return (
-                  <button
-                    key={preset.short}
-                    type='button'
-                    onClick={() => r.selectPreset(i)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin enable range preset'
-                    className={cn(
-                      'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                      active
-                        ? 'bg-foreground text-background'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {preset.short}
-                  </button>
-                );
-              })}
-              <button
-                type='button'
-                onClick={r.selectCustom}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin enable range custom'
-                className={cn(
-                  'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                  r.selection === 'custom'
-                    ? 'bg-foreground text-background'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
+            <button
+              type='button'
+              onClick={range.selectCustom}
+              aria-pressed={range.selection === 'custom'}
+              className={
+                range.selection === 'custom'
+                  ? 'flex min-h-20 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
+                  : 'flex min-h-20 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent'
+              }
+              data-track-category='Claw Agents'
+              data-track-name='Digital Twin enable range custom'
+            >
+              <span
+                className={
+                  range.selection === 'custom'
+                    ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
+                    : 'flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
+                }
               >
-                Custom
-              </button>
-            </div>
-            {activeDescription && (
-              <p className='mt-2 text-xs text-muted-foreground'>{activeDescription}</p>
-            )}
-          </div>
-
-          {/* Custom date inputs */}
-          {r.selection === 'custom' && (
-            <div className='mt-4 flex flex-col gap-2.5'>
-              <div className='flex items-center gap-2'>
-                <input
-                  type='date'
-                  value={r.customFrom}
-                  max={r.customTo}
-                  onChange={e => r.setCustomFrom(e.target.value)}
-                  data-track-category='Claw Agents'
-                  data-track-name='Digital Twin enable from date'
-                  className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
-                />
-                <span className='shrink-0 text-[11px] text-muted-foreground'>→</span>
-                <input
-                  type='date'
-                  value={r.customTo}
-                  min={r.customFrom}
-                  max={isoDate(new Date())}
-                  onChange={e => r.setCustomTo(e.target.value)}
-                  data-track-category='Claw Agents'
-                  data-track-name='Digital Twin enable to date'
-                  className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
-                />
-              </div>
-              <div className='flex flex-wrap gap-1.5'>
-                {QUICK_DAYS.map(n => (
-                  <button
-                    key={n}
-                    type='button'
-                    onClick={() => r.applyQuickDays(n)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin enable quick days'
-                    className='rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                  >
-                    last {n}d
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Estimate — quiet, inline */}
-          <div className='mt-6 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground'>
-            {r.estimateLoading ? (
-              <span className='inline-flex items-center gap-1.5'>
-                <Loader2 className='size-3 animate-spin' />
-                Estimating scope…
+                {range.selection === 'custom' && <Check className='size-4' />}
               </span>
-            ) : !r.range ? (
-              <span>No history imported — your Twin starts learning from today.</span>
-            ) : r.estimate ? (
               <span>
-                Reviews about{' '}
-                <span className='font-medium tabular-nums text-foreground'>
-                  {(r.estimate.messages ?? 0).toLocaleString()}
-                </span>{' '}
-                messages,{' '}
-                <span className='font-medium tabular-nums text-foreground'>
-                  {(r.estimate.calls ?? 0).toLocaleString()}
-                </span>{' '}
-                calls and{' '}
-                <span className='font-medium tabular-nums text-foreground'>
-                  {(r.estimate.canvases ?? 0).toLocaleString()}
-                </span>{' '}
-                canvases · ~${(r.estimate.estCostUSD ?? 0).toFixed(2)} LLM cost, charged to your
-                org.
+                <span className='block text-sm font-medium text-foreground'>Custom range</span>
+                <span className='mt-1 block text-xs text-muted-foreground'>Choose exact dates</span>
               </span>
-            ) : (
-              <span>Choose a range to preview the scope.</span>
-            )}
+            </button>
           </div>
+        </fieldset>
 
-          {/* CTA */}
-          <div className='mt-6 flex flex-wrap items-center gap-x-4 gap-y-2'>
-            <Button onClick={submit} loading={enableMutation.isPending}>
-              {enableMutation.isPending ? 'Enabling…' : 'Enable & start'}
-              {!enableMutation.isPending && <ArrowRight className='size-4' />}
-            </Button>
-            <span className='text-[11px] text-muted-foreground'>
-              Disable or delete everything any time.
-            </span>
+        {range.selection === 'custom' && (
+          <div className='mt-5'>
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <label htmlFor='digital-twin-enable-from'>
+                <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
+                <Input
+                  id='digital-twin-enable-from'
+                  type='date'
+                  value={range.customFrom}
+                  max={range.customTo}
+                  onChange={event => range.setCustomFrom(event.target.value)}
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin enable custom start date'
+                />
+              </label>
+              <label htmlFor='digital-twin-enable-to'>
+                <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
+                <Input
+                  id='digital-twin-enable-to'
+                  type='date'
+                  value={range.customTo}
+                  min={range.customFrom}
+                  max={isoDate(new Date())}
+                  onChange={event => range.setCustomTo(event.target.value)}
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin enable custom end date'
+                />
+              </label>
+            </div>
+            <div className='mt-3 flex flex-wrap gap-2'>
+              {QUICK_DAYS.map(days => (
+                <Button
+                  key={days}
+                  variant='outline'
+                  size='sm'
+                  onClick={() => range.applyQuickDays(days)}
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin enable quick date range'
+                >
+                  Last {days} days
+                </Button>
+              ))}
+            </div>
           </div>
+        )}
+
+        <div className='mt-5 rounded-lg border border-border bg-muted/20 p-3' aria-live='polite'>
+          {range.estimateLoading ? (
+            <p className='text-sm text-muted-foreground'>Estimating the import scope…</p>
+          ) : !range.range ? (
+            <p className='text-sm text-muted-foreground'>
+              No history imported. Learning starts from today.
+            </p>
+          ) : range.estimate ? (
+            <>
+              <dl className='grid grid-cols-3 divide-x divide-border'>
+                {[
+                  ['Messages', range.estimate.messages],
+                  ['Calls', range.estimate.calls],
+                  ['Canvases', range.estimate.canvases],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className='px-3 py-1'>
+                    <dt className='text-xs text-muted-foreground'>{String(label)}</dt>
+                    <dd className='mt-1 text-base font-semibold tabular-nums text-foreground'>
+                      {Number(value).toLocaleString()}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <p className='mt-3 text-xs leading-5 text-muted-foreground'>
+                About {range.estimate.estCandidates.toLocaleString()} candidate memories · estimated
+                ${range.estimate.estCostUSD.toFixed(2)} LLM cost charged to your organization.
+              </p>
+            </>
+          ) : (
+            <p className='text-sm text-muted-foreground'>
+              Choose a valid range to preview the scope.
+            </p>
+          )}
         </div>
-      </div>
+
+        {enable.isError && (
+          <div
+            role='alert'
+            className='mt-5 rounded-lg border border-destructive/30 bg-destructive/5 p-4'
+          >
+            <p className='text-sm font-semibold text-destructive'>
+              Digital Twin could not be enabled.
+            </p>
+            <p className='mt-1 text-sm text-muted-foreground'>
+              {enable.error.message} Your history choice has been kept; use the button below to try
+              again.
+            </p>
+          </div>
+        )}
+
+        <Button
+          className='mt-5 w-full'
+          disabled={customInvalid}
+          loading={enable.isPending}
+          onClick={() =>
+            enable.mutate(
+              { backfill: range.range },
+              { onSuccess: () => toast.success('Digital Twin enabled') },
+            )
+          }
+          data-track-category='Claw Agents'
+          data-track-name='Digital Twin enable'
+        >
+          Enable and start
+          <ArrowRight className='size-4' />
+        </Button>
+        <p className='mt-3 text-center text-xs text-muted-foreground'>
+          You can pause imports, edit memories, or disable the Twin at any time.
+        </p>
+      </section>
     </div>
   );
 };

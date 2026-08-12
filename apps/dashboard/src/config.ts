@@ -6,6 +6,8 @@ export const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 export const isSandboxLocal = hostname.endsWith('.localhost');
 export const isTestEnv =
   import.meta.env.MODE === 'test' || hostname === 'dashboard' || isSandboxLocal;
+export const isLocalDevAuthEnabled =
+  import.meta.env.DEV && isLocalhost && import.meta.env['VITE_ENABLE_DEV_AUTH'] === 'true';
 
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;

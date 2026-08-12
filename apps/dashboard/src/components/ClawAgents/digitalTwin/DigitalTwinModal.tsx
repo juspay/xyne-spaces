@@ -31,15 +31,20 @@ export const DigitalTwinModal = ({
       if (!next) onClose();
     }}
     title={title}
+    description={description}
     className={cn('max-w-lg', className)}
   >
-    <div className='flex max-h-[85vh] flex-col gap-4 overflow-y-auto p-6'>
-      <div className='flex flex-col gap-1'>
+    <div className='flex max-h-[85vh] flex-col gap-5 overflow-y-auto p-6'>
+      <div className='flex flex-col gap-2'>
         <h2 className='text-base font-semibold text-foreground'>{title}</h2>
-        {description && <p className='text-sm text-muted-foreground'>{description}</p>}
+        {description && <p className='text-sm leading-6 text-muted-foreground'>{description}</p>}
       </div>
       {children}
-      {footer && <div className='flex items-center justify-end gap-2 pt-1'>{footer}</div>}
+      {footer && (
+        <div className='flex items-center justify-end gap-2 border-t border-border pt-4'>
+          {footer}
+        </div>
+      )}
     </div>
   </Dialog>
 );

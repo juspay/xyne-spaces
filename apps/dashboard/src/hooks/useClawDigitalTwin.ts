@@ -1,24 +1,38 @@
-import { useEffect, useRef, useState } from 'react';
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
+  type InfiniteData,
+  type UseInfiniteQueryResult,
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
 import { clawErrorText } from '@/services/claw/clawRequest';
+import { isDigitalTwinDemoMode } from '@/services/claw/digitalTwinDemo';
 import {
   approveDigitalTwinCluster,
+  deleteDigitalTwinMemories,
+  deleteDigitalTwinMemoryFile,
   disableDigitalTwin,
   enableDigitalTwin,
   getDigitalTwinCluster,
   getDigitalTwinEstimate,
   getDigitalTwinMetrics,
+  getDigitalTwinPipelineEvent,
   getDigitalTwinStatus,
   listDigitalTwinClusters,
+  listDigitalTwinMemoryFiles,
+  listDigitalTwinPipelineEvents,
   patchDigitalTwinCandidate,
+  pauseDigitalTwinBackfill,
+  resumeDigitalTwinBackfill,
+  saveDigitalTwinMemoryFile,
+  setDigitalTwinMemoryFileLoad,
+  synthesizeDigitalTwin,
   updateDigitalTwinSettings,
   uploadDigitalTwinMd,
 } from '@/services/claw/digitalTwinService';
@@ -32,6 +46,8 @@ import {
 import type {
   DigitalTwinCandidate,
   DigitalTwinEstimate,
+  DigitalTwinMemoryFile,
+  DigitalTwinMemoryFilesResponse,
   DigitalTwinMetrics,
   DigitalTwinStatus,
   DigitalTwinSubsystemEdge,
@@ -39,6 +55,9 @@ import type {
   MemoryBankMemory,
   MemoryBankStats,
   MemoryRange,
+  PipelineEventDetail,
+  PipelineEventFilters,
+  PipelineEventsPage,
   RecallResult,
 } from '@/services/claw/digitalTwinTypes';
 
@@ -47,76 +66,77 @@ export interface DigitalTwinProposalGroup {
   candidates: DigitalTwinCandidate[];
 }
 
+export interface DigitalTwinProposalResult {
+  groups: DigitalTwinProposalGroup[];
+  failedSubsystems: string[];
+}
+
+export interface DigitalTwinMemoryQuery {
+  limit?: number;
+  offset?: number;
+  subsystem?: string;
+  search?: string;
+}
+
 // ── Query keys ────────────────────────────────────────────────────────────────
 
-const statusKey = (userId?: string) => ['claw-dt-status', userId] as const;
-const memoriesKey = (userId?: string, subsystem?: string | null) =>
-  ['claw-dt-memories', userId, subsystem ?? null] as const;
+const dataMode = (): 'demo' | 'live' => (isDigitalTwinDemoMode() ? 'demo' : 'live');
+const statusKey = (userId?: string) => ['claw-dt-status', userId, dataMode()] as const;
+const memoriesKey = (userId?: string, opts: DigitalTwinMemoryQuery = {}) =>
+  [
+    'claw-dt-memories',
+    userId,
+    opts.limit ?? null,
+    opts.offset ?? null,
+    opts.subsystem ?? null,
+    opts.search ?? '',
+    dataMode(),
+  ] as const;
+const infiniteMemoriesKey = (userId?: string, opts: Omit<DigitalTwinMemoryQuery, 'offset'> = {}) =>
+  [
+    'claw-dt-memories',
+    userId,
+    'infinite',
+    opts.limit ?? null,
+    opts.subsystem ?? null,
+    opts.search ?? '',
+    dataMode(),
+  ] as const;
 const statsKey = (userId?: string, range?: MemoryRange) =>
-  ['claw-dt-stats', userId, range] as const;
-const proposalsKey = (userId?: string) => ['claw-dt-proposals', userId] as const;
-const graphKey = (userId?: string) => ['claw-dt-graph', userId] as const;
+  ['claw-dt-stats', userId, range, dataMode()] as const;
+const proposalsKey = (userId?: string) => ['claw-dt-proposals', userId, dataMode()] as const;
+const graphKey = (userId?: string) => ['claw-dt-graph', userId, dataMode()] as const;
 const metricsKey = (userId?: string, days?: number | null) =>
-  ['claw-dt-metrics', userId, days ?? null] as const;
+  ['claw-dt-metrics', userId, days ?? null, dataMode()] as const;
 const estimateKey = (userId?: string, from?: string, to?: string) =>
-  ['claw-dt-estimate', userId, from, to] as const;
+  ['claw-dt-estimate', userId, from, to, dataMode()] as const;
+const filesKey = (userId?: string) => ['claw-dt-files', userId, dataMode()] as const;
+const activityKey = (userId?: string, filters: PipelineEventFilters = {}) =>
+  [
+    'claw-dt-activity',
+    userId,
+    filters.runType ?? '',
+    filters.status ?? '',
+    filters.sourceKind ?? '',
+    dataMode(),
+  ] as const;
+const activityDetailKey = (userId?: string, id?: string | null) =>
+  ['claw-dt-activity-detail', userId, id ?? null, dataMode()] as const;
 
-const backfillRunning = (status: DigitalTwinStatus | undefined): boolean =>
-  !!status?.backfillState && Object.values(status.backfillState).some(s => !s.complete);
+const backgroundWorkRunning = (status: DigitalTwinStatus | undefined): boolean => {
+  if (status?.memoryDeleteInProgress) return true;
+  return !!status?.backfill?.overall.running;
+};
 
-// ── Status (with polling + stall detection) ───────────────────────────────────
+const invalidateDigitalTwin = (
+  qc: ReturnType<typeof useQueryClient>,
+  userId: string | undefined,
+  keys: string[],
+): void => {
+  keys.forEach(key => void qc.invalidateQueries({ queryKey: [key, userId] }));
+};
 
-/** Stringify cursor values for non-complete sources so we can detect movement. */
-function cursorSnapshot(status: DigitalTwinStatus | undefined): string {
-  if (!status?.backfillState) return '';
-  return Object.entries(status.backfillState)
-    .filter(([, entry]) => !entry.complete)
-    .map(([key, entry]) => `${key}:${entry.cursor ?? ''}`)
-    .sort()
-    .join('|');
-}
-
-/**
- * Ported from the reference `useDigitalTwin` stall detector: true once the
- * backfill has run for ≥3 consecutive polls (~30s) with no cursor movement on
- * any non-complete source. Recomputed each time react-query refetches (keyed on
- * `dataUpdatedAt`). Only counts after a cursor has moved at least once, so the
- * initial "" → "source:cursor" transition never counts as a stall.
- */
-function useBackfillStall(status: DigitalTwinStatus | undefined, dataUpdatedAt: number): boolean {
-  const stalledPollsRef = useRef(0);
-  const lastSnapshotRef = useRef('');
-  const hasSeenMovementRef = useRef(false);
-  const [stalled, setStalled] = useState(false);
-
-  useEffect(() => {
-    if (!status) return;
-    const snap = cursorSnapshot(status);
-    const hasNonComplete = status.backfillState
-      ? Object.values(status.backfillState).some(e => !e.complete)
-      : false;
-
-    if (!hasNonComplete) {
-      stalledPollsRef.current = 0;
-      lastSnapshotRef.current = '';
-      hasSeenMovementRef.current = false;
-      setStalled(false);
-    } else if (snap !== lastSnapshotRef.current) {
-      stalledPollsRef.current = 0;
-      if (lastSnapshotRef.current !== '') hasSeenMovementRef.current = true;
-      lastSnapshotRef.current = snap;
-      setStalled(false);
-    } else if (hasSeenMovementRef.current) {
-      stalledPollsRef.current += 1;
-      if (stalledPollsRef.current >= 3) setStalled(true);
-    }
-    // dataUpdatedAt changes on every (even unchanged) refetch, so a frozen
-    // cursor still advances the stall counter each poll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataUpdatedAt]);
-
-  return stalled;
-}
+// ── Reads ─────────────────────────────────────────────────────────────────────
 
 export type UseClawDigitalTwinStatusResult = UseQueryResult<DigitalTwinStatus, Error> & {
   backfillStalled: boolean;
@@ -124,26 +144,65 @@ export type UseClawDigitalTwinStatusResult = UseQueryResult<DigitalTwinStatus, E
 
 export const useClawDigitalTwinStatus = (): UseClawDigitalTwinStatusResult => {
   const { user } = useAuth();
+  const qc = useQueryClient();
+  const previouslyRunning = useRef(false);
   const query = useQuery({
     queryKey: statusKey(user?.id),
     queryFn: () => getDigitalTwinStatus(user!.id),
     enabled: !!user?.id,
-    // Poll every 10s while a backfill is in progress; idle otherwise.
-    refetchInterval: q => (backfillRunning(q.state.data) ? 10_000 : false),
+    refetchInterval: q => (backgroundWorkRunning(q.state.data) ? 2_000 : false),
   });
-  const backfillStalled = useBackfillStall(query.data, query.dataUpdatedAt);
-  return { ...query, backfillStalled };
+  const running = backgroundWorkRunning(query.data);
+
+  useEffect((): void => {
+    if (previouslyRunning.current && !running) {
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-status',
+        'claw-dt-files',
+        'claw-dt-memories',
+        'claw-dt-activity',
+      ]);
+    }
+    previouslyRunning.current = running;
+  }, [qc, running, user?.id]);
+
+  return {
+    ...query,
+    backfillStalled: query.data?.backfill?.overall.stalled ?? false,
+  };
 };
 
-// ── Reads ─────────────────────────────────────────────────────────────────────
-
 export const useClawDigitalTwinMemories = (
-  opts: { limit?: number; offset?: number; subsystem?: string } = {},
+  opts: DigitalTwinMemoryQuery = {},
 ): UseQueryResult<{ memories: MemoryBankMemory[]; total: number }, Error> => {
   const { user } = useAuth();
   return useQuery({
-    queryKey: memoriesKey(user?.id, opts.subsystem),
+    queryKey: memoriesKey(user?.id, opts),
     queryFn: () => listDigitalTwinMemories(user!.id, opts),
+    enabled: !!user?.id,
+    placeholderData: previous => previous,
+    staleTime: 30 * 1000,
+  });
+};
+
+export const useInfiniteClawDigitalTwinMemories = (
+  opts: Omit<DigitalTwinMemoryQuery, 'offset'> = {},
+): UseInfiniteQueryResult<InfiniteData<{ memories: MemoryBankMemory[]; total: number }>, Error> => {
+  const { user } = useAuth();
+  const limit = opts.limit ?? 50;
+  return useInfiniteQuery({
+    queryKey: infiniteMemoriesKey(user?.id, { ...opts, limit }),
+    queryFn: ({ pageParam }) =>
+      listDigitalTwinMemories(user!.id, {
+        ...opts,
+        limit,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((count, page) => count + page.memories.length, 0);
+      return lastPage.memories.length > 0 && loaded < lastPage.total ? loaded : undefined;
+    },
     enabled: !!user?.id,
     staleTime: 30 * 1000,
   });
@@ -161,28 +220,32 @@ export const useClawDigitalTwinStats = (
   });
 };
 
-export const useClawDigitalTwinProposals = (): UseQueryResult<
-  DigitalTwinProposalGroup[],
-  Error
-> => {
+export const useClawDigitalTwinProposals = (): UseQueryResult<DigitalTwinProposalResult, Error> => {
   const { user } = useAuth();
   return useQuery({
     queryKey: proposalsKey(user?.id),
     queryFn: async () => {
       const userId = user!.id;
       const { clusters } = await listDigitalTwinClusters(userId);
-      const withPending = clusters.filter(c => c.pending > 0);
-      const results = await Promise.all(
-        withPending.map(cl =>
-          getDigitalTwinCluster(userId, cl.subsystem)
-            .then(data => ({
-              subsystem: cl.subsystem,
-              candidates: data.candidates.filter(c => c.status === 'pending'),
-            }))
-            .catch(() => ({ subsystem: cl.subsystem, candidates: [] as DigitalTwinCandidate[] })),
-        ),
+      const withPending = clusters.filter(cluster => cluster.pending > 0);
+      const settled = await Promise.allSettled(
+        withPending.map(cluster => getDigitalTwinCluster(userId, cluster.subsystem)),
       );
-      return results.filter(r => r.candidates.length > 0);
+      const failedSubsystems: string[] = [];
+      const groups: DigitalTwinProposalGroup[] = [];
+      settled.forEach((result, index) => {
+        const subsystem = withPending[index]?.subsystem;
+        if (!subsystem) return;
+        if (result.status === 'rejected') {
+          failedSubsystems.push(subsystem);
+          return;
+        }
+        const candidates = result.value.candidates.filter(
+          candidate => candidate.status === 'pending',
+        );
+        if (candidates.length > 0) groups.push({ subsystem, candidates });
+      });
+      return { groups, failedSubsystems };
     },
     enabled: !!user?.id,
   });
@@ -227,7 +290,76 @@ export const useClawDigitalTwinEstimate = (
   });
 };
 
-// ── Mutations ───────────────────────────────────────────────────────────────
+export const useClawDigitalTwinMemoryFiles = (): UseQueryResult<
+  DigitalTwinMemoryFilesResponse,
+  Error
+> => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: filesKey(user?.id),
+    queryFn: () => listDigitalTwinMemoryFiles(user!.id),
+    enabled: !!user?.id,
+  });
+};
+
+export const useClawDigitalTwinPipelineEvents = (
+  filters: Omit<PipelineEventFilters, 'before'>,
+  live: boolean,
+  enabled = true,
+): UseInfiniteQueryResult<InfiniteData<PipelineEventsPage>, Error> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const previouslyRunning = useRef(false);
+  const query = useInfiniteQuery({
+    queryKey: activityKey(user?.id, filters),
+    queryFn: ({ pageParam }) =>
+      listDigitalTwinPipelineEvents(user!.id, {
+        ...filters,
+        ...(pageParam ? { before: pageParam } : {}),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: lastPage => lastPage.nextBefore ?? undefined,
+    enabled: !!user?.id && enabled,
+    refetchInterval: result => {
+      const eventRunning =
+        result.state.data?.pages.some(page =>
+          page.events.some(event => event.status === 'running' || event.status === 'retry'),
+        ) ?? false;
+      return live || eventRunning ? 2_000 : false;
+    },
+  });
+  const eventRunning =
+    query.data?.pages.some(page =>
+      page.events.some(event => event.status === 'running' || event.status === 'retry'),
+    ) ?? false;
+
+  useEffect((): void => {
+    if (previouslyRunning.current && !eventRunning) {
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-status',
+        'claw-dt-files',
+        'claw-dt-memories',
+        'claw-dt-activity',
+      ]);
+    }
+    previouslyRunning.current = eventRunning;
+  }, [eventRunning, qc, user?.id]);
+
+  return query;
+};
+
+export const useClawDigitalTwinPipelineEvent = (
+  id: string | null,
+): UseQueryResult<PipelineEventDetail, Error> => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: activityDetailKey(user?.id, id),
+    queryFn: () => getDigitalTwinPipelineEvent(user!.id, id!),
+    enabled: !!user?.id && !!id,
+  });
+};
+
+// ── Mutations ─────────────────────────────────────────────────────────────────
 
 export const useEnableDigitalTwin = (): UseMutationResult<
   { enabled: boolean; enabledAt: string; backfillJobIds: string[] },
@@ -238,10 +370,8 @@ export const useEnableDigitalTwin = (): UseMutationResult<
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ backfill }) => enableDigitalTwin(user!.id, backfill),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: statusKey(user?.id) });
-    },
-    onError: err => toast.error(clawErrorText(err, 'Failed to enable Digital Twin')),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: statusKey(user?.id) }),
+    onError: error => toast.error(clawErrorText(error, 'Failed to enable Digital Twin')),
   });
 };
 
@@ -255,17 +385,77 @@ export const useDisableDigitalTwin = (): UseMutationResult<
   return useMutation({
     mutationFn: ({ deleteMemories }) => disableDigitalTwin(user!.id, deleteMemories),
     onSuccess: () => {
-      [
+      invalidateDigitalTwin(qc, user?.id, [
         'claw-dt-status',
         'claw-dt-memories',
         'claw-dt-proposals',
         'claw-dt-graph',
         'claw-dt-stats',
         'claw-dt-metrics',
-      ].forEach(k => void qc.invalidateQueries({ queryKey: [k, user?.id] }));
+        'claw-dt-files',
+        'claw-dt-activity',
+      ]);
       toast.success('Digital Twin disabled');
     },
-    onError: err => toast.error(clawErrorText(err, 'Failed to disable Digital Twin')),
+    onError: error => toast.error(clawErrorText(error, 'Failed to disable Digital Twin')),
+  });
+};
+
+export const usePauseDigitalTwinBackfill = (): UseMutationResult<
+  { paused: boolean; pausedSources: number; cancelledJobs: number },
+  Error,
+  void
+> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => pauseDigitalTwinBackfill(user!.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: statusKey(user?.id) });
+      toast.success('Backfill paused');
+    },
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not pause backfill')),
+  });
+};
+
+export const useResumeDigitalTwinBackfill = (): UseMutationResult<
+  { resumed: number; jobIds: string[] },
+  Error,
+  void
+> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => resumeDigitalTwinBackfill(user!.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: statusKey(user?.id) });
+      toast.success('Backfill resumed');
+    },
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not resume backfill')),
+  });
+};
+
+export const useDeleteDigitalTwinMemories = (): UseMutationResult<
+  { deleting: boolean; mode?: string },
+  Error,
+  { mode: 'all' | 'range'; from?: string; to?: string }
+> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (opts: { mode: 'all' | 'range'; from?: string; to?: string }) =>
+      deleteDigitalTwinMemories(user!.id, opts),
+    onSuccess: () => {
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-status',
+        'claw-dt-memories',
+        'claw-dt-stats',
+        'claw-dt-graph',
+        'claw-dt-activity',
+      ]);
+      toast.success('Memory deletion started');
+    },
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not delete memories')),
   });
 };
 
@@ -279,12 +469,13 @@ export const useApproveDigitalTwinCluster = (): UseMutationResult<
   return useMutation({
     mutationFn: ({ subsystem, candidateIds }) =>
       approveDigitalTwinCluster(user!.id, subsystem, candidateIds),
-    onSuccess: () => {
-      ['claw-dt-proposals', 'claw-dt-status', 'claw-dt-memories'].forEach(
-        k => void qc.invalidateQueries({ queryKey: [k, user?.id] }),
-      );
-    },
-    onError: err => toast.error(clawErrorText(err, 'Failed to approve')),
+    onSuccess: () =>
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-proposals',
+        'claw-dt-status',
+        'claw-dt-memories',
+      ]),
+    onError: error => toast.error(clawErrorText(error, 'Failed to approve')),
   });
 };
 
@@ -297,32 +488,37 @@ export const usePatchDigitalTwinCandidate = (): UseMutationResult<
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, patch }) => patchDigitalTwinCandidate(user!.id, id, patch),
-    onSuccess: () => {
-      ['claw-dt-proposals', 'claw-dt-status', 'claw-dt-memories'].forEach(
-        k => void qc.invalidateQueries({ queryKey: [k, user?.id] }),
-      );
-    },
-    onError: err => toast.error(clawErrorText(err, 'Action failed')),
+    onSuccess: () =>
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-proposals',
+        'claw-dt-status',
+        'claw-dt-memories',
+      ]),
+    onError: error => toast.error(clawErrorText(error, 'Action failed')),
   });
 };
 
 export const useUpdateDigitalTwinSettings = (): UseMutationResult<
-  { responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number },
+  {
+    responseSuffix: string;
+    memoryApprovalMode: string;
+    memoryAutoApproveMinScore: number;
+    respondPolicy?: string;
+  },
   Error,
   {
     responseSuffix?: string | null;
     memoryApprovalMode?: 'manual' | 'auto';
     memoryAutoApproveMinScore?: number;
+    respondPolicy?: 'always' | 'learned';
   }
 > => {
   const { user } = useAuth();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: patch => updateDigitalTwinSettings(user!.id, patch),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: statusKey(user?.id) });
-    },
-    onError: err => toast.error(clawErrorText(err, 'Failed to save settings')),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: statusKey(user?.id) }),
+    onError: error => toast.error(clawErrorText(error, 'Failed to save settings')),
   });
 };
 
@@ -335,12 +531,13 @@ export const useUploadDigitalTwinMd = (): UseMutationResult<
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ filename, content }) => uploadDigitalTwinMd(user!.id, filename, content),
-    onSuccess: () => {
-      ['claw-dt-status', 'claw-dt-proposals'].forEach(
-        k => void qc.invalidateQueries({ queryKey: [k, user?.id] }),
-      );
-    },
-    onError: err => toast.error(clawErrorText(err, 'Upload failed')),
+    onSuccess: () =>
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-status',
+        'claw-dt-proposals',
+        'claw-dt-activity',
+      ]),
+    onError: error => toast.error(clawErrorText(error, 'Upload failed')),
   });
 };
 
@@ -354,12 +551,78 @@ export const useDeleteDigitalTwinMemory = (): UseMutationResult<
   return useMutation({
     mutationFn: ({ hindsightMemoryId }) => deleteDigitalTwinMemory(user!.id, hindsightMemoryId),
     onSuccess: () => {
-      ['claw-dt-memories', 'claw-dt-stats', 'claw-dt-graph', 'claw-dt-status'].forEach(
-        k => void qc.invalidateQueries({ queryKey: [k, user?.id] }),
-      );
+      invalidateDigitalTwin(qc, user?.id, [
+        'claw-dt-memories',
+        'claw-dt-stats',
+        'claw-dt-graph',
+        'claw-dt-status',
+      ]);
       toast.success('Memory deleted');
     },
-    onError: err => toast.error(clawErrorText(err, 'Failed to delete memory')),
+    onError: error => toast.error(clawErrorText(error, 'Failed to delete memory')),
+  });
+};
+
+export const useSaveDigitalTwinMemoryFile = (): UseMutationResult<
+  { file: DigitalTwinMemoryFile; truncated: boolean; maxChars: number },
+  Error,
+  { name: string; content: string }
+> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, content }: { name: string; content: string }) =>
+      saveDigitalTwinMemoryFile(user!.id, name, content),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: filesKey(user?.id) });
+      toast.success('Persona file saved');
+    },
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not save persona file')),
+  });
+};
+
+export const useSetDigitalTwinMemoryFileLoad = (): UseMutationResult<
+  { file: DigitalTwinMemoryFile },
+  Error,
+  { file: DigitalTwinMemoryFile; load: boolean }
+> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, load }: { file: DigitalTwinMemoryFile; load: boolean }) =>
+      setDigitalTwinMemoryFileLoad(user!.id, file.name, load),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: filesKey(user?.id) }),
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not update prompt files')),
+  });
+};
+
+export const useDeleteDigitalTwinMemoryFile = (): UseMutationResult<
+  { deleted: boolean },
+  Error,
+  { name: string }
+> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name }: { name: string }) => deleteDigitalTwinMemoryFile(user!.id, name),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: filesKey(user?.id) });
+      toast.success('Persona file deleted');
+    },
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not delete persona file')),
+  });
+};
+
+export const useSynthesizeDigitalTwin = (): UseMutationResult<{ status: string }, Error, void> => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => synthesizeDigitalTwin(user!.id),
+    onSuccess: () => {
+      invalidateDigitalTwin(qc, user?.id, ['claw-dt-files', 'claw-dt-activity']);
+      toast.success('Persona rebuild started');
+    },
+    onError: (error: Error) => toast.error(clawErrorText(error, 'Could not rebuild persona')),
   });
 };
 
@@ -371,6 +634,6 @@ export const useRecallDigitalTwin = (): UseMutationResult<
   const { user } = useAuth();
   return useMutation({
     mutationFn: ({ query, budget }) => recallDigitalTwinMemory(user!.id, query, budget),
-    onError: err => toast.error(clawErrorText(err, 'Recall failed')),
+    onError: error => toast.error(clawErrorText(error, 'Recall failed')),
   });
 };

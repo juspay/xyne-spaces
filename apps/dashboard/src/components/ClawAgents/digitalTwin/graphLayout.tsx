@@ -29,35 +29,19 @@ export function layoutSubsystems(
   });
   dagre.layout(g);
 
-  const maxMemoryCount = Math.max(1, ...subsystems.map(s => s.memoryCount));
-
   return subsystems.map(s => {
     const pos = g.node(s.name) as { x: number; y: number } | undefined;
-    const sat = 0.4 + 0.5 * (s.memoryCount / maxMemoryCount);
     return {
       id: s.name,
+      ariaLabel: `${s.name}: ${s.memoryCount} memories from ${s.sessionCount} sessions`,
       position: { x: (pos?.x ?? 0) - NODE_WIDTH / 2, y: (pos?.y ?? 0) - NODE_HEIGHT / 2 },
       data: {
         label: (
-          <div style={{ textAlign: 'left', lineHeight: 1.25 }}>
-            <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
-            <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>
+          <div style={{ textAlign: 'left', lineHeight: 1.4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name}</div>
+            <div style={{ fontSize: 14, color: 'var(--dt-muted)', marginTop: 4 }}>
               {s.memoryCount} {s.memoryCount === 1 ? 'memory' : 'memories'} · {s.sessionCount}{' '}
               {s.sessionCount === 1 ? 'session' : 'sessions'}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                opacity: 0.55,
-                marginTop: 4,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical' as const,
-              }}
-            >
-              {s.sampleContent}
             </div>
           </div>
         ),
@@ -65,13 +49,13 @@ export function layoutSubsystems(
       style: {
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
-        background: `rgba(99,102,241,${0.12 + 0.18 * sat})`,
-        border: `1.5px solid rgba(129,140,248,${sat})`,
-        borderRadius: 10,
-        padding: '8px 12px',
+        background: 'var(--dt-paper)',
+        color: 'var(--dt-ink)',
+        border: '1px solid var(--dt-rule)',
+        borderRadius: 8,
+        padding: '12px 14px',
         display: 'flex',
         alignItems: 'flex-start',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         cursor: 'pointer',
       },
     };
@@ -88,11 +72,12 @@ export function makeSubsystemEdges(edges: DigitalTwinSubsystemEdge[]): RFEdge[] 
     type: 'smoothstep',
     animated: false,
     style: {
-      stroke: 'rgba(129,140,248,0.55)',
+      stroke: 'var(--dt-accent)',
+      opacity: 0.55,
       strokeWidth: Math.max(1.5, (e.sharedSessions / maxShared) * 3.5),
     },
     label: `${e.sharedSessions} shared`,
-    labelStyle: { fontSize: 10, fill: 'rgb(129,140,248)' },
+    labelStyle: { fontSize: 14, fill: 'var(--dt-muted)' },
     labelBgPadding: [4, 4] as [number, number],
     labelBgBorderRadius: 4,
   }));

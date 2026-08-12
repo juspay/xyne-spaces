@@ -638,7 +638,7 @@ const DmsPage = (): ReactElement => {
           groupResizeBehavior='preserve-pixel-size'
         >
           <div className='flex flex-col text-foreground h-full'>
-            {/* Top navigator spacer — matches ChatDirectory; keeps the panel transparent so the wallpaper shows through */}
+            {/* Top navigator spacer — matches ChatDirectory; keeps the panel transparent so the root background shows through */}
             <div className='w-full h-[52px] shrink-0'>
               <AppNavigator />
             </div>

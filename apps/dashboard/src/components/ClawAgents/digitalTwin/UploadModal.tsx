@@ -1,6 +1,7 @@
 import { ReactElement, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { useUploadDigitalTwinMd } from '@/hooks/useClawDigitalTwin';
 import { DigitalTwinModal } from './DigitalTwinModal';
 
@@ -99,37 +100,48 @@ export const UploadModal = ({
       }
     >
       <div>
-        <span className='mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-          File
-        </span>
-        <input
+        <label
+          htmlFor='digital-twin-markdown-file'
+          className='mb-2 block text-xs font-medium text-foreground'
+        >
+          Markdown file
+        </label>
+        <Input
+          id='digital-twin-markdown-file'
           ref={fileInputRef}
           type='file'
           accept='.md,.markdown,text/markdown'
           onChange={handleFileSelect}
-          className='block w-full text-xs text-muted-foreground file:mr-2 file:rounded-lg file:border file:border-border file:bg-muted file:px-2.5 file:py-1.5 file:text-xs file:text-foreground hover:file:bg-muted/70'
+          className='h-auto min-h-9 py-1.5 text-muted-foreground file:mr-3 file:rounded-md file:border file:border-border file:bg-muted file:px-3 file:text-xs file:font-medium file:text-foreground'
         />
-        {filename && <p className='mt-1 text-[11px] text-muted-foreground'>{filename}</p>}
+        {filename && <p className='mt-2 text-xs text-muted-foreground'>{filename}</p>}
       </div>
 
       {content && (
         <div>
-          <span className='mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+          <label
+            htmlFor='digital-twin-markdown-content'
+            className='mb-2 block text-xs font-medium text-foreground'
+          >
             Content preview
-          </span>
+          </label>
           <textarea
+            id='digital-twin-markdown-content'
             value={content}
             onChange={e => setContent(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin upload content preview'
             rows={6}
-            className='w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground focus:border-ring focus:outline-none'
+            className='w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/10'
           />
         </div>
       )}
 
       {err && (
-        <div className='rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-[11px] text-destructive'>
+        <div
+          role='alert'
+          className='rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive'
+        >
           {err}
         </div>
       )}

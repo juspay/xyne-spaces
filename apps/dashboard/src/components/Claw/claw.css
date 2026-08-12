@@ -6,7 +6,6 @@ html.claw-overlay-active main {
   background-color: transparent !important;
 }
 
-html.claw-overlay-active .app-wallpaper-image,
 html.claw-overlay-active [data-slot="switch-loading-overlay"] {
   display: none !important;
 }

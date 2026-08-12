@@ -174,7 +174,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                   'flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl',
                   // DM + Bookmarks + Canvas routes render their own transparent left
                   // sidebar + an opaque detail panel; keep this wrapper transparent so
-                  // the wallpaper shows through those sidebars.
+                  // the root background shows through those sidebars.
                   !pathnameWithoutWorkspace.startsWith('/chat/dm') &&
                     !pathnameWithoutWorkspace.startsWith('/chat/bookmarks') &&
                     !pathnameWithoutWorkspace.startsWith('/chat/canvas') &&

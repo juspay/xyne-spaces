@@ -12,15 +12,64 @@ export interface DigitalTwinBackfillEntry {
   to: string;
   cursor: string;
   complete: boolean;
+  progress?: {
+    windowsTotal: number;
+    windowsDone: number;
+    recordsSeen: number;
+    candidatesMade: number;
+    currentWindow: { from: string; to: string } | null;
+    lastError: { message: string; windowUpper: string; at: string } | null;
+    startedAt: string;
+    updatedAt: string;
+  };
+}
+
+export interface DigitalTwinBackfillSourceProgress {
+  complete: boolean;
+  paused?: boolean;
+  pausedAt?: string | null;
+  windowsDone: number | null;
+  windowsTotal: number | null;
+  recordsSeen: number | null;
+  candidatesMade: number | null;
+  currentWindow: { from: string; to: string } | null;
+  pctByWindows: number | null;
+  pctByTime: number | null;
+  lastError: { message: string; windowUpper: string; at: string } | null;
+  job: {
+    state: string;
+    attemptsMade: number;
+    maxAttempts: number;
+    failedReason: string | null;
+  } | null;
+}
+
+export interface DigitalTwinBackfillBlock {
+  overall: {
+    running: boolean;
+    paused: boolean;
+    stalled: boolean;
+    windowsDone: number;
+    windowsTotal: number;
+    recordsSeen: number;
+    candidatesMade: number;
+    pctByWindows: number | null;
+    updatedAt: string | null;
+  };
+  sources: Record<string, DigitalTwinBackfillSourceProgress>;
 }
 
 export interface DigitalTwinStatus {
   enabled: boolean;
   enabledAt: string | null;
   backfillState: Record<string, DigitalTwinBackfillEntry> | null;
+  /** Server-normalized progress and stall state. Prefer this over cursor math. */
+  backfill?: DigitalTwinBackfillBlock | null;
   pendingCandidates: number;
   totalCandidates: number;
   approvedCandidates: number;
+  memoryCount?: number;
+  memoryDeleteInProgress?: boolean;
   mdFileCount: number;
   /** Optional suffix the user has configured. Empty string when unset. */
   responseSuffix: string;
@@ -28,6 +77,8 @@ export interface DigitalTwinStatus {
   memoryApprovalMode: string;
   /** Min curator confidence (0–1) required to auto-approve a candidate. */
   memoryAutoApproveMinScore: number;
+  /** Whether every mention receives a reply or learned behavior decides. */
+  respondPolicy?: 'always' | 'learned';
 }
 
 export interface DigitalTwinEstimate {
@@ -48,6 +99,8 @@ export interface DigitalTwinClusterPreview {
 export interface DigitalTwinCandidate {
   id: string;
   subsystem: string;
+  /** Human-readable proposal title. Older API responses may omit it. */
+  title?: string;
   text: string;
   editedText: string | null;
   sourceRefs: Array<{
@@ -94,11 +147,85 @@ export interface DigitalTwinMetrics {
   recallRatedCount: number;
 }
 
+// ── Persona files ─────────────────────────────────────────────────────────────
+
+export interface DigitalTwinMemoryFile {
+  id: string;
+  name: string;
+  content: string;
+  loadInPrompt: boolean;
+  sortOrder: number;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface DigitalTwinMemoryFilesResponse {
+  files: DigitalTwinMemoryFile[];
+  maxLoaded: number;
+  maxChars: number;
+}
+
+// ── Pipeline activity ─────────────────────────────────────────────────────────
+
+export interface PipelineRecordPreview {
+  id: string;
+  type: string;
+  ts: string;
+  channelId?: string;
+  channelName?: string;
+  title?: string;
+  textPreview: string;
+}
+
+export interface PipelineEventSummary {
+  id: string;
+  createdAt: string;
+  runType: string;
+  source: string;
+  sourceKind: string | null;
+  windowFrom: string;
+  windowTo: string;
+  status: string;
+  recordCount: number;
+  existingMemoryCount: number;
+  emittedCount: number;
+  keptCount: number;
+  candidatesCreated: number;
+  autoApproved: number;
+  durationMs: number;
+  error: string | null;
+  hasTrace: boolean;
+  approvedCount?: number;
+  pendingCount?: number;
+  rejectedCount?: number;
+}
+
+export interface PipelineEventDetail extends PipelineEventSummary {
+  records: PipelineRecordPreview[] | null;
+  /** Trace shapes vary by curator, persona synthesis, and response-gate runs. */
+  trace: Record<string, unknown> | null;
+}
+
+export interface PipelineEventsPage {
+  events: PipelineEventSummary[];
+  nextBefore: string | null;
+}
+
+export interface PipelineEventFilters {
+  limit?: number;
+  before?: string;
+  runType?: string;
+  status?: string;
+  sourceKind?: string;
+}
+
 // ── Memory Bank (Hindsight) family ────────────────────────────────────────────
 
 export interface MemoryBankMemory {
   id: string;
   hindsightMemoryId: string;
+  /** Human-readable label. Older memory-bank records may not provide one. */
+  title?: string;
   category: string | null;
   content: string;
   curatorReasoning: string | null;
@@ -106,6 +233,8 @@ export interface MemoryBankMemory {
   createdAt: string;
   recallHits7d: number;
   lastRecalledAt: string | null;
+  pipelineEventId?: string | null;
+  tags?: string[];
 }
 
 export interface MemoryBankStats {
@@ -117,6 +246,7 @@ export interface MemoryBankStats {
   };
   hot: Array<{
     hindsightMemoryId: string;
+    title?: string;
     hits: number;
     lastRecalledAt: string | null;
     content: string;

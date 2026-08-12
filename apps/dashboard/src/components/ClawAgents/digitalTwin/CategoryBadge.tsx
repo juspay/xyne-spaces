@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/utils/classNames';
 import { CATEGORY_STYLES } from './subsystems';
 
@@ -7,19 +8,14 @@ export const CategoryBadge = ({ category }: { category: string | null }): ReactE
   const style = CATEGORY_STYLES[category.toLowerCase()];
   if (!style) {
     return (
-      <span className='rounded border border-border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+      <Badge variant='outline' className='text-muted-foreground'>
         {category}
-      </span>
+      </Badge>
     );
   }
   return (
-    <span
-      className={cn(
-        'rounded border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide',
-        style.className,
-      )}
-    >
+    <Badge variant='outline' className={cn('border', style.className)}>
       {style.label}
-    </span>
+    </Badge>
   );
 };

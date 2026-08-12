@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { AlertTriangle, Brain, CheckCircle2, Info, Loader2, XCircle } from 'lucide-react';
+import { AlertTriangle, Brain, CheckCircle2, Info, Loader2, XCircle } from './icons';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { cn } from '@/utils/classNames';
 import type { DigitalTwinStatus } from '@/services/claw/digitalTwinTypes';

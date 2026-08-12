@@ -1,60 +1,92 @@
 import { ReactElement, useState } from 'react';
-import { Check, Loader2, Pencil, X } from 'lucide-react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { Check, ChevronDown, Loader2, Pencil, Save, X } from './icons';
 import { toast } from 'sonner';
-import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
-import { cn } from '@/utils/classNames';
+import { Button } from '@/components/ui/Button';
 import { usePatchDigitalTwinCandidate } from '@/hooks/useClawDigitalTwin';
 import type { DigitalTwinCandidate } from '@/services/claw/digitalTwinTypes';
-import { scoreToneClass } from './format';
 
-const iconBtn =
-  'flex size-[30px] items-center justify-center rounded-full transition active:scale-95 disabled:opacity-50';
+const proposalTitle = (value: string): string => {
+  const firstClause = value.split(/[.!?:;]/, 1)[0]?.trim() ?? '';
+  const words = firstClause.split(/\s+/).filter(Boolean);
+  if (words.length <= 7) return firstClause || 'Untitled proposal';
+  return `${words.slice(0, 7).join(' ')}…`;
+};
+
+const MOTION_EASE = [0.22, 1, 0.36, 1] as const;
 
 export const CandidateRow = ({
   candidate,
+  total,
   onApproved,
   onRejected,
+  onRestore,
+  onOutcome,
 }: {
   candidate: DigitalTwinCandidate;
+  total: number;
   onApproved: (id: string) => void;
   onRejected: (id: string) => void;
+  onRestore: (id: string) => void;
+  onOutcome: (message: string, error?: boolean) => void;
 }): ReactElement => {
   const patch = usePatchDigitalTwinCandidate();
+  const reduceMotion = useReducedMotion();
   const [acting, setActing] = useState<'approve' | 'reject' | 'save' | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(candidate.editedText ?? candidate.text);
   const [committed, setCommitted] = useState(candidate.editedText ?? candidate.text);
 
-  const isBusy = acting !== null;
-  const isDirty = text.trim() !== committed.trim();
+  const busy = acting !== null;
+  const dirty = text.trim() !== committed.trim();
+  const confidence = Math.round(Math.max(0, Math.min(1, candidate.signalScore)) * 100);
+  const title = candidate.title?.trim() || proposalTitle(committed);
+  const detailsId = `candidate-details-${candidate.id}`;
 
-  const handleApprove = async (): Promise<void> => {
+  const toggleExpanded = (): void => {
+    if (expanded && editing) {
+      setText(committed);
+      setEditing(false);
+    }
+    setExpanded(previous => !previous);
+  };
+
+  const approve = async (): Promise<void> => {
     setActing('approve');
+    onApproved(candidate.id);
     try {
       await patch.mutateAsync({
         id: candidate.id,
-        patch: { ...(isDirty ? { editedText: text.trim() } : {}), status: 'approved' },
+        patch: { ...(dirty ? { editedText: text.trim() } : {}), status: 'approved' },
       });
-      toast.success('Approved — memory saved to Hindsight');
-      onApproved(candidate.id);
+      onOutcome(`Added to memory. ${Math.max(0, total - 1)} left to review.`);
+      toast.success('Approved and added to memory');
+    } catch {
+      onRestore(candidate.id);
+      onOutcome('This proposal could not be approved. It is back in your queue—try again.', true);
     } finally {
       setActing(null);
     }
   };
 
-  const handleReject = async (): Promise<void> => {
+  const reject = async (): Promise<void> => {
     setActing('reject');
+    onRejected(candidate.id);
     try {
       await patch.mutateAsync({ id: candidate.id, patch: { status: 'rejected' } });
-      toast.success('Rejected');
-      onRejected(candidate.id);
+      onOutcome(`Removed from review. ${Math.max(0, total - 1)} left.`);
+      toast.success('Proposal rejected');
+    } catch {
+      onRestore(candidate.id);
+      onOutcome('This proposal could not be rejected. It is back in your queue—try again.', true);
     } finally {
       setActing(null);
     }
   };
 
-  const handleSave = async (): Promise<void> => {
-    if (!isDirty) {
+  const save = async (): Promise<void> => {
+    if (!dirty) {
       setEditing(false);
       return;
     }
@@ -63,139 +95,168 @@ export const CandidateRow = ({
       await patch.mutateAsync({ id: candidate.id, patch: { editedText: text.trim() } });
       setCommitted(text.trim());
       setEditing(false);
+      onOutcome('Edit saved. Review the final wording, then approve or reject it.');
       toast.success('Edit saved');
+    } catch {
+      onOutcome('Your edit could not be saved. It is still here so you can try again.', true);
     } finally {
       setActing(null);
     }
   };
 
   return (
-    <div className='flex w-full items-start gap-2.5 px-3.5 py-3'>
-      <div className='min-w-0 flex-1'>
-        {editing ? (
-          <textarea
-            value={text}
-            onChange={e => setText(e.target.value)}
-            data-track-category='Claw Agents'
-            data-track-name='Digital Twin edit candidate text'
-            disabled={isBusy}
-            rows={3}
-            autoFocus
-            className='w-full resize-none rounded-lg border border-primary bg-background px-2.5 py-1.5 text-xs leading-relaxed text-foreground focus:outline-none disabled:opacity-60'
-          />
-        ) : (
-          <p className='line-clamp-2 text-xs leading-relaxed text-foreground'>{committed}</p>
-        )}
-        <div className='mt-1.5 flex flex-wrap items-center gap-2'>
-          <span className={cn('text-[10px] font-medium', scoreToneClass(candidate.signalScore))}>
-            {Math.round(candidate.signalScore * 100)}% confidence
+    <article className='dt-review-proposal' aria-labelledby={`candidate-${candidate.id}`}>
+      <button
+        type='button'
+        className='dt-review-proposal-toggle'
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        onClick={toggleExpanded}
+        data-track-category='Claw Agents'
+        data-track-name='Digital Twin toggle proposal'
+      >
+        <span className='dt-review-proposal-heading'>
+          <span id={`candidate-${candidate.id}`} className='dt-review-proposal-title'>
+            {title}
           </span>
-          {isDirty && !editing && (
-            <span className='text-[10px] font-medium text-amber-600 dark:text-amber-400'>
-              · edited
-            </span>
-          )}
-          {(candidate.sourceRefs?.length ?? 0) > 0 && (
-            <span className='text-[10px] text-muted-foreground'>
-              {candidate.sourceRefs.length} source{candidate.sourceRefs.length !== 1 ? 's' : ''}
-            </span>
-          )}
+          <span className='dt-review-confidence'>{confidence}% Confidence</span>
+        </span>
+        <motion.span
+          className='inline-flex shrink-0 text-muted-foreground'
+          animate={{ rotate: expanded ? 180 : 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.18, ease: MOTION_EASE }}
+          aria-hidden='true'
+        >
+          <ChevronDown className='size-4' />
+        </motion.span>
+      </button>
+
+      <div id={detailsId} className='dt-review-proposal-content'>
+        {editing ? (
+          <label className='block'>
+            <span className='sr-only'>Edit proposed memory</span>
+            <textarea
+              value={text}
+              onChange={event => setText(event.target.value)}
+              disabled={busy}
+              rows={5}
+              autoFocus
+              className='w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/10 disabled:opacity-60'
+              data-track-category='Claw Agents'
+              data-track-name='Digital Twin edit candidate text'
+            />
+          </label>
+        ) : (
+          <p
+            className={`dt-review-proposal-copy${expanded ? '' : ' dt-review-proposal-copy-clamped'}`}
+          >
+            {committed}
+          </p>
+        )}
+
+        <div
+          className='dt-review-proposal-actions-reveal'
+          data-expanded={expanded}
+          aria-hidden={!expanded}
+        >
+          <div className='dt-review-proposal-actions-reveal-inner'>
+            <motion.footer
+              className='dt-review-proposal-actions'
+              animate={
+                reduceMotion
+                  ? { opacity: 1, y: 0 }
+                  : { opacity: expanded ? 1 : 0, y: expanded ? 0 : -4 }
+              }
+              transition={{ duration: reduceMotion ? 0 : 0.18, ease: MOTION_EASE }}
+            >
+              {editing ? (
+                <>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 rounded-[10px] px-2 shadow-none'
+                    disabled={busy || !expanded}
+                    onClick={() => {
+                      setText(committed);
+                      setEditing(false);
+                    }}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin cancel candidate edit'
+                  >
+                    <X className='size-4' />
+                    Cancel
+                  </Button>
+                  <Button
+                    size='sm'
+                    className='h-7 rounded-[10px] px-2 shadow-none'
+                    disabled={!expanded || !text.trim() || busy}
+                    onClick={() => void save()}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin save candidate edit'
+                  >
+                    {acting === 'save' ? (
+                      <Loader2 className='size-4 animate-spin' />
+                    ) : (
+                      <Save className='size-4' />
+                    )}
+                    Save edit
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant='outline'
+                    size='iconSm'
+                    className='size-7 rounded-[10px] p-0 shadow-none'
+                    aria-label={`Edit ${title}`}
+                    title='Edit proposal'
+                    disabled={busy || !expanded}
+                    onClick={() => setEditing(true)}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin edit candidate'
+                  >
+                    <Pencil className='size-4' />
+                  </Button>
+                  <Button
+                    variant='outline'
+                    size='iconSm'
+                    className='size-7 rounded-[10px] p-0 shadow-none'
+                    aria-label={`Reject ${title}`}
+                    title='Reject proposal'
+                    disabled={busy || !expanded}
+                    onClick={() => void reject()}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin reject candidate'
+                  >
+                    {acting === 'reject' ? (
+                      <Loader2 className='size-4 animate-spin' />
+                    ) : (
+                      <X className='size-4' />
+                    )}
+                  </Button>
+                  <Button
+                    size='iconSm'
+                    className='size-7 rounded-[10px] p-0 shadow-none'
+                    aria-label={`Approve ${title}`}
+                    title='Approve proposal'
+                    disabled={busy || !expanded}
+                    onClick={() => void approve()}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin approve candidate'
+                  >
+                    {acting === 'approve' ? (
+                      <Loader2 className='size-4 animate-spin' />
+                    ) : (
+                      <Check className='size-4' />
+                    )}
+                  </Button>
+                </>
+              )}
+            </motion.footer>
+          </div>
         </div>
       </div>
-
-      <div className='flex shrink-0 items-center gap-2'>
-        {editing ? (
-          <>
-            <Tooltip side='top' content='Save edit'>
-              <button
-                type='button'
-                onClick={() => void handleSave()}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin save candidate edit'
-                disabled={isBusy}
-                className={cn(iconBtn, 'bg-primary text-primary-foreground hover:opacity-85')}
-              >
-                {acting === 'save' ? (
-                  <Loader2 className='size-3.5 animate-spin' />
-                ) : (
-                  <Check className='size-3.5' />
-                )}
-              </button>
-            </Tooltip>
-            <Tooltip side='top' content='Cancel'>
-              <button
-                type='button'
-                onClick={() => {
-                  setText(committed);
-                  setEditing(false);
-                }}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin cancel candidate edit'
-                disabled={isBusy}
-                className={cn(
-                  iconBtn,
-                  'border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}
-              >
-                <X className='size-3.5' />
-              </button>
-            </Tooltip>
-          </>
-        ) : (
-          <>
-            <Tooltip side='top' content='Edit'>
-              <button
-                type='button'
-                onClick={() => setEditing(true)}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin edit candidate'
-                disabled={isBusy}
-                className={cn(
-                  iconBtn,
-                  'border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}
-              >
-                <Pencil className='size-3.5' />
-              </button>
-            </Tooltip>
-            <Tooltip side='top' content={isDirty ? 'Save & approve' : 'Approve'}>
-              <button
-                type='button'
-                onClick={() => void handleApprove()}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin approve candidate'
-                disabled={isBusy}
-                className={cn(iconBtn, 'bg-emerald-600 text-white hover:opacity-85')}
-              >
-                {acting === 'approve' ? (
-                  <Loader2 className='size-3.5 animate-spin' />
-                ) : (
-                  <Check className='size-3.5' />
-                )}
-              </button>
-            </Tooltip>
-            <Tooltip side='top' content='Reject'>
-              <button
-                type='button'
-                onClick={() => void handleReject()}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin reject candidate'
-                disabled={isBusy}
-                className={cn(
-                  iconBtn,
-                  'border border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20',
-                )}
-              >
-                {acting === 'reject' ? (
-                  <Loader2 className='size-3.5 animate-spin' />
-                ) : (
-                  <X className='size-3.5' />
-                )}
-              </button>
-            </Tooltip>
-          </>
-        )}
-      </div>
-    </div>
+    </article>
   );
 };

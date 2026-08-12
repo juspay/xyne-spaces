@@ -1,0 +1,1857 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claw · MCP connection modal prototype</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: oklch(0.93 0.008 285);
+      --backdrop: oklch(0.22 0.012 285 / 0.66);
+      --surface: oklch(0.985 0.004 45);
+      --surface-raised: oklch(0.998 0.002 45);
+      --surface-soft: oklch(0.965 0.006 285);
+      --surface-hover: oklch(0.947 0.008 285);
+      --ink: oklch(0.235 0.016 285);
+      --ink-secondary: oklch(0.43 0.014 285);
+      --ink-muted: oklch(0.59 0.011 285);
+      --border: oklch(0.87 0.01 285);
+      --border-strong: oklch(0.78 0.012 285);
+      --accent: oklch(0.65 0.17 28);
+      --accent-dark: oklch(0.53 0.17 28);
+      --accent-soft: oklch(0.95 0.035 28);
+      --success: oklch(0.55 0.12 153);
+      --success-soft: oklch(0.95 0.035 153);
+      --warning: oklch(0.62 0.13 73);
+      --warning-soft: oklch(0.96 0.045 73);
+      --danger: oklch(0.57 0.18 25);
+      --focus: 0 0 0 3px oklch(0.65 0.17 28 / 0.22);
+      --shadow: 0 32px 90px oklch(0.15 0.015 285 / 0.28), 0 8px 24px oklch(0.15 0.015 285 / 0.1);
+      --font-sans: "Geist", "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      color: var(--ink);
+      background: var(--canvas);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    button:not(:disabled) {
+      cursor: pointer;
+    }
+
+    :focus-visible {
+      outline: none;
+      box-shadow: var(--focus);
+    }
+
+    .prototype-canvas {
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      position: relative;
+      isolation: isolate;
+    }
+
+    .ghost-app {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      background: var(--canvas);
+      color: oklch(0.42 0.012 285);
+      z-index: -2;
+    }
+
+    .ghost-sidebar {
+      padding: 30px 22px;
+      border-right: 1px solid oklch(0.84 0.01 285);
+      background: oklch(0.955 0.007 285);
+    }
+
+    .ghost-brand {
+      width: 84px;
+      height: 14px;
+      border-radius: 99px;
+      background: oklch(0.73 0.012 285);
+      margin-bottom: 42px;
+    }
+
+    .ghost-nav {
+      height: 34px;
+      border-radius: 8px;
+      background: oklch(0.9 0.008 285);
+      margin-bottom: 10px;
+    }
+
+    .ghost-nav:nth-child(3) {
+      width: 78%;
+      background: transparent;
+    }
+
+    .ghost-nav:nth-child(4) {
+      width: 88%;
+      background: transparent;
+    }
+
+    .ghost-main {
+      width: min(920px, calc(100vw - 300px));
+      padding: 56px 42px;
+      justify-self: center;
+    }
+
+    .ghost-heading {
+      width: 220px;
+      height: 24px;
+      border-radius: 99px;
+      background: oklch(0.73 0.012 285);
+      margin-bottom: 42px;
+    }
+
+    .ghost-field {
+      height: 96px;
+      border: 1px solid oklch(0.83 0.01 285);
+      border-radius: 14px;
+      margin-bottom: 18px;
+      background: oklch(0.95 0.006 285);
+    }
+
+    .backdrop {
+      position: absolute;
+      inset: 0;
+      background: var(--backdrop);
+      z-index: -1;
+      animation: backdrop-in 220ms ease-out both;
+    }
+
+    .modal {
+      width: min(860px, calc(100vw - 32px));
+      height: min(680px, calc(100vh - 32px));
+      min-height: 540px;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      overflow: hidden;
+      border: 1px solid oklch(0.88 0.008 285);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      position: relative;
+      animation: modal-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .modal[hidden] {
+      display: none;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 22px 14px;
+      background: var(--surface);
+      position: relative;
+      z-index: 4;
+    }
+
+    .title-block {
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+      font-weight: 680;
+    }
+
+    .subtitle {
+      margin: 5px 0 0;
+      color: var(--ink-muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .agent-context {
+      color: var(--ink-secondary);
+      font-weight: 620;
+    }
+
+    .icon-button {
+      width: 32px;
+      height: 32px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--ink-muted);
+      transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+    }
+
+    .icon-button:hover {
+      color: var(--ink);
+      background: var(--surface-soft);
+    }
+
+    .icon-button:active {
+      transform: scale(0.94);
+    }
+
+    .modal-main {
+      min-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .browser {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      transition: filter 220ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal.drawer-open .browser {
+      filter: saturate(0.74);
+      transform: translateX(-74px);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .browser-toolbar {
+      padding: 0 22px 10px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .search {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      padding: 0 12px;
+      background: var(--surface-soft);
+      color: var(--ink-muted);
+      transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    }
+
+    .search:focus-within {
+      border-color: var(--border-strong);
+      background: var(--surface-raised);
+      box-shadow: var(--focus);
+    }
+
+    .search input {
+      min-width: 0;
+      flex: 1;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .search input::placeholder {
+      color: var(--ink-muted);
+    }
+
+    .filter-wrap {
+      position: relative;
+    }
+
+    .filter-button {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      background: var(--surface-soft);
+      color: var(--ink-muted);
+      transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+    }
+
+    .filter-button:hover,
+    .filter-button[aria-expanded="true"] {
+      border-color: var(--border);
+      color: var(--ink);
+      background: var(--surface-raised);
+    }
+
+    .filter-popover {
+      position: absolute;
+      right: 0;
+      top: 46px;
+      width: 190px;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-raised);
+      box-shadow: 0 14px 32px oklch(0.2 0.014 285 / 0.16);
+      z-index: 8;
+    }
+
+    .filter-popover[hidden] {
+      display: none;
+    }
+
+    .filter-option {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 9px;
+      background: transparent;
+      text-align: left;
+      font-size: 12px;
+      color: var(--ink-secondary);
+    }
+
+    .filter-option:hover {
+      background: var(--surface-soft);
+      color: var(--ink);
+    }
+
+    .filter-option[aria-checked="true"] {
+      color: var(--ink);
+      font-weight: 620;
+    }
+
+    .selected-strip {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      overflow-x: auto;
+      padding: 0 22px 10px;
+      scrollbar-width: none;
+    }
+
+    .selected-strip::-webkit-scrollbar {
+      display: none;
+    }
+
+    .selected-empty {
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .selected-chip {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0 6px 0 5px;
+      background: var(--surface-raised);
+      color: var(--ink-secondary);
+      box-shadow: 0 1px 2px oklch(0.2 0.012 285 / 0.04);
+    }
+
+    .selected-chip:hover {
+      border-color: var(--border-strong);
+    }
+
+    .selected-chip > button:first-of-type {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+    }
+
+    .chip-name {
+      font-size: 12px;
+      font-weight: 620;
+      color: var(--ink);
+    }
+
+    .chip-source {
+      font-size: 10px;
+      color: var(--ink-muted);
+    }
+
+    .chip-remove {
+      width: 20px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink-muted);
+    }
+
+    .chip-remove:hover {
+      background: var(--surface-soft);
+      color: var(--ink);
+    }
+
+    .app-icon {
+      width: 25px;
+      height: 25px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-raised);
+    }
+
+    .app-icon img {
+      display: block;
+      width: 17px;
+      height: 17px;
+      object-fit: contain;
+    }
+
+    .catalog {
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
+      padding: 2px 22px 26px;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+    }
+
+    .catalog::-webkit-scrollbar,
+    .drawer-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .catalog::-webkit-scrollbar-thumb,
+    .drawer-body::-webkit-scrollbar-thumb {
+      border-radius: 99px;
+      background: var(--border-strong);
+    }
+
+    .category {
+      margin-top: 12px;
+    }
+
+    .category:first-child {
+      margin-top: 2px;
+    }
+
+    .category-heading {
+      margin: 0 0 8px;
+      color: var(--ink-muted);
+      font-size: 11px;
+      font-weight: 620;
+      letter-spacing: 0.055em;
+      text-transform: uppercase;
+    }
+
+    .app-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mcp-card {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: auto auto;
+      gap: 8px 12px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      padding: 11px;
+      background: var(--surface-soft);
+      text-align: left;
+      transition: border-color 150ms ease, background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+    }
+
+    .mcp-card:hover {
+      border-color: var(--border);
+      background: var(--surface-raised);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px oklch(0.2 0.014 285 / 0.07);
+    }
+
+    .mcp-card[data-selected="true"] {
+      border-color: var(--border-strong);
+      background: var(--surface-raised);
+    }
+
+    .card-title {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .name-wrap {
+      min-width: 0;
+    }
+
+    .app-name {
+      display: block;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.25;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 3px;
+      color: var(--ink-muted);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--ink-muted);
+    }
+
+    .status-line[data-tone="ready"] .status-dot {
+      background: var(--success);
+    }
+
+    .status-line[data-tone="warning"] .status-dot {
+      background: var(--warning);
+    }
+
+    .status-line[data-tone="agent"] .status-dot {
+      background: var(--accent);
+    }
+
+    .card-action {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      align-self: center;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--ink-muted);
+      transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+    }
+
+    .mcp-card:hover .card-action {
+      border-color: var(--border);
+      background: var(--surface-soft);
+      color: var(--ink);
+    }
+
+    .mcp-card[data-selected="true"] .card-action {
+      border-color: var(--accent);
+      color: var(--accent-dark);
+      background: var(--accent-soft);
+    }
+
+    .app-description {
+      min-width: 0;
+      grid-column: 1 / -1;
+      overflow: hidden;
+      color: var(--ink-muted);
+      font-size: 11px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .no-results {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .modal-footer {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 11px 22px;
+      border-top: 1px solid var(--border);
+      background: var(--surface-raised);
+      position: relative;
+      z-index: 4;
+    }
+
+    .footer-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink-secondary);
+      font-size: 11px;
+    }
+
+    .footer-status strong {
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .footer-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .button {
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border-radius: 9px;
+      padding: 0 14px;
+      font-size: 12px;
+      font-weight: 650;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+    }
+
+    .button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    .button.secondary {
+      border: 1px solid var(--border);
+      background: var(--surface-raised);
+      color: var(--ink-secondary);
+    }
+
+    .button.secondary:hover {
+      border-color: var(--border-strong);
+      color: var(--ink);
+    }
+
+    .button.primary {
+      border: 1px solid var(--accent-dark);
+      background: var(--accent);
+      color: oklch(0.985 0.004 45);
+    }
+
+    .button.primary:hover {
+      background: var(--accent-dark);
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+
+    .drawer-backdrop {
+      position: absolute;
+      inset: 0;
+      background: oklch(0.23 0.014 285 / 0.2);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease;
+      z-index: 4;
+    }
+
+    .modal.drawer-open .drawer-backdrop {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .connection-drawer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(420px, calc(100% - 34px));
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      box-shadow: -18px 0 46px oklch(0.2 0.014 285 / 0.16);
+      transform: translateX(104%);
+      visibility: hidden;
+      transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 360ms;
+      z-index: 5;
+    }
+
+    .modal.drawer-open .connection-drawer {
+      transform: translateX(0);
+      visibility: visible;
+      transition-delay: 0s;
+    }
+
+    .drawer-header {
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .drawer-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .drawer-app {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .drawer-app .app-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+    }
+
+    .drawer-app .app-icon img {
+      width: 21px;
+      height: 21px;
+    }
+
+    .drawer-app-name {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+      font-weight: 680;
+      letter-spacing: -0.015em;
+    }
+
+    .drawer-kicker {
+      margin: 3px 0 0;
+      color: var(--ink-muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-weight: 650;
+    }
+
+    .drawer-intro {
+      margin: 14px 0 0;
+      color: var(--ink-secondary);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .drawer-body {
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px 18px 24px;
+    }
+
+    .section-label {
+      margin: 0 0 8px;
+      color: var(--ink-muted);
+      font-size: 10px;
+      font-weight: 680;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .source-options {
+      display: grid;
+      gap: 8px;
+    }
+
+    .source-option {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: start;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 11px;
+      background: var(--surface-raised);
+      transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+    }
+
+    .source-option:hover {
+      border-color: var(--border-strong);
+    }
+
+    .source-option[data-selected="true"] {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 1px oklch(0.65 0.17 28 / 0.08);
+    }
+
+    .source-option[data-disabled="true"] {
+      opacity: 0.58;
+      cursor: not-allowed;
+    }
+
+    .source-option input {
+      width: 15px;
+      height: 15px;
+      margin: 2px 0 0;
+      accent-color: var(--accent);
+    }
+
+    .source-name {
+      display: block;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.3;
+    }
+
+    .source-copy {
+      display: block;
+      margin-top: 3px;
+      color: var(--ink-muted);
+      font-size: 10px;
+      line-height: 1.4;
+    }
+
+    .source-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      border-radius: 6px;
+      padding: 0 6px;
+      background: var(--surface-soft);
+      color: var(--ink-muted);
+      font-size: 9px;
+      font-weight: 680;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .source-badge.ready {
+      color: var(--success);
+      background: var(--success-soft);
+    }
+
+    .source-badge.required {
+      color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .configuration {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .connection-state {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 11px;
+      background: var(--surface-raised);
+    }
+
+    .account {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--ink);
+      color: var(--surface);
+      font-size: 10px;
+      font-weight: 720;
+    }
+
+    .account strong {
+      display: block;
+      overflow: hidden;
+      font-size: 11px;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .account span {
+      display: block;
+      margin-top: 2px;
+      color: var(--ink-muted);
+      font-size: 9px;
+    }
+
+    .text-button {
+      border: 0;
+      padding: 3px 0;
+      background: transparent;
+      color: var(--accent-dark);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .text-button:hover {
+      color: var(--ink);
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field + .field {
+      margin-top: 11px;
+    }
+
+    .field label {
+      color: var(--ink-secondary);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .field input {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 0 11px;
+      outline: 0;
+      background: var(--surface-raised);
+      color: var(--ink);
+      font-size: 12px;
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    .field input:focus {
+      border-color: var(--accent);
+      box-shadow: var(--focus);
+    }
+
+    .field-hint {
+      color: var(--ink-muted);
+      font-size: 9px;
+      line-height: 1.4;
+    }
+
+    .inline-action {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 10px;
+      background: var(--surface-soft);
+      color: var(--ink-secondary);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .notice.warning {
+      border-color: oklch(0.85 0.065 73);
+      background: var(--warning-soft);
+    }
+
+    .notice svg {
+      flex: 0 0 auto;
+      margin-top: 1px;
+    }
+
+    .drawer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      background: var(--surface-raised);
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      max-width: min(420px, calc(100vw - 32px));
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid oklch(0.36 0.012 285);
+      border-radius: 11px;
+      padding: 10px 13px;
+      background: oklch(0.26 0.014 285);
+      color: oklch(0.96 0.005 285);
+      box-shadow: 0 12px 28px oklch(0.15 0.01 285 / 0.24);
+      font-size: 11px;
+      transform: translate(-50%, 18px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 20;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    .reopen {
+      height: 40px;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 0 16px;
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: 0 8px 22px oklch(0.2 0.014 285 / 0.15);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .reopen[hidden] {
+      display: none;
+    }
+
+    @keyframes modal-in {
+      from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes backdrop-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @media (max-width: 680px) {
+      .modal {
+        width: calc(100vw - 20px);
+        height: calc(100vh - 20px);
+        min-height: 0;
+        border-radius: 15px;
+      }
+
+      .modal-header {
+        padding: 16px 16px 12px;
+      }
+
+      .browser-toolbar,
+      .selected-strip,
+      .catalog {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .app-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .modal-footer {
+        padding: 10px 16px;
+      }
+
+      .footer-status {
+        display: none;
+      }
+
+      .footer-actions {
+        width: 100%;
+      }
+
+      .footer-actions .button {
+        flex: 1;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-canvas">
+    <div class="ghost-app" aria-hidden="true">
+      <aside class="ghost-sidebar">
+        <div class="ghost-brand"></div>
+        <div class="ghost-nav"></div>
+        <div class="ghost-nav"></div>
+        <div class="ghost-nav"></div>
+      </aside>
+      <section class="ghost-main">
+        <div class="ghost-heading"></div>
+        <div class="ghost-field"></div>
+        <div class="ghost-field"></div>
+        <div class="ghost-field"></div>
+      </section>
+    </div>
+
+    <div class="backdrop" id="backdrop"></div>
+
+    <section
+      class="modal"
+      id="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      aria-describedby="modal-description"
+    >
+      <header class="modal-header">
+        <div class="title-block">
+          <h1 id="modal-title">Connect MCPs</h1>
+          <p class="subtitle" id="modal-description">
+            Choose tools for <span class="agent-context">PR Agent</span>, then decide whose account each one uses.
+          </p>
+        </div>
+        <button class="icon-button" id="close-modal" type="button" aria-label="Close modal">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="modal-main">
+        <div class="browser">
+          <div class="browser-toolbar">
+            <label class="search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.7"/>
+                <path d="m16 16 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+              <input id="search-input" type="search" placeholder="Search MCPs" autocomplete="off" />
+            </label>
+
+            <div class="filter-wrap">
+              <button class="filter-button" id="filter-button" type="button" aria-label="Filter MCPs" aria-expanded="false">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 7h16M7 12h10M10 17h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <div class="filter-popover" id="filter-popover" hidden>
+                <button class="filter-option" type="button" data-filter="all" role="radio" aria-checked="true">
+                  All MCPs <span>✓</span>
+                </button>
+                <button class="filter-option" type="button" data-filter="ready" role="radio" aria-checked="false">
+                  Ready to use <span></span>
+                </button>
+                <button class="filter-option" type="button" data-filter="setup" role="radio" aria-checked="false">
+                  Needs setup <span></span>
+                </button>
+                <button class="filter-option" type="button" data-filter="selected" role="radio" aria-checked="false">
+                  Added to agent <span></span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="selected-strip" id="selected-strip" aria-label="MCPs added to agent"></div>
+          <div class="catalog" id="catalog"></div>
+        </div>
+
+        <div class="drawer-backdrop" id="drawer-backdrop"></div>
+
+        <aside class="connection-drawer" id="connection-drawer" aria-label="MCP connection settings">
+          <header class="drawer-header">
+            <div class="drawer-topline">
+              <div class="drawer-app" id="drawer-app"></div>
+              <button class="icon-button" id="close-drawer" type="button" aria-label="Close connection settings">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <p class="drawer-intro">
+              Choose the identity this agent should use. This affects what data it can see and what actions it can take.
+            </p>
+          </header>
+          <div class="drawer-body">
+            <p class="section-label">Connection identity</p>
+            <div class="source-options" id="source-options"></div>
+            <div class="configuration" id="configuration"></div>
+          </div>
+          <footer class="drawer-footer">
+            <button class="button secondary" id="cancel-source" type="button">Cancel</button>
+            <button class="button primary" id="confirm-source" type="button">Add MCP</button>
+          </footer>
+        </aside>
+      </div>
+
+      <footer class="modal-footer">
+        <div class="footer-status" id="footer-status" aria-live="polite"></div>
+        <div class="footer-actions">
+          <button class="button secondary" id="cancel-modal" type="button">Cancel</button>
+          <button class="button primary" id="save-modal" type="button">Save MCPs</button>
+        </div>
+      </footer>
+    </section>
+
+    <button class="reopen" id="reopen-modal" type="button" hidden>Open MCP modal</button>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <script>
+    const ASSET_ROOT = "../../xyne-claw-auth/frontend/src/assets/mcp";
+
+    const apps = [
+      {
+        id: "github",
+        name: "GitHub",
+        icon: `${ASSET_ROOT}/github.svg`,
+        description: "Read repositories, review pull requests, and manage issues.",
+        category: "Popular",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: true, agent: false, workspace: true },
+        selected: true,
+        source: "personal",
+        account: "@devesh-prakash"
+      },
+      {
+        id: "gmail",
+        name: "Gmail",
+        icon: `${ASSET_ROOT}/gmail.svg`,
+        description: "Read, search, draft, and send email through Gmail.",
+        category: "Popular",
+        oauth: true,
+        modes: ["personal"],
+        availability: { personal: true, agent: false, workspace: false },
+        selected: true,
+        source: "personal",
+        account: "devesh@xyne.ai"
+      },
+      {
+        id: "slack",
+        name: "Slack",
+        icon: `${ASSET_ROOT}/slack.svg`,
+        description: "Read channels, search conversations, and send messages.",
+        category: "Popular",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: false, agent: false, workspace: true },
+        selected: false,
+        source: null,
+        account: null
+      },
+      {
+        id: "notion",
+        name: "Notion",
+        icon: `${ASSET_ROOT}/notion.svg`,
+        description: "Search workspace pages and update shared documentation.",
+        category: "Popular",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: false, agent: false, workspace: false },
+        selected: false,
+        source: null,
+        account: null
+      },
+      {
+        id: "microsoft",
+        name: "Microsoft Teams",
+        icon: `${ASSET_ROOT}/microsoft.svg`,
+        description: "Use chats, meetings, calendars, and Microsoft 365 files.",
+        category: "Communication",
+        oauth: true,
+        modes: ["personal"],
+        availability: { personal: false, agent: false, workspace: false },
+        selected: false,
+        source: null,
+        account: null
+      },
+      {
+        id: "hubspot",
+        name: "HubSpot",
+        icon: `${ASSET_ROOT}/hubspot.svg`,
+        description: "Look up contacts, companies, deals, and engagement history.",
+        category: "Communication",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: false, agent: false, workspace: true },
+        selected: false,
+        source: null,
+        account: null
+      },
+      {
+        id: "grafana",
+        name: "Grafana",
+        icon: `${ASSET_ROOT}/grafana.svg`,
+        description: "Query dashboards, alerts, logs, and operational metrics.",
+        category: "Developer & data",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: false, agent: true, workspace: false },
+        selected: false,
+        source: null,
+        account: null
+      },
+      {
+        id: "bigquery",
+        name: "BigQuery",
+        icon: `${ASSET_ROOT}/bigquery.svg`,
+        description: "Run governed queries against approved analytics datasets.",
+        category: "Developer & data",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: false, agent: false, workspace: true },
+        selected: false,
+        source: null,
+        account: null
+      },
+      {
+        id: "figma",
+        name: "Figma",
+        icon: `${ASSET_ROOT}/figma.svg`,
+        description: "Inspect design files, components, variables, and annotations.",
+        category: "Developer & data",
+        oauth: false,
+        modes: ["personal", "agent", "workspace"],
+        availability: { personal: false, agent: false, workspace: false },
+        selected: false,
+        source: null,
+        account: null
+      }
+    ];
+
+    const sourceMeta = {
+      personal: {
+        label: "Each user's connection",
+        shortLabel: "Personal",
+        copy: "Every person who runs this agent uses their own connected account."
+      },
+      agent: {
+        label: "Agent connection",
+        shortLabel: "Agent",
+        copy: "PR Agent always uses one shared service account."
+      },
+      workspace: {
+        label: "Workspace-managed",
+        shortLabel: "Workspace",
+        copy: "Use a connection configured by your workspace administrator."
+      }
+    };
+
+    const modal = document.querySelector("#modal");
+    const catalog = document.querySelector("#catalog");
+    const selectedStrip = document.querySelector("#selected-strip");
+    const footerStatus = document.querySelector("#footer-status");
+    const searchInput = document.querySelector("#search-input");
+    const filterButton = document.querySelector("#filter-button");
+    const filterPopover = document.querySelector("#filter-popover");
+    const drawerApp = document.querySelector("#drawer-app");
+    const sourceOptions = document.querySelector("#source-options");
+    const configuration = document.querySelector("#configuration");
+    const confirmSourceButton = document.querySelector("#confirm-source");
+    const reopenButton = document.querySelector("#reopen-modal");
+    const backdrop = document.querySelector("#backdrop");
+    const toast = document.querySelector("#toast");
+
+    let activeFilter = "all";
+    let activeAppId = null;
+    let draftSource = null;
+    let toastTimer = null;
+
+    function icon(name, size = 16) {
+      const icons = {
+        plus: `<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`,
+        check: `<path d="m5 12 4.2 4.2L19 6.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`,
+        shield: `<path d="M12 3.5 19 6v5.3c0 4.1-2.6 7.4-7 9.2-4.4-1.8-7-5.1-7-9.2V6l7-2.5Z" stroke="currentColor" stroke-width="1.5"/><path d="m9.2 12 1.8 1.8 3.8-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`,
+        info: `<circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/><path d="M12 10.5v5M12 7.6h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`,
+        warning: `<path d="M12 4 21 20H3L12 4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 9v4.6M12 17h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>`
+      };
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" aria-hidden="true">${icons[name]}</svg>`;
+    }
+
+    function getApp(id) {
+      return apps.find((app) => app.id === id);
+    }
+
+    function anyCredentialAvailable(app) {
+      return Object.values(app.availability).some(Boolean);
+    }
+
+    function statusFor(app) {
+      if (app.selected && app.source) {
+        return {
+          text: `${sourceMeta[app.source].shortLabel} connection`,
+          tone: app.source === "agent" ? "agent" : "ready"
+        };
+      }
+      if (app.availability.personal) return { text: "Your connection is ready", tone: "ready" };
+      if (app.availability.agent) return { text: "Agent connection available", tone: "agent" };
+      if (app.availability.workspace) return { text: "Workspace connection available", tone: "ready" };
+      return { text: app.oauth ? "Connect your account" : "Credential setup required", tone: "warning" };
+    }
+
+    function matchesFilter(app) {
+      if (activeFilter === "selected") return app.selected;
+      if (activeFilter === "ready") return anyCredentialAvailable(app);
+      if (activeFilter === "setup") return !anyCredentialAvailable(app);
+      return true;
+    }
+
+    function renderSelected() {
+      const selected = apps.filter((app) => app.selected);
+      if (!selected.length) {
+        selectedStrip.innerHTML = `<span class="selected-empty">No MCPs added yet</span>`;
+      } else {
+        selectedStrip.innerHTML = selected.map((app) => `
+          <div class="selected-chip">
+            <button type="button" data-open-app="${app.id}" aria-label="Configure ${app.name}">
+              <span class="app-icon"><img src="${app.icon}" alt="" /></span>
+              <span class="chip-name">${app.name}</span>
+              <span class="chip-source">${sourceMeta[app.source].shortLabel}</span>
+            </button>
+            <button class="chip-remove" type="button" data-remove-app="${app.id}" aria-label="Remove ${app.name}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        `).join("");
+      }
+
+      const needsAttention = selected.filter((app) => !app.source).length;
+      footerStatus.innerHTML = `
+        <span class="status-dot" style="background:${needsAttention ? "var(--warning)" : "var(--success)"}"></span>
+        <span><strong>${selected.length} MCP${selected.length === 1 ? "" : "s"}</strong> added${needsAttention ? ` · ${needsAttention} needs setup` : " · identities reviewed"}</span>
+      `;
+    }
+
+    function renderCatalog() {
+      const query = searchInput.value.trim().toLowerCase();
+      const visible = apps.filter((app) => {
+        const haystack = `${app.name} ${app.description} ${app.category}`.toLowerCase();
+        return haystack.includes(query) && matchesFilter(app);
+      });
+
+      if (!visible.length) {
+        catalog.innerHTML = `<div class="no-results">No MCPs match this search.</div>`;
+        return;
+      }
+
+      const categories = [...new Set(visible.map((app) => app.category))];
+      catalog.innerHTML = categories.map((category) => {
+        const group = visible.filter((app) => app.category === category);
+        return `
+          <section class="category">
+            <h2 class="category-heading">${category}</h2>
+            <div class="app-grid">
+              ${group.map((app) => {
+                const status = statusFor(app);
+                return `
+                  <button class="mcp-card" type="button" data-app-id="${app.id}" data-selected="${app.selected}">
+                    <span class="card-title">
+                      <span class="app-icon"><img src="${app.icon}" alt="" /></span>
+                      <span class="name-wrap">
+                        <span class="app-name">${app.name}</span>
+                        <span class="status-line" data-tone="${status.tone}">
+                          <span class="status-dot"></span>${status.text}
+                        </span>
+                      </span>
+                    </span>
+                    <span class="card-action" aria-hidden="true">
+                      ${icon(app.selected ? "check" : "plus", 16)}
+                    </span>
+                    <span class="app-description">${app.description}</span>
+                  </button>
+                `;
+              }).join("")}
+            </div>
+          </section>
+        `;
+      }).join("");
+    }
+
+    function render() {
+      renderSelected();
+      renderCatalog();
+    }
+
+    function modeBadge(app, mode) {
+      if (app.availability[mode]) return `<span class="source-badge ready">Ready</span>`;
+      if (mode === "workspace") return `<span class="source-badge required">Ask admin</span>`;
+      return `<span class="source-badge required">Setup</span>`;
+    }
+
+    function renderDrawer() {
+      const app = getApp(activeAppId);
+      if (!app) return;
+
+      drawerApp.innerHTML = `
+        <span class="app-icon"><img src="${app.icon}" alt="" /></span>
+        <span>
+          <h2 class="drawer-app-name">${app.name}</h2>
+          <p class="drawer-kicker">${app.selected ? "Update MCP" : "Add to PR Agent"}</p>
+        </span>
+      `;
+
+      sourceOptions.innerHTML = app.modes.map((mode) => {
+        const meta = sourceMeta[mode];
+        return `
+          <label class="source-option" data-source="${mode}" data-selected="${draftSource === mode}">
+            <input type="radio" name="credential-source" value="${mode}" ${draftSource === mode ? "checked" : ""} />
+            <span>
+              <span class="source-name">${meta.label}</span>
+              <span class="source-copy">${meta.copy}</span>
+            </span>
+            ${modeBadge(app, mode)}
+          </label>
+        `;
+      }).join("");
+
+      renderConfiguration();
+      confirmSourceButton.textContent = app.selected ? "Update MCP" : "Add MCP";
+    }
+
+    function renderConfiguration() {
+      const app = getApp(activeAppId);
+      if (!app || !draftSource) {
+        configuration.innerHTML = "";
+        confirmSourceButton.disabled = true;
+        return;
+      }
+
+      confirmSourceButton.disabled = false;
+
+      if (draftSource === "personal") {
+        if (app.availability.personal) {
+          configuration.innerHTML = `
+            <p class="section-label">Your connection</p>
+            <div class="connection-state">
+              <div class="account">
+                <span class="avatar">DP</span>
+                <span>
+                  <strong>${app.account || "Devesh Prakash"}</strong>
+                  <span>Connected for your Claw account</span>
+                </span>
+              </div>
+              <button class="text-button" type="button" data-reconnect>Reconnect</button>
+            </div>
+            <div class="notice" style="margin-top:10px">
+              ${icon("shield", 15)}
+              <span>If PR Agent is shared, every other user will be asked to connect their own ${app.name} account. Your credential is never shared with them.</span>
+            </div>
+          `;
+        } else if (app.oauth) {
+          configuration.innerHTML = `
+            <p class="section-label">Connect your account</p>
+            <div class="notice">
+              ${icon("info", 15)}
+              <span>${app.name} uses OAuth. You’ll return here after authorizing your account.</span>
+            </div>
+            <button class="button primary inline-action" type="button" data-simulate-connect>Connect ${app.name}</button>
+          `;
+          confirmSourceButton.disabled = true;
+        } else {
+          configuration.innerHTML = `
+            <p class="section-label">Connect your account</p>
+            <div class="field">
+              <label for="personal-token">${app.name} personal access token</label>
+              <input id="personal-token" type="password" placeholder="Paste token" autocomplete="new-password" />
+              <span class="field-hint">Stored encrypted for your account. It will not be shared with the agent or other users.</span>
+            </div>
+            <button class="button primary inline-action" type="button" data-simulate-connect>Connect my account</button>
+          `;
+          confirmSourceButton.disabled = true;
+        }
+        return;
+      }
+
+      if (draftSource === "agent") {
+        if (app.availability.agent) {
+          configuration.innerHTML = `
+            <p class="section-label">Agent credential</p>
+            <div class="connection-state">
+              <div class="account">
+                <span class="avatar">PR</span>
+                <span>
+                  <strong>PR Agent service account</strong>
+                  <span>Credential configured · values hidden</span>
+                </span>
+              </div>
+              <button class="text-button" type="button" data-reconnect>Replace</button>
+            </div>
+            <div class="notice warning" style="margin-top:10px">
+              ${icon("warning", 15)}
+              <span>Anyone who can run PR Agent can take actions through this credential.</span>
+            </div>
+          `;
+        } else {
+          configuration.innerHTML = `
+            <p class="section-label">Agent credential</p>
+            <div class="notice warning" style="margin-bottom:10px">
+              ${icon("warning", 15)}
+              <span>This is a shared service credential. Anyone with access to PR Agent can act through it.</span>
+            </div>
+            <div class="field">
+              <label for="agent-token">${app.name} service account token</label>
+              <input id="agent-token" type="password" placeholder="Paste token" autocomplete="new-password" />
+              <span class="field-hint">Stored encrypted on PR Agent. Secret values are paste-once and never shown again.</span>
+            </div>
+            <button class="button primary inline-action" type="button" data-simulate-connect>Save agent credential</button>
+          `;
+          confirmSourceButton.disabled = true;
+        }
+        return;
+      }
+
+      if (draftSource === "workspace") {
+        if (app.availability.workspace) {
+          configuration.innerHTML = `
+            <p class="section-label">Workspace connection</p>
+            <div class="connection-state">
+              <div class="account">
+                <span class="avatar">XY</span>
+                <span>
+                  <strong>Xyne workspace connection</strong>
+                  <span>Managed by workspace administrators</span>
+                </span>
+              </div>
+              <span class="source-badge ready">Available</span>
+            </div>
+            <div class="notice" style="margin-top:10px">
+              ${icon("info", 15)}
+              <span>Your personal connection will not be used. Access and rotation are controlled by the workspace.</span>
+            </div>
+          `;
+        } else {
+          configuration.innerHTML = `
+            <p class="section-label">Workspace connection</p>
+            <div class="notice warning">
+              ${icon("warning", 15)}
+              <span>No workspace-managed ${app.name} connection is available. Ask an administrator to configure one.</span>
+            </div>
+            <button class="button secondary inline-action" type="button" data-ask-admin>Copy request for admin</button>
+          `;
+          confirmSourceButton.disabled = true;
+        }
+      }
+    }
+
+    function openDrawer(appId) {
+      const app = getApp(appId);
+      if (!app) return;
+      activeAppId = appId;
+      draftSource = app.source || (
+        app.availability.personal ? "personal" :
+        app.availability.agent ? "agent" :
+        app.availability.workspace ? "workspace" :
+        app.modes[0]
+      );
+      renderDrawer();
+      modal.classList.add("drawer-open");
+      document.querySelector("#close-drawer").focus();
+    }
+
+    function closeDrawer() {
+      modal.classList.remove("drawer-open");
+      const prior = activeAppId;
+      activeAppId = null;
+      draftSource = null;
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-app-id="${prior}"]`)?.focus();
+      });
+    }
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      toast.innerHTML = `${icon("check", 15)}<span>${message}</span>`;
+      toast.classList.add("show");
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+    }
+
+    function closeModal() {
+      closeDrawer();
+      modal.hidden = true;
+      backdrop.hidden = true;
+      reopenButton.hidden = false;
+      reopenButton.focus();
+    }
+
+    function openModal() {
+      modal.hidden = false;
+      backdrop.hidden = false;
+      reopenButton.hidden = true;
+      searchInput.focus();
+    }
+
+    catalog.addEventListener("click", (event) => {
+      const card = event.target.closest("[data-app-id]");
+      if (card) openDrawer(card.dataset.appId);
+    });
+
+    selectedStrip.addEventListener("click", (event) => {
+      const remove = event.target.closest("[data-remove-app]");
+      if (remove) {
+        event.stopPropagation();
+        const app = getApp(remove.dataset.removeApp);
+        app.selected = false;
+        app.source = null;
+        render();
+        showToast(`${app.name} removed from PR Agent`);
+        return;
+      }
+
+      const open = event.target.closest("[data-open-app]");
+      if (open) openDrawer(open.dataset.openApp);
+    });
+
+    sourceOptions.addEventListener("change", (event) => {
+      if (event.target.name !== "credential-source") return;
+      draftSource = event.target.value;
+      renderDrawer();
+    });
+
+    configuration.addEventListener("click", (event) => {
+      const app = getApp(activeAppId);
+      if (!app) return;
+
+      if (event.target.closest("[data-simulate-connect]")) {
+        const input = configuration.querySelector("input");
+        if (input && !input.value.trim() && !app.oauth) {
+          input.focus();
+          input.setAttribute("aria-invalid", "true");
+          showToast("Paste a credential to continue");
+          return;
+        }
+        app.availability[draftSource] = true;
+        if (draftSource === "personal") app.account = app.oauth ? "devesh@xyne.ai" : "@devesh-prakash";
+        renderDrawer();
+        render();
+        showToast(`${sourceMeta[draftSource].shortLabel} connection is ready`);
+      }
+
+      if (event.target.closest("[data-reconnect]")) {
+        showToast("Reconnect flow would open here");
+      }
+
+      if (event.target.closest("[data-ask-admin]")) {
+        navigator.clipboard?.writeText(`Please configure the workspace-managed ${app.name} MCP connection for PR Agent.`);
+        showToast("Admin request copied");
+      }
+    });
+
+    document.querySelector("#confirm-source").addEventListener("click", () => {
+      const app = getApp(activeAppId);
+      if (!app || !draftSource || !app.availability[draftSource]) return;
+      app.selected = true;
+      app.source = draftSource;
+      render();
+      closeDrawer();
+      showToast(`${app.name} added with ${sourceMeta[app.source].shortLabel.toLowerCase()} credentials`);
+    });
+
+    document.querySelector("#close-drawer").addEventListener("click", closeDrawer);
+    document.querySelector("#cancel-source").addEventListener("click", closeDrawer);
+    document.querySelector("#drawer-backdrop").addEventListener("click", closeDrawer);
+
+    searchInput.addEventListener("input", renderCatalog);
+
+    filterButton.addEventListener("click", () => {
+      const willOpen = filterPopover.hidden;
+      filterPopover.hidden = !willOpen;
+      filterButton.setAttribute("aria-expanded", String(willOpen));
+    });
+
+    filterPopover.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-filter]");
+      if (!option) return;
+      activeFilter = option.dataset.filter;
+      filterPopover.querySelectorAll("[data-filter]").forEach((item) => {
+        const active = item.dataset.filter === activeFilter;
+        item.setAttribute("aria-checked", String(active));
+        item.querySelector("span").textContent = active ? "✓" : "";
+      });
+      filterPopover.hidden = true;
+      filterButton.setAttribute("aria-expanded", "false");
+      renderCatalog();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".filter-wrap")) {
+        filterPopover.hidden = true;
+        filterButton.setAttribute("aria-expanded", "false");
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (!filterPopover.hidden) {
+        filterPopover.hidden = true;
+        filterButton.setAttribute("aria-expanded", "false");
+      } else if (modal.classList.contains("drawer-open")) {
+        closeDrawer();
+      } else if (!modal.hidden) {
+        closeModal();
+      }
+    });
+
+    document.querySelector("#close-modal").addEventListener("click", closeModal);
+    document.querySelector("#cancel-modal").addEventListener("click", closeModal);
+    document.querySelector("#save-modal").addEventListener("click", () => {
+      const count = apps.filter((app) => app.selected).length;
+      showToast(`${count} MCP${count === 1 ? "" : "s"} saved to PR Agent`);
+    });
+    reopenButton.addEventListener("click", openModal);
+
+    render();
+  </script>
+</body>
+</html>
