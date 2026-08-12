@@ -3,7 +3,7 @@
 Status: implementation source of truth
 Owner: Xyne Spaces
 Scope: desktop web, v1
-Last updated: 2026-08-09
+Last updated: 2026-08-11
 
 ## 1. Product summary
 
@@ -27,6 +27,7 @@ Engineering intent is fragmented across chats, emails, calls, documents, tickets
 8. Let workspace administrators configure one shared GitHub credential for public/private repository access without exposing it to repository members.
 9. Verify repository capabilities before baseline generation and progressively unlock SDLC surfaces only when their prerequisites pass.
 10. Keep human discussion attached to the SDLC item it explains while reusing normal Channel conversations and message behavior.
+11. Generate and manually refresh a source-grounded repository Wiki by replaying selected base-branch history.
 
 ## 4. Non-goals
 
@@ -34,8 +35,8 @@ v1 does not include:
 
 - mobile layouts;
 - baseline drift detection or automatic regeneration after merges;
-- agentic Wiki generation, refresh scheduling, drift detection, or source-link reconciliation;
-- canvas version history or dirty-state tracking;
+- scheduled, webhook-triggered, or automatic Wiki refresh;
+- general Canvas dirty-state tracking outside the Wiki pipeline's optimistic content-hash check;
 - code indexing in Vespa;
 - GitHub App installation, OAuth, classic PAT, SSH/deploy-key credential UX, or GitHub Enterprise;
 - Bitbucket/GitLab SDLC adapters, fork-based contribution, multiple VCS credentials per workspace, or multiple GitHub resource owners;
@@ -47,7 +48,6 @@ v1 does not include:
 - suggested-diff review;
 - Feedback, Quick Start, Automations, or test-management modules;
 - repository detach/delete after setup;
-- new automated test suites or unit tests.
 - changing Ask AI session/history behavior or exposing SDLC conversations in global Ask AI, Chat, Wiki, or pull-request surfaces.
 
 Existing build, typecheck, lint, enum, and manual smoke checks remain release gates.
@@ -79,6 +79,7 @@ to v2.
 | Run/retry repository access check         | Yes                   | Yes                   | No         |
 | Manage repository members                 | Yes                   | No                    | No         |
 | Start/retry/cancel/restart baseline setup | Yes                   | No                    | No         |
+| Generate/refresh/retry/cancel Wiki        | Yes                   | No                    | No         |
 | Edit/approve baseline canvases            | Yes                   | View only             | No         |
 | Create PRDs and Tech Docs; edit own       | Yes                   | Yes                   | No         |
 | Create/link/start Tickets                 | Yes                   | Yes                   | No         |
@@ -91,7 +92,7 @@ The hidden repository channel is an authorization boundary. It must not appear i
 
 Every newly created SDLC canvas grants the hidden repository Channel `VIEWER` access. The creator retains edit
 access through canvas ownership; other repository members receive view-only access unless separately granted a
-stronger direct role. This default applies to baseline, PRD, Tech Doc, and imported Wiki canvases. Existing canvas
+stronger direct role. This default applies to baseline, PRD, Tech Doc, and generated Wiki canvases. Existing canvas
 participant rows are not backfilled.
 
 The token is never returned to any user after save. Project-authorized users may attach private repositories using the shared capability, but cannot read the credential.
@@ -136,11 +137,14 @@ Each hidden repository channel owns three flat Canvas Folders:
 
 `SDLC` is the repository-level hub, not a global canvas folder. Tickets reuse Tickets and therefore do not require a canvas folder.
 
-The temporary Wiki importer creates source-managed folders named `Wiki` or `Wiki/<source-directory>`.
-Each Research Agent Markdown file maps to exactly one private repository-channel Canvas. Folder names and
-Canvas metadata preserve the source path, while the Wiki screen reconstructs them as a directory tree.
-Repeated imports upsert by source path and never delete missing pages. Wiki availability is independent of
-baseline generation and approval gates.
+The Wiki pipeline creates source-managed folders named `Wiki` or `Wiki/<concept-directory>`. Each conceptual
+Markdown page maps to exactly one private repository-channel Canvas. Folder names and Canvas metadata preserve
+the Wiki path, current source paths, processed Git commit, content hash, and Canvas version identity; the Wiki
+screen reconstructs them as a directory tree. Updates reuse the same Canvas, create a Canvas version, and never
+hard-delete obsolete pages. Wiki availability is independent of baseline generation and approval gates.
+
+The temporary Research Agent importer is superseded by this pipeline. If source-managed Wiki Canvases already
+exist, bootstrap reads and reconciles them rather than creating duplicates.
 
 ### 6.3 Project repository navigation
 
@@ -280,7 +284,7 @@ follow-up.
    - secrets named but never copied into canvas content.
 5. **Test Guide**
    - existing test layers, locations, commands, fixtures, and CI expectations;
-   - v1 implementation itself adds no new automated tests.
+   - never imply test coverage that the repository does not contain.
 
 Generated canvases carry metadata containing Repo ID, artifact kind, baseline key, setup/workflow execution
 ID, approval timestamp/user, and Knowledge Document ID. A generation commit is stored when the sandbox
@@ -302,6 +306,130 @@ Repository setup state is derived as:
 UI shows current document, completed count out of five, last durable update, and actionable error. Refresh/reconnect must recover from DB truth when Redis state is absent.
 Admins can open the existing Ask AI debug panel for the setup conversation; repository-scoped backend
 authorization permits the run owner and repository admins without exposing the trace to ordinary members.
+
+## 8A. Incremental Wiki generation
+
+### 8A.1 Trigger and range
+
+Repository attachment and access checking do not generate the Wiki. After read access passes, a repository
+admin manually selects **Generate Wiki**. Later runs use **Refresh Wiki**. There is no schedule, webhook, merge
+hook, or automatic refresh.
+
+The first-run panel provides:
+
+- history range: latest 20% by default, latest 50%, full first-parent history, or a custom starting SHA;
+- commits per Wiki update: 1, 10 by default, 25, 50, or 100;
+- quality: Quick, Standard by default, or Thorough.
+
+Each option explains its effect. More history improves evolution and rationale recall but costs more time and
+model usage. Larger History Windows reduce run-launch overhead and documentation churn but may compress
+intermediate rationale; size 1 preserves exact commit-level fidelity. Higher quality adds final review passes. The panel presents one common cost,
+time, and quality warning before start.
+
+Refresh begins after the latest successful Commit Checkpoint and targets the current head of the base branch
+saved during repository attachment. One Wiki Run may be active per repository. Repository admins can start,
+retry, cancel, and inspect runs; repository members can view Wiki pages and run progress.
+
+### 8A.2 History and bootstrap semantics
+
+The backend deterministically fetches the selected base branch, resolves its head, validates a custom SHA as an
+ancestor when supplied, and uses first-parent history in oldest-to-newest order. No Agent session performs range
+preparation. Merge changes are analyzed once where they enter the base branch. The run records its full target
+head so later remote movement cannot change the active range. Agent prompts, tool inputs, and the dashboard use
+shortest-unique commit references with a nine-character minimum; persistence and authorization retain full SHAs.
+
+Before processing the selected starting commit `C`, bootstrap creates or reconciles the conceptual Wiki against
+the complete repository tree at `parent(C)`. It does not summarize only that parent commit. Commit `C` is then
+processed normally and receives its own attributable revisions. When `C` is the root commit, bootstrap starts
+from an empty Wiki and the root tree/diff establishes the initial pages.
+
+The sandbox fetches enough history for the selected range. Wiki-only Git tools expose the assigned commit's
+metadata, bounded diff, tree, source files, searches, and bounded path history without giving the model arbitrary
+Git or shell mutation. Large diffs remain in bounded sandbox files; small diffs may be returned inline.
+
+### 8A.3 Supervision and History Windows
+
+The backend owns ordering, the authoritative cursor, retries, cancellation, one-active-run enforcement, and
+completion. The existing `sdlc-agent` handles one immutable History Window of sequential commits as a conceptual
+before→after update. It normally writes at the mandatory endpoint. It may retain a meaningful intermediate state
+only by explicitly beginning and finalizing that server-authorized checkpoint first. All mutations are serialized.
+
+One stable Wiki conversation identity allows a live sandbox and fetched clone to be reused. Model session
+history is cleared between History Windows. Run-finally cleanup removes credentials but does not intentionally
+destroy the reusable sandbox. If the sandbox or Claw process is gone, the next History Window provisions a new
+sandbox, fetches the remaining range, and resumes after the latest Commit Checkpoint. The system never trusts an
+agent's claim that earlier commits completed without matching durable checkpoints.
+
+### 8A.4 Generator contract
+
+For every assigned commit, the generator:
+
+1. reads commit metadata, changed paths, and diff;
+2. loads current Wiki paths and only likely affected pages;
+3. inspects the assigned historical tree and surrounding code when the diff is insufficient;
+4. uses source-map overlap plus bounded Git path/rename history for relevant historical context;
+5. creates, updates, or archives the smallest coherent set of concept-oriented pages; or records no-op;
+6. submits the complete current source-path list for every changed active page.
+
+The Wiki captures domain concepts, business flows and rules, interfaces, integrations, state, invariants,
+failure modes, operational behavior, security/trust boundaries, important decisions, and useful evolution. It
+does not become a file inventory, line-by-line explanation, commit log, or dependency list. Formatting-only,
+generated-only, lockfile-only, and test-only commits may be deterministically classified as no-op when that fact
+is provable. Refactors and bug fixes update the Wiki only when conceptual behavior, pointers, invariants, or
+lasting rationale change.
+
+Current executable code wins conflicts. Tests, schemas, configuration, current repository docs, commit
+messages, selected history, and old Wiki text provide supporting evidence in that order, subject to explicit
+rationale found in comments or design records. Inferences are never presented as documented motivation.
+
+### 8A.5 Wiki write interface and concurrency
+
+Wiki runs receive dedicated list/read/page-write/commit-finalize tools rather than generic Canvas or database
+mutation. Each tool is bound to repository, Workflow Execution, Agent session, assigned commit, and initiating
+user. A page-write accepts exactly one validated create, update, restore, or archive action. Finalize advances
+the commit only after all page writes succeed, or records no-op when no page was written.
+
+Every update includes the content hash read by the generator. If a human or another process changed the Canvas,
+the backend rejects the stale write with a conflict; the same commit is retried against current content. Human
+edits therefore remain part of the Wiki unless repository evidence contradicts them. The backend validates Wiki
+paths, output size, assigned SHA, action shape, source-path existence in the assigned tree, duplicate paths, and
+source completeness before mutation.
+
+Changed pages create a `CanvasVersion`. A whole topic that is no longer useful is archived through Canvas
+metadata and hidden from the normal Wiki tree; it is never hard-deleted. Section removal, source rename, or file
+movement updates the existing Canvas instead. A later commit may restore an archived path and reuse its Canvas.
+
+### 8A.6 Persistence without a new schema
+
+The pipeline reuses existing persistence:
+
+- `WorkflowExecution` context/output stores configuration, target head, cursor, counts, errors, History Window
+  sessions, and historical Wiki Revision evidence;
+- `SdlcEntityLink` associates the repository with each Wiki Workflow Execution;
+- current Canvas metadata stores Wiki path, current source paths, last commit SHA, content hash, Canvas version
+  ID, sync time, and optional archive fields;
+- `CanvasVersion` stores the version content and content hash;
+- Redis/Bull stores only dispatch, live progress, admission, and retry state.
+
+Each historical Wiki Revision record links action, commit SHA, Canvas ID, Canvas version ID, Canvas content hash,
+and the complete source-path list. Current source mappings remain directly available from Canvas metadata;
+historical mappings may be removed later without changing current Wiki behavior. No `.doc_runs.json`,
+`.doc_sources.json`, generated Markdown, or credential is written or pushed to the attached repository.
+
+### 8A.7 Quality modes
+
+All roles use the same configured `sdlc-agent`; only instructions and write permissions differ.
+
+- Quick ends after bootstrap and commit processing.
+- Standard runs one read-only final validator, then one correction run for confirmed findings.
+- Thorough runs two read-only validators with different focuses—architecture/domain/flows and
+  operations/failure/security/source accuracy—then one correction run.
+
+Validators report missing topics, stale or conflicting claims, invalid sources, and suggestions. They cannot
+write. Correction runs verify findings against the final target tree and create revisions labelled
+`Wiki audit @ <target-head>`. Deterministic backend validation runs in every quality mode.
+
+Full design and prompt contracts are in [WIKI_PIPELINE_DESIGN.md](./WIKI_PIPELINE_DESIGN.md).
 
 ## 9. Baseline review and memory
 
@@ -374,11 +502,18 @@ Default context:
 3. explicitly linked context the user can access;
 4. repository channel conversation history.
 
-For an interactive repository question, the SDLC Assistant searches the relevant live code, imported Wiki,
+For an interactive repository question, the SDLC Assistant searches the relevant live code, generated Wiki,
 PRDs, Tech Docs, Tickets and their conversations, baseline memory, linked context, and repository-channel
 history before converging on an answer. Workspace-backed claims retain normal inline citations. Code answers
 show the smallest relevant excerpt before its explanation and include repository-relative path, symbol, and
 line range. This retrieval guidance is interactive-only and does not change baseline or Start Work execution.
+
+Interactive context includes the latest successful Wiki commit SHA, current base-branch head SHA, and a derived
+`CURRENT`, `STALE`, or `UNKNOWN` freshness state. When current and the Wiki fully establishes the answer, the
+Assistant may answer from it. When stale or unknown, the Wiki is orientation only: the Assistant inspects current
+code before making repository claims and discloses that stale Wiki informed the answer. Even a current Wiki does
+not replace code inspection for exact implementation, security, configuration, or behavior it does not establish.
+Current code wins any conflict.
 
 Wider workspace sources require explicit user selection or normal authorized retrieval. Existing search/retrieval infrastructure remains responsible for emails, chats, canvases, calls, recordings, and attachments.
 
@@ -531,6 +666,12 @@ One active, deterministically named `ExternalSource` per workspace/provider uses
 validation, identity/resource-owner/fingerprint, actor, and timestamp metadata. Ciphertext is never mirrored
 into Zero. The temporary legacy credential table is migrated and removed.
 
+### 14.5 Wiki pipeline reuse
+
+Incremental Wiki generation adds no database model, field, enum, or migration. It reuses Workflow Executions,
+generic SDLC entity links, Canvas metadata, Canvas versions, the existing SDLC queue, and existing credential
+bootstrap. Shared Zod contracts may add text unions and payload schemas without Prisma enums.
+
 ## 15. Deep module interface
 
 Business invariants live behind one backend `SdlcHub` module:
@@ -563,6 +704,23 @@ interface for credential configuration, access checks, capability gates, runtime
 and PR validation. `GitHubVcsAdapter` is the v1 provider adapter. See
 [VCS_CREDENTIALS_PLAN.md](./VCS_CREDENTIALS_PLAN.md).
 
+Wiki orchestration lives behind a separate deep `SdlcWikiPipeline` module:
+
+```ts
+interface SdlcWikiPipeline {
+  start(actor: SdlcActor, input: StartWikiRunInput): Promise<WikiRun>;
+  refresh(actor: SdlcActor, input: RefreshWikiRunInput): Promise<WikiRun>;
+  retry(actor: SdlcActor, repoId: string, executionId: string): Promise<WikiRun>;
+  cancel(actor: SdlcActor, repoId: string, executionId: string): Promise<WikiRun>;
+  getStatus(actor: SdlcActor, repoId: string): Promise<WikiStatus>;
+}
+```
+
+Its external interface hides Git range resolution, History Window dispatch, sandbox reuse, prompt roles,
+checkpoints, optimistic Canvas writes, revision/source evidence, validation, and recovery. HTTP routes, Bull
+jobs, callbacks, Claw tools, and the dashboard are adapters at this seam. Wiki source inspection and Canvas
+storage may use private internal seams; callers do not coordinate them.
+
 ## 16. HTTP commands
 
 - `POST /api/sdlc/repositories`
@@ -575,6 +733,10 @@ and PR validation. `GitHubVcsAdapter` is the v1 provider adapter. See
 - `POST /api/sdlc/repositories/:repoId/setup/retry`
 - `POST /api/sdlc/repositories/:repoId/setup/cancel`
 - `POST /api/sdlc/repositories/:repoId/setup/restart`
+- `POST /api/sdlc/repositories/:repoId/wiki/runs`
+- `POST /api/sdlc/repositories/:repoId/wiki/runs/:executionId/retry`
+- `POST /api/sdlc/repositories/:repoId/wiki/runs/:executionId/cancel`
+- `GET /api/sdlc/repositories/:repoId/wiki/status`
 - `POST /api/sdlc/repositories/:repoId/artifacts`
 - `GET /api/sdlc/repositories/:repoId/executions/:executionId/debug`
 - `POST /api/sdlc/repositories/:repoId/links`
@@ -582,6 +744,8 @@ and PR validation. `GitHubVcsAdapter` is the v1 provider adapter. See
 - `POST /api/sdlc/repositories/:repoId/start-work`
 - baseline approval may extend the existing knowledge approval command while preserving legacy behavior.
 - `POST /api/sdlc/claw/artifacts` is the authenticated narrow Claw tool boundary.
+- Wiki-only Claw list/read/page-write/commit-finalize routes are authenticated and bound to the active Wiki execution, Agent session,
+  repository, initiating user, and assigned commit.
 - `POST /api/sdlc/claw/pull-requests` is the authenticated narrow draft-PR boundary.
 - `POST /api/internal/sdlc/vcs/runtime-credentials/bootstrap` is S2S-authenticated, validates active durable
   execution/repository/session/operation scope, rejects reuse of one sandbox binding, and returns only ciphertext.
@@ -608,6 +772,13 @@ Read models and optimistic mutations must be mirrored across backend/dashboard Z
 - baseline cannot start before read access passes;
 - artifact commands cannot start before read access and all-five approval gates;
 - Start Work cannot start without current read/push/PR capability.
+- Wiki generation cannot start before read access passes and remains independent of baseline approval;
+- one active Wiki Run exists per repository;
+- every terminal commit advances one durable checkpoint; partial agent output never advances it;
+- retries are idempotent across partially applied page updates, duplicate callbacks, and lost callbacks;
+- stale Canvas hashes fail with conflict rather than overwriting human edits;
+- failed runs retain diagnostic diff/context artifacts until retry or explicit cleanup;
+- reusable sandboxes are opportunistic optimization, never the durable source of run truth.
 
 ## 18. v1 acceptance criteria
 
@@ -635,3 +806,14 @@ Read models and optimistic mutations must be mirrored across backend/dashboard Z
 22. Unlinked historical conversations do not appear, and v1 offers no attach, move, multi-owner, unlink, or backfill flow.
 23. Conversation selection survives refresh and browser navigation; **Assistant** remains behaviorally unchanged and is mutually exclusive with the conversation panel.
 24. Overview renders the current user's existing Activity rows filtered to the repository Channel without creating events or mutating read state.
+25. Repository attachment does not generate a Wiki; an admin can manually Generate or Refresh only after read access passes.
+26. First generation supports latest 20%, latest 50%, full first-parent history, or a valid custom ancestor SHA; it bootstraps the full tree at the selected starting commit's parent.
+27. Commits are partitioned first-parent, oldest to newest, into History Windows of 1/10/25/50/100; every window has a mandatory endpoint checkpoint and backend-owned monotonic optional intermediate checkpoints.
+28. A missing reusable sandbox is recreated and resumes after the latest Commit Checkpoint without repeating completed commits.
+29. Product-relevant commits create, update, or archive the correct conceptual Canvas pages; provably irrelevant commits record no-op.
+30. Every active changed page records existing source paths, commit SHA, Canvas content hash, and Canvas version; historical Wiki Revision evidence connects the same facts in the run output.
+31. A human edit racing generation produces a stale-hash conflict and retry, never silent overwrite.
+32. Whole obsolete topics are archived and hidden without hard-deleting Canvas history/comments; moves and partial removals update the existing Canvas.
+33. Quick, Standard, and Thorough use the same `sdlc-agent`; validators remain read-only and correction runs write only verified fixes.
+34. Ask AI receives Wiki and base-branch SHAs. When freshness is stale or unknown, it inspects current code before making repository claims and tells the user when stale Wiki informed the answer.
+35. Interrupted, failed, cancelled, truncated, duplicated-callback, and transient-network runs leave durable, truthful, retryable state without corrupting Wiki Canvases or source evidence.

@@ -1,12 +1,17 @@
 import { execFile } from 'child_process';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { promisify } from 'util';
 import type {
   DraftPullRequestInput,
   DraftPullRequestResult,
+  FirstParentHistory,
   GitAuthentication,
   ParsedRepository,
   PullRequestInspection,
   RepositoryInspection,
+  SourceLineRange,
   ValidatedCredential,
   VcsProviderAdapter,
 } from './types';
@@ -15,6 +20,28 @@ import { VcsProviderError } from './types';
 const execFileAsync = promisify(execFile);
 const API_URL = 'https://api.github.com';
 const API_VERSION = '2026-03-10';
+const GIT_HISTORY_TIMEOUT_MS = 5 * 60_000;
+const GIT_HISTORY_MAX_BUFFER = 64 * 1024 * 1024;
+
+interface GitHubVcsAdapterDependencies {
+  runGit(
+    args: string[],
+    options: { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number }
+  ): Promise<{ stdout: string }>;
+  makeTempDirectory(prefix: string): Promise<string>;
+  removeTempDirectory(path: string): Promise<void>;
+}
+
+const defaultDependencies: GitHubVcsAdapterDependencies = {
+  async runGit(args, options) {
+    const result = await execFileAsync('git', args, options);
+    return { stdout: String(result.stdout) };
+  },
+  makeTempDirectory: mkdtemp,
+  async removeTempDirectory(path) {
+    await rm(path, { recursive: true, force: true });
+  },
+};
 
 interface GitHubRepositoryResponse {
   name?: string;
@@ -33,6 +60,10 @@ interface GitHubRepositoryResponse {
 
 export class GitHubVcsAdapter implements VcsProviderAdapter {
   readonly provider = 'GITHUB' as const;
+
+  constructor(
+    private readonly dependencies: GitHubVcsAdapterDependencies = defaultDependencies
+  ) {}
 
   parseRepositoryUrl(raw: string): ParsedRepository {
     let value = raw.trim();
@@ -253,21 +284,183 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
   }
 
   async verifyRemoteCommit(
-    token: string,
+    token: string | undefined,
     repository: ParsedRepository,
     branch: string,
     commitHash: string
   ): Promise<void> {
+    const head = await this.resolveBranchHead(token, repository, branch);
+    if (head.toLowerCase() !== commitHash.toLowerCase()) {
+      throw new VcsProviderError(
+        'GITHUB_REMOTE_COMMIT_MISMATCH',
+        'Remote branch does not point to the submitted commit',
+        409
+      );
+    }
+  }
+
+  async resolveBranchHead(
+    token: string | undefined,
+    repository: ParsedRepository,
+    branch: string
+  ): Promise<string> {
     const ref = await this.request<{ object?: { sha?: string } }>(
       `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`,
       token
     );
-    if (ref.object?.sha?.toLowerCase() !== commitHash.toLowerCase()) {
+    if (!ref.object?.sha || !/^[0-9a-f]{40}$/i.test(ref.object.sha)) {
       throw new VcsProviderError(
-        'GITHUB_REMOTE_COMMIT_MISMATCH',
-        'Remote feature branch does not point to the submitted commit',
-        409
+        'GITHUB_BRANCH_HEAD_INVALID',
+        'GitHub did not return a valid branch head',
+        502
       );
+    }
+    return ref.object.sha;
+  }
+
+  async listFirstParentHistory(
+    token: string | undefined,
+    repository: ParsedRepository,
+    branch: string
+  ): Promise<FirstParentHistory> {
+    const directory = await this.dependencies.makeTempDirectory(
+      join(tmpdir(), 'xyne-sdlc-wiki-history-')
+    );
+    const env = this.gitEnvironment(token);
+    const options = {
+      env,
+      timeout: GIT_HISTORY_TIMEOUT_MS,
+      maxBuffer: GIT_HISTORY_MAX_BUFFER,
+    };
+    try {
+      await this.dependencies.runGit(['init', '--bare', directory], options);
+      await this.dependencies.runGit(
+        [
+          '--git-dir',
+          directory,
+          'fetch',
+          '--force',
+          '--no-tags',
+          // Planning needs commit ancestry only. Omitting historical trees and
+          // blobs keeps 7k+ commit monorepos bounded; the agent sandbox fetches
+          // code separately for the selected commits.
+          '--filter=tree:0',
+          repository.cloneUrl,
+          `+refs/heads/${branch}:refs/remotes/origin/wiki-base`,
+        ],
+        options
+      );
+      const { stdout } = await this.dependencies.runGit(
+        [
+          '--git-dir',
+          directory,
+          'rev-list',
+          '--first-parent',
+          '--reverse',
+          'refs/remotes/origin/wiki-base',
+        ],
+        options
+      );
+      const shas = stdout
+        .split(/\r?\n/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+      if (shas.length === 0 || shas.some((sha) => !/^[0-9a-f]{40}$/.test(sha))) {
+        throw new VcsProviderError(
+          'GITHUB_HISTORY_INVALID',
+          'Git returned an invalid base-branch history',
+          502
+        );
+      }
+      return {
+        targetHeadSha: shas[shas.length - 1]!,
+        commits: shas.map((sha, index) => ({
+          sha,
+          parentSha: index === 0 ? null : shas[index - 1]!,
+        })),
+      };
+    } catch (error) {
+      if (error instanceof VcsProviderError) throw error;
+      throw new VcsProviderError(
+        'GITHUB_GIT_HISTORY_FAILED',
+        `Git could not read first-parent history for branch ${branch}`,
+        503,
+        true
+      );
+    } finally {
+      await this.dependencies.removeTempDirectory(directory).catch(() => undefined);
+    }
+  }
+
+  async verifyPathsAtCommit(
+    token: string | undefined,
+    repository: ParsedRepository,
+    commitHash: string,
+    paths: string[]
+  ): Promise<void> {
+    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
+      throw new VcsProviderError('GITHUB_COMMIT_INVALID', 'Invalid Git commit identity', 400);
+    }
+    for (const path of [...new Set(paths)]) {
+      if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
+        throw new VcsProviderError('GITHUB_PATH_INVALID', `Invalid repository path: ${path}`, 400);
+      }
+      try {
+        await this.request(
+          `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${path
+            .split('/')
+            .map(encodeURIComponent)
+            .join('/')}?ref=${encodeURIComponent(commitHash)}`,
+          token
+        );
+      } catch (error) {
+        if (error instanceof VcsProviderError && error.httpStatus === 404) {
+          throw new VcsProviderError(
+            'INVALID_SOURCE_PATH',
+            `[INVALID_SOURCE_PATH] Source path does not exist at the assigned ref: ${path}`,
+            400
+          );
+        }
+        throw error;
+      }
+    }
+  }
+
+  async verifySourceRangesAtCommit(
+    token: string | undefined,
+    repository: ParsedRepository,
+    commitHash: string,
+    references: SourceLineRange[]
+  ): Promise<void> {
+    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
+      throw new VcsProviderError('GITHUB_COMMIT_INVALID', 'Invalid Git commit identity', 400);
+    }
+    for (const reference of references) {
+      if (!reference.startLine) continue;
+      const response = await this.request<{ type?: string; content?: string; encoding?: string }>(
+        `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${reference.path
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}?ref=${encodeURIComponent(commitHash)}`,
+        token
+      );
+      if (response.type !== 'file' || response.encoding !== 'base64' || typeof response.content !== 'string') {
+        throw new VcsProviderError(
+          'INVALID_SOURCE_RANGE',
+          `[INVALID_SOURCE_RANGE] Source cannot be line-addressed: ${reference.path}`,
+          400
+        );
+      }
+      const content = Buffer.from(response.content.replace(/\s/g, ''), 'base64').toString('utf8');
+      const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
+      const endLine = reference.endLine ?? reference.startLine;
+      if (reference.startLine > lineCount || endLine > lineCount) {
+        throw new VcsProviderError(
+          'INVALID_SOURCE_RANGE',
+          `[INVALID_SOURCE_RANGE] ${reference.path} has ${lineCount} lines at the assigned ref`,
+          400
+        );
+      }
     }
   }
 
@@ -364,12 +557,7 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
   }
 
   private async lsRemote(url: string, branch: string, token?: string): Promise<void> {
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    if (token) {
-      env.GIT_CONFIG_COUNT = '1';
-      env.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
-      env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
-    }
+    const env = this.gitEnvironment(token);
     try {
       const { stdout } = await execFileAsync(
         'git',
@@ -388,5 +576,15 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
         403
       );
     }
+  }
+
+  private gitEnvironment(token?: string): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    if (token) {
+      env.GIT_CONFIG_COUNT = '1';
+      env.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
+      env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
+    }
+    return env;
   }
 }

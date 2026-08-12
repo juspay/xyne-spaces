@@ -11,7 +11,7 @@ export type SdlcJobData =
       userId: string;
       realFailures?: number;
     }
-  | { type: 'SETUP' | 'ARTIFACT' | 'WORK'; repoId: string; executionId: string };
+  | { type: 'SETUP' | 'ARTIFACT' | 'WORK' | 'WIKI'; repoId: string; executionId: string };
 
 export interface SdlcAccessCheckState {
   status: 'NOT_CHECKED' | 'QUEUED' | 'CHECKING' | 'READY' | 'BLOCKED';
@@ -50,7 +50,7 @@ class SdlcQueue {
         maxStalledCount: 1,
       },
     });
-    this.queue.on('error', error => logger.error('[SDLC-QUEUE] error', error));
+    this.queue.on('error', (error) => logger.error('[SDLC-QUEUE] error', error));
     logger.info('[SDLC-QUEUE] Initialized');
   }
 
@@ -91,6 +91,10 @@ class SdlcQueue {
     await this.enqueue({ type: 'WORK', executionId, repoId });
   }
 
+  async enqueueWiki(executionId: string, repoId: string): Promise<void> {
+    await this.enqueue({ type: 'WIKI', executionId, repoId });
+  }
+
   async accessCheckState(repoId: string): Promise<SdlcAccessCheckState> {
     if (!this.queue) await this.initialize();
     const job = await this.queue!.getJob(`access-check:${repoId}`);
@@ -98,7 +102,8 @@ class SdlcQueue {
     const state = await job.getState();
     return {
       status: accessCheckStatus(state),
-      errorMessage: state === 'failed' ? job.failedReason || 'Repository access check failed' : null,
+      errorMessage:
+        state === 'failed' ? job.failedReason || 'Repository access check failed' : null,
       result: state === 'completed' ? job.returnvalue : null,
     };
   }

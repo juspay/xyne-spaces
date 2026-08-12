@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionContext } from "../../../src/tools/types.js";
 import {
+  buildRepoCloneCommand,
   resolveDynamicSdlcRepositoryConfig,
   sandboxRepoSetup,
 } from "../../../src/tools/sandbox/tools.js";
@@ -27,6 +28,28 @@ describe("SDLC sandbox repository context", () => {
     );
     expect(resolved?.config.defaultBranch).toBe("main");
     expect(resolved?.config.template).toBe("kata-workspace-template");
+    expect(resolved?.config.cloneDepth).toBe(1);
+    expect(resolved?.config.cloneFilter).toBeUndefined();
+  });
+
+  it("uses bounded blobless single-branch history for large Wiki repositories", () => {
+    const resolved = resolveDynamicSdlcRepositoryConfig(
+      context({
+        sdlcRepositoryId: "repo-large",
+        sdlcRepositoryName: "Large",
+        sdlcRepositoryUrl: "https://github.com/example/large.git",
+        sdlcRepositoryBaseBranch: "main",
+        sdlcWikiRun: "true",
+      }),
+    );
+
+    expect(resolved?.config.cloneDepth).toBeUndefined();
+    expect(resolved?.config.cloneFilter).toBe("blob:none");
+    expect(resolved?.config.cloneSingleBranch).toBe(true);
+    expect(resolved?.config.cloneTimeoutMs).toBe(30 * 60 * 1000);
+    expect(buildRepoCloneCommand(resolved!.config, "main")).toBe(
+      "git clone --filter=blob:none --single-branch --branch main https://github.com/example/large.git /workspace/Large",
+    );
   });
 
   it("rejects a scheme-less SDLC URL instead of falling back to lamf", async () => {

@@ -7,6 +7,8 @@ import {
   createSdlcTicketSchema,
   configureSdlcVcsCredentialSchema,
   sdlcVcsProviderSchema,
+  startSdlcWikiRunSchema,
+  refreshSdlcWikiRunSchema,
   startSdlcWorkSchema,
 } from '@xyne/shared';
 import { AppError } from '@/middleware/errorHandler';
@@ -14,10 +16,12 @@ import { sdlcQueue } from '@/queues/sdlcQueue';
 import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { DatabaseClient } from '@/database/client';
+import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
 const prisma = DatabaseClient.getInstance();
+const wikiPipeline = new SdlcWikiPipelineService(prisma, sdlcQueue);
 
 function actorFromRequest(req: Request): SdlcActor {
   const userId = req.user?.id;
@@ -110,19 +114,16 @@ router.get(
     });
     const accessStates = new Map(
       await Promise.all(
-        repositories.map(async (repository) => [
-          repository.id,
-          await sdlcQueue.accessCheckState(repository.id),
-        ] as const)
+        repositories.map(
+          async (repository) =>
+            [repository.id, await sdlcQueue.accessCheckState(repository.id)] as const
+        )
       )
     );
     res.status(200).json({
       success: true,
       repositories: repositories.map((repository) => {
-        const parsed = sdlcVcs.parseRepository(
-          'GITHUB',
-          repository.canonicalUrl || repository.url
-        );
+        const parsed = sdlcVcs.parseRepository('GITHUB', repository.canonicalUrl || repository.url);
         const accessState = accessStates.get(repository.id);
         const result =
           accessState?.result &&
@@ -136,14 +137,14 @@ router.get(
           !Array.isArray(result['evidence'])
             ? (result['evidence'] as Record<string, unknown>)
             : {};
-        const hasCapabilities = Array.isArray(repository.accessCapabilities) &&
-          repository.accessCapabilities.length > 0;
+        const hasCapabilities =
+          Array.isArray(repository.accessCapabilities) && repository.accessCapabilities.length > 0;
         return {
           ...repository,
           accessJobStatus:
             accessState?.status === 'NOT_CHECKED' && hasCapabilities
               ? 'READY'
-              : accessState?.status ?? (hasCapabilities ? 'READY' : 'NOT_CHECKED'),
+              : (accessState?.status ?? (hasCapabilities ? 'READY' : 'NOT_CHECKED')),
           accessJobErrorMessage: accessState?.errorMessage ?? null,
           provider: parsed.provider,
           visibility:
@@ -151,8 +152,7 @@ router.get(
               ? evidence.repositoryVisibility
               : null,
           configuredBaseBranch:
-            Array.isArray(repository.baseBranch) &&
-            typeof repository.baseBranch[0] === 'string'
+            Array.isArray(repository.baseBranch) && typeof repository.baseBranch[0] === 'string'
               ? repository.baseBranch[0]
               : null,
         };
@@ -196,14 +196,13 @@ router.get(
 router.get(
   '/repositories/:repoId/context',
   route(async (req, res) => {
-    const conversationId = typeof req.query.conversationId === 'string'
-      ? req.query.conversationId.trim()
-      : '';
+    const conversationId =
+      typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
     if (!conversationId) throw new AppError('conversationId is required', 400);
     const context = await sdlcHub.getRepositoryRunContext(
       actorFromRequest(req),
       req.params.repoId,
-      conversationId,
+      conversationId
     );
     res.status(200).json({ success: true, context });
   })
@@ -214,6 +213,56 @@ router.get(
   route(async (req, res) => {
     const pages = await sdlcWiki.listPages(actorFromRequest(req), req.params.repoId);
     res.status(200).json({ success: true, pages });
+  })
+);
+
+router.get(
+  '/repositories/:repoId/wiki/run',
+  route(async (req, res) => {
+    const run = await wikiPipeline.getStatus(actorFromRequest(req), req.params.repoId);
+    res.status(200).json({ success: true, run });
+  })
+);
+
+router.get(
+  '/repositories/:repoId/wiki/repair-preview',
+  route(async (req, res) => {
+    const preview = await sdlcWiki.repairPreview(actorFromRequest(req), req.params.repoId);
+    res.status(200).json({ success: true, preview, applied: false });
+  })
+);
+
+router.post(
+  '/repositories/:repoId/wiki/generate',
+  route(async (req, res) => {
+    const input = startSdlcWikiRunSchema.parse(req.body ?? {});
+    const run = await wikiPipeline.start(actorFromRequest(req), req.params.repoId, input);
+    res.status(202).json({ success: true, run });
+  })
+);
+
+router.post(
+  '/repositories/:repoId/wiki/refresh',
+  route(async (req, res) => {
+    const input = refreshSdlcWikiRunSchema.parse(req.body ?? {});
+    const run = await wikiPipeline.refresh(actorFromRequest(req), req.params.repoId, input);
+    res.status(202).json({ success: true, run });
+  })
+);
+
+router.post(
+  '/repositories/:repoId/wiki/retry',
+  route(async (req, res) => {
+    const run = await wikiPipeline.retry(actorFromRequest(req), req.params.repoId);
+    res.status(202).json({ success: true, run });
+  })
+);
+
+router.post(
+  '/repositories/:repoId/wiki/cancel',
+  route(async (req, res) => {
+    const run = await wikiPipeline.cancel(actorFromRequest(req), req.params.repoId);
+    res.status(200).json({ success: true, run });
   })
 );
 

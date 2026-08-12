@@ -28,6 +28,9 @@ import {
 import { BASELINE_DEFINITIONS } from '@/sdlc/baselineDefinitions';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
 import { buildSdlcAskAiContext } from '@/sdlc/sdlcAskAiContext';
+import { sdlcVcs } from '@/sdlc/vcs';
+import { computeWikiFreshness } from '@/sdlc/wiki/wikiFreshness';
+import { parseWikiExecutionContext } from '@/sdlc/wiki/wikiRunState';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -385,6 +388,41 @@ export class XyneAIControllerV2 {
         const linkedContext = sdlcRepo.workspaceId
           ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
           : [];
+        const [baseBranchHeadSha, wikiRunLinks] = await Promise.all([
+          sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
+          db.sdlcEntityLink.findMany({
+            where: {
+              repoId: sdlcRepo.id,
+              sourceType: 'REPOSITORY',
+              sourceId: sdlcRepo.id,
+              targetType: 'WORKFLOW_EXECUTION',
+              relationType: 'WIKI_RUN',
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: { targetId: true },
+          }),
+        ]);
+        const latestSuccessfulWiki = wikiRunLinks.length
+          ? await db.workflowExecution.findFirst({
+              where: {
+                id: { in: wikiRunLinks.map(link => link.targetId) },
+                workflowType: 'SDLC_WIKI',
+                status: 'SUCCESS',
+              },
+              orderBy: { createdAt: 'desc' },
+              select: { context: true },
+            })
+          : null;
+        let wikiCommitSha: string | null = null;
+        if (latestSuccessfulWiki?.context) {
+          try {
+            const wikiContext = parseWikiExecutionContext(latestSuccessfulWiki.context);
+            wikiCommitSha = wikiContext.targetHeadSha ?? wikiContext.cursorSha;
+          } catch {
+            wikiCommitSha = null;
+          }
+        }
         sdlcDashboardContext = buildSdlcAskAiContext({
           repo: {
             id: sdlcRepo.id,
@@ -394,6 +432,7 @@ export class XyneAIControllerV2 {
           channelId: effectiveChannelIds[0],
           baselineDocuments: approvedBaseline,
           linkedContext,
+          wikiFreshness: computeWikiFreshness({ wikiCommitSha, baseBranchHeadSha }),
         });
       }
 

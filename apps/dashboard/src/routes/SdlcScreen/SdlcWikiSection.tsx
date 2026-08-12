@@ -7,6 +7,12 @@ import {
   Folder,
   FolderOpen,
   Search,
+  AlertTriangle,
+  Bug,
+  GitCommitHorizontal,
+  Loader2,
+  RefreshCw,
+  Settings2,
 } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 
@@ -17,6 +23,370 @@ export interface SdlcWikiPage {
   folderPath: string;
   syncedAt: string;
   updatedAt: string;
+}
+
+export interface SdlcWikiRun {
+  executionId: string;
+  runMode: 'INITIAL' | 'REFRESH';
+  phase: string;
+  total: number;
+  processed: number;
+  updated: number;
+  noop: number;
+  failed: number;
+  aggregated?: number;
+  windows?: {
+    total: number;
+    completed: number;
+    updated: number;
+    noop: number;
+    failed: number;
+    intermediate: number;
+  };
+  currentWindowBeforeSha?: string | null;
+  currentWindowAfterSha?: string | null;
+  activeCheckpointSha?: string | null;
+  cursorSha: string | null;
+  targetHeadSha: string | null;
+  error: string | null;
+  recovery?: {
+    attempts: number;
+    noProgressAttempts: number;
+    lastCause: string;
+    lastCauseAt: string;
+  };
+  chunkSize: 1 | 10 | 25 | 50 | 100;
+  quality: 'QUICK' | 'STANDARD' | 'THOROUGH';
+  baseBranch: string;
+  currentCommitSha: string | null;
+  currentChunkPosition: number | null;
+  currentChunkSize: number | null;
+  conversationId: string | null;
+  sessionId: string | null;
+  updatedAt: string;
+}
+
+export interface SdlcWikiStartInput {
+  historyRange:
+    | { kind: 'LAST_PERCENT'; percent: 20 | 50 }
+    | { kind: 'FULL' }
+    | { kind: 'CUSTOM_SHA'; sha: string };
+  chunkSize: 1 | 10 | 25 | 50 | 100;
+  quality: 'QUICK' | 'STANDARD' | 'THOROUGH';
+}
+
+const ACTIVE_WIKI_PHASES = new Set([
+  'QUEUED',
+  'PREPARING',
+  'BOOTSTRAPPING',
+  'PROCESSING',
+  'VALIDATING',
+  'CORRECTING',
+]);
+
+function WikiRunControls(props: {
+  run: SdlcWikiRun | null;
+  isAdmin: boolean;
+  actionPending: boolean;
+  onGenerate: (input: SdlcWikiStartInput) => Promise<void>;
+  onRefresh: (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>) => Promise<void>;
+  onRetry: () => Promise<void>;
+  onCancel: () => Promise<void>;
+  onDebug: () => void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [history, setHistory] = useState<'20' | '50' | 'FULL' | 'CUSTOM'>('20');
+  const [customSha, setCustomSha] = useState('');
+  const [chunkSize, setChunkSize] = useState<1 | 10 | 25 | 50 | 100>(10);
+  const [quality, setQuality] = useState<'QUICK' | 'STANDARD' | 'THOROUGH'>('STANDARD');
+  const active = props.run ? ACTIVE_WIKI_PHASES.has(props.run.phase) : false;
+  const canRefresh = props.run?.phase === 'COMPLETED' && Boolean(props.run.cursorSha);
+  const progress = props.run?.total
+    ? Math.min(100, Math.round((props.run.processed / props.run.total) * 100))
+    : 0;
+  const start = async (): Promise<void> => {
+    const historyRange: SdlcWikiStartInput['historyRange'] =
+      history === '20'
+        ? { kind: 'LAST_PERCENT', percent: 20 }
+        : history === '50'
+          ? { kind: 'LAST_PERCENT', percent: 50 }
+          : history === 'FULL'
+            ? { kind: 'FULL' }
+            : { kind: 'CUSTOM_SHA', sha: customSha.trim() };
+    await props.onGenerate({ historyRange, chunkSize, quality });
+    setOpen(false);
+  };
+
+  return (
+    <div className='mt-6 overflow-hidden rounded-xl border bg-background shadow-sm'>
+      <div className='flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3'>
+        <div className='flex min-w-0 items-center gap-3'>
+          <div className='grid size-8 shrink-0 place-items-center rounded-lg border bg-background'>
+            <GitCommitHorizontal size={16} />
+          </div>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium'>Commit history pipeline</p>
+            <p className='truncate font-mono text-[11px] text-muted-foreground'>
+              {props.run
+                ? `${props.run.phase.toLowerCase().replaceAll('_', ' ')} · ${props.run.quality.toLowerCase()} · ${props.run.processed}/${props.run.total || '?'} commits`
+                : 'Not generated yet'}
+            </p>
+          </div>
+        </div>
+        {props.isAdmin ? (
+          <div className='flex items-center gap-2'>
+            {props.run?.conversationId ? (
+              <button
+                type='button'
+                onClick={props.onDebug}
+                title='Debug Wiki run'
+                aria-label='Debug Wiki run'
+                data-track-category='SdlcWiki'
+                data-track-name='DebuggerOpened'
+                className='inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground'
+              >
+                <Bug size={14} />
+              </button>
+            ) : null}
+            {props.run?.phase === 'PARTIALLY_FAILED' ? (
+              <button
+                type='button'
+                disabled={props.actionPending}
+                onClick={() => void props.onRetry()}
+                data-track-category='SdlcWiki'
+                data-track-name='RetryClicked'
+                className='inline-flex h-8 items-center gap-2 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50'
+              >
+                <RefreshCw size={13} /> Retry
+              </button>
+            ) : null}
+            {active ? (
+              <button
+                type='button'
+                disabled={props.actionPending}
+                onClick={() => void props.onCancel()}
+                data-track-category='SdlcWiki'
+                data-track-name='CancelClicked'
+                className='h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50'
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                type='button'
+                onClick={() => setOpen(current => !current)}
+                data-track-category='SdlcWiki'
+                data-track-name={canRefresh ? 'RefreshPanelOpened' : 'GeneratePanelOpened'}
+                className='inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90'
+              >
+                <Settings2 size={13} /> {canRefresh ? 'Refresh Wiki' : 'Generate Wiki'}
+              </button>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {active ? (
+        <div className='px-4 py-3'>
+          <div className='h-1.5 overflow-hidden rounded-full bg-muted'>
+            <div
+              className='h-full rounded-full bg-primary transition-[width]'
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className='mt-2 flex justify-between text-[11px] text-muted-foreground'>
+            <span>
+              {props.run?.updated ?? 0} updated · {props.run?.noop ?? 0} no-op
+              {props.run?.aggregated ? ` · ${props.run.aggregated} aggregated` : ''}
+            </span>
+            <span className='inline-flex items-center gap-1'>
+              <Loader2 size={11} className='animate-spin' /> {progress}%
+            </span>
+          </div>
+          <p className='mt-2 truncate font-mono text-[10px] text-muted-foreground'>
+            {props.run?.baseBranch} @{' '}
+            {props.run?.activeCheckpointSha ??
+              props.run?.currentWindowAfterSha ??
+              props.run?.currentCommitSha ??
+              props.run?.targetHeadSha ??
+              'discovering head'}
+            {props.run?.windows
+              ? ` · window ${Math.min(props.run.windows.completed + 1, props.run.windows.total)}/${props.run.windows.total}`
+              : props.run?.currentChunkPosition && props.run.currentChunkSize
+                ? ` · legacy chunk ${props.run.currentChunkPosition}/${props.run.currentChunkSize}`
+                : ''}
+          </p>
+          {props.run?.recovery ? (
+            <p className='mt-1 text-[10px] text-amber-600 dark:text-amber-300'>
+              Recovery {props.run.recovery.attempts} · {props.run.recovery.lastCause}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {props.run?.error ? (
+        <p className='border-t px-4 py-3 text-xs text-destructive'>{props.run.error}</p>
+      ) : null}
+
+      {props.run && !active && !props.run.error ? (
+        <p className='border-t px-4 py-2 text-[10px] text-muted-foreground'>
+          Last durable update {new Date(props.run.updatedAt).toLocaleString()}
+        </p>
+      ) : null}
+
+      {open ? (
+        <div className='space-y-5 border-t px-4 py-4'>
+          {!canRefresh ? (
+            <fieldset>
+              <legend className='text-xs font-semibold'>History range</legend>
+              <p className='mt-1 text-xs text-muted-foreground'>
+                More history captures more architectural evolution and takes longer.
+              </p>
+              <div className='mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                {(
+                  [
+                    ['20', 'Latest 20%'],
+                    ['50', 'Latest 50%'],
+                    ['FULL', 'Full history'],
+                    ['CUSTOM', 'Custom SHA'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type='button'
+                    onClick={() => setHistory(value)}
+                    data-track-category='SdlcWiki'
+                    data-track-name='HistoryRangeSelected'
+                    data-track-metadata={JSON.stringify({ value })}
+                    className={cn(
+                      'rounded-md border px-3 py-2 text-xs font-medium',
+                      history === value
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'hover:bg-muted',
+                    )}
+                  >
+                    {label}
+                    {value === '20' ? ' · default' : ''}
+                  </button>
+                ))}
+              </div>
+              {history === 'CUSTOM' ? (
+                <input
+                  value={customSha}
+                  onChange={event => setCustomSha(event.target.value)}
+                  data-track-category='SdlcWiki'
+                  data-track-name='CustomShaChanged'
+                  placeholder='40-character start commit SHA'
+                  className='mt-2 h-9 w-full rounded-md border bg-background px-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring'
+                />
+              ) : null}
+            </fieldset>
+          ) : null}
+
+          <fieldset>
+            <legend className='text-xs font-semibold'>Commits per Wiki update</legend>
+            <p className='mt-1 text-xs text-muted-foreground'>
+              1 preserves exact commit-by-commit history. Larger windows compare the state before
+              and after several commits, reducing model runs but potentially compressing
+              intermediate architectural context.
+            </p>
+            <div className='mt-2 flex flex-wrap gap-2'>
+              {([1, 10, 25, 50, 100] as const).map(value => (
+                <button
+                  key={value}
+                  type='button'
+                  onClick={() => setChunkSize(value)}
+                  data-track-category='SdlcWiki'
+                  data-track-name='ChunkSizeSelected'
+                  data-track-metadata={JSON.stringify({ value })}
+                  className={cn(
+                    'min-w-12 rounded-md border px-3 py-2 font-mono text-xs',
+                    chunkSize === value
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'hover:bg-muted',
+                  )}
+                >
+                  {value}
+                  {value === 10 ? ' · default' : ''}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend className='text-xs font-semibold'>Quality</legend>
+            <div className='mt-2 grid gap-2 sm:grid-cols-3'>
+              {(
+                [
+                  ['QUICK', 'Quick', 'Generation only. Fastest; no independent review.'],
+                  ['STANDARD', 'Standard', 'One read-only review and one correction pass.'],
+                  ['THOROUGH', 'Thorough', 'Two focused reviews and one correction pass.'],
+                ] as const
+              ).map(([value, label, note]) => (
+                <button
+                  key={value}
+                  type='button'
+                  onClick={() => setQuality(value)}
+                  data-track-category='SdlcWiki'
+                  data-track-name='QualitySelected'
+                  data-track-metadata={JSON.stringify({ value })}
+                  className={cn(
+                    'rounded-md border p-3 text-left',
+                    quality === value ? 'border-primary bg-primary/10' : 'hover:bg-muted',
+                  )}
+                >
+                  <span className='block text-xs font-semibold'>
+                    {label}
+                    {value === 'STANDARD' ? ' · default' : ''}
+                  </span>
+                  <span className='mt-1 block text-[11px] leading-4 text-muted-foreground'>
+                    {note}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200'>
+            <AlertTriangle size={15} className='mt-0.5 shrink-0' />
+            <span>
+              More history, smaller Wiki updates, and higher quality improve historical context, but
+              increase runtime and model cost. Every window still saves its endpoint; meaningful
+              intermediate checkpoints are optional.
+            </span>
+          </div>
+          <div className='flex justify-end gap-2'>
+            <button
+              type='button'
+              onClick={() => setOpen(false)}
+              data-track-category='SdlcWiki'
+              data-track-name='RunPanelClosed'
+              className='h-9 rounded-md border px-4 text-xs font-medium hover:bg-muted'
+            >
+              Close
+            </button>
+            <button
+              type='button'
+              disabled={
+                props.actionPending ||
+                (history === 'CUSTOM' && !/^[0-9a-f]{40}$/i.test(customSha.trim()))
+              }
+              onClick={() =>
+                void (canRefresh
+                  ? props.onRefresh({ chunkSize, quality }).then(() => setOpen(false))
+                  : start())
+              }
+              data-track-category='SdlcWiki'
+              data-track-name={canRefresh ? 'RefreshStarted' : 'GenerateStarted'}
+              className='h-9 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+            >
+              {canRefresh ? 'Refresh Wiki' : 'Generate Wiki'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 interface WikiTreeNode {
@@ -380,6 +750,14 @@ export function SdlcWikiSection(props: {
   error: boolean;
   onRetry: () => void;
   onOpen: (page: SdlcWikiPage) => void;
+  run: SdlcWikiRun | null;
+  isAdmin: boolean;
+  actionPending: boolean;
+  onGenerate: (input: SdlcWikiStartInput) => Promise<void>;
+  onRefresh: (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>) => Promise<void>;
+  onRetryRun: () => Promise<void>;
+  onCancelRun: () => Promise<void>;
+  onDebugRun: () => void;
 }): ReactElement {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['', 'domains', 'overview']));
@@ -424,6 +802,17 @@ export function SdlcWikiSection(props: {
         </div>
       </div>
 
+      <WikiRunControls
+        run={props.run}
+        isAdmin={props.isAdmin}
+        actionPending={props.actionPending}
+        onGenerate={props.onGenerate}
+        onRefresh={props.onRefresh}
+        onRetry={props.onRetryRun}
+        onCancel={props.onCancelRun}
+        onDebug={props.onDebugRun}
+      />
+
       <div className='mt-6 overflow-hidden rounded-xl border bg-background shadow-sm'>
         <div className='flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-3'>
           <div className='relative min-w-64 flex-1'>
@@ -442,7 +831,7 @@ export function SdlcWikiSection(props: {
             />
           </div>
           <div className='font-mono text-[11px] text-muted-foreground'>
-            {newestSync ? `synced ${new Date(newestSync).toLocaleString()}` : 'not imported'}
+            {newestSync ? `updated ${new Date(newestSync).toLocaleString()}` : 'not generated'}
           </div>
         </div>
 
@@ -469,11 +858,11 @@ export function SdlcWikiSection(props: {
               <div>
                 <BookOpen className='mx-auto text-muted-foreground' size={28} />
                 <p className='mt-3 text-sm font-medium'>
-                  {props.pages.length === 0 ? 'No Wiki pages imported' : 'No matching Wiki pages'}
+                  {props.pages.length === 0 ? 'No Wiki pages generated' : 'No matching Wiki pages'}
                 </p>
                 <p className='mt-1 text-xs text-muted-foreground'>
                   {props.pages.length === 0
-                    ? 'Run the SDLC Wiki import script to add Research Agent documentation.'
+                    ? 'Choose Generate Wiki to build product and architecture knowledge from Git history.'
                     : 'Try a title, feature, or directory name.'}
                 </p>
               </div>

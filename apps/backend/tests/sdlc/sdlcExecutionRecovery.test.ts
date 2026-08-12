@@ -2,7 +2,7 @@ import { shouldHandleSdlcCallback } from '../../src/sdlc/sdlcCallbackPolicy';
 import { isGenericWorkflowRecoveryType } from '@/workflows/polling/workflowRecoveryPolicy';
 
 describe('SDLC execution recovery', () => {
-  it.each(['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK'])(
+  it.each(['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK', 'SDLC_WIKI'])(
     'does not expose %s executions to generic workflow recovery',
     (workflowType) => {
       expect(isGenericWorkflowRecoveryType(workflowType)).toBe(false);

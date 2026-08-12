@@ -2,6 +2,23 @@ import path from 'path';
 
 export const WIKI_FOLDER_PREFIX = 'Wiki';
 
+export function normalizeWikiRelativePath(value: string): string {
+  const rawPath = value.trim();
+  if (!rawPath || rawPath.includes('\\') || rawPath.startsWith('/')) {
+    throw new Error('Wiki path must be a non-empty relative POSIX path');
+  }
+  const normalized = path.posix.normalize(rawPath);
+  if (
+    normalized === '.' ||
+    normalized.startsWith('../') ||
+    normalized.includes('/../') ||
+    !normalized.toLowerCase().endsWith('.md')
+  ) {
+    throw new Error('Wiki path must be a normalized relative Markdown path');
+  }
+  return normalized;
+}
+
 export function normalizeWikiSourcePath(sourceRepository: string, sourcePath: string): string {
   const repository = sourceRepository.trim().replace(/^\/+|\/+$/g, '');
   const rawPath = sourcePath.trim();
@@ -15,17 +32,7 @@ export function normalizeWikiSourcePath(sourceRepository: string, sourcePath: st
     throw new Error(`Wiki path must be inside ${repository}`);
   }
 
-  const relativePath = normalized.slice(prefix.length);
-  if (
-    !relativePath ||
-    relativePath === '.' ||
-    relativePath.startsWith('../') ||
-    relativePath.includes('/../') ||
-    !relativePath.toLowerCase().endsWith('.md')
-  ) {
-    throw new Error('Wiki source path must resolve to a Markdown file inside the repository');
-  }
-  return relativePath;
+  return normalizeWikiRelativePath(normalized.slice(prefix.length));
 }
 
 export function wikiFolderName(relativePath: string): string {

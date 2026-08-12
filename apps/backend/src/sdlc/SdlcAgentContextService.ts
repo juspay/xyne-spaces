@@ -6,7 +6,16 @@ import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
 
-export type SdlcAgentOperation = 'interactive' | 'baseline' | 'artifact' | 'work';
+export type SdlcAgentOperation = 'interactive' | 'baseline' | 'artifact' | 'work' | 'wiki';
+export type SdlcWikiAgentRole =
+  | 'BOOTSTRAP_SURVEY'
+  | 'BOOTSTRAP_PAGE'
+  | 'BOOTSTRAP_EDITOR'
+  | 'BOOTSTRAP'
+  | 'GENERATOR'
+  | 'ARCHITECTURE_VALIDATOR'
+  | 'OPERATIONS_VALIDATOR'
+  | 'CORRECTOR';
 
 export interface SdlcAgentContextInput {
   operation: SdlcAgentOperation;
@@ -21,6 +30,10 @@ export interface SdlcAgentContextInput {
   sourceType?: 'CANVAS' | 'TICKET';
   sourceId?: string;
   writeRequested?: boolean;
+  wikiRole?: SdlcWikiAgentRole;
+  wikiAssignedCommitShas?: string[];
+  wikiBootstrapRef?: string | null;
+  wikiTargetHeadSha?: string | null;
 }
 
 export interface SdlcAgentContext {
@@ -50,6 +63,12 @@ export interface SdlcAgentContext {
   ticketId: string | null;
   setupExecutionId: string | null;
   baselineKind: string | null;
+  wiki: {
+    role: SdlcWikiAgentRole | null;
+    assignedCommitShas: string[];
+    bootstrapRef: string | null;
+    targetHeadSha: string | null;
+  };
 }
 
 export class SdlcAgentContextService {
@@ -58,7 +77,7 @@ export class SdlcAgentContextService {
   async build(
     actor: SdlcActor,
     repoId: string,
-    input: SdlcAgentContextInput,
+    input: SdlcAgentContextInput
   ): Promise<SdlcAgentContext> {
     const repo = await this.prisma.repo.findFirst({
       where: {
@@ -130,6 +149,12 @@ export class SdlcAgentContextService {
       ticketId: input.ticketId ?? null,
       setupExecutionId: input.setupExecutionId ?? null,
       baselineKind: input.baselineKind ?? null,
+      wiki: {
+        role: input.wikiRole ?? null,
+        assignedCommitShas: input.wikiAssignedCommitShas ?? [],
+        bootstrapRef: input.wikiBootstrapRef ?? null,
+        targetHeadSha: input.wikiTargetHeadSha ?? null,
+      },
     };
   }
 }

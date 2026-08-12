@@ -3,12 +3,6 @@ export interface SdlcWikiActor {
   workspaceId: string;
 }
 
-export interface SdlcWikiPageInput {
-  sourcePath: string;
-  title: string;
-  markdown: string;
-}
-
 export interface SdlcWikiPageSummary {
   canvasId: string;
   title: string;
@@ -18,30 +12,16 @@ export interface SdlcWikiPageSummary {
   updatedAt: string;
 }
 
-export type SdlcWikiPageSyncStatus = 'created' | 'updated' | 'unchanged' | 'failed';
-
-export interface SdlcWikiPageSyncResult {
-  sourcePath: string;
-  status: SdlcWikiPageSyncStatus;
-  canvasId?: string;
-  error?: string;
-}
-
-export interface SdlcWikiSyncResult {
-  created: number;
-  updated: number;
-  unchanged: number;
-  failed: number;
-  pages: SdlcWikiPageSyncResult[];
-}
-
-export interface SyncSdlcWikiInput {
-  repoId: string;
-  sourceRepository: string;
-  pages: SdlcWikiPageInput[];
-}
-
 export interface SdlcWiki {
   listPages(actor: SdlcWikiActor, repoId: string): Promise<SdlcWikiPageSummary[]>;
-  syncPages(input: SyncSdlcWikiInput): Promise<SdlcWikiSyncResult>;
+  repairPreview(actor: SdlcWikiActor, repoId: string): Promise<Array<{
+    path: string;
+    action: 'archive' | 'review';
+    reason: string;
+    canvasId: string;
+    preservesCanvasIdentity: true;
+    preservesVersionHistory: true;
+    preservesSourceEvidence: true;
+    applied: false;
+  }>>;
 }

@@ -247,7 +247,16 @@ export interface S2SRunAgentRequest {
   context?: string;
   workspaceId?: string;
   executionProfile?: 'sdlc';
-  sdlcOperation?: 'baseline' | 'artifact' | 'work';
+  sdlcOperation?: 'baseline' | 'artifact' | 'work' | 'wiki';
+  sdlcWikiRole?:
+    | 'BOOTSTRAP_SURVEY'
+    | 'BOOTSTRAP_PAGE'
+    | 'BOOTSTRAP_EDITOR'
+    | 'BOOTSTRAP'
+    | 'GENERATOR'
+    | 'ARCHITECTURE_VALIDATOR'
+    | 'OPERATIONS_VALIDATOR'
+    | 'CORRECTOR';
   sdlcContext?: Record<string, unknown>;
   allowWriteInReadOnlyJob?: boolean;
 }
@@ -1356,6 +1365,7 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
     ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
     ...(req.executionProfile ? { executionProfile: req.executionProfile } : {}),
     ...(req.sdlcOperation ? { sdlcOperation: req.sdlcOperation } : {}),
+    ...(req.sdlcWikiRole ? { sdlcWikiRole: req.sdlcWikiRole } : {}),
     ...(req.sdlcContext ? { sdlcContext: req.sdlcContext } : {}),
     ...(req.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
   });

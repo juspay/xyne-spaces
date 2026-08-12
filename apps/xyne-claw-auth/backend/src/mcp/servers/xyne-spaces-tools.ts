@@ -4936,6 +4936,180 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
   }
 }
 
+async function callSdlcWiki(path: string, args: Record<string, unknown>): Promise<ToolResult> {
+  try {
+    const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+    if (!s2sKey) return err("Internal S2S key is unavailable for the SDLC Wiki tool.");
+    const data = await spacesFetch(
+      `/api/internal/sdlc/wiki${path}`,
+      { method: "POST", body: JSON.stringify(args) },
+      { s2sKey },
+    );
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC Wiki tool error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+const spacesSdlcWikiListPages: ToolDef = {
+  name: "spaces-sdlc-wiki-list-pages",
+  description: "List active or archived Wiki pages bound to the trusted repository run, optionally filtered by overlapping source paths. Also returns the server-owned current assignment, pending progress, and derived Wiki Map for page ownership/source/diagram routing; call this after compaction or when progress is uncertain.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      includeArchived: { type: "boolean" }, sourcePaths: { type: "array", items: { type: "string" } },
+    },
+    required: ["executionId", "sessionId", "repoId"],
+  },
+  async handler(args) { return callSdlcWiki("/pages/list", args); },
+  async appHandler(args) { return callSdlcWiki("/pages/list", args); },
+};
+
+const spacesSdlcWikiReadPage: ToolDef = {
+  name: "spaces-sdlc-wiki-read-page",
+  description: "Read one run-bound Wiki Canvas as Markdown with its live content hash, sources, abbreviated commit identity, archive state, and server-owned current assignment.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      path: { type: "string" }, includeArchived: { type: "boolean" },
+    },
+    required: ["executionId", "sessionId", "repoId", "path"],
+  },
+  async handler(args) { return callSdlcWiki("/pages/read", args); },
+  async appHandler(args) { return callSdlcWiki("/pages/read", args); },
+};
+
+const spacesSdlcWikiVerifySources: ToolDef = {
+  name: "spaces-sdlc-wiki-verify-sources",
+  description: "Preflight a bounded batch of repository-relative source paths at one assigned abbreviated checkpoint ref. Returns the exact invalid path instead of discovering source failures during a page mutation.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string" }, paths: { type: "array", maxItems: 500, items: { type: "string" } },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha", "paths"],
+  },
+  async handler(args) { return callSdlcWiki("/sources/verify", args); },
+  async appHandler(args) { return callSdlcWiki("/sources/verify", args); },
+};
+
+const wikiSourcePathsProperty = { type: "array", items: { type: "string" } } as const;
+const wikiSourceReferencesProperty = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      path: { type: "string" }, symbol: { type: "string" },
+      startLine: { type: "number" }, endLine: { type: "number" },
+    },
+    required: ["path"],
+  },
+} as const;
+const wikiActionProperties = {
+  path: { type: "string", description: "Normalized repository-relative Markdown path ending in .md" },
+  sourcePaths: wikiSourcePathsProperty,
+  sourceReferences: wikiSourceReferencesProperty,
+} as const;
+const wikiPageActionSchema = {
+  oneOf: [
+    {
+      type: "object",
+      properties: { ...wikiActionProperties, action: { const: "create" }, title: { type: "string" }, markdown: { type: "string" } },
+      required: ["action", "path", "title", "markdown", "sourcePaths"],
+    },
+    {
+      type: "object",
+      properties: { ...wikiActionProperties, action: { type: "string", enum: ["update", "restore"] }, expectedContentHash: { type: "string" }, title: { type: "string" }, markdown: { type: "string" } },
+      required: ["action", "path", "expectedContentHash", "title", "markdown", "sourcePaths"],
+    },
+    {
+      type: "object",
+      properties: { ...wikiActionProperties, action: { const: "archive" }, expectedContentHash: { type: "string" } },
+      required: ["action", "path", "expectedContentHash", "sourcePaths"],
+    },
+    {
+      type: "object",
+      properties: { ...wikiActionProperties, action: { type: "string", enum: ["replace_section", "insert_section"] }, expectedContentHash: { type: "string" }, heading: { type: "string" }, markdown: { type: "string" } },
+      required: ["action", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"],
+    },
+    {
+      type: "object",
+      properties: { ...wikiActionProperties, action: { const: "remove_section" }, expectedContentHash: { type: "string" }, heading: { type: "string" } },
+      required: ["action", "path", "expectedContentHash", "heading", "sourcePaths"],
+    },
+  ],
+} as const;
+
+const spacesSdlcWikiBeginCheckpoint: ToolDef = {
+  name: "spaces-sdlc-wiki-begin-checkpoint",
+  description:
+    "Begin one server-authorized checkpoint inside the assigned history window. Choose a meaningful intermediate ref or the mandatory endpoint, then serialize all page writes and finalization for that ref before beginning another checkpoint.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string" },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha"],
+  },
+  async handler(args) { return callSdlcWiki("/checkpoints/begin", args); },
+  async appHandler(args) { return callSdlcWiki("/checkpoints/begin", args); },
+};
+
+const spacesSdlcWikiWritePage: ToolDef = {
+  name: "spaces-sdlc-wiki-write-page",
+  description:
+    "Mutate exactly one conceptual Wiki page for the assigned abbreviated commit ref. Creates/restores/archives and explicit page-wide restructures use whole Markdown; normal maintenance should replace, insert, or remove one unique headed section. The server preserves the remaining page, records a full Canvas version and source evidence, and does not advance the checkpoint. Expected content hashes protect human edits.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string" }, page: wikiPageActionSchema,
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha", "page"],
+  },
+  async handler(args) { return callSdlcWiki("/pages/write", args); },
+  async appHandler(args) { return callSdlcWiki("/pages/write", args); },
+};
+
+const spacesSdlcWikiMovePage: ToolDef = {
+  name: "spaces-sdlc-wiki-move-page",
+  description:
+    "Atomically move or rename one Wiki page while preserving its Canvas identity, content, sources, and version history. The destination folder hierarchy is created automatically.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string" }, sourcePath: { type: "string" },
+      destinationPath: { type: "string" }, expectedContentHash: { type: "string" },
+      title: { type: "string" },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha", "sourcePath", "destinationPath", "expectedContentHash"],
+  },
+  async handler(args) { return callSdlcWiki("/pages/move", args); },
+  async appHandler(args) { return callSdlcWiki("/pages/move", args); },
+};
+
+const spacesSdlcWikiFinalizeCommit: ToolDef = {
+  name: "spaces-sdlc-wiki-finalize-commit",
+  description:
+    "Durably finalize one assigned Wiki commit after all required one-page writes succeed, or finalize it as no-op when no pages were written. This advances the commit checkpoint.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
+      commitSha: { type: "string" }, outcome: { type: "string", enum: ["changes", "noop"] },
+      summary: { type: "string" },
+    },
+    required: ["executionId", "sessionId", "repoId", "commitSha", "outcome", "summary"],
+  },
+  async handler(args) { return callSdlcWiki("/commits/finalize", args); },
+  async appHandler(args) { return callSdlcWiki("/commits/finalize", args); },
+};
+
 // ── spaces-sdlc-create-pull-request ───────────────────────────────
 const spacesSdlcCreatePullRequest: ToolDef = {
   name: "spaces-sdlc-create-pull-request",
@@ -7674,4 +7848,11 @@ export const tools: ToolDef[] = [
   spacesSdlcCreateArtifact,
   spacesSdlcUpdateBaseline,
   spacesSdlcCreatePullRequest,
+  spacesSdlcWikiListPages,
+  spacesSdlcWikiReadPage,
+  spacesSdlcWikiVerifySources,
+  spacesSdlcWikiBeginCheckpoint,
+  spacesSdlcWikiWritePage,
+  spacesSdlcWikiMovePage,
+  spacesSdlcWikiFinalizeCommit,
 ];

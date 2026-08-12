@@ -37,3 +37,22 @@ it('embeds baseline documents so the agent does not need to rediscover them', ()
   assert.match(context, /The approved baseline documents below are already loaded/);
   assert.match(context, /Linked ticket context/);
 });
+
+it('grounds Wiki use in verified commit freshness', () => {
+  const context = buildSdlcAskAiContext({
+    repo: { id: 'repo-1', name: 'Hyper Switch', url: 'https://example.test/repo' },
+    channelId: 'channel-1',
+    baselineDocuments: [],
+    linkedContext: [],
+    wikiFreshness: {
+      wikiCommitSha: 'a'.repeat(40),
+      baseBranchHeadSha: 'b'.repeat(40),
+      freshness: 'STALE',
+    },
+  });
+
+  assert.match(context, /Wiki commit: a{40}/);
+  assert.match(context, /base-branch head: b{40}/);
+  assert.match(context, /freshness: STALE/);
+  assert.match(context, /Inspect live code/);
+});
