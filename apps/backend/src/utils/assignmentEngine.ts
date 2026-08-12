@@ -79,15 +79,16 @@ async function filterMappingsToChannelParticipants(
   channelId: string,
 ): Promise<UserGroupMapping[]> {
   const channel = await repositories.channels.findById(channelId);
-  if (!channel || String(channel.visibility) !== 'PRIVATE') {
+  const visibility = channel ? String(channel.visibility) : 'CHANNEL_NOT_FOUND';
+  if (!channel || visibility !== 'PRIVATE') {
+    logger.info(`[AutoAssignment] channelFilter channelId=${channelId} visibility=${visibility} applied=false groupMemberCount=${userGroupMappings.length}`);
     return userGroupMappings;
   }
   const participants = await repositories.channelParticipants.getChannelParticipants(channelId);
   const participantIds = new Set(participants.map(p => p.userId));
   const filtered = userGroupMappings.filter(m => participantIds.has(m.userId));
-  logger.info(
-    `[Assignment] Private channel ${channelId} participant filter: ${userGroupMappings.length} group members → ${filtered.length} eligible participants`,
-  );
+  const removed = userGroupMappings.filter(m => !participantIds.has(m.userId)).map(m => m.userId);
+  logger.info(`[AutoAssignment] channelFilter channelId=${channelId} visibility=PRIVATE applied=true before=${userGroupMappings.length} after=${filtered.length} removedUserIds=${JSON.stringify(removed)} keptUserIds=${JSON.stringify(filtered.map(m => m.userId))}`);
   return filtered;
 }
 
@@ -183,6 +184,9 @@ export async function evaluateAssignmentRule(
   // Helper to get expertise
   const hasExpertiseForBoard = (userId: string) => expertiseMap.get(userId)?.hasExpertise === true;
 
+  logger.info(`[AutoAssignment] evaluateAssignmentRule.candidates userGroupId=${userGroupId} boardId=${boardId} type=${assignmentType} excludeUserId=${excludeUserId ?? 'none'} candidateCount=${userIds.length} candidates=${JSON.stringify(userIds)} groupMappings=${JSON.stringify(userGroupMappings.map(m => ({ userId: m.userId, roleId: m.roleId, responsibility: m.responsibility })))}`);
+  logger.info(`[AutoAssignment] evaluateAssignmentRule.eligibility userGroupId=${userGroupId} boardId=${boardId} type=${assignmentType} perCandidate=${JSON.stringify(userIds.map(id => { const st = getUserState(id); return { userId: id, hasState: st !== undefined, active: st?.isActiveForAssignment === true, onCall: st?.onCall === true, expertise: hasExpertiseForBoard(id) }; }))}`);
+
   // 1. On-call + active + expertise
   let eligibleUserIds = userIds.filter(userId => {
     const state = getUserState(userId);
@@ -223,6 +227,7 @@ export async function evaluateAssignmentRule(
     });
   }
   const finalEligibleUserIds = eligibleUserIds;
+  logger.info(`[AutoAssignment] evaluateAssignmentRule.eligible userGroupId=${userGroupId} boardId=${boardId} type=${assignmentType} finalEligibleUserIds=${JSON.stringify(finalEligibleUserIds)}`);
 
   // If projectId is provided, fetch all boards in that project
   let projectBoardIds: Set<string> | undefined;
@@ -331,6 +336,11 @@ export async function evaluateAssignmentRule(
 
   // Sort by new score ascending (lowest wins)
   candidates.sort((a, b) => a.score - b.score);
+
+  for (const c of candidates) {
+    const rows = allWorkloadMappings.filter((w: UserWorkloadMapping) => w.userId === c.userId).map((w: UserWorkloadMapping) => ({ boardId: w.boardId, activeTasks: w.activeTasks, updatedAt: w.updatedAt }));
+    logger.info(`[AutoAssignment] evaluateAssignmentRule.score userGroupId=${userGroupId} boardId=${boardId} type=${assignmentType} userId=${c.userId} score=${c.score.toFixed(2)} details=${JSON.stringify(c.details)} workloadRows=${JSON.stringify(rows)}`);
+  }
 
   // Pick the first candidate who has not exceeded their maxTickets (if set)
   // Exclude excludeUserId from assignment and pick the next-best candidate when possible.
@@ -457,6 +467,7 @@ export async function evaluateAssignmentRule(
   }
 
   logger.info(`[Assignment] Selected userId: ${selectedUser.userId} with score: ${selectedUser.score.toFixed(2)}`);
+  logger.info(`[AutoAssignment] evaluateAssignmentRule.result userGroupId=${userGroupId} boardId=${boardId} type=${assignmentType} picked=${selectedUser.userId} score=${selectedUser.score.toFixed(2)}`);
 
   return { assignedUserId: selectedUser.userId };
 }
@@ -497,10 +508,13 @@ function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): AssignmentResult {
-  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, totalTicketsOnBoard } = ctx;
+  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, totalTicketsOnBoard } = ctx;
+  const userGroupId = userGroupMappings[0]?.userGroupId ?? 'n/a';
 
   const getUserState   = (id: string) => userStateMap.get(id);
   const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
+
+  logger.info(`[AutoAssignment] pickBest.start type=${assignmentType} userGroupId=${userGroupId} boardId=${boardId} candidateCount=${userIds.length} candidates=${JSON.stringify(userIds)} excludeUserId=${excludeUserId ?? 'none'} totalTicketsOnBoard=${totalTicketsOnBoard} expertiseMappingsCount=${expertiseMappings.length}`);
 
   // Build workloadMap for this role's userIds using pre-computed workloadsByUserId
   const workloadMap = new Map<string, number>();
@@ -519,20 +533,29 @@ function pickBest(
   // Tier 3: active + expertise
   // Tier 4: active only                   (minimum bar)
   const t1: string[] = [], t2: string[] = [], t3: string[] = [], t4: string[] = [];
+  const tierDetail: Array<Record<string, unknown>> = [];
   for (const id of userIds) {
     const s = getUserState(id);
-    if (s?.isActiveForAssignment !== true) continue;
-    const onCall  = s.onCall === true;
-    const expert  = hasExpertise(id);
-    if (onCall && expert)  { t1.push(id); continue; }
-    if (onCall)            { t2.push(id); continue; }
-    if (expert)            { t3.push(id); continue; }
-    t4.push(id);
+    const active = s?.isActiveForAssignment === true;
+    const onCall = s?.onCall === true;
+    const expert = hasExpertise(id);
+    let tier: string;
+    if (!active)              { tier = 'EXCLUDED_not_active'; }
+    else if (onCall && expert){ t1.push(id); tier = 't1'; }
+    else if (onCall)          { t2.push(id); tier = 't2'; }
+    else if (expert)          { t3.push(id); tier = 't3'; }
+    else                      { t4.push(id); tier = 't4'; }
+    tierDetail.push({ userId: id, hasState: s !== undefined, active, onCall, expertise: expert, tier, weightedActiveTasks: workloadMap.get(id) ?? 0 });
   }
+  logger.info(`[AutoAssignment] pickBest.eligibility type=${assignmentType} boardId=${boardId} tierSizes={t1:${t1.length},t2:${t2.length},t3:${t3.length},t4:${t4.length}} perCandidate=${JSON.stringify(tierDetail)}`);
+
   const eligible = t1.length ? t1 : t2.length ? t2 : t3.length ? t3 : t4;
+  const chosenTier = t1.length ? 't1' : t2.length ? 't2' : t3.length ? 't3' : t4.length ? 't4' : 'none';
   if (eligible.length === 0) {
+    logger.info(`[AutoAssignment] pickBest.result type=${assignmentType} boardId=${boardId} chosenTier=none picked=none reason=NO_ON_CALL_USERS`);
     return { reason: 'NO_ON_CALL_USERS' };
   }
+  logger.info(`[AutoAssignment] pickBest.chosenTier type=${assignmentType} boardId=${boardId} chosenTier=${chosenTier} eligible=${JSON.stringify(eligible)}`);
 
   const finalEligible = (expertiseMappings.length > 0)
     ? eligible.slice().sort((a, b) => (hasExpertise(b) ? 1 : 0) - (hasExpertise(a) ? 1 : 0))
@@ -573,7 +596,20 @@ function pickBest(
     return { reason: 'NO_ON_CALL_USERS' };
   };
 
-  return selectFrom(finalEligible.map(score));
+  const scored = finalEligible.map(score);
+  for (const c of scored) {
+    const rows = (workloadsByUserId.get(c.userId) ?? []).map(m => ({
+      boardId: m.boardId,
+      activeTasks: m.activeTasks,
+      weight: boardWeightMap.get(m.boardId) ?? 1,
+      updatedAt: m.updatedAt,
+    }));
+    logger.info(`[AutoAssignment] pickBest.score type=${assignmentType} boardId=${boardId} userId=${c.userId} score=${c.score.toFixed(2)} details=${JSON.stringify(c.details)} workloadRows=${JSON.stringify(rows)}`);
+  }
+
+  const result = selectFrom(scored);
+  logger.info(`[AutoAssignment] pickBest.result type=${assignmentType} boardId=${boardId} chosenTier=${chosenTier} picked=${result.assignedUserId ?? 'none'} reason=${result.reason ?? 'ok'} sortedByScore=${JSON.stringify(scored.map(c => ({ userId: c.userId, score: Number(c.score.toFixed(2)), maxTickets: c.details?.maxTickets, userTickets: c.details?.userTickets })))}`);
+  return result;
 }
 
 /**
@@ -683,6 +719,9 @@ export async function evaluateAllRoles(
   // ── Per-role pools ─────────────────────────────────────────────────────────
   const poolFor = (type: AssignmentType) =>
     filterUsersByResponsibility(userGroupMappings, type);
+
+  logger.info(`[AutoAssignment] evaluateAllRoles.context userGroupId=${userGroupId} boardId=${boardId} projectId=${projectId ?? 'n/a'} channelId=${channelId ?? 'n/a'} groupMemberCount=${userGroupMappings.length} projectBoardIds=${projectBoardIds ? JSON.stringify(Array.from(projectBoardIds)) : 'all'} totalTicketsOnBoard=${totalTicketsOnBoard} boardWeights=${JSON.stringify(Array.from(boardWeightMap.entries()))}`);
+  logger.info(`[AutoAssignment] evaluateAllRoles.groupMappings userGroupId=${userGroupId} mappings=${JSON.stringify(userGroupMappings.map(m => ({ userId: m.userId, roleId: m.roleId, responsibility: m.responsibility })))}`);
 
   // Round 1: MANAGER, TEAM_LEAD, MEMBER, QA
   const manager   = pickBest(poolFor(AssignmentType.MANAGER),   AssignmentType.MANAGER,   ctx, boardId);
@@ -804,12 +843,16 @@ export async function evaluateRoleSlots(
     totalTicketsOnBoard,
   };
 
+  logger.info(`[AutoAssignment] evaluateRoleSlots.context userGroupId=${userGroupId} boardId=${boardId} projectId=${projectId ?? 'n/a'} channelId=${channelId ?? 'n/a'} excludeUserId=${excludeUserId ?? 'none'} groupMemberCount=${userGroupMappings.length} roleIds=${JSON.stringify(roleIds)} projectBoardIds=${projectBoardIds ? JSON.stringify(Array.from(projectBoardIds)) : 'all'} totalTicketsOnBoard=${totalTicketsOnBoard} boardWeights=${JSON.stringify(Array.from(boardWeightMap.entries()))}`);
+  logger.info(`[AutoAssignment] evaluateRoleSlots.groupMappings userGroupId=${userGroupId} mappings=${JSON.stringify(userGroupMappings.map(m => ({ userId: m.userId, roleId: m.roleId, responsibility: m.responsibility })))}`);
+
   // Score each roleId's pool independently. `excludeUserId` (if set) removes
   // that user from every pool — used by the PR-webhook flow to avoid self-review
   // (the ticket assignee shouldn't be picked as the PR reviewer).
   const summary: string[] = [];
   for (const roleId of roleIds) {
     const pool = filterUsersByRoleId(userGroupMappings, roleId);
+    logger.info(`[AutoAssignment] evaluateRoleSlots.rolePool userGroupId=${userGroupId} boardId=${boardId} roleId=${roleId} poolCount=${pool.length} pool=${JSON.stringify(pool)}`);
     const res = pickBest(pool, AssignmentType.TICKET_ASSIGNEE, ctx, boardId);
     result[roleId] = res;
     summary.push(`${roleId}:${res.assignedUserId ?? 'none'}`);

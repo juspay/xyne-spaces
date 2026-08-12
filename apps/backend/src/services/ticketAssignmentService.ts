@@ -242,6 +242,10 @@ export class TicketAssignmentService {
       throw new Error(`workspaceId required: board ${boardId} not found`);
     }
 
+    logger.info(
+      `[AutoAssignment] assignFullRolesToTicket ticketId=${ticketId} userGroupId=${userGroupId} boardId=${boardId} projectId=${projectId ?? 'n/a'} channelId=${channelId ?? 'n/a'} path=${assignmentRoles.length > 0 ? 'role-driven' : 'legacy-enum'} assignmentRoles=${JSON.stringify(assignmentRoles)} fullRoleAssignment=${metadata.fullRoleAssignment === true}`,
+    );
+
     if (assignmentRoles.length > 0) {
       return this.assignRoleDrivenSlots({
         ticketId,
@@ -368,6 +372,8 @@ export class TicketAssignmentService {
       );
     }
 
+    logger.info(`[AutoAssignment] assignRoleDrivenSlots.result ticketId=${ticketId} userGroupId=${userGroupId} boardId=${boardId} primarySlotRoleId=${primarySlot.roleId} primaryUserId=${result.primaryUserId ?? 'none'} slotPicks=${JSON.stringify(slots)} persisted=${JSON.stringify(Object.entries(result.assignments).map(([roleId, a]) => ({ roleId, userId: a.userId, assignmentId: a.assignmentId })))}`);
+
     return result;
   }
 
@@ -446,9 +452,11 @@ export class TicketAssignmentService {
       }),
     );
 
+    logger.info(`[AutoAssignment] assignLegacyEnumSlots.result ticketId=${ticketId} userGroupId=${userGroupId} boardId=${boardId} member=${result.member ?? 'none'} manager=${result.manager?.userId ?? 'none'} teamLead=${result.teamLead?.userId ?? 'none'} prReviewer=${result.prReviewer?.userId ?? 'none'} qa=${result.qa?.userId ?? 'none'}`);
+
     return result;
   }
-  
+
   async assignTicketToGroup(params: {
     ticketId: string;
     groupId: string;
@@ -483,6 +491,8 @@ export class TicketAssignmentService {
     const isFullRole = hasAssignmentRoles
       || metadata.fullRoleAssignment === true;
 
+    logger.info(`[AutoAssignment] assignTicketToGroup ticketId=${ticketId} userGroupId=${groupId} boardId=${ticket.boardId} projectId=${ticket.projectId ?? 'n/a'} channelId=${ticket.channelId ?? 'n/a'} actorId=${actorId} isFullRole=${isFullRole} hasAssignmentRoles=${hasAssignmentRoles} fullRoleAssignment=${metadata.fullRoleAssignment === true}`);
+
     let assignedUserId: string | undefined;
     let usedFullRole = false;
     if (isFullRole) {
@@ -515,6 +525,8 @@ export class TicketAssignmentService {
       );
       return null;
     }
+
+    logger.info(`[AutoAssignment] assignTicketToGroup.assignee ticketId=${ticketId} userGroupId=${groupId} boardId=${ticket.boardId} assignedUserId=${assignedUserId} usedFullRole=${usedFullRole}`);
 
     // Set the assignee via the existing repository method (md sync + ticket-updated event).
     await repositories.tickets.updateTicketAssignee(ticketId, assignedUserId, actorId);
