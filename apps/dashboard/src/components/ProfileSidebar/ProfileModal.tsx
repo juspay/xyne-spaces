@@ -62,7 +62,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
       onOpenChange={open => {
         if (!open) onClose();
       }}
-      className='w-full max-w-md p-0 overflow-hidden'
+      className='w-full max-w-lg p-0 overflow-hidden'
       testId='profile-modal'
     >
       <div className='flex flex-col max-h-[85vh]'>
