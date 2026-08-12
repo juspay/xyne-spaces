@@ -867,8 +867,6 @@ class NotificationService {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
-        title: data.title,
-        message: data.message,
         relatedEntityType: data.relatedEntityType,
         relatedEntityId: data.relatedEntityId,
         actionUrl: data.actionUrl,
@@ -880,7 +878,7 @@ class NotificationService {
         const hasActiveTokens = await fcmPushService.hasActiveTokens(userId);
 
         if (hasActiveTokens) {
-          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type}`);
 
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
@@ -939,7 +937,7 @@ class NotificationService {
 
       // ─── DESKTOP NOTIFICATIONS ───────────────────────────────────────────────
       if (sendDesktop) {
-        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type}`);
 
         await realTimeNotificationService.sendNotification(
           userId,

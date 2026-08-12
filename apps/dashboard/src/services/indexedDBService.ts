@@ -8,6 +8,7 @@
 const DB_PREFIX = 'xyne-state-machine';
 const STORE_NAME = 'state';
 const SCHEMA_VERSION_KEY = '_schemaVersion';
+const ENCRYPTION_KEYS_DB_NAME = 'xyne-encryption-keys';
 
 export const FINGERPRINT_FIELD = '__conversationFingerprint__';
 
@@ -246,6 +247,8 @@ class IndexedDBService {
    * This is useful when clearing data for logged-out users
    */
   async dropAllUserDatabases(): Promise<void> {
+    this.close();
+
     try {
       const databases = await indexedDB.databases();
 
@@ -254,7 +257,9 @@ class IndexedDBService {
       }
 
       const userDatabases = databases
-        .filter(db => db.name && db.name.startsWith(DB_PREFIX))
+        .filter(
+          db => db.name && (db.name.startsWith(DB_PREFIX) || db.name === ENCRYPTION_KEYS_DB_NAME),
+        )
         .map(db => db.name as string);
 
       const dropPromises = userDatabases.map(dbName => {
@@ -272,7 +277,9 @@ class IndexedDBService {
       await Promise.all(dropPromises);
 
       if (userDatabases.length > 0) {
-        console.log(`Dropped ${userDatabases.length} user-scoped databases`);
+        console.log(
+          `Dropped ${userDatabases.length} IndexedDB databases including user cache and encryption keys`,
+        );
       }
     } catch (error) {
       // If we can't list databases, just proceed

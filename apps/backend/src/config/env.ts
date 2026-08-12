@@ -332,7 +332,14 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
+  ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
+  ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
+  ENC_ORG_PROVISION: Joi.boolean().default(false),
+  ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -367,6 +374,9 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  ENC_S2S_KEY: Joi.string().allow(''),
+  ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
+  ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -874,6 +884,13 @@ export const config = {
     importBatchSize: envVars.CONFLUENCE_IMPORT_BATCH_SIZE as number,
     importBatchCooldownMs: envVars.CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS as number,
   },
+  enc: {
+    clientEncryptionEnabled: envVars.ZERO_CLIENT_ENCRYPTION_ENABLED as boolean,
+    apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
+    enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
+    orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
+    workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
+  },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
@@ -900,6 +917,11 @@ export const config = {
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
+  },
+  internal: {
+    encryptionS2sKey: envVars.ENC_S2S_KEY as string,
+    encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    encryptionRequestTimeoutMs: envVars.ENCRYPTION_REQUEST_TIMEOUT_MS as number,
   },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
