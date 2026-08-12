@@ -22,8 +22,70 @@ import {
   type DynamicFieldQueryFilter,
   type FormEntityValueLike,
 } from '../../../utils/board/dynamicFieldFilters';
+import {
+  DEFAULT_TICKET_LIST_COLUMN_WIDTHS,
+  getTicketListColumnAlignClass,
+  getTicketListGridTemplate,
+  TICKET_LIST_COLUMN_GAP,
+  TICKET_LIST_COLUMN_PADDING_X,
+  TICKET_LIST_COLUMNS,
+  TICKET_LIST_HORIZONTAL_PADDING,
+  TICKET_LIST_SELECTION_COLUMN_WIDTH,
+  type TicketListColumnKey,
+  type TicketListColumnWidths,
+} from './ticketListColumns';
 
 const PAGE_SIZE = 50;
+const COLUMN_WIDTHS_STORAGE_KEY = 'xyne:desk-ticket-list-column-widths:v2';
+
+interface ColumnResizeDrag {
+  column: TicketListColumnKey;
+  adjacentColumn: TicketListColumnKey;
+  pointerId: number;
+  startX: number;
+  startWidth: number;
+  startAdjacentWidth: number;
+  availableWidth: number;
+  totalWidthUnits: number;
+  handle: HTMLButtonElement;
+  previousCursor: string;
+  previousUserSelect: string;
+}
+
+// Pixel width the `fr` columns span: container minus row padding, gaps and selection column.
+const computeAvailableColumnsWidth = (
+  containerWidth: number,
+  showSelectionColumn: boolean,
+): number => {
+  const columnCount = TICKET_LIST_COLUMNS.length + (showSelectionColumn ? 1 : 0);
+  return Math.max(
+    1,
+    containerWidth -
+      TICKET_LIST_HORIZONTAL_PADDING -
+      TICKET_LIST_COLUMN_GAP * Math.max(0, columnCount - 1) -
+      (showSelectionColumn ? TICKET_LIST_SELECTION_COLUMN_WIDTH : 0),
+  );
+};
+
+const loadColumnWidths = (): TicketListColumnWidths => {
+  const widths = { ...DEFAULT_TICKET_LIST_COLUMN_WIDTHS };
+  if (typeof window === 'undefined') return widths;
+
+  try {
+    const stored = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
+    if (!stored) return widths;
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    for (const column of TICKET_LIST_COLUMNS) {
+      const storedWidth = parsed[column.key];
+      if (typeof storedWidth === 'number' && Number.isFinite(storedWidth) && storedWidth > 0) {
+        widths[column.key] = storedWidth;
+      }
+    }
+  } catch {
+    // Ignore unavailable storage or malformed preferences and use defaults.
+  }
+  return widths;
+};
 
 export type SupportTicketRow = NonNullable<
   QueryResultType<typeof queries.supportTicketsPageV3>[number]
@@ -35,6 +97,7 @@ interface TicketListViewProps {
   filter: {
     channelId: string;
     assignedTo?: string[] | undefined;
+    createdBy?: string[] | undefined;
     priority?: TicketPriority[] | undefined;
     stageName?: string[] | undefined;
     aiCategory?: string[] | undefined;
@@ -43,6 +106,8 @@ interface TicketListViewProps {
     userGroups?: string[] | undefined;
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
+    createdAtStart?: number | undefined;
+    createdAtEnd?: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
@@ -106,6 +171,7 @@ export const TicketListView = function TicketListView({
   const {
     channelId,
     assignedTo,
+    createdBy,
     priority,
     stageName,
     aiCategory,
@@ -114,15 +180,223 @@ export const TicketListView = function TicketListView({
     userGroups,
     lastEmailAtStart,
     lastEmailAtEnd,
+    createdAtStart,
+    createdAtEnd,
     dynamicFieldFilters,
   } = filter;
 
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
   const [selectAllMenuOpen, setSelectAllMenuOpen] = useState(false);
+  const [columnWidths, setColumnWidths] = useState<TicketListColumnWidths>(loadColumnWidths);
+  const [resizingColumn, setResizingColumn] = useState<TicketListColumnKey | null>(null);
+  const resizeDragRef = useRef<ColumnResizeDrag | null>(null);
+  const columnHeadersRef = useRef<HTMLDivElement>(null);
+  // Virtuoso's scroller: rows render inside it (net of its scrollbar) while the header and
+  // resize overlay sit outside, so both pad by `scrollbarGutter` to stay column-aligned.
+  const scrollerElRef = useRef<HTMLElement | null>(null);
+  const scrollbarObserverRef = useRef<ResizeObserver | null>(null);
+  const [scrollbarGutter, setScrollbarGutter] = useState(0);
+  const [listViewportHeight, setListViewportHeight] = useState(0);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  // Kept raw so the derived width recomputes against the current showSelectionColumn.
+  const [scrollerClientWidth, setScrollerClientWidth] = useState(0);
+  // Real row content height — shorter than the viewport when there are only a few rows.
+  const [bodyContentHeight, setBodyContentHeight] = useState(0);
+  // Callback ref, not an effect: re-runs across the skeleton/empty/loaded branch swaps below.
+  const tableWrapperRef = useCallback((node: HTMLDivElement | null): void => {
+    scrollbarObserverRef.current?.disconnect();
+    scrollbarObserverRef.current = null;
+    scrollerElRef.current = null;
+    if (!node) return;
+    const scroller = node.querySelector<HTMLElement>('[data-testid="virtuoso-scroller"]');
+    if (!scroller) return;
+    scrollerElRef.current = scroller;
+    const header = columnHeadersRef.current;
+    const measure = (): void => {
+      setScrollbarGutter(Math.max(0, scroller.offsetWidth - scroller.clientWidth));
+      setListViewportHeight(scroller.clientHeight);
+      setScrollerClientWidth(scroller.clientWidth);
+      setHeaderHeight(header?.offsetHeight ?? 0);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    if (header) observer.observe(header);
+    scrollbarObserverRef.current = observer;
+  }, []);
   // Adaptive server fetch window. Starts at one page (+1 sentinel); grows only for the
   // client-filtered folders when a page needs more rows to fill after filtering.
   const [fetchLimit, setFetchLimit] = useState(PAGE_SIZE + 1);
+  const showSelectionColumn = !!onToggleSelect;
+  const ticketListGridTemplate = useMemo(
+    () => getTicketListGridTemplate(columnWidths, showSelectionColumn),
+    [columnWidths, showSelectionColumn],
+  );
+
+  // Persist on drag settle only — `columnWidths` changes every pointermove and setItem is sync.
+  useEffect(() => {
+    if (resizingColumn) return;
+    try {
+      localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+    } catch {
+      // Column resizing remains available when storage is blocked.
+    }
+  }, [columnWidths, resizingColumn]);
+
+  useEffect((): (() => void) => {
+    return (): void => {
+      const drag = resizeDragRef.current;
+      if (!drag) return;
+      document.body.style.cursor = drag.previousCursor;
+      document.body.style.userSelect = drag.previousUserSelect;
+    };
+  }, []);
+
+  const getAvailableColumnsWidth = useCallback((): number => {
+    // Header ref is only a fallback for the first render, before the callback ref runs.
+    const containerWidth =
+      scrollerElRef.current?.clientWidth ?? columnHeadersRef.current?.clientWidth ?? 1;
+    return computeAvailableColumnsWidth(containerWidth, showSelectionColumn);
+  }, [showSelectionColumn]);
+
+  // Denominator for unit → pixel conversion. A drag only shifts width between two adjacent
+  // columns, so the total stays constant.
+  const totalColumnUnits = useMemo(
+    () => TICKET_LIST_COLUMNS.reduce((total, item) => total + columnWidths[item.key], 0),
+    [columnWidths],
+  );
+  const columnsPixelWidth = computeAvailableColumnsWidth(scrollerClientWidth, showSelectionColumn);
+  const columnPixelWidth = useCallback(
+    (key: TicketListColumnKey): number =>
+      totalColumnUnits > 0
+        ? Math.round((columnWidths[key] / totalColumnUnits) * columnsPixelWidth)
+        : 0,
+    [columnWidths, totalColumnUnits, columnsPixelWidth],
+  );
+
+  const resizeColumnPair = useCallback(
+    (
+      column: TicketListColumnKey,
+      adjacentColumn: TicketListColumnKey,
+      startWidth: number,
+      startAdjacentWidth: number,
+      deltaPixels: number,
+      availableWidth: number,
+      totalWidthUnits: number,
+    ): void => {
+      const columnDefinition = TICKET_LIST_COLUMNS.find(item => item.key === column);
+      const adjacentDefinition = TICKET_LIST_COLUMNS.find(item => item.key === adjacentColumn);
+      if (!columnDefinition || !adjacentDefinition) return;
+
+      const pixelsToUnits = totalWidthUnits / availableWidth;
+      const pairWidth = startWidth + startAdjacentWidth;
+      let minimumWidth = columnDefinition.minWidth * pixelsToUnits;
+      let minimumAdjacentWidth = adjacentDefinition.minWidth * pixelsToUnits;
+      const minimumPairWidth = minimumWidth + minimumAdjacentWidth;
+      if (minimumPairWidth > pairWidth) {
+        const scale = pairWidth / minimumPairWidth;
+        minimumWidth *= scale;
+        minimumAdjacentWidth *= scale;
+      }
+      const maximumWidth = columnDefinition.maxWidth * pixelsToUnits;
+      const maximumAdjacentWidth = adjacentDefinition.maxWidth * pixelsToUnits;
+      const lowerBound = Math.max(minimumWidth, pairWidth - maximumAdjacentWidth);
+      const upperBound = Math.min(maximumWidth, pairWidth - minimumAdjacentWidth);
+      const nextWidth = Math.min(
+        Math.max(startWidth + deltaPixels * pixelsToUnits, lowerBound),
+        upperBound,
+      );
+
+      setColumnWidths(current => ({
+        ...current,
+        [column]: Number(nextWidth.toFixed(3)),
+        [adjacentColumn]: Number((pairWidth - nextWidth).toFixed(3)),
+      }));
+    },
+    [],
+  );
+
+  const handleColumnResizePointerDown = useCallback(
+    (column: TicketListColumnKey, event: React.PointerEvent<HTMLButtonElement>): void => {
+      if (event.button !== 0) return;
+      const columnIndex = TICKET_LIST_COLUMNS.findIndex(item => item.key === column);
+      const adjacentColumn = TICKET_LIST_COLUMNS[columnIndex + 1];
+      if (!adjacentColumn) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      resizeDragRef.current = {
+        column,
+        adjacentColumn: adjacentColumn.key,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: columnWidths[column],
+        startAdjacentWidth: columnWidths[adjacentColumn.key],
+        availableWidth: getAvailableColumnsWidth(),
+        totalWidthUnits: totalColumnUnits,
+        handle: event.currentTarget,
+        previousCursor: document.body.style.cursor,
+        previousUserSelect: document.body.style.userSelect,
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      setResizingColumn(column);
+    },
+    [columnWidths, getAvailableColumnsWidth, totalColumnUnits],
+  );
+
+  const handleColumnResizePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>): void => {
+      const drag = resizeDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      resizeColumnPair(
+        drag.column,
+        drag.adjacentColumn,
+        drag.startWidth,
+        drag.startAdjacentWidth,
+        event.clientX - drag.startX,
+        drag.availableWidth,
+        drag.totalWidthUnits,
+      );
+    },
+    [resizeColumnPair],
+  );
+
+  const handleColumnResizeEnd = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>): void => {
+      const drag = resizeDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (drag.handle.hasPointerCapture(event.pointerId)) {
+        drag.handle.releasePointerCapture(event.pointerId);
+      }
+      document.body.style.cursor = drag.previousCursor;
+      document.body.style.userSelect = drag.previousUserSelect;
+      resizeDragRef.current = null;
+      setResizingColumn(null);
+    },
+    [],
+  );
+
+  const handleColumnResizeKeyDown = useCallback(
+    (column: TicketListColumnKey, event: React.KeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      const columnIndex = TICKET_LIST_COLUMNS.findIndex(item => item.key === column);
+      const adjacentColumn = TICKET_LIST_COLUMNS[columnIndex + 1];
+      if (!adjacentColumn) return;
+      event.preventDefault();
+      resizeColumnPair(
+        column,
+        adjacentColumn.key,
+        columnWidths[column],
+        columnWidths[adjacentColumn.key],
+        event.key === 'ArrowRight' ? 8 : -8,
+        getAvailableColumnsWidth(),
+        totalColumnUnits,
+      );
+    },
+    [columnWidths, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits],
+  );
 
   const pageStart = pageCursors[pageIndex] ?? null;
   const [firstPage, firstPageDetails] = useCachedQuery(
@@ -130,6 +404,7 @@ export const TicketListView = function TicketListView({
       channelId,
       isMember,
       assignedTo,
+      createdBy,
       priority,
       stageName,
       aiCategory,
@@ -139,6 +414,8 @@ export const TicketListView = function TicketListView({
       hasAiDraft,
       lastEmailAtStart,
       lastEmailAtEnd,
+      createdAtStart,
+      createdAtEnd,
       // Spam/Starred are filtered server-side (they need an overlay row) so pagination is
       // meaningful; Inbox/All Mail are filtered client-side in `filteredAll` below, over an
       // adaptive fetch window so their pages fill correctly after filtering.
@@ -159,6 +436,7 @@ export const TicketListView = function TicketListView({
       JSON.stringify({
         c: channelId,
         a: assignedTo ?? null,
+        cb: createdBy ?? null,
         p: priority ?? null,
         s: stageName ?? null,
         ac: aiCategory ?? null,
@@ -168,11 +446,14 @@ export const TicketListView = function TicketListView({
         g: userGroups ?? null,
         ds: lastEmailAtStart ?? null,
         de: lastEmailAtEnd ?? null,
+        cs: createdAtStart ?? null,
+        ce: createdAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
       }),
     [
       channelId,
       assignedTo,
+      createdBy,
       priority,
       stageName,
       aiCategory,
@@ -182,6 +463,8 @@ export const TicketListView = function TicketListView({
       userGroups,
       lastEmailAtStart,
       lastEmailAtEnd,
+      createdAtStart,
+      createdAtEnd,
       dynamicFieldEntries,
     ],
   );
@@ -454,6 +737,7 @@ export const TicketListView = function TicketListView({
       className={cn('h-full w-full outline-none')}
       initialTopMostItemIndex={0}
       increaseViewportBy={{ top: 0, bottom: 200 }}
+      totalListHeightChanged={setBodyContentHeight}
       itemContent={(index, row) => {
         const ticketIdValue = row?.xyneId || row?.id || '';
         const isActive =
@@ -466,6 +750,7 @@ export const TicketListView = function TicketListView({
             ticket={row as TicketListItem}
             isActive={isActive}
             showExtraFields={showExtraFields}
+            gridTemplate={ticketListGridTemplate}
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
@@ -560,7 +845,7 @@ export const TicketListView = function TicketListView({
     <div className={cn('flex flex-col h-full w-full', className)}>
       <div
         data-slot='ticket-list-toolbar'
-        className='flex items-center justify-between gap-2 px-6 py-2 border-b border-border'
+        className='flex items-center justify-between gap-2 px-6 py-2'
       >
         {onToggleSelectAll ? (
           <div className='flex items-center gap-1'>
@@ -614,45 +899,107 @@ export const TicketListView = function TicketListView({
         ) : (
           <span />
         )}
-        <div className='flex flex-col items-end gap-1'>
-          <div data-slot='ticket-list-pagination' className='flex items-center gap-2'>
-            <span className='text-sm text-muted-foreground px-1'>{rangeLabel}</span>
-            <button
-              type='button'
-              onClick={goToPrevPage}
-              disabled={pageIndex === 0}
-              aria-label='Previous page'
-              data-track-category='Support'
-              data-track-name='PaginationPrev'
-              className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <button
-              type='button'
-              onClick={goToNextPage}
-              disabled={isLastPage}
-              aria-label='Next page'
-              data-track-category='Support'
-              data-track-name='PaginationNext'
-              className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-          <div className='flex items-center gap-3' aria-hidden='true'>
-            <span className='w-[100px]' />
-            <span className='w-5' />
-            <span className='w-[118px] text-right text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Created at
-            </span>
-            <span className='w-[120px] text-right text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Latest email
-            </span>
-          </div>
+        <div data-slot='ticket-list-pagination' className='flex items-center gap-2'>
+          <span className='text-sm text-muted-foreground px-1'>{rangeLabel}</span>
+          <button
+            type='button'
+            onClick={goToPrevPage}
+            disabled={pageIndex === 0}
+            aria-label='Previous page'
+            data-track-category='Support'
+            data-track-name='PaginationPrev'
+            className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <button
+            type='button'
+            onClick={goToNextPage}
+            disabled={isLastPage}
+            aria-label='Next page'
+            data-track-category='Support'
+            data-track-name='PaginationNext'
+            className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <ChevronRight size={14} />
+          </button>
         </div>
       </div>
-      <div className='flex-1 min-h-0'>{list}</div>
+      <div ref={tableWrapperRef} className='relative flex-1 min-h-0 min-w-0'>
+        <div className='flex h-full min-w-0 flex-col'>
+          <div
+            ref={columnHeadersRef}
+            role='row'
+            data-slot='ticket-list-column-headers'
+            className='grid shrink-0 items-center gap-x-3 px-6 py-1.5'
+            style={{
+              gridTemplateColumns: ticketListGridTemplate,
+              paddingRight: TICKET_LIST_COLUMN_PADDING_X + scrollbarGutter,
+            }}
+          >
+            {showSelectionColumn && <div aria-hidden='true' />}
+            {TICKET_LIST_COLUMNS.map(column => (
+              <div
+                key={column.key}
+                role='columnheader'
+                className={cn(
+                  'flex h-6 min-w-0 items-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground',
+                  getTicketListColumnAlignClass(column.key),
+                )}
+              >
+                <span className='min-w-0 truncate'>{column.label}</span>
+              </div>
+            ))}
+          </div>
+          <div className='flex-1 min-h-0'>{list}</div>
+        </div>
+        {/* One divider per boundary, spanning header + rows, so hovering anywhere along a
+            boundary highlights the whole line. Capped at the real table height — the list
+            wrapper is `flex-1`, so `inset-0` would draw past the last ticket. */}
+        <div
+          className='pointer-events-none absolute inset-x-0 top-0 z-10 grid gap-x-3 px-6'
+          style={{
+            height: headerHeight + Math.min(bodyContentHeight, listViewportHeight),
+            gridTemplateColumns: ticketListGridTemplate,
+            paddingRight: TICKET_LIST_COLUMN_PADDING_X + scrollbarGutter,
+          }}
+        >
+          {showSelectionColumn && <span aria-hidden='true' />}
+          {TICKET_LIST_COLUMNS.map((column, columnIndex) => (
+            <span key={column.key} className='relative'>
+              {columnIndex < TICKET_LIST_COLUMNS.length - 1 && (
+                <button
+                  type='button'
+                  role='slider'
+                  aria-label={`Resize ${column.label} column`}
+                  aria-orientation='horizontal'
+                  aria-valuemin={column.minWidth}
+                  aria-valuemax={column.maxWidth}
+                  aria-valuenow={columnPixelWidth(column.key)}
+                  title={`Drag to move the ${column.label} column boundary`}
+                  onPointerDown={event => handleColumnResizePointerDown(column.key, event)}
+                  onPointerMove={handleColumnResizePointerMove}
+                  onPointerUp={handleColumnResizeEnd}
+                  onPointerCancel={handleColumnResizeEnd}
+                  onLostPointerCapture={handleColumnResizeEnd}
+                  onKeyDown={event => handleColumnResizeKeyDown(column.key, event)}
+                  data-track-category='Support'
+                  data-track-name='ResizeTicketListColumn'
+                  data-track-metadata={JSON.stringify({ column: column.key })}
+                  className='group pointer-events-auto absolute -right-3 inset-y-0 w-3 cursor-col-resize touch-none select-none border-0 bg-transparent p-0 outline-none'
+                >
+                  <span
+                    className={cn(
+                      'absolute left-1/2 inset-y-0 w-0.5 -translate-x-1/2 bg-border/50 transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary',
+                      resizingColumn === column.key && 'bg-primary',
+                    )}
+                  />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };

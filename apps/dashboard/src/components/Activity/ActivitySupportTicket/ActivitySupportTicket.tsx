@@ -9,6 +9,7 @@ import { useUserChannelStatuses } from '../../../hooks/useChannels';
 
 const EMPTY_TICKET_FILTER = {
   assignedTo: undefined,
+  createdBy: undefined,
   priority: undefined,
   stageName: undefined,
   aiCategory: undefined,
@@ -17,6 +18,8 @@ const EMPTY_TICKET_FILTER = {
   userGroups: undefined,
   lastEmailAtStart: undefined,
   lastEmailAtEnd: undefined,
+  createdAtStart: undefined,
+  createdAtEnd: undefined,
 } as const;
 
 /**

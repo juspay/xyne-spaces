@@ -731,6 +731,7 @@ const SupportScreen = (): ReactElement => {
           : filters.assigned
             ? [userID]
             : undefined,
+      createdBy: filters.createdBy && filters.createdBy.length > 0 ? filters.createdBy : undefined,
       priority: filters.priority && filters.priority.length > 0 ? filters.priority : undefined,
       stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
       aiCategory:
@@ -744,6 +745,8 @@ const SupportScreen = (): ReactElement => {
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
+      createdAtStart: filters.createdDateStart,
+      createdAtEnd: filters.createdDateEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds],
@@ -818,8 +821,11 @@ const SupportScreen = (): ReactElement => {
     (filters.aiCategory && filters.aiCategory.length > 0) ||
     (filters.generatedTags && filters.generatedTags.length > 0) ||
     (filters.userGroups && filters.userGroups.length > 0) ||
+    (filters.createdBy && filters.createdBy.length > 0) ||
     filters.lastEmailAtStart !== undefined ||
     filters.lastEmailAtEnd !== undefined ||
+    filters.createdDateStart !== undefined ||
+    filters.createdDateEnd !== undefined ||
     (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0)
   );
   const hasAnyFilterActive =
@@ -868,6 +874,29 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
+  const handleCreatedDateRangeChange = useCallback(
+    (range: DateRangeValue): void => {
+      const newFilters = {
+        ...filters,
+        createdDateStart: range.startDate.getTime(),
+        createdDateEnd: range.endDate.getTime(),
+      };
+      Object.keys(newFilters).forEach((filterKey: string) => {
+        const k = filterKey as keyof TicketFilters;
+        const filterValue = newFilters[k];
+        if (
+          filterValue === undefined ||
+          filterValue === null ||
+          (Array.isArray(filterValue) && filterValue.length === 0)
+        ) {
+          delete newFilters[k];
+        }
+      });
+      setFilters(newFilters);
+    },
+    [filters, setFilters],
+  );
+
   const handleMenuItemClick = useCallback((category: string): void => {
     setActiveSubmenu(prev => (prev === category ? null : category));
   }, []);
@@ -897,7 +926,9 @@ const SupportScreen = (): ReactElement => {
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
-      { id: 'date', label: 'Date', icon: CalendarDays },
+      { id: 'createdBy', label: 'Created by', icon: User },
+      { id: 'date', label: 'Last updated', icon: CalendarDays },
+      { id: 'createdDate', label: 'Created at', icon: CalendarDays },
       ...deskDynamicFields.map(field => ({
         id: `dynamic-${field.id}`,
         label: field.fieldName,
@@ -950,6 +981,16 @@ const SupportScreen = (): ReactElement => {
             onClose={() => setActiveSubmenu(null)}
           />
         );
+      case 'createdBy':
+        return (
+          <UserSubmenu
+            key='created-by-submenu'
+            selectedUsers={filters.createdBy || []}
+            onChange={(users: string[]) => handleFilterChange('createdBy', users)}
+            label='Created by'
+            channelId={selectedChannelId ?? undefined}
+          />
+        );
       case 'date': {
         const currentRange: DateRangeValue | null =
           filters.lastEmailAtStart !== undefined && filters.lastEmailAtEnd !== undefined
@@ -990,9 +1031,59 @@ const SupportScreen = (): ReactElement => {
               })}
             </div>
             <CalendarView
+              key='last-email-calendar'
               range={currentRange}
               onSelect={(range: DateRangeValue) => {
                 handleDateRangeChange(range);
+              }}
+            />
+          </div>
+        );
+      }
+      case 'createdDate': {
+        const currentCreatedRange: DateRangeValue | null =
+          filters.createdDateStart !== undefined && filters.createdDateEnd !== undefined
+            ? {
+                startDate: new Date(filters.createdDateStart),
+                endDate: new Date(filters.createdDateEnd),
+              }
+            : null;
+        return (
+          <div className='w-[252px] bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
+            <div className='p-1 border-b border-border'>
+              {PRESETS.map(preset => {
+                const v = preset.getValue();
+                const isActive =
+                  filters.createdDateStart !== undefined &&
+                  filters.createdDateEnd !== undefined &&
+                  Math.abs(filters.createdDateStart - v.startDate.getTime()) < 1000 &&
+                  Math.abs(filters.createdDateEnd - v.endDate.getTime()) < 1000;
+                return (
+                  <button
+                    key={preset.label}
+                    type='button'
+                    data-track-category='Support'
+                    data-track-name='SelectCreatedAtPreset'
+                    onClick={() => {
+                      handleCreatedDateRangeChange(v);
+                    }}
+                    className={cn(
+                      'flex w-full items-center rounded-sm px-2 py-1.5 text-sm select-none',
+                      isActive
+                        ? 'bg-accent text-foreground font-medium'
+                        : 'hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            <CalendarView
+              key='created-at-calendar'
+              range={currentCreatedRange}
+              onSelect={(range: DateRangeValue) => {
+                handleCreatedDateRangeChange(range);
               }}
             />
           </div>
@@ -1006,9 +1097,11 @@ const SupportScreen = (): ReactElement => {
     filters,
     handleFilterChange,
     handleDateRangeChange,
+    handleCreatedDateRangeChange,
     handleDynamicFieldChange,
     availableAiCategories,
     deskDynamicFields,
+    selectedChannelId,
   ]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
@@ -2695,6 +2788,14 @@ const SupportScreen = (): ReactElement => {
                                       )) ||
                                     (item.id === 'userGroups' &&
                                       !!(filters.userGroups && filters.userGroups.length > 0)) ||
+                                    (item.id === 'createdBy' &&
+                                      !!(filters.createdBy && filters.createdBy.length > 0)) ||
+                                    (item.id === 'date' &&
+                                      (filters.lastEmailAtStart !== undefined ||
+                                        filters.lastEmailAtEnd !== undefined)) ||
+                                    (item.id === 'createdDate' &&
+                                      (filters.createdDateStart !== undefined ||
+                                        filters.createdDateEnd !== undefined)) ||
                                     ('dynamicFieldId' in item &&
                                       !!filters.dynamicFields?.[item.dynamicFieldId]);
                                   const menuButton = (
@@ -3399,6 +3500,7 @@ const TicketMetaRow = ({
 type SupportTicketDetailProps = {
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
@@ -3407,6 +3509,8 @@ type SupportTicketDetailProps = {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
   isMember: boolean;

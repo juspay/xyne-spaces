@@ -63,6 +63,7 @@ export interface SupportKanbanBoardProps {
   onBoardIdResolved: (boardId: string) => void;
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
@@ -71,6 +72,8 @@ export interface SupportKanbanBoardProps {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
   dynamicFieldEntries?: DynamicFieldFilterEntry[];
@@ -127,6 +130,7 @@ export const SupportKanbanBoard = ({
       JSON.stringify({
         c: channelId,
         a: ticketFilter.assignedTo ?? null,
+        cb: ticketFilter.createdBy ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
         ac: ticketFilter.aiCategory ?? null,
@@ -135,11 +139,14 @@ export const SupportKanbanBoard = ({
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
+        cs: ticketFilter.createdAtStart ?? null,
+        ce: ticketFilter.createdAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
       }),
     [
       channelId,
       ticketFilter.assignedTo,
+      ticketFilter.createdBy,
       ticketFilter.priority,
       ticketFilter.stageName,
       ticketFilter.aiCategory,
@@ -148,6 +155,8 @@ export const SupportKanbanBoard = ({
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
+      ticketFilter.createdAtStart,
+      ticketFilter.createdAtEnd,
       dynamicFieldEntries,
     ],
   );
