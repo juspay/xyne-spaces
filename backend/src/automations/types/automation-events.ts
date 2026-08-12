@@ -1,4 +1,5 @@
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
+import { MessageType, CallType } from '@xyne/shared';
 import { EMAIL_SENT_EVENT } from '../triggers/email-sent.trigger';
 import { TICKET_COMMENTED_EVENT } from '../triggers/ticket-commented.trigger';
 import { TICKET_CREATED_EVENT } from '../triggers/ticket-created.trigger';
@@ -9,7 +10,6 @@ import {
 } from '../triggers/ticket-updated.trigger';
 import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
 import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
-import type { MessageType, CallType } from '@prisma/client';
 
 export interface TicketCreatedEventPayload {
   ticketId: string;

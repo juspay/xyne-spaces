@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { WebhookReceiver, WebhookEvent } from 'livekit-server-sdk';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { CallOrigin, CallStatus, InvitationResponse, type Call } from '@prisma/client';
+import { type Call } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,7 +41,7 @@ class LiveKitWebhookController {
         externalId: call.externalId,
         channelId: call.channelId,
         title: call.title,
-        callType: call.callType,
+        callType: call.callType as CallType,
         startedAt: call.startedAt,
         endedAt,
         aiSummary: call.aiSummary,
@@ -242,7 +243,10 @@ class LiveKitWebhookController {
 
         // Track call metrics (count + duration) as a side effect
         try {
-          await callSideEffectService.logCallAnalytics(result.call, now);
+          await callSideEffectService.logCallAnalytics(
+            { ...result.call, callOrigin: result.call.callOrigin as CallOrigin },
+            now,
+          );
         } catch (analyticsError) {
           logger.error(`[LiveKit Webhook] Failed to log call analytics for ${callId}:`, analyticsError);
         }
@@ -464,7 +468,7 @@ class LiveKitWebhookController {
             externalId: call.externalId,
             channelId: call.channelId,
             title: call.title,
-            callType: call.callType,
+            callType: call.callType as CallType,
             startedAt: call.startedAt,
           }).catch(autoError => {
             logger.error(`[LiveKit Webhook] Failed to emit call-started automation event:`, autoError);
@@ -694,7 +698,10 @@ class LiveKitWebhookController {
 
         // Emit analytics events (call_ended + per-participant) for the Calls dashboards
         try {
-          await callSideEffectService.logCallAnalytics(result.call, now);
+          await callSideEffectService.logCallAnalytics(
+            { ...result.call, callOrigin: result.call.callOrigin as CallOrigin },
+            now,
+          );
         } catch (analyticsError) {
           logger.error(`[LiveKit Webhook] Failed to log call analytics for ${callId}:`, analyticsError);
         }

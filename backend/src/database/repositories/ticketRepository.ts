@@ -1,4 +1,4 @@
-import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient, EmailType } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { extractEmailAddress } from '@/utils/email';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
@@ -7,7 +7,16 @@ import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { BaseTicketType, isReleaseTicket, PRActivityValue } from '@xyne/shared';
+import {
+  BaseTicketType,
+  isReleaseTicket,
+  PRActivityValue,
+  TicketStatusV2,
+  TicketPriority,
+  ActivityType,
+  PRStatusEvent,
+  EmailType,
+} from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
@@ -15,6 +24,7 @@ import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trig
 import { emitTicketUpdated, type TicketChanges } from '@/automations/triggers/ticket-updated.trigger';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -208,7 +218,7 @@ export class TicketRepository {
       await dualWriteTicketTag(ticket.id, 'hotfix');
       logger.info(`Hotfix tag added to ticket ${ticket.id}`);
     }
-    const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket);
+    const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'insert',
       ticket: createdSnapshot,
@@ -466,13 +476,13 @@ export class TicketRepository {
         changes.statusV2 = { previousValue: oldStatusV2 ?? null, newValue: newStatusV2 };
       }
       void emitTicketUpdated({
-        ticket: updatedTicket,
+        ticket: updatedTicket as TicketLike,
         changes,
         performedById: updatedBy,
       });
     }
 
-    const updatedSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+    const updatedSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'update',
       ticket: updatedSnapshot,
@@ -764,7 +774,7 @@ export class TicketRepository {
 
     if (previousAssigneeId !== newAssigneeId) {
       void emitTicketUpdated({
-        ticket: updatedTicket,
+        ticket: updatedTicket as TicketLike,
         changes: {
           assignedTo: { previousValue: previousAssigneeId, newValue: newAssigneeId },
         },
@@ -772,7 +782,7 @@ export class TicketRepository {
       });
     }
 
-    const assigneeSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+    const assigneeSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'update',
       ticket: assigneeSnapshot,
@@ -803,7 +813,7 @@ export class TicketRepository {
 
     if (previousGroupId !== groupId) {
       void emitTicketUpdated({
-        ticket: updatedTicket,
+        ticket: updatedTicket as TicketLike,
         changes: {
           userGroupId: { previousValue: previousGroupId, newValue: groupId },
         },
@@ -900,10 +910,10 @@ export class TicketRepository {
       });
       prevSnapshot = prev
         ? {
-            statusV2: prev.statusV2,
+            statusV2: prev.statusV2 as TicketStatusV2,
             title: prev.title,
             description: prev.description,
-            priority: prev.priority,
+            priority: prev.priority as TicketPriority,
             eta: prev.eta,
             ticketType: prev.ticketType,
             isArchived: prev.isArchived,
@@ -1042,7 +1052,7 @@ export class TicketRepository {
 
       if (Object.keys(changes).length > 0) {
         void emitTicketUpdated({
-          ticket: updatedTicket,
+          ticket: updatedTicket as TicketLike,
           changes,
           performedById: updatedBy,
         });
@@ -1050,7 +1060,7 @@ export class TicketRepository {
     }
 
     if (prevSnapshot) {
-      const metadataSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+      const metadataSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
       websocketService.broadcastTicketCountsUpdate({
         operation: 'update',
         ticket: metadataSnapshot,

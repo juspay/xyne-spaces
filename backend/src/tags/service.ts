@@ -1,6 +1,6 @@
-import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
+import { Prisma, Tag, TagsConfig } from '@prisma/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 import { TagsConfigShapeSchema } from './schema';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
 import type { CategoryCatalogEntry, CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
@@ -214,7 +214,7 @@ export class TagService {
         configKey: existing.configKey,
         tagCategory,
         tag: newTag,
-        method: existing.method,
+        method: existing.method as TagMethod,
         createdBy: existing.createdBy,
         updatedBy,
       }, tx);
@@ -307,7 +307,7 @@ export class TagService {
       }
 
       const updated = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
-      return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method }));
+      return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method as TagMethod }));
     });
   }
 

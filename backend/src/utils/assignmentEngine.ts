@@ -1,11 +1,11 @@
 import { repositories } from '@/database/repositories';
+import { UserResponsibility } from '@xyne/shared';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
   UserExpertiseMapping,
   UserAssignmentState,
   UserWorkloadMapping,
-  UserResponsibility,
 } from '@prisma/client';
 
 export interface AssignmentResult {

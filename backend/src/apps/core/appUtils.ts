@@ -1,5 +1,5 @@
 import { repositories } from '@/database/repositories';
-import { AuthProvider, UserType } from '@prisma/client';
+import { AuthProvider, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import crypto from 'crypto';

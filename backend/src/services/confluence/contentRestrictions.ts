@@ -1,5 +1,5 @@
-import { CanvasVisibility } from '@prisma/client';
 import type { ConfluenceContentRestrictions, ConfluencePage } from './confluenceClient';
+import { CanvasVisibility } from '@xyne/shared';
 
 export interface ConfluenceRestrictionDecision {
   visibility: CanvasVisibility;

@@ -3,7 +3,7 @@ import { ReleaseNotesService } from '@/services/releaseNotes/releaseNotesService
 import { conversationService } from '@/services/conversationService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { config } from '@/config/env';
-import { BaseTicketType, isReleaseTicket } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
@@ -150,7 +150,7 @@ Release notes have been generated for **${ticket.title}**
           conversationId: ticket.conversationId,
           userId: xyneReleaseBot.id,
           content: messageContent,
-          msgType: 'SYSTEM',
+          msgType: MessageType.SYSTEM,
           metadata: {
             messageSubtype: 'release_notes_generated',
             canvasUrl,

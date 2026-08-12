@@ -15,7 +15,8 @@ import { UserRepository } from '../database/repositories/users';
 import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
-import { Message, MessageType, AttachmentEntityType, ChannelScopeType } from '@prisma/client';
+import { Message } from '@prisma/client';
+import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -404,7 +405,7 @@ export class ConversationController {
       if (!isParticipant) {
         // Only auto-add for PUBLIC channels
         if (channel.visibility === 'PUBLIC') {
-          await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+          await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         } else {
           // PRIVATE channels require explicit invitation
           res.status(403).json({
@@ -450,7 +451,7 @@ export class ConversationController {
           channelId,
           conversationId: conversation.conversationId,
           senderId: userId,
-          scopeType: channel.scopeType,
+          scopeType: channel.scopeType as ChannelScopeType,
         });
 
         // Handle bot command with the new conversation ID
@@ -488,7 +489,7 @@ export class ConversationController {
         channelId,
         conversationId: conversation.conversationId,
         senderId: userId,
-        scopeType: channel.scopeType,
+        scopeType: channel.scopeType as ChannelScopeType,
       });
 
       // Create attachment records if files were uploaded
@@ -963,7 +964,7 @@ export class ConversationController {
           await this.channelParticipantRepository.addParticipant(
             conversation.channelId,
             userId,
-            'MEMBER'
+            ChannelRole.MEMBER
           );
         } else {
           // PRIVATE channels require explicit invitation

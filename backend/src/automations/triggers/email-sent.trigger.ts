@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EmailType } from '@prisma/client';
+import { EmailType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';

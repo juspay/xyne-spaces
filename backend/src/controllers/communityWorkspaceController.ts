@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { AuthProvider } from '@prisma/client';
 import {
   CommunityJoinResultStatus,
   OrgRole,
   WorkspaceJoinRequestAction,
   type WorkspaceJoinRequestAction as WorkspaceJoinRequestActionType,
   WorkspaceJoinRequestStatus,
+  AuthProvider,
 } from '@xyne/shared';
 import { communityWorkspaceService } from '@/services/communityWorkspaceService';
 import { UserSessionService } from '@/services/userSessionService';

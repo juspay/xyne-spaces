@@ -4,6 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { ChannelScopeType, ChannelRole, ChannelVisibility } from '@xyne/shared';
 import { getMigrationMessageBlocks, getMigrationMessageFallbackText } from './utils/blockKit';
 import { postMessage } from './utils/postMessage';
 import { extractChannelHistory, extractLegacyThreadReplies, UserInfoCache, getUserInfo } from './utils/extractConversation';
@@ -124,12 +125,12 @@ export async function resolveOrCreateChannel(
   // 4. Create the channel
   try {
     const newChannel = await channelRepo.create({
-      scopeType: 'DEFAULT',
+      scopeType: ChannelScopeType.DEFAULT,
       name: channelName,
       projectId,
       workspaceId,
       createdBy: creatorUser.id,
-      visibility,
+      visibility: visibility as ChannelVisibility,
     });
 
     logger.info('[Migration] Created new channel for migration', {
@@ -646,7 +647,7 @@ export async function addChannelParticipantsAfterMigration(
     const existingParticipant = await channelParticipantRepo.addParticipant(
       xyneChannelId,
       creatorUser.xyneUserId,
-      'ADMIN'
+      ChannelRole.ADMIN
     );
     // addParticipant returns the existing record unchanged if the user is already
     // a participant — explicitly promote to ADMIN if needed.
@@ -654,7 +655,7 @@ export async function addChannelParticipantsAfterMigration(
       await channelParticipantRepo.updateParticipantRole(
         xyneChannelId,
         creatorUser.xyneUserId,
-        'ADMIN'
+        ChannelRole.ADMIN
       );
     }
     logger.info('[Migration] Channel creator added as ADMIN', {
@@ -670,7 +671,7 @@ export async function addChannelParticipantsAfterMigration(
     const result = await channelParticipantRepo.addParticipantsBatch(
       xyneChannelId,
       memberUserIds,
-      'MEMBER',
+      ChannelRole.MEMBER,
       false,
       seenCutoffAt,
     );
@@ -728,13 +729,13 @@ export async function addChannelParticipantsBeforeMigration(
     const existingParticipant = await channelParticipantRepo.addParticipant(
       xyneChannelId,
       creatorUser.xyneUserId,
-      'ADMIN'
+      ChannelRole.ADMIN
     );
     if (existingParticipant.role !== 'ADMIN') {
       await channelParticipantRepo.updateParticipantRole(
         xyneChannelId,
         creatorUser.xyneUserId,
-        'ADMIN'
+        ChannelRole.ADMIN
       );
     }
     logger.info('[Migration] Channel creator added as ADMIN', {
@@ -751,7 +752,7 @@ export async function addChannelParticipantsBeforeMigration(
       const PARTICIPANT_BATCH_DELAY_MS = 60000;
       for (let i = 0; i < memberUserIds.length; i += BATCH_SIZE) {
         const chunk = memberUserIds.slice(i, i + BATCH_SIZE);
-        const result = await channelParticipantRepo.addParticipantsBatch(xyneChannelId, chunk, 'MEMBER');
+        const result = await channelParticipantRepo.addParticipantsBatch(xyneChannelId, chunk, ChannelRole.MEMBER);
         const batchNum = Math.floor(i / BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(memberUserIds.length / BATCH_SIZE);
         logger.info('[Migration] Participant batch added', {
@@ -780,7 +781,7 @@ export async function addChannelParticipantsBeforeMigration(
       }
     } else {
       const result = await channelParticipantRepo.addParticipantsBatch(
-        xyneChannelId, memberUserIds, 'MEMBER'
+        xyneChannelId, memberUserIds, ChannelRole.MEMBER
       );
       logger.info('[Migration] Channel participants batch added', {
         xyneChannelId, addedCount: result.addedCount, existingCount: result.existingCount,

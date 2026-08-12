@@ -3,11 +3,30 @@ import { extractChannelMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
-import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
+import {
+  CanvasVisibility,
+  ChannelScopeType,
+  ChannelVisibility,
+  TicketStatus,
+  TicketStatusV2,
+  type Schema,
+  AttachmentEntityType,
+  VespaOperationType as VespaOpType,
+} from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
+import {
+  Channel,
+  Message,
+  Project,
+  Ticket,
+  Email,
+  Canvas,
+  Call,
+  CollectionItem,
+  Apps,
+} from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
@@ -1664,7 +1683,7 @@ export const fetchAndMapBySchema = async (
 
 
 export const VespaOperationType: Record<VespaJobType, VespaOpType> = {
-  feed: 'INSERT',
-  update: 'UPDATE',
-  delete: 'DELETE',
+  feed: VespaOpType.INSERT,
+  update: VespaOpType.UPDATE,
+  delete: VespaOpType.DELETE,
 }

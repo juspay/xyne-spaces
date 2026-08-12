@@ -1,8 +1,8 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
 import { getStorageService } from './storage';
-import { AccessType, PrismaClient, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { PrismaClient } from '@prisma/client';
+import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -819,7 +819,7 @@ export class UserManagementService {
     // Add direct access (higher priority)
     directAccess.forEach(access => {
       resourceMap.set(access.resource.name, {
-        accessType: access.accessType,
+        accessType: access.accessType as AccessType,
         source: 'direct'
       });
     });
@@ -828,7 +828,7 @@ export class UserManagementService {
     groupAccess.forEach(access => {
       if (!resourceMap.has(access.resource.name)) {
         resourceMap.set(access.resource.name, {
-          accessType: access.accessType,
+          accessType: access.accessType as AccessType,
           source: 'group'
         });
       }

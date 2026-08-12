@@ -1,5 +1,5 @@
 import { EgressClient, EgressStatus, SegmentedFileOutput, SegmentedFileProtocol, GCPUpload, S3Upload, EgressInfo } from 'livekit-server-sdk';
-import { AttachmentEntityType, RecordingType, type Call, type CallRecording } from '@prisma/client';
+import { type Call, type CallRecording } from '@prisma/client';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -10,7 +10,7 @@ import { getStorageService } from '@/services/storage';
 import { livekitService } from '@/services/liveKitService';
 import { stitchHlsToMp4 } from '@/utils/ffmpeg';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, RecordingType } from '@xyne/shared';
 
 /** HLS segment length. Smaller = more frequent uploads (less data lost on crash). */
 const SEGMENT_DURATION_SECONDS = 6;

@@ -1,5 +1,4 @@
 import { DatabaseClient } from '@/database/client';
-import { logger } from '@/utils/logger';
 import {
   ActivityClassification,
   AuthProvider,
@@ -15,7 +14,8 @@ import {
   InvitationResponse,
   MeetingStatus,
   ProjectType,
-} from '@prisma/client';
+} from '@xyne/shared';
+import { logger } from '@/utils/logger';
 
 export class TestAuthSeeder {
   public static async seedWorkspaceFixtures(

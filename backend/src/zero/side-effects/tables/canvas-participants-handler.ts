@@ -1,10 +1,10 @@
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityClassification } from '@xyne/shared';
 import type { SideEffectJobConfig } from '../types';
 import type { CanvasParticipantPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { enqueueCanvasPermissionRefresh } from '@/services/canvasPermissionSync';
 

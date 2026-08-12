@@ -1,8 +1,8 @@
 // PR to Ticket Status Sync Service
 // Handles mapping PR status changes to ticket stage updates based on configurable PR status mappings
 
-import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType } from '@xyne/shared';
 import { ticketService } from '@/services/ticketService';
 import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
@@ -411,7 +411,7 @@ export class PRTicketStatusSyncService {
         sourceBranchName: true,
         destinationBranchName: true,
       },
-    });
+    }) as PRInfo;
   }
 
   /**
@@ -440,7 +440,7 @@ export class PRTicketStatusSyncService {
       });
       if (ticket) {
         logger.info(`[PR-Ticket-Sync] Found ticket via direct ticketId: ${pr.ticketId}`);
-        return ticket;
+        return ticket as TicketInfo;
       }
     }
 
@@ -497,7 +497,7 @@ export class PRTicketStatusSyncService {
               }
             }
 
-            return ticket;
+            return ticket as TicketInfo;
           }
         }
       }
@@ -740,7 +740,7 @@ export class PRTicketStatusSyncService {
         ticketId: ticket.id,
         workspaceId: ticket.workspaceId,
         updatedBy,
-        activityType: 'ASSIGNED_TO',
+        activityType: ActivityType.ASSIGNED_TO,
         value: {
           field: fieldName,
           oldValue: isPrOpened ? null : oldValue,

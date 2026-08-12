@@ -11,8 +11,8 @@ import { ConversationRepository } from '../../database/repositories/conversation
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
-import { ExternalSource, ExternalMessage, ExternalEntityType, EmailType, EmailMergeMode, ChannelType } from '@prisma/client';
-import { isDeskChannelType } from '@xyne/shared';
+import { ExternalSource, ExternalMessage } from '@prisma/client';
+import { isDeskChannelType, ExternalEntityType, EmailType, EmailMergeMode, ChannelType, MessageDirection, MessageType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
 import { emailService } from '../../services/emailService';
@@ -307,7 +307,7 @@ export class ExternalSourceCore {
         externalId: normalizedData.externalId,
         externalThreadId: normalizedData.externalThreadId,
         entityId: resolvedEntityId,
-        direction: 'INCOMING',
+        direction: MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
       });
     }
@@ -505,7 +505,7 @@ export class ExternalSourceCore {
           conversationId: conversation.conversationId,
           userId: senderId,
           content: messageContent,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           uploadedFiles: uploadedFiles,
           metadata: {
             externalSource: source.name,
@@ -770,7 +770,7 @@ export class ExternalSourceCore {
         channelId: source.channelId,
         userId: senderId,
         content: messageContent,
-        msgType: 'BOT',
+        msgType: MessageType.BOT,
         uploadedFiles: uploadedFiles,
         metadata: {
           externalSource: source.name,

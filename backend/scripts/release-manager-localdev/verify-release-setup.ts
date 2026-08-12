@@ -5,14 +5,8 @@
  * whether each RELEASE board is bound to the commit specs form via
  * forms_context_mapping. Makes no writes.
  */
-import {
-  PrismaClient,
-  BoardType,
-  LookupType,
-  FormContextType,
-  FormEntityType,
-  ReleaseTrackingMode,
-} from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { BoardType, LookupType, FormContextType, FormEntityType, ReleaseTrackingMode } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 

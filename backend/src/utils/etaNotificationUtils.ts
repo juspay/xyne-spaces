@@ -1,8 +1,7 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
-import { TicketStatusV2 } from '@prisma/client';
-import { MessageType } from '@xyne/shared';
+import { MessageType, TicketStatusV2 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 export const OPEN_STATUSES = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED];

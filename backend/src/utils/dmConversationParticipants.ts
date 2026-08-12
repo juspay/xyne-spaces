@@ -1,8 +1,5 @@
-import {
-  ChannelScopeType,
-  ConversationParticipation,
-  type Prisma,
-} from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { ChannelScopeType, ConversationParticipation } from '@xyne/shared';
 import { db } from '@/database/client';
 
 export async function ensureDmConversationAuthorParticipant({

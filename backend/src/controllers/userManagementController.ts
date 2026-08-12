@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 
 const storageService = getStorageService();

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { FormContextType, FormEntityType, FormFieldType, parseFieldOptions, resolveParentOption, serializeFieldOptions, type FieldEnumOption } from '@xyne/shared';
 import { BaseRepository } from './base';
-import { Form, FormFields, Prisma, PrismaClient, FormFieldType as PrismaFormFieldType } from '@prisma/client';
+import { Form, FormFields, Prisma, PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import {
   assertNoNameCollisions,
@@ -65,7 +65,7 @@ export interface GlobalFieldListResult {
   id: string;
   projectId: string;
   fieldName: string;
-  fieldType: PrismaFormFieldType;
+  fieldType: FormFieldType;
   fieldEnum: Prisma.JsonValue | null;
   fieldOptions: Prisma.JsonValue | null;
 }
@@ -272,7 +272,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     return rows.map(row => ({
       ...row,
       fieldEnum: parseGlobalFieldEnum(row.fieldEnum),
-    }));
+    })) as GlobalFieldListResult[];
   }
 
   /**

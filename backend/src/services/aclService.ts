@@ -1,5 +1,5 @@
 import { repositories } from '../database/repositories/index';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { logger } from '../utils/logger';
 
 /**
@@ -143,7 +143,7 @@ export class ACLService {
 
       return userAccess.map(access => ({
         resourceName: access.resource.name,
-        accessType: access.accessType
+        accessType: access.accessType as AccessType
       }));
     } catch (error) {
       logger.error('Error getting user resources:', error);

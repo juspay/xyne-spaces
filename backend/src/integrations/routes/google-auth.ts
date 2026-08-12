@@ -2,6 +2,7 @@
  * Google OAuth routes for Gmail integration setup.
  */
 
+import { EmailMergeMode, WorkspaceRole, DeskType } from '@xyne/shared';
 import express, { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
@@ -13,7 +14,6 @@ import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
-import { EmailMergeMode, WorkspaceRole, DeskType } from '@prisma/client';
 import { config as appConfig } from '@/config/env';
 import {
   appendQueryToReturnPath,

@@ -1,6 +1,6 @@
 import { repositories } from '../database/repositories/index';
+import { ACLAuditEventType, ACLAuditTargetType } from '@xyne/shared';
 import { getContextOrNull } from '@/database/tenant/context';
-import { ACLAuditEventType, ACLAuditTargetType } from '@prisma/client';
 import { ACLAuditLog, ACLAuditLogWithActor, PaginationOptions, PaginatedResult } from '../types/database';
 import { logger } from '../utils/logger';
 
