@@ -44,20 +44,6 @@ export interface BoardSummary {
   boardType: string;
 }
 
-// Fields beyond `errors`/`warnings` are only populated when validation passes and
-// `categories.stages` was requested — mirrors apps/backend/src/services/boardConfigCopyService.ts's
-// `PlanCopyResult` exactly (do not widen these back to required without checking that file).
-export interface PlanCopyResult {
-  errors: string[];
-  warnings: string[];
-  sourceBoard?: BoardSummary;
-  targetBoard?: BoardSummary;
-  newStages?: NewStageInfo[];
-  oldStages?: OldStageInfo[];
-  suggestedMapping?: Record<string, string>;
-  requiresExplicit?: string[];
-}
-
 // ─── Prepared mutation payloads ───────────────────────────────────────────
 // `/prepare` does only what a browser can't (the pre-copy snapshot and the custom-fields
 // form clone) and hands these back. The screen passes them straight into the SAME Zero
@@ -110,22 +96,40 @@ export interface PreparedTransition {
   approvers: Array<{ id: string; approverId: string; approverType: string }>;
 }
 
-export interface PrepareCopyResult {
-  dryRun: boolean;
+/** The committable half — present only once the plan is fully resolved and `dryRun` is false. */
+export interface PreparedCopy {
   // Object-storage path of the pre-copy backup of the target board, kept for 7 days.
-  snapshotPath?: string;
+  snapshotPath: string;
   customFieldsCopied: boolean;
   rolesCopied: boolean;
   newStageCount: number;
   deletedOldStageCount: number;
   ticketsToMigrate: number;
-  warnings: string[];
   boardUpdate: PreparedBoardUpdate;
   boardFormMapping: PreparedBoardFormMapping | null;
   transitions: PreparedTransition[] | null;
-  // True when per-ticket work remains and `/start-ticket-migration` should be called
-  // after the configuration mutations land.
-  hasPendingMigration: boolean;
+  // The per-ticket work left over, or null when there is none. Passed back verbatim to
+  // /start-ticket-migration after the configuration mutations land — the server re-validates
+  // every destination in it, so the screen treats it as an opaque blob.
+  ticketMigration: Record<string, unknown> | null;
+}
+
+/**
+ * One response covering both halves of `/prepare`. The descriptive fields are always
+ * returned once the board pair validates — they're what the remap picker renders from —
+ * while `prepared` is added only on a call that actually committed to the server-side work.
+ * Mirrors apps/backend/src/services/boardConfigCopyService.ts's `PrepareCopyResult`.
+ */
+export interface PrepareCopyResult {
+  errors: string[];
+  warnings: string[];
+  sourceBoard?: BoardSummary;
+  targetBoard?: BoardSummary;
+  newStages?: NewStageInfo[];
+  oldStages?: OldStageInfo[];
+  suggestedMapping?: Record<string, string>;
+  requiresExplicit?: string[];
+  prepared?: PreparedCopy;
 }
 
 /**

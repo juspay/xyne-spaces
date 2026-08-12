@@ -17,7 +17,6 @@ import type {
   ApiEnvelope,
   CopyCategorySelection,
   CopyResultSummary,
-  PlanCopyResult,
   PrepareCopyResult,
 } from './BoardConfigCopyScreen.types';
 
@@ -71,7 +70,7 @@ const BoardConfigCopyScreen = ({
     stages: false,
   });
 
-  const [plan, setPlan] = useState<PlanCopyResult | null>(null);
+  const [plan, setPlan] = useState<PrepareCopyResult | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
@@ -110,14 +109,19 @@ const BoardConfigCopyScreen = ({
     onClose();
   };
 
-  const fetchPlan = useCallback(async (): Promise<PlanCopyResult | null> => {
+  /**
+   * Plan-only call: `dryRun: true` makes /prepare describe the copy (stages, counts,
+   * suggested mapping) without writing a snapshot or cloning a form, so the remap picker
+   * can be rendered — and re-rendered — without side effects.
+   */
+  const fetchPlan = useCallback(async (): Promise<PrepareCopyResult | null> => {
     if (!sourceBoardId) return null;
     setPlanLoading(true);
     setPlanError(null);
     try {
-      const response = await apiInstance.post<ApiEnvelope<PlanCopyResult>>(
-        '/admin/board-config-copy/plan',
-        { sourceBoardId, targetBoardId, categories },
+      const response = await apiInstance.post<ApiEnvelope<PrepareCopyResult>>(
+        '/admin/board-config-copy/prepare',
+        { sourceBoardId, targetBoardId, categories, dryRun: true },
       );
       const result = response.data.data;
       if (!result) {
@@ -133,10 +137,10 @@ const BoardConfigCopyScreen = ({
       return result;
     } catch (error) {
       // Validation failures (e.g. mismatched project) come back as HTTP 400 with the
-      // PlanCopyResult still attached under `data.data` — surface it if present so the
-      // UI can show the structured `errors` list, not just a generic message.
+      // result still attached under `data.data` — surface it if present so the UI can show
+      // the structured `errors` list, not just a generic message.
       const withResponse = error as {
-        response?: { data?: ApiEnvelope<PlanCopyResult> };
+        response?: { data?: ApiEnvelope<PrepareCopyResult> };
       };
       const attached = withResponse?.response?.data?.data;
       if (attached) {
@@ -253,8 +257,12 @@ const BoardConfigCopyScreen = ({
           dryRun: false,
         },
       );
-      const prepared = response.data.data;
-      if (!prepared) throw new Error(response.data.error ?? 'Copy could not be prepared');
+      const result = response.data.data;
+      if (!result) throw new Error(response.data.error ?? 'Copy could not be prepared');
+      // No `prepared` means the plan still has unresolved stage mappings — the caller
+      // reached here without completing the remap step, so nothing was written.
+      const prepared = result.prepared;
+      if (!prepared) throw new Error('Every old stage with tickets needs a target stage first');
 
       // 2. Commit the configuration through the ordinary board mutators — the same path a
       //    hand-edited board save takes. `board.update` carries the whole change: it
@@ -307,19 +315,20 @@ const BoardConfigCopyScreen = ({
         rolesCopied: prepared.rolesCopied,
         newStageCount: prepared.newStageCount,
         deletedOldStageCount: prepared.deletedOldStageCount,
-        warnings: prepared.warnings,
-        ...(prepared.snapshotPath ? { snapshotPath: prepared.snapshotPath } : {}),
+        warnings: result.warnings,
+        snapshotPath: prepared.snapshotPath,
       };
 
       // 3. Hand the remaining per-ticket work (stage remap, custom-field value repointing)
       //    to the background job and move on — there is no status endpoint to watch it
-      //    with, so this is fire-and-forget from here. Its plan was stashed server-side by
-      //    /prepare, since the old stages are gone by now and can't be re-derived.
+      //    with, so this is fire-and-forget from here. The plan is /prepare's own payload
+      //    passed straight back; the server re-checks every destination in it against the
+      //    stages that now exist, so this side never inspects or edits it.
       setSummary(configSummary);
-      if (prepared.hasPendingMigration) {
+      if (prepared.ticketMigration) {
         const migrationResponse = await apiInstance.post<ApiEnvelope<{ jobId: string }>>(
           '/admin/board-config-copy/start-ticket-migration',
-          { targetBoardId },
+          prepared.ticketMigration,
         );
         if (!migrationResponse.data.data?.jobId) {
           throw new Error(migrationResponse.data.error ?? 'Ticket migration did not start');

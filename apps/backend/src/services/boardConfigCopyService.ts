@@ -2,7 +2,6 @@ import { createHash } from 'crypto';
 import { BoardType, TicketStatusV2, FormContextType, FormEntityType, ApproverType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { redisService } from '@/services/redisService';
 import { boardConfigCopySnapshotService } from '@/services/boardConfigCopySnapshotService';
 import { calculateETADeadline, recomputeOverallTicketEta } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -15,14 +14,6 @@ import {
 } from '@/queues/boardConfigCopyQueue';
 
 const TAG = '[BoardConfigCopy]';
-
-// How long a prepared copy stays claimable. The plan is stashed server-side between
-// `prepareCopy` and `startTicketMigration` rather than round-tripped through the client:
-// by the time migration starts the old stages are already deleted, so this payload is the
-// only remaining record of where each ticket should land — it must not be client-forgeable.
-const PENDING_MIGRATION_TTL_SECONDS = 3600;
-const pendingMigrationKey = (targetBoardId: string): string =>
-  `board-config-copy:pending-migration:${targetBoardId}`;
 
 // The only categories every board is guaranteed to have at least one stage of — enforced
 // by mutators.ts's board.update validation ("Board must have at least one TODO, one
@@ -95,16 +86,6 @@ export interface NewStagePreview {
   sequenceNumber: number;
 }
 
-export interface PlanCopyResult {
-  errors: string[];
-  warnings: string[];
-  sourceBoard?: { id: string; name: string; boardType: string };
-  targetBoard?: { id: string; name: string; boardType: string };
-  newStages?: NewStagePreview[];
-  oldStages?: OldStageInfo[];
-  suggestedMapping?: Record<string, string>; // oldStageId -> sourceStageId
-  requiresExplicit?: string[]; // oldStageIds with tickets that still need an explicit mapping
-}
 
 // ─── Prepared client-side mutation payloads ───────────────────────────────
 // Everything below is handed to the dashboard verbatim and passed straight into the SAME
@@ -166,21 +147,48 @@ export interface PreparedTransition {
   approvers: Array<{ id: string; approverId: string; approverType: string }>;
 }
 
-export interface PrepareCopyResult {
-  dryRun: boolean;
-  snapshotPath?: string;
+/** The committable half — present only once the copy is fully resolved and actually prepared. */
+export interface PreparedCopy {
+  snapshotPath: string;
   customFieldsCopied: boolean;
   rolesCopied: boolean;
   newStageCount: number;
   deletedOldStageCount: number;
   /** Tickets the follow-up migration job will need to move; 0 means no job is needed. */
   ticketsToMigrate: number;
-  warnings: string[];
   boardUpdate: PreparedBoardUpdate;
   boardFormMapping: PreparedBoardFormMapping | null;
   transitions: PreparedTransition[] | null;
-  /** True when a prepared migration plan was stashed and `startTicketMigration` should be called. */
-  hasPendingMigration: boolean;
+  /**
+   * The per-ticket work left over, or null when there is none. Pass it back to
+   * `startTicketMigration` after the config mutations land — it is re-validated there, so
+   * carrying it through the client costs nothing in trust.
+   */
+  ticketMigration: BoardConfigCopyJobData | null;
+}
+
+/**
+ * One response covering both halves of a copy request.
+ *
+ * The descriptive fields (`oldStages`/`newStages`/`suggestedMapping`/`requiresExplicit`) are
+ * always returned once the board pair validates — they're what the remap picker renders from.
+ * `prepared` is added only when the copy is fully resolved AND the caller asked to commit
+ * (`dryRun: false`): that's the call that writes the snapshot, clones the custom-fields form
+ * and stashes the migration plan.
+ *
+ * So a caller that hasn't finished choosing gets plan data and no side effects — whether it
+ * said so explicitly (`dryRun: true`) or simply hasn't supplied every required override yet.
+ */
+export interface PrepareCopyResult {
+  errors: string[];
+  warnings: string[];
+  sourceBoard?: { id: string; name: string; boardType: string };
+  targetBoard?: { id: string; name: string; boardType: string };
+  newStages?: NewStagePreview[];
+  oldStages?: OldStageInfo[];
+  suggestedMapping?: Record<string, string>; // oldStageId -> sourceStageId
+  requiresExplicit?: string[]; // oldStageIds with tickets that still need an explicit mapping
+  prepared?: PreparedCopy;
 }
 
 export class BoardConfigCopyValidationError extends Error {
@@ -412,50 +420,6 @@ export class BoardConfigCopyService {
     return { mapping, requiresExplicit, invalidCategoryOverrides };
   }
 
-  // ─── Plan (read-only) ───────────────────────────────────────────────────
-
-  async planCopy(input: CopyRequestInput, workspaceId: string): Promise<PlanCopyResult> {
-    const { errors, sourceBoard, targetBoard } = await this.validateBoards(
-      input.sourceBoardId,
-      input.targetBoardId,
-      workspaceId,
-    );
-    if (errors.length > 0 || !sourceBoard || !targetBoard) {
-      return { errors, warnings: [] };
-    }
-
-    const result: PlanCopyResult = {
-      errors: [],
-      warnings: [],
-      sourceBoard: { id: sourceBoard.id, name: sourceBoard.name, boardType: sourceBoard.boardType },
-      targetBoard: { id: targetBoard.id, name: targetBoard.name, boardType: targetBoard.boardType },
-    };
-
-    if (!input.categories.stages) {
-      return result;
-    }
-
-    const sourceStages = await this.getSourceStagesOrdered(sourceBoard.id);
-    const newStages: NewStagePreview[] = sourceStages.map(s => ({
-      sourceStageId: s.id,
-      name: s.name,
-      defaultTicketStatusV2: s.defaultTicketStatusV2,
-      sequenceNumber: s.sequenceNumber,
-    }));
-    const oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
-
-    const suggestedMapping = this.computeSuggestedMapping(oldStages, newStages);
-    const { requiresExplicit } = this.resolveRemapPlan(oldStages, newStages, []);
-
-    if (sourceBoard.boardType !== targetBoard.boardType) {
-      result.warnings.push(
-        `Target board type will change from ${targetBoard.boardType} to ${sourceBoard.boardType} to match the source board.`,
-      );
-    }
-
-    return { ...result, newStages, oldStages, suggestedMapping, requiresExplicit };
-  }
-
   // ─── Custom-field helpers ───────────────────────────────────────────────
 
   private parseFieldOptions(raw: string): Array<{ id: string; value: string }> | undefined {
@@ -605,15 +569,23 @@ export class BoardConfigCopyService {
   // ─── Prepare (server-side work only; the client commits the config) ─────
 
   /**
-   * Computes everything the dashboard needs to apply this copy through the ordinary Zero
-   * mutators, and performs the two steps a browser can't: writing the pre-copy snapshot and
-   * cloning the custom-fields form. Deliberately writes NO board configuration itself —
-   * stages, transitions, form binding and metadata are all committed by the client, exactly
-   * like an ordinary board edit.
+   * Single entry point for both halves of a copy request.
    *
-   * Any ticket-level work (stage remap, custom-field value repointing) is stashed as a
-   * pending migration plan and picked up by `startTicketMigration` once the client's
-   * mutations land.
+   * Always returns the descriptive plan — old/new stages, ticket counts, a suggested
+   * mapping, and which old stages still need an explicit target — which is what the remap
+   * picker renders from. When the plan is fully resolved and the caller asked to commit
+   * (`dryRun: false`), it additionally performs the two steps a browser can't (writing the
+   * pre-copy snapshot and cloning the custom-fields form) and returns `prepared`: the exact
+   * arguments the dashboard feeds to the ordinary Zero mutators.
+   *
+   * Nothing is written on a call that can't yet commit — whether the caller said so
+   * (`dryRun: true`) or simply hasn't supplied every required override — so the picker can
+   * call this as often as it likes without burning snapshots or orphaning cloned forms.
+   *
+   * Deliberately writes NO board configuration itself: stages, transitions, form binding
+   * and metadata are all committed by the client, exactly like an ordinary board edit. Any
+   * ticket-level work (stage remap, custom-field value repointing) is stashed as a pending
+   * migration plan and picked up by `startTicketMigration` once those mutations land.
    */
   async prepareCopy(
     input: PrepareCopyInput,
@@ -626,57 +598,77 @@ export class BoardConfigCopyService {
       workspaceId,
     );
     if (errors.length > 0 || !sourceBoard || !targetBoard) {
-      throw new BoardConfigCopyValidationError(errors.length > 0 ? errors : ['Validation failed']);
+      return { errors, warnings: [] };
     }
 
-    const warnings: string[] = [];
-    const targetMetadata: Record<string, unknown> = {
-      ...((targetBoard.metadata as Record<string, unknown> | null) ?? {}),
+    const result: PrepareCopyResult = {
+      errors: [],
+      warnings: [],
+      sourceBoard: { id: sourceBoard.id, name: sourceBoard.name, boardType: sourceBoard.boardType },
+      targetBoard: { id: targetBoard.id, name: targetBoard.name, boardType: targetBoard.boardType },
     };
-    const sourceMetadata = (sourceBoard.metadata as Record<string, unknown> | null) ?? {};
 
-    // ── Stage set ────────────────────────────────────────────────────────
-    let preparedStages: PreparedStage[] | undefined;
-    let prStatusMappingIds: Record<string, string> | undefined;
-    let preparedTransitions: PreparedTransition[] | null = null;
-    const ticketRemap: BoardConfigCopyTicketRemap[] = [];
-    let oldStageCount = 0;
-    let ticketsToMigrate = 0;
+    // ── Plan half: what this copy would do, and what still needs deciding ──
+    let sourceStages: SourceStageRow[] = [];
+    let oldStages: OldStageInfo[] = [];
+    let mapping = new Map<string, string>();
 
     if (input.categories.stages) {
-      const sourceStages = await this.getSourceStagesOrdered(sourceBoard.id);
+      sourceStages = await this.getSourceStagesOrdered(sourceBoard.id);
+      oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
       const newStagesPreview: NewStagePreview[] = sourceStages.map(s => ({
         sourceStageId: s.id,
         name: s.name,
         defaultTicketStatusV2: s.defaultTicketStatusV2,
         sequenceNumber: s.sequenceNumber,
       }));
-      const oldStages = await this.getOldStagesWithTicketCounts(targetBoard.id);
-      oldStageCount = oldStages.length;
-      ticketsToMigrate = oldStages.reduce((sum, s) => sum + s.ticketCount, 0);
 
-      const { mapping, requiresExplicit, invalidCategoryOverrides } = this.resolveRemapPlan(
-        oldStages,
-        newStagesPreview,
-        input.stageRemapOverrides ?? [],
-      );
+      const resolved = this.resolveRemapPlan(oldStages, newStagesPreview, input.stageRemapOverrides ?? []);
+      mapping = resolved.mapping;
 
-      if (invalidCategoryOverrides.length > 0) {
+      result.newStages = newStagesPreview;
+      result.oldStages = oldStages;
+      result.suggestedMapping = this.computeSuggestedMapping(oldStages, newStagesPreview);
+      result.requiresExplicit = resolved.requiresExplicit;
+
+      if (sourceBoard.boardType !== targetBoard.boardType) {
+        result.warnings.push(
+          `Target board type will change from ${targetBoard.boardType} to ${sourceBoard.boardType} to match the source board.`,
+        );
+      }
+
+      // A supplied-but-wrong mapping is a genuine error rather than "still deciding" — the
+      // caller picked a target in the wrong status category and needs telling, not a picker.
+      if (resolved.invalidCategoryOverrides.length > 0) {
         throw new BoardConfigCopyValidationError(
           [
             'Some stage mappings target a stage with a different status than the tickets being moved — ' +
               'a ticket can only be remapped to a new stage of the same status.',
           ],
-          invalidCategoryOverrides,
-        );
-      }
-      if (requiresExplicit.length > 0) {
-        throw new BoardConfigCopyValidationError(
-          ['Some old stages with tickets still need an explicit target stage'],
-          requiresExplicit,
+          resolved.invalidCategoryOverrides,
         );
       }
 
+      // Choices still outstanding → hand back the picker data and stop. Nothing is written:
+      // the caller is deciding, not committing.
+      if (resolved.requiresExplicit.length > 0) return result;
+    }
+
+    // An explicit look-don't-touch call stops in the same place, with the same shape.
+    if (input.dryRun) return result;
+
+    // ── Prepare half: the two server-only steps, plus the payloads the client commits ──
+    const targetMetadata: Record<string, unknown> = {
+      ...((targetBoard.metadata as Record<string, unknown> | null) ?? {}),
+    };
+    const sourceMetadata = (sourceBoard.metadata as Record<string, unknown> | null) ?? {};
+
+    let preparedStages: PreparedStage[] | undefined;
+    let prStatusMappingIds: Record<string, string> | undefined;
+    let preparedTransitions: PreparedTransition[] | null = null;
+    const ticketRemap: BoardConfigCopyTicketRemap[] = [];
+
+    if (input.categories.stages) {
       const sourceStageIdToNewStageId = new Map(
         sourceStages.map(s => [s.id, this.deriveDeterministicId('board-config-copy-stage', targetBoard.id, s.id)]),
       );
@@ -785,7 +777,7 @@ export class BoardConfigCopyService {
     let customFieldsCopied = false;
     let rolesCopied = false;
 
-    if (input.categories.customFields && !input.dryRun) {
+    if (input.categories.customFields) {
       const clone = await this.cloneSourceCustomFieldsForm(
         { id: sourceBoard.id, projectId: sourceBoard.projectId, workspaceId: sourceBoard.workspaceId },
         targetBoard.id,
@@ -794,7 +786,7 @@ export class BoardConfigCopyService {
       clonedFormId = clone.clonedFormId;
       targetOldFormId = clone.targetOldFormId;
       fieldRepoints = clone.fieldRepoints;
-      warnings.push(...clone.warnings);
+      result.warnings.push(...clone.warnings);
 
       if (clonedFormId) targetMetadata['customFieldsFormId'] = clonedFormId;
       targetMetadata['fieldOrder'] = this.remapFieldOrder(sourceMetadata['fieldOrder'], clone.sourceOldToNewFieldId);
@@ -804,8 +796,6 @@ export class BoardConfigCopyService {
         clone.sourceOldToNewFieldId,
       );
       customFieldsCopied = true;
-    } else if (input.categories.customFields) {
-      customFieldsCopied = true; // dry run — reported, not performed
     }
 
     if (input.categories.roles) {
@@ -832,26 +822,9 @@ export class BoardConfigCopyService {
         }
       : null;
 
-    const result: PrepareCopyResult = {
-      dryRun: input.dryRun,
-      customFieldsCopied,
-      rolesCopied,
-      newStageCount: preparedStages?.length ?? 0,
-      deletedOldStageCount: preparedStages ? oldStageCount : 0,
-      ticketsToMigrate,
-      warnings,
-      boardUpdate,
-      boardFormMapping,
-      transitions: preparedTransitions,
-      hasPendingMigration: false,
-    };
-
-    if (input.dryRun) {
-      return result;
-    }
-
     // Snapshot before handing anything back — the client is about to mutate the board, so
     // there must already be a restore point. Fail closed: no snapshot, no copy.
+    let snapshotPath: string;
     try {
       const snapshot = await boardConfigCopySnapshotService.captureSnapshot({
         targetBoardId: targetBoard.id,
@@ -859,7 +832,7 @@ export class BoardConfigCopyService {
         workspaceId,
         actorUserId,
       });
-      result.snapshotPath = snapshot.path;
+      snapshotPath = snapshot.path;
     } catch (error) {
       logger.error(`${TAG} Snapshot failed for board ${targetBoard.id} — aborting before any change`, error);
       // The form clone committed independently; drop it rather than leave it orphaned.
@@ -875,49 +848,122 @@ export class BoardConfigCopyService {
     void boardConfigCopySnapshotService.sweepExpiredSnapshots();
 
     const needsMigration = ticketRemap.length > 0 || fieldRepoints.length > 0;
-    if (needsMigration) {
-      const jobData: BoardConfigCopyJobData = {
-        targetBoardId: targetBoard.id,
-        workspaceId,
-        actorUserId,
-        ticketRemap,
-        fieldRepoints,
-        targetOldFormId,
-        clonedFormId,
-        snapshotPath: result.snapshotPath!,
-      };
-      await redisService.set(
-        pendingMigrationKey(targetBoard.id),
-        JSON.stringify(jobData),
-        PENDING_MIGRATION_TTL_SECONDS,
-      );
-      result.hasPendingMigration = true;
-    }
+
+    result.prepared = {
+      snapshotPath,
+      customFieldsCopied,
+      rolesCopied,
+      newStageCount: preparedStages?.length ?? 0,
+      deletedOldStageCount: preparedStages ? oldStages.length : 0,
+      ticketsToMigrate: oldStages.reduce((sum, s) => sum + s.ticketCount, 0),
+      boardUpdate,
+      boardFormMapping,
+      transitions: preparedTransitions,
+      // Handed back rather than stashed server-side: the client passes it straight to
+      // startTicketMigration once its config mutations land, and that call re-checks every
+      // claim in it against the board's real state (see there). Round-tripping it keeps the
+      // plan alive for exactly as long as the client needs it, with no expiry to miss.
+      ticketMigration: needsMigration
+        ? {
+            targetBoardId: targetBoard.id,
+            workspaceId,
+            actorUserId,
+            ticketRemap,
+            fieldRepoints,
+            targetOldFormId,
+            clonedFormId,
+            snapshotPath,
+          }
+        : null,
+    };
 
     return result;
   }
 
   /**
-   * Enqueues the ticket-migration job the client's just-committed config left pending.
-   * Reads the plan from the server-side stash rather than the request body: by now the old
-   * stages are gone, so a caller-supplied remap could silently send tickets anywhere.
+   * Enqueues the ticket migration a prepared copy left pending, once the client's config
+   * mutations have landed.
+   *
+   * The plan arrives via the browser, so nothing in it is taken on trust: every destination
+   * is re-checked against the stages that actually exist on the board right now, and the
+   * workspace/actor are taken from the authenticated request rather than the payload. The
+   * effect is that a tampered plan can only ever describe a move the board already permits
+   * — it can't invent a destination, reach another workspace, or repoint field values onto
+   * a form this board isn't bound to.
    */
-  async startTicketMigration(targetBoardId: string, workspaceId: string): Promise<{ jobId: string } | null> {
-    const raw = await redisService.get(pendingMigrationKey(targetBoardId));
-    if (!raw) return null;
-
-    const jobData = JSON.parse(raw) as BoardConfigCopyJobData;
-    if (jobData.workspaceId !== workspaceId || jobData.targetBoardId !== targetBoardId) {
-      logger.warn(`${TAG} Refusing to start migration — stashed plan does not match caller's workspace/board`);
-      return null;
+  async startTicketMigration(
+    plan: BoardConfigCopyJobData,
+    actorUserId: string,
+    workspaceId: string,
+  ): Promise<{ jobId: string }> {
+    const board = await db.board.findFirst({
+      where: { id: plan.targetBoardId, workspaceId },
+      select: { id: true },
+    });
+    if (!board) {
+      throw new BoardConfigCopyValidationError(['Target board not found in this workspace']);
     }
+
+    const stages = await db.stage.findMany({
+      where: { boardId: plan.targetBoardId },
+      select: { id: true, name: true },
+    });
+    const stageById = new Map(stages.map(s => [s.id, s]));
+    const liveStageNames = new Set(stages.map(s => s.name));
+
+    for (const remap of plan.ticketRemap) {
+      // Tickets may only land on a stage that exists on this board right now, under the
+      // name that stage actually carries.
+      const destination = stageById.get(remap.newStageId);
+      if (!destination || destination.name !== remap.newStageName) {
+        throw new BoardConfigCopyValidationError([
+          'This migration plan points at a stage that no longer exists on the board. Re-run the copy.',
+        ]);
+      }
+      // ...and may only be moved OFF a name the new configuration actually retired, so a
+      // plan can't be used to sweep tickets off a stage that is still in use.
+      if (liveStageNames.has(remap.oldStageName)) {
+        throw new BoardConfigCopyValidationError([
+          `"${remap.oldStageName}" is still an active stage on this board, so tickets cannot be migrated off it.`,
+        ]);
+      }
+    }
+
+    if (plan.fieldRepoints.length > 0) {
+      if (!plan.clonedFormId || !plan.targetOldFormId) {
+        throw new BoardConfigCopyValidationError(['This migration plan is missing the forms its field mapping refers to.']);
+      }
+      // Values may only be repointed onto the form the board is currently bound to.
+      const mapping = await db.formContextMapping.findFirst({
+        where: {
+          contextId: plan.targetBoardId,
+          contextType: FormContextType.BOARD,
+          entityType: FormEntityType.TICKET,
+        },
+        select: { formId: true },
+      });
+      if (!mapping || mapping.formId !== plan.clonedFormId) {
+        throw new BoardConfigCopyValidationError([
+          'This board is not bound to the form this migration plan expects. Re-run the copy.',
+        ]);
+      }
+      const oldForm = await db.form.findFirst({
+        where: { id: plan.targetOldFormId, workspaceId },
+        select: { id: true },
+      });
+      if (!oldForm) {
+        throw new BoardConfigCopyValidationError(['The previous form this migration plan refers to was not found.']);
+      }
+    }
+
+    // Identity comes from the authenticated request, never the payload.
+    const jobData: BoardConfigCopyJobData = { ...plan, workspaceId, actorUserId };
 
     const { enqueued, reason } = await boardConfigCopyQueue.addJob(jobData);
     if (!enqueued) {
       throw new BoardConfigCopyConflictError(reason ?? 'A migration is already in progress for this board');
     }
-    await redisService.del(pendingMigrationKey(targetBoardId));
-    return { jobId: targetBoardId };
+    return { jobId: plan.targetBoardId };
   }
 
   // ─── Worker-facing: per-ticket work only ─────────────────────────────────

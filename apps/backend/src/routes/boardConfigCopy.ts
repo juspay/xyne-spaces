@@ -8,17 +8,12 @@ const router = Router();
 const adminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
 /**
- * @route POST /api/admin/board-config-copy/plan
- * @desc Validate a source/target board pair and preview the stage remap plan (no writes).
- * @access TICKET-MIGRATION Admin only
- */
-router.post('/plan', authMiddleware.authenticate, adminAuth, BoardConfigCopyController.plan);
-
-/**
  * @route POST /api/admin/board-config-copy/prepare
- * @desc Perform the server-only half of a copy (validation, pre-copy snapshot, custom-fields
- *       form clone) and return the arguments the dashboard passes to the ordinary Zero
- *       mutators to commit the configuration. Writes no board configuration itself.
+ * @desc Validate a source/target board pair and return the stage remap plan; when that plan
+ *       is fully resolved and `dryRun` is false, also perform the server-only work (pre-copy
+ *       snapshot, custom-fields form clone) and return `prepared` — the arguments the
+ *       dashboard passes to the ordinary Zero mutators. Writes no board configuration itself,
+ *       and writes nothing at all on a call that can't yet commit.
  * @access TICKET-MIGRATION Admin only
  */
 router.post('/prepare', authMiddleware.authenticate, adminAuth, BoardConfigCopyController.prepare);
