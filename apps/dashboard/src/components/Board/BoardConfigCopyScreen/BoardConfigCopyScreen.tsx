@@ -12,7 +12,6 @@ import { Badge } from '../../../components/ui/Badge/Badge';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { StageRemapTable } from './StageRemapTable';
 import type {
   ApiEnvelope,
@@ -67,9 +66,9 @@ const BoardConfigCopyScreen = ({
   const [step, setStep] = useState<Step>('select');
   const [sourceBoardId, setSourceBoardId] = useState<string | null>(null);
   const [categories, setCategories] = useState<CopyCategorySelection>({
-    customFields: true,
-    roles: true,
-    stages: true,
+    customFields: false,
+    roles: false,
+    stages: false,
   });
 
   const [plan, setPlan] = useState<PlanCopyResult | null>(null);
@@ -96,7 +95,7 @@ const BoardConfigCopyScreen = ({
   const resetForClose = (): void => {
     setStep('select');
     setSourceBoardId(null);
-    setCategories({ customFields: true, roles: true, stages: true });
+    setCategories({ customFields: false, roles: false, stages: false });
     setPlan(null);
     setPlanError(null);
     setRemapOverrides({});
@@ -462,45 +461,11 @@ const BoardConfigCopyScreen = ({
               {resultError && <p className='text-sm text-destructive'>{resultError}</p>}
               {summary && (
                 <div className='space-y-2 text-sm'>
-                  <p className='text-foreground'>
-                    Custom fields copied: {summary.customFieldsCopied ? 'yes' : 'no'} · Roles
-                    copied: {summary.rolesCopied ? 'yes' : 'no'}
-                  </p>
-                  {summary.newStageCount > 0 && (
-                    <div className='border border-border rounded-md p-3 space-y-1'>
-                      <p>New stages: {summary.newStageCount}</p>
-                      <p>Old stages removed: {summary.deletedOldStageCount}</p>
-                    </div>
-                  )}
+                  <p className='text-foreground'>Copied successfully.</p>
                   {migrationPending && (
                     <p className='text-xs text-muted-foreground bg-muted/40 border border-border rounded-md px-3 py-2'>
                       Existing tickets are being moved onto the new stages in the background.
                     </p>
-                  )}
-                  {summary.snapshotPath && (
-                    <div className='border border-border rounded-md px-3 py-2 space-y-1'>
-                      <p className='text-xs text-muted-foreground'>
-                        A backup of this board was saved before the copy and is kept for 7 days.
-                      </p>
-                      <div className='flex items-center gap-2'>
-                        <code className='text-xs text-foreground break-all'>
-                          {summary.snapshotPath}
-                        </code>
-                        <Button
-                          variant='secondary'
-                          size='sm'
-                          data-track-category='BOARD_CONFIG_COPY'
-                          data-track-name='copy_snapshot_path'
-                          onClick={() =>
-                            void copyTextToClipboard(summary.snapshotPath!).then(() =>
-                              toast.success('Backup path copied to clipboard'),
-                            )
-                          }
-                        >
-                          Copy path
-                        </Button>
-                      </div>
-                    </div>
                   )}
                   {summary.warnings.length > 0 && (
                     <div className='space-y-1'>
