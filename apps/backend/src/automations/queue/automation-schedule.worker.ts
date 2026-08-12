@@ -38,7 +38,7 @@ class AutomationScheduleWorker {
     if (!this.executor) {
       throw new Error('[AUTOMATION-SCHEDULE-WORKER] Executor not initialized');
     }
-    const { executionId } = job.data;
+    const { executionId, resumeStepName } = job.data;
     logger.info(
       `[AUTOMATION-SCHEDULE-WORKER] picking up scheduled run executionId=${executionId}`,
     );
@@ -58,7 +58,7 @@ class AutomationScheduleWorker {
     }
 
     await runAsServiceActor('automation', workspaceId, () =>
-      this.executor!.runExecution(executionId),
+      this.executor!.runExecution(executionId, resumeStepName),
     );
   }
 }

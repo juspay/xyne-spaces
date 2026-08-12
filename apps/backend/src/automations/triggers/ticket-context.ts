@@ -3,6 +3,7 @@ import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@xyne/sh
 import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { DataNotReadyError } from '../engine/retryability';
 
 const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.EMAIL,
@@ -422,20 +423,9 @@ export function matchTicketScopeFilters(
 export async function hydrateTicketBoundPayload<P extends { ticketId: string }>(
   payload: P,
 ): Promise<P & Partial<TicketContext>> {
-  const refreshed = await db.ticket
-    .findUnique({ where: { id: payload.ticketId } })
-    .catch(err => {
-      logger.warn(
-        `[ticket-context] hydrateTicketBoundPayload: findUnique threw for ticketId=${payload.ticketId}:`,
-        err,
-      );
-      return null;
-    });
+  const refreshed = await db.ticket.findUnique({ where: { id: payload.ticketId } });
   if (!refreshed) {
-    logger.warn(
-      `[ticket-context] hydrateTicketBoundPayload: ticket ${payload.ticketId} not found — returning payload WITHOUT ticket context (scope filters will treat ticket as absent)`,
-    );
-    return payload;
+    throw new DataNotReadyError('ticket', payload.ticketId);
   }
 
   const context = await buildTicketContext(refreshed as TicketLike);

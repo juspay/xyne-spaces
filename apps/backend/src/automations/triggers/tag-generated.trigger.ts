@@ -8,6 +8,7 @@ import { TicketContextSchema, buildTicketContext } from './ticket-context';
 import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
 import type { TicketLike } from './ticket-context';
+import { DataNotReadyError } from '../engine/retryability';
 
 export const TAG_GENERATED_EVENT = 'TAG_GENERATED';
 
@@ -85,7 +86,7 @@ export class TagGeneratedTrigger extends BaseTrigger<typeof TagGeneratedConfigSc
     }
 
     const email = await repositories.emails.findById(sourceId);
-    if (!email) return { sourceId, sourceType, channelId, generatedTags: [], priorityTag: null, email: null };
+    if (!email) throw new DataNotReadyError('email', sourceId);
 
     const ticketRef = await repositories.tickets
       .findFirstByConversationId(email.conversationId)

@@ -266,9 +266,63 @@ export class ConfigValidator {
       }
     }
 
+    this.validateUniqueStepIds(config.steps, 'steps', new Set<string>(), issues);
     this.walkSteps(config.steps, 'steps', outputSchemas, issues);
 
     return { valid: issues.length === 0, issues };
+  }
+
+  private validateUniqueStepIds(
+    steps: AutomationStepConfig[],
+    prefix: string,
+    seen: Set<string>,
+    issues: ValidationIssue[],
+  ): void {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i] as AutomationStepConfig;
+      const stepPath = `${prefix}[${i}]`;
+      if (seen.has(step.id)) {
+        issues.push({
+          path: `${stepPath}.id`,
+          code: ValidationIssueCode.SHAPE,
+          message: `Step id "${step.id}" must be globally unique, including nested branches.`,
+        });
+      } else {
+        seen.add(step.id);
+      }
+
+      if (step.type === ControlFlowStepType.CONDITIONAL) {
+        const cfg = (step as ConditionalStepConfig).config;
+        this.validateUniqueStepIds(
+          cfg.if_true,
+          `${stepPath}.config.if_true`,
+          seen,
+          issues,
+        );
+        this.validateUniqueStepIds(
+          cfg.if_false ?? [],
+          `${stepPath}.config.if_false`,
+          seen,
+          issues,
+        );
+      } else if (step.type === ControlFlowStepType.SWITCH) {
+        const cfg = (step as SwitchStepConfig).config;
+        cfg.cases.forEach((caseEntry, caseIndex) => {
+          this.validateUniqueStepIds(
+            caseEntry.steps,
+            `${stepPath}.config.cases[${caseIndex}].steps`,
+            seen,
+            issues,
+          );
+        });
+        this.validateUniqueStepIds(
+          cfg.default,
+          `${stepPath}.config.default`,
+          seen,
+          issues,
+        );
+      }
+    }
   }
 
   private walkSteps(

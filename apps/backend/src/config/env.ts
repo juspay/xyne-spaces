@@ -217,6 +217,8 @@ const envSchema = Joi.object({
   RECAP_RETENTION_DAYS: Joi.number().default(30),
   RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
+  AUTOMATION_MAX_ATTEMPTS: Joi.number().integer().min(1).default(3),
+  AUTOMATION_RETRY_DELAY_MS: Joi.number().integer().min(0).default(5000),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
@@ -567,6 +569,10 @@ export const config = {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,
     model: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     maxRetries: envVars.ACTIVITY_CLASSIFICATION_MAX_RETRIES,
+  },
+  automation: {
+    maxAttempts: envVars.AUTOMATION_MAX_ATTEMPTS,
+    retryDelayMs: envVars.AUTOMATION_RETRY_DELAY_MS,
   },
   langfuse: {
     baseUrl: envVars.LANGFUSE_BASE_URL,

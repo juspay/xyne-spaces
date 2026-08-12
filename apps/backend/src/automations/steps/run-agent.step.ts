@@ -4,7 +4,10 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { PauseStep } from '../engine/pause-step';
-import { automationContextStorage } from '../engine/automation-context-storage';
+import {
+  automationContextStorage,
+  currentStepName,
+} from '../engine/automation-context-storage';
 import { OutputSchemaSchema, assertMatchesSchema } from '../engine/declared-schema';
 import { clawClient } from '../services/claw-client';
 import { parseAgentAttachments } from '../services/agent-attachment.service';
@@ -63,11 +66,13 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       );
     }
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
+    const stepKey = currentStepName();
+    if (!stepKey) {
+      throw new Error('[RUN_AGENT] execute requires an authoritative persisted step name');
+    }
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const sessionId = `${store.runId}:${stepKey}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepKey);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
@@ -77,7 +82,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${store.runId} step=${stepKey} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
@@ -93,7 +98,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       });
     } catch (err) {
       logger.error(
-        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepIndex=${currentIndex}:`,
+        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} step=${stepKey}:`,
         err,
       );
       throw err;
@@ -166,7 +171,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const stepName =
       typeof rowData['stepName'] === 'string'
         ? (rowData['stepName'] as string)
-        : deriveStepNameFromCtx(context);
+        : deriveStepNameFromCtx();
     if (!stepName) {
       throw new Error('[RUN_AGENT] cannot derive stepName for retry');
     }
@@ -354,10 +359,8 @@ async function resolveHeadlessIdentityContext(
   };
 }
 
-function deriveStepNameFromCtx(context: AutomationContext): string | null {
-  const stepCount = Object.keys(context.steps).length;
-  if (stepCount === 0) return null;
-  return `step_${stepCount - 1}`;
+function deriveStepNameFromCtx(): string | null {
+  return currentStepName() ?? null;
 }
 
 function buildRetryPrompt(

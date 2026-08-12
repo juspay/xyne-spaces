@@ -245,11 +245,11 @@ export async function markAutomationFailed(
     }
   }
   const existingMeta =
-    (mergedContext['__meta'] as { error?: string | null; chain?: readonly string[] } | undefined) ??
-    {};
+    (mergedContext['__meta'] as Record<string, unknown> | undefined) ?? {};
   mergedContext['__meta'] = {
+    ...existingMeta,
     error: errorMessage,
-    chain: existingMeta.chain ?? [],
+    chain: existingMeta['chain'] ?? [],
   };
 
   await prisma.$transaction([
@@ -264,6 +264,76 @@ export async function markAutomationFailed(
     }),
   ]);
   return 'marked';
+}
+
+/**
+ * Reset a failed run back to PENDING for the next retry attempt, recording the
+ * failure under __meta.lastError + __meta.retryCount. Unlike markAutomationFailed,
+ * FAILED is not treated as terminal here because the executor pre-marks the run
+ * FAILED (and re-throws) before the queue listener decides to retry — so a
+ * retryable run is already FAILED at this point and must transition FAILED -> PENDING.
+ */
+export async function markAutomationRetryPending(
+  workflowExecutionId: string,
+  errorMessage: string,
+  retryCount: number,
+): Promise<'reset' | 'skipped-terminal' | 'not-found'> {
+  const execution = await prisma.workflowExecution.findUnique({
+    where: { id: workflowExecutionId },
+    select: { id: true, status: true, workspaceId: true },
+  });
+  if (!execution) return 'not-found';
+  // The executor pre-marks a retryable run FAILED before this listener runs, so
+  // only a FAILED run is eligible to be reset. Anything else means a concurrent
+  // transition (cancel/kill/duplicate-success) already won — do NOT resurrect it.
+  if (execution.status !== 'FAILED') {
+    return 'skipped-terminal';
+  }
+
+  const state = await prisma.workflowExecutionState.findUnique({
+    where: { workflowExecutionId },
+    select: { context: true },
+  });
+  let mergedContext: Record<string, unknown> = {};
+  if (state?.context) {
+    try {
+      const parsed = JSON.parse(state.context);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        mergedContext = parsed as Record<string, unknown>;
+      }
+    } catch {
+      mergedContext = {};
+    }
+  }
+  const existingMeta =
+    (mergedContext['__meta'] as Record<string, unknown> | undefined) ?? {};
+  mergedContext['__meta'] = {
+    ...existingMeta,
+    error: errorMessage,
+    chain: existingMeta['chain'] ?? [],
+    lastError: errorMessage,
+    retryCount,
+  };
+
+  // Conditional + atomic: only flip FAILED -> PENDING if the row is STILL FAILED at
+  // write time (guards against a cancel/kill or duplicate-success racing between the
+  // read above and this write). If the guard matches 0 rows, skip the state upsert.
+  const flipped = await prisma.$transaction(async tx => {
+    const { count } = await tx.workflowExecution.updateMany({
+      where: { id: workflowExecutionId, status: 'FAILED' },
+      data: { status: 'PENDING' },
+    });
+    if (count === 0) {
+      return false;
+    }
+    await tx.workflowExecutionState.upsert({
+      where: { workflowExecutionId },
+      create: { workflowExecutionId, workspaceId: execution.workspaceId, context: JSON.stringify(mergedContext) },
+      update: { context: JSON.stringify(mergedContext) },
+    });
+    return true;
+  });
+  return flipped ? 'reset' : 'skipped-terminal';
 }
 
 export async function getAutomationPauseState(

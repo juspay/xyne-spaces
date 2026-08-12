@@ -7,6 +7,7 @@ import { OutputSchemaSchema } from '../engine/declared-schema';
 import { decryptHeaderValue, isSensitiveHeader } from '../engine/webhook-step-encryption';
 import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
 import { logger } from '@/utils/logger';
+import { RetryableError } from '../engine/retryability';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -131,6 +132,11 @@ export class TriggerWebhookStep extends BaseActionStep<
       );
 
       if (!ok) {
+        if (status >= 500 || status === 429) {
+          throw new RetryableError(
+            `[TRIGGER_WEBHOOK] ${method} ${url} returned ${status}: ${responseBody.slice(0, 200)}`,
+          );
+        }
         throw new Error(
           `[TRIGGER_WEBHOOK] ${method} ${url} returned ${status}: ${responseBody.slice(0, 200)}`,
         );
@@ -149,7 +155,13 @@ export class TriggerWebhookStep extends BaseActionStep<
       return { status, ok, responseBody, responseJson };
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        throw new Error(`[TRIGGER_WEBHOOK] ${method} ${url} timed out after ${timeoutMs}ms`);
+        throw new RetryableError(`[TRIGGER_WEBHOOK] ${method} ${url} timed out after ${timeoutMs}ms`);
+      }
+      if (err instanceof TypeError) {
+        throw new RetryableError(
+          `[TRIGGER_WEBHOOK] ${method} ${url} network failure: ${err.message}`,
+          { cause: err },
+        );
       }
       throw err;
     } finally {

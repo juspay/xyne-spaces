@@ -5,6 +5,7 @@ import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { DataNotReadyError } from '../engine/retryability';
 
 // Unified Call Event Types
 export const CALL_EVENT = 'CALL_EVENT';
@@ -211,6 +212,7 @@ async function hydrateCallEventPayload(
         select: { userId: true },
       }),
     ]);
+    if (!fresh) throw new DataNotReadyError('call', callId);
 
     const userIds = participantRows.map(p => p.userId).filter(Boolean);
     let participantUsers: Array<{ id: string; name: string | null; email: string | null }> = [];
@@ -224,8 +226,8 @@ async function hydrateCallEventPayload(
 
     return {
       ...payload,
-      aiSummary: fresh?.aiSummary ?? payload.aiSummary,
-      transcript: fresh?.transcript ?? payload.transcript,
+      aiSummary: fresh.aiSummary ?? payload.aiSummary,
+      transcript: fresh.transcript ?? payload.transcript,
       participantUsers,
     };
   } catch (err) {
@@ -233,11 +235,6 @@ async function hydrateCallEventPayload(
       callId,
       error: err,
     });
-    // Return the original payload with an empty participant list so the automation
-    // event can still be processed rather than failing the whole run.
-    return {
-      ...payload,
-      participantUsers: [],
-    };
+    throw err;
   }
 }

@@ -1055,6 +1055,10 @@ export class AnalyticsRepository {
       where: {
         createdAt: dateCondition,
         stepName: { not: null },
+        // Automation rows use hierarchical step names but intentionally leave
+        // the legacy input/output discriminator null. Keep them out of the
+        // legacy workflow step analytics.
+        type: { in: ['input', 'output'] },
         workflowExecution: {
           workflow: {
             ...workflowTypeFilter,

@@ -4,11 +4,15 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { PauseStep } from '../engine/pause-step';
-import { automationContextStorage } from '../engine/automation-context-storage';
+import {
+  automationContextStorage,
+  currentStepName,
+} from '../engine/automation-context-storage';
 import { automationScheduleQueue } from '../queue/automation-schedule.queue';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { triggerRegistry } from '../triggers/trigger-registry';
+import { RetryableError } from '../engine/retryability';
 
 const MAX_DELAY_SECONDS = 30 * 24 * 60 * 60;
 
@@ -73,7 +77,7 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
 
   async execute(
     config: z.infer<typeof DelayConfigSchema>,
-    context: AutomationContext,
+    _context: AutomationContext,
   ): Promise<DelayOutput> {
     const store = automationContextStorage.getStore();
     if (!store) {
@@ -94,17 +98,20 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
     const delayMs = Math.max(0, resumeAt.getTime() - now.getTime());
     const delayedUntil = resumeAt.toISOString();
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
-    const jobId = `${store.runId}:delay:step_${currentIndex}`;
+    const stepKey = currentStepName();
+    if (!stepKey) {
+      throw new Error('[DELAY] execute requires an authoritative persisted step name');
+    }
+    const jobId = `${store.runId}:delay:${stepKey}`;
 
     logger.info(
       `[DELAY] scheduling wake-up — executionId=${store.runId} jobId=${jobId} amount=${amount} unit=${unit} delayedUntil=${delayedUntil}`,
     );
 
-    await automationScheduleQueue
-      .getQueue()
-      .add({ executionId: store.runId }, { delay: delayMs, jobId });
+    await automationScheduleQueue.enqueueScheduled(
+      { executionId: store.runId, resumeStepName: stepKey },
+      delayMs,
+    );
 
     throw new PauseStep(`delaying ${amount} ${unit}`, {
       statePatch: { output: { delayedUntil } },
@@ -133,9 +140,13 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
             data: hydratedTriggerData,
           } as unknown as AutomationContext['trigger'];
         } catch (err) {
-          logger.warn(
-            `[DELAY] trigger rehydration failed for trigger=${triggerType}, using snapshot:`,
+          logger.error(
+            `[DELAY] trigger rehydration failed for trigger=${triggerType}:`,
             err,
+          );
+          throw new RetryableError(
+            `[DELAY] trigger rehydration failed for trigger=${triggerType}: ${err instanceof Error ? err.message : String(err)}`,
+            { cause: err },
           );
         }
       }

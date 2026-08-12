@@ -74,5 +74,8 @@ export interface AutomationContext {
   __meta?: {
     error?: string | null;
     chain?: readonly string[];
+    lastError?: string | null;
+    retryCount?: number;
+    waitingStepName?: string;
   };
 }

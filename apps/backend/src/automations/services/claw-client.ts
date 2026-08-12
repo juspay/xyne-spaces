@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { RetryableError } from '../engine/retryability';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
@@ -64,13 +65,17 @@ class ClawClient {
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {
-      throw new Error(
+      throw new RetryableError(
         `[claw-client] listAgents: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
 
     if (!res.ok) {
       const body = await safeReadText(res);
+      if (res.status >= 500 || res.status === 429) {
+        throw new RetryableError(`[claw-client] listAgents: HTTP ${res.status} — ${body}`);
+      }
       throw new Error(`[claw-client] listAgents: HTTP ${res.status} — ${body}`);
     }
 
@@ -113,8 +118,9 @@ class ClawClient {
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {
-      throw new Error(
+      throw new RetryableError(
         `[claw-client] runAgent: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
 
@@ -123,6 +129,11 @@ class ClawClient {
       logger.warn(
         `[claw-client] runAgent rejected — sessionId=${req.sessionId} agentSlug=${req.agentSlug} spacesAppId=${req.spacesAppId} status=${res.status} error=${json.error ?? '∅'}`,
       );
+      if (res.status >= 500 || res.status === 429) {
+        throw new RetryableError(
+          `[claw-client] runAgent: claw rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`,
+        );
+      }
       throw new Error(
         `[claw-client] runAgent: claw rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`,
       );
