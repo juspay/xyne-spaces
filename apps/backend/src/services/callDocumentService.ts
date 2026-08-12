@@ -9,9 +9,10 @@ import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
+import type { Prisma, SummaryTemplate } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
@@ -1029,6 +1030,72 @@ export class CallDocumentService {
   }
 
   /**
+   * Grant the standard access policy for a canvas generated from a call.
+   */
+  private async createCallCanvasAccess(
+    tx: Prisma.TransactionClient,
+    params: {
+      canvasId: string;
+      workspaceId: string;
+      callId: string;
+      createdByUserId: string;
+      callCreatorUserId: string;
+      channelId: string | null;
+      now: Date;
+    },
+  ): Promise<string> {
+    const { canvasId, workspaceId, callId, createdByUserId, callCreatorUserId, channelId, now } = params;
+    const call = await tx.call.findUnique({
+      where: { externalId: callId },
+      select: { id: true, callOrigin: true },
+    });
+    const isChannelThreadCall = call?.callOrigin === CallOrigin.CONVERSATION && channelId !== null;
+
+    await tx.canvasParticipant.create({
+      data: {
+        id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
+        joinedAt: now, updatedAt: now,
+      },
+    });
+    await tx.canvasParticipant.create({
+      data: {
+        id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
+        joinedAt: now, updatedAt: now,
+      },
+    });
+
+    if (isChannelThreadCall && call) {
+      const callParticipants = await tx.callParticipant.findMany({
+        where: { callId: call.id, isExternal: false },
+        select: { userId: true },
+      });
+      const editorUserIds = [...new Set(callParticipants.map(({ userId }) => userId))]
+        .filter((userId) => userId !== createdByUserId && userId !== callCreatorUserId);
+      if (editorUserIds.length > 0) {
+        await tx.canvasParticipant.createMany({
+          data: editorUserIds.map((userId) => ({
+            id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
+            joinedAt: now, updatedAt: now,
+          })),
+        });
+      }
+    }
+
+    if (channelId) {
+      await tx.canvasParticipant.create({
+        data: {
+          id: uuidv4(), canvasId, workspaceId, channelId,
+          role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
+          joinedAt: now, updatedAt: now,
+        },
+      });
+    }
+
+    if (isChannelThreadCall) return 'thread participants as editors and channel as viewer';
+    return channelId ? 'channel as editor' : 'private access';
+  }
+
+  /**
    * Create PRD Canvas in database
    */
   async createPRDCanvas(
@@ -1044,61 +1111,47 @@ export class CallDocumentService {
       const now = new Date();
 
       const canvasId = uuidv4();
-      const participantId = uuidv4();
       const workspaceId = await repositories.channels.getWorkspaceId(channelId);
 
       const title = `📋 PRD: ${prd.title}`;
       const content = formatPRDToBlockNote(prd, callId);
 
-      // Create canvas with empty content (Y-Sweet is source of truth)
-      await prisma.canvas.create({
-        data: {
-          id: canvasId,
-          title,
-          content: [],
-          channelId,
-          workspaceId,
-          createdBy: createdByUserId,
-          visibility: 'PUBLIC',
-          isTemplate: false,
-          isCollaborative: true,
-          lastEditedBy: createdByUserId,
-          lastEditedAt: now,
-          createdAt: now,
-          updatedAt: now,
-          metadata: {
-            source: 'call_prd',
-            callId,
-            conversationId,
-            generatedAt: now.toISOString(),
+      let accessMode = 'private access';
+      await prisma.$transaction(async (tx) => {
+        // Keep PRD canvases private and grant the same explicit access as
+        // detailed-summary canvases generated from this call.
+        await tx.canvas.create({
+          data: {
+            id: canvasId,
+            title,
+            content: [],
+            channelId,
+            workspaceId,
+            createdBy: createdByUserId,
+            visibility: CanvasVisibility.PRIVATE,
+            isTemplate: false,
+            isCollaborative: true,
+            lastEditedBy: createdByUserId,
+            lastEditedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            metadata: {
+              source: 'call_prd',
+              callId,
+              conversationId,
+              generatedAt: now.toISOString(),
+            },
           },
-        },
-      });
-
-      // Add creator (Xyne Automatic bot) as OWNER
-      await prisma.canvasParticipant.create({
-        data: {
-          id: participantId,
+        });
+        accessMode = await this.createCallCanvasAccess(tx, {
           canvasId,
           workspaceId,
-          userId: createdByUserId,
-          role: 'OWNER',
-          joinedAt: now,
-          updatedAt: now,
-        },
-      });
-
-      // Add call initiator as OWNER
-      await prisma.canvasParticipant.create({
-        data: {
-          id: uuidv4(),
-          canvasId,
-          workspaceId,
-          userId: callCreatorUserId,
-          role: 'OWNER',
-          joinedAt: now,
-          updatedAt: now,
-        },
+          callId,
+          createdByUserId,
+          callCreatorUserId,
+          channelId,
+          now,
+        });
       });
 
       // Initialize Y-Sweet for collaborative editing
@@ -1107,7 +1160,7 @@ export class CallDocumentService {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for PRD canvas ${canvasId}`);
       }
 
-      logger.info(`[CallDocumentService] Created collaborative PRD canvas ${canvasId} for call ${callId} with Xyne Automatic and call initiator as owners`);
+      logger.info(`[CallDocumentService] Created collaborative PRD canvas ${canvasId} for call ${callId} with ${accessMode}, plus Xyne Automatic and call initiator as owners`);
 
       // Fetch workspaceId from channel for Vespa job routing
       const channel = await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
@@ -1142,7 +1195,6 @@ export class CallDocumentService {
       const now = new Date();
 
       const canvasId = uuidv4();
-      const participantId = uuidv4();
       const workspaceId = workspaceIdOverride ?? (channelId ? await repositories.channels.getWorkspaceId(channelId) : undefined);
       if (!workspaceId) {
         throw new Error(`Cannot resolve workspaceId for detailed summary canvas (call ${callId})`);
@@ -1157,8 +1209,10 @@ export class CallDocumentService {
         citationCtx
       );
 
-      // Create canvas with empty content (Y-Sweet is source of truth).
-      // PRIVATE — note-taker recordings are shared per-user/group/channel via
+      // Create a private canvas with explicit access for its call context:
+      // DM attendees edit, direct channel calls grant channel edit access, and
+      // channel-thread calls grant attendees edit plus channel view access.
+      // Additional recording shares are managed per-user/group/channel via
       // entity_access, and the recording sharing API updates canvas_participants
       // in the same transaction.
       //
@@ -1170,6 +1224,7 @@ export class CallDocumentService {
       // the per-request tenant ACL (CanvasParticipantsACL.canCreate would
       // otherwise deny the second insert since the requester isn't a
       // participant yet); regular canvas access after this stays ACL-gated.
+      let accessMode = 'private access';
       await prisma.$transaction(async (tx) => {
         await tx.canvas.create({
           data: {
@@ -1198,30 +1253,14 @@ export class CallDocumentService {
           },
         });
 
-        // Add Xyne Automatic bot as OWNER
-        await tx.canvasParticipant.create({
-          data: {
-            id: participantId,
-            canvasId,
-            workspaceId,
-            userId: createdByUserId,
-            role: CanvasRole.OWNER,
-            joinedAt: now,
-            updatedAt: now,
-          },
-        });
-
-        // Add call creator as OWNER
-        await tx.canvasParticipant.create({
-          data: {
-            id: uuidv4(),
-            canvasId,
-            workspaceId,
-            userId: callCreatorUserId,
-            role: CanvasRole.OWNER,
-            joinedAt: now,
-            updatedAt: now,
-          },
+        accessMode = await this.createCallCanvasAccess(tx, {
+          canvasId,
+          workspaceId,
+          callId,
+          createdByUserId,
+          callCreatorUserId,
+          channelId,
+          now,
         });
       });
 
@@ -1231,7 +1270,7 @@ export class CallDocumentService {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for detailed summary canvas ${canvasId}`);
       }
 
-      logger.info(`[CallDocumentService] Created collaborative detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
+      logger.info(`[CallDocumentService] Created collaborative detailed summary canvas ${canvasId} for call ${callId} with ${accessMode}, plus Xyne Automatic and call creator as owners`);
 
       // Fetch complete context for the user to pass to side-effect handler
       const user = await db.user.findUnique({
