@@ -451,8 +451,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runWithContext(
-        { userId: 'incoming-webhook', workspaceId: context.workspaceId },
+      await runAsServiceActor('incoming-webhook', context.workspaceId,
         async () => {
           let flow: FlowDefinition;
           switch (envelope.Type) {
