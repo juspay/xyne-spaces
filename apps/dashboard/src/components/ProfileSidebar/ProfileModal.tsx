@@ -52,9 +52,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
   if (!userId) return null;
 
   const isOwnProfile = user?.id === context.userID;
-  const title = isOwnProfile
-    ? 'Profile'
-    : user?.name || userProfile?.displayName || 'Unknown User';
+  const title = isOwnProfile ? 'Profile' : user?.name || userProfile?.displayName || 'Unknown User';
 
   return (
     <Dialog

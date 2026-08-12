@@ -358,7 +358,12 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               role='button'
               tabIndex={0}
             >
-              <Avatar userId={user.id} size={headerAvatarSize} className='rounded-xl' showActiveStatus={true} />
+              <Avatar
+                userId={user.id}
+                size={headerAvatarSize}
+                className='rounded-xl'
+                showActiveStatus={true}
+              />
               <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity'>
                 <Camera className='size-8 text-white' />
               </div>
@@ -374,7 +379,12 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               />
             </div>
           ) : (
-            <Avatar userId={user.id} size={headerAvatarSize} className='rounded-xl' showActiveStatus={true} />
+            <Avatar
+              userId={user.id}
+              size={headerAvatarSize}
+              className='rounded-xl'
+              showActiveStatus={true}
+            />
           )}
         </div>
 
