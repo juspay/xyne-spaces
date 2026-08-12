@@ -250,7 +250,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     staleTime: 5 * 60 * 1000,
   });
   const selectedAgent = useMemo(
-    () => composerAgents?.find((a) => a.slug === selectedAgentSlug) ?? null,
+    () => composerAgents?.find(a => a.slug === selectedAgentSlug) ?? null,
     [composerAgents, selectedAgentSlug],
   );
   const instant = selectedAgent?.instantAgent === true;
