@@ -32,8 +32,8 @@ export interface RecordingPillState {
 }
 
 const GUTTER = 32;
-const CARD_EXPANDED_WIDTH = 108;
-const CARD_MAX_HEIGHT = 110;
+const CARD_EXPANDED_WIDTH = 92;
+const CARD_MAX_HEIGHT = 98;
 const WINDOW_WIDTH = CARD_EXPANDED_WIDTH + GUTTER * 2;
 const WINDOW_HEIGHT = CARD_MAX_HEIGHT + GUTTER * 2;
 const EDGE_MARGIN = 20;
