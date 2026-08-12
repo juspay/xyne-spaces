@@ -24,7 +24,12 @@ const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
-  LOG_FILE_PATH: Joi.string().default('logs/app.log'),
+  // Streams error-level logs to Fluent Bit's forward input (see docker/fluent-bit/).
+  // Off by default so envs without a Fluent Bit endpoint (e.g. prod, until one
+  // is provisioned there) don't try to connect anywhere.
+  LOG_FLUENT_ENABLED: Joi.boolean().default(false),
+  LOG_FLUENT_HOST: Joi.string().default('localhost'),
+  LOG_FLUENT_PORT: Joi.number().default(24224),
   LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
@@ -503,7 +508,11 @@ export const config = {
   },
   logging: {
     level: envVars.LOG_LEVEL,
-    filePath: envVars.LOG_FILE_PATH,
+    fluent: {
+      enabled: envVars.LOG_FLUENT_ENABLED,
+      host: envVars.LOG_FLUENT_HOST,
+      port: envVars.LOG_FLUENT_PORT,
+    },
     logUserSessionChanges: envVars.LOG_USER_SESSION_CHANGES,
   },
   database: {
