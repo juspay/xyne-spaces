@@ -1,4 +1,11 @@
-import { EmailType, Prisma, MessageDirection, ExternalEntityType, AttachmentEntityType, ActivityType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import {
+  EmailType,
+  MessageDirection,
+  ExternalEntityType,
+  AttachmentEntityType,
+  ActivityType,
+} from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';

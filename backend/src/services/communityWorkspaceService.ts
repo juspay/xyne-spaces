@@ -1,6 +1,5 @@
-import { AuthProvider, Status, User, UserStatus, WorkspaceRole } from '@prisma/client';
-import {
-  CommunityJoinResultStatus,
+import { User } from '@prisma/client';
+import { CommunityJoinResultStatus,
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
   OrgRole,
   WorkspaceJoinPolicy,
@@ -9,7 +8,10 @@ import {
   WorkspaceJoinRequestStatus,
   type WorkspaceJoinRequestStatus as WorkspaceJoinRequestStatusType,
   WorkspaceType,
-} from '@xyne/shared';
+  AuthProvider,
+  Status,
+  UserStatus,
+  WorkspaceRole, ChannelRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -371,7 +373,7 @@ export class CommunityWorkspaceService {
         await repositories.channelParticipants.addParticipant(
           landingChannelId,
           result.workspaceUser.id,
-          'MEMBER',
+          ChannelRole.MEMBER,
         );
       } catch (error) {
         logger.error('[CommunityWorkspaceService] Failed to add user to landing channel', {
@@ -396,7 +398,7 @@ export class CommunityWorkspaceService {
         this.prisma,
         params.workspace.id,
         result.workspaceUser.id,
-        'MEMBER'
+        ChannelRole.MEMBER
       );
     } catch (error) {
       logger.error('[CommunityWorkspaceService] Failed to join user to general channel', {

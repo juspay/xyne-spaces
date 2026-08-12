@@ -1,4 +1,5 @@
-import { AccessType, WorkspaceRole, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { db } from '../database/client';

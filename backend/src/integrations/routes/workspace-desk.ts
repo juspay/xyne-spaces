@@ -14,8 +14,8 @@
  */
 
 import express, { Request, Response } from 'express';
+import { WorkspaceRole } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
-import { WorkspaceRole } from '@prisma/client';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';

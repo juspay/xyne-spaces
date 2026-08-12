@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { WorkflowMappingEntityType } from '@prisma/client';
+import { WorkflowMappingEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { encrypt, decrypt } from '@/services/encryptionService';
 

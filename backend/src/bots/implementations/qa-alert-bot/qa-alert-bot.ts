@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import { MessageType } from '@xyne/shared';
 import { Request, Response } from 'express';
 import { Bot, UnifiedBaseBot } from '@/bots/unified/index.js';
 import type { BotExecutionContext, InternalBotDefinition, BotEvent } from '@/bots/unified/types/index.js';
@@ -247,7 +248,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
         conversationId: ticket.conversationId,
         userId: qaAlertBot.id,
         content: alertMessage,
-        msgType: 'BOT',
+        msgType: MessageType.BOT,
         isBot: true,
       });
 

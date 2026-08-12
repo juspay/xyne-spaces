@@ -1,15 +1,14 @@
 // Bitbucket Webhook Service
 // Handles different Bitbucket webhook event types based on X-Event-Key header
 
-import { PRStatus } from '@prisma/client';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
+import { PRStatus, PRStatusEvent } from '@xyne/shared';
 import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
 import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { logger } from '@/utils/logger';
 import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhooks';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { runWithContext } from '@/database/tenant/context';
@@ -612,7 +611,7 @@ export class BitbucketWebhookService {
     await prTicketStatusSyncService.syncTicketStatusOnPRChange({
       prId: context.prId,
       prUrl: context.prUrl,
-      newStatus: trackedPr.status,
+      newStatus: trackedPr.status as PRStatus,
       prAuthor: context.prAuthor,
       prAuthorEmail: context.prAuthorEmail,
       prEvent: PRStatusEvent.DELETED,

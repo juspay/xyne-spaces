@@ -4,7 +4,8 @@
  */
 
 import { DatabaseClient } from '../client';
-import { MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { MessageDirection, ExternalEntityType } from '@xyne/shared';
 
 export class ExternalMessageRepository {
   private db = DatabaseClient.getInstance();

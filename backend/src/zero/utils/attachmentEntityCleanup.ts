@@ -1,6 +1,5 @@
 import type { Transaction } from '@rocicorp/zero';
 import { AttachmentEntityType, type Schema } from '@xyne/shared';
-import { AttachmentEntityType as PrismaAttachmentEntityType } from '@prisma/client';
 import { gcsService } from '@/services/gcsService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -73,7 +72,7 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
   const attachments = await db.messageAttachment.findMany({
     where: {
       entityId: delayedMessageId,
-      entityType: PrismaAttachmentEntityType.DELAYED_MESSAGE,
+      entityType: AttachmentEntityType.DELAYED_MESSAGE,
     },
   });
 

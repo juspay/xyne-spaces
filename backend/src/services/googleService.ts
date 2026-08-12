@@ -5,6 +5,7 @@
  */
 
 import { google, gmail_v1 } from 'googleapis';
+import { DeskType } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
 import { PubSub } from '@google-cloud/pubsub';
 import { decrypt, encrypt } from './encryptionService';
@@ -19,7 +20,6 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
-import { DeskType } from '@prisma/client';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 

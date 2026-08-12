@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { TicketDuplicateBackfillController } from '@/controllers/ticketDuplicateBackfillController';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 
 const router = Router();
 

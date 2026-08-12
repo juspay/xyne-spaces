@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { UserRepository } from '@/database/repositories/users';
-import { AuthProvider, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AuthProvider } from '@xyne/shared';
 
 export interface WhatsAppNameEmailMapping {
   whatsappName: string;

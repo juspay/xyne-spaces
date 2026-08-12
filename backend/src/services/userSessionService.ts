@@ -1,4 +1,5 @@
-import { PrismaClient, UserSession, SessionStatus } from '@prisma/client';
+import { PrismaClient, UserSession } from '@prisma/client';
+import { SessionStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 

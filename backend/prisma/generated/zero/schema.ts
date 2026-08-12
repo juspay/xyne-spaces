@@ -12,847 +12,6 @@ import {
   type Row,
 } from "@rocicorp/zero";
 
-// Define enums
-
-export enum WorkflowCategory {
-  USER_ONBOARDING = "USER_ONBOARDING",
-  BUG_WORKFLOW = "BUG_WORKFLOW",
-  BUG_WORKFLOW_EVAL = "BUG_WORKFLOW_EVAL",
-  BUG_WORKFLOW_EVAL_INNER_STEPS = "BUG_WORKFLOW_EVAL_INNER_STEPS",
-  BUG_WORKFLOW_EVAL_INNER_STEPS_EXPERIMENTAL = "BUG_WORKFLOW_EVAL_INNER_STEPS_EXPERIMENTAL",
-  FEATURE_IMPLEMENTATION = "FEATURE_IMPLEMENTATION",
-  FEATURE_PLANNING = "FEATURE_PLANNING",
-  XYNE_SPACES_FEATURE_IMPLEMENTATION = "XYNE_SPACES_FEATURE_IMPLEMENTATION",
-  FIDO_SERVER_WORKFLOW = "FIDO_SERVER_WORKFLOW",
-  CONNECTOR_MIGRATION = "CONNECTOR_MIGRATION",
-  CODER_WORKFLOW = "CODER_WORKFLOW",
-  QUERY_WORKFLOW = "QUERY_WORKFLOW",
-  QUERY = "QUERY",
-  ISSUE = "ISSUE",
-  REQUIREMENT_NEW = "REQUIREMENT_NEW",
-  REQUIREMENT_ENHANCEMENT = "REQUIREMENT_ENHANCEMENT",
-  FULL_PG_INTEGRATION = "FULL_PG_INTEGRATION",
-  INVESTIGATION_WORKFLOW = "INVESTIGATION_WORKFLOW",
-  GENIUS_INVESTIGATION_WORKFLOW = "GENIUS_INVESTIGATION_WORKFLOW",
-  STAGE_APPROVAL_WORKFLOW = "STAGE_APPROVAL_WORKFLOW",
-}
-
-export enum WorkflowExecutionMode {
-  AUTOMATIC = "AUTOMATIC",
-  MANUAL = "MANUAL",
-}
-
-export enum AutoDraftMode {
-  OFF = "OFF",
-  DRAFT = "DRAFT",
-}
-
-export enum AutoDraftStatus {
-  GENERATING = "GENERATING",
-  READY = "READY",
-}
-
-export enum TicketStatus {
-  NEW = "NEW",
-  IN_PROGRESS = "IN_PROGRESS",
-  WAIT_FOR_APPROVAL = "WAIT_FOR_APPROVAL",
-  REJECTED = "REJECTED",
-  RESOLVED = "RESOLVED",
-}
-
-export enum TicketStatusV2 {
-  TODO = "TODO",
-  STARTED = "STARTED",
-  PAUSED = "PAUSED",
-  CANCELLED = "CANCELLED",
-  COMPLETED = "COMPLETED",
-}
-
-export enum TicketPriority {
-  LOW = "LOW",
-  MEDIUM = "MEDIUM",
-  HIGH = "HIGH",
-  CRITICAL = "CRITICAL",
-}
-
-export enum TicketReferenceRelation {
-  LINKED = "LINKED",
-  DUPLICATE_CONFIRMED = "DUPLICATE_CONFIRMED",
-  DUPLICATE_POSSIBLE = "DUPLICATE_POSSIBLE",
-  MERGED_INTO = "MERGED_INTO",
-}
-
-export enum EmailMergeMode {
-  DISABLED = "DISABLED",
-  ENABLED = "ENABLED",
-}
-
-export enum DeskType {
-  EMAIL = "EMAIL",
-  DL = "DL",
-  SLACK = "SLACK",
-  APP = "APP",
-}
-
-export enum UserResponsibility {
-  MANAGER = "MANAGER",
-  TEAM_LEAD = "TEAM_LEAD",
-  MEMBER = "MEMBER",
-  PR_REVIEWER = "PR_REVIEWER",
-  QA = "QA",
-}
-
-export enum RotationInterval {
-  WEEKLY = "WEEKLY",
-  BIWEEKLY = "BIWEEKLY",
-  MONTHLY = "MONTHLY",
-}
-
-export enum QueryVisualizationType {
-  KPI = "KPI",
-  BAR_CHART = "BAR_CHART",
-  PIE_CHART = "PIE_CHART",
-  DONUT_CHART = "DONUT_CHART",
-  LINE_CHART = "LINE_CHART",
-  FUNNEL = "FUNNEL",
-  HEATMAP = "HEATMAP",
-  DATA_TABLE = "DATA_TABLE",
-  AREA_CHART = "AREA_CHART",
-  KPI_COMPARE = "KPI_COMPARE",
-  SCATTER_CHART = "SCATTER_CHART",
-}
-
-export enum EntityType {
-  MERCHANT = "MERCHANT",
-  GATEWAY = "GATEWAY",
-}
-
-export enum RecapEntityType {
-  PROJECT = "PROJECT",
-  CHANNEL = "CHANNEL",
-}
-
-export enum ActivityType {
-  TITLE = "TITLE",
-  DESCRIPTION = "DESCRIPTION",
-  STATUS = "STATUS",
-  ASSIGNED_TO = "ASSIGNED_TO",
-  TICKET_TYPE = "TICKET_TYPE",
-  PRIORITY = "PRIORITY",
-  ETA = "ETA",
-  STAGE_ETA = "STAGE_ETA",
-  METADATA = "METADATA",
-  CLOSED_AT = "CLOSED_AT",
-  CLOSED_BY = "CLOSED_BY",
-  REFERENCE_TICKET = "REFERENCE_TICKET",
-  STAGE_NAME = "STAGE_NAME",
-  TAGS = "TAGS",
-  ENTITY = "ENTITY",
-  PR = "PR",
-  SUBTICKET_CREATED = "SUBTICKET_CREATED",
-  BOARD = "BOARD",
-  USER_GROUP_ID = "USER_GROUP_ID",
-  PR_REVIEWER = "PR_REVIEWER",
-  QA = "QA",
-  STAGE_CHANGE_REQUEST = "STAGE_CHANGE_REQUEST",
-  STAGE_CHANGE_APPROVED = "STAGE_CHANGE_APPROVED",
-  STAGE_CHANGE_REJECTED = "STAGE_CHANGE_REJECTED",
-  IS_ARCHIVED = "IS_ARCHIVED",
-  MERGED = "MERGED",
-  UNMERGED = "UNMERGED",
-  RCA_CREATED = "RCA_CREATED",
-  RCA_UPDATED = "RCA_UPDATED",
-}
-
-export enum AttachmentEntityType {
-  TICKET = "TICKET",
-  CHAT = "CHAT",
-  CANVAS = "CANVAS",
-  EMAIL = "EMAIL",
-  DRAFT = "DRAFT",
-  DELAYED_MESSAGE = "DELAYED_MESSAGE",
-  WORKFLOW_STEPS = "WORKFLOW_STEPS",
-  IMPACT = "IMPACT",
-  COLLECTION = "COLLECTION",
-  FORM_ENTITY_VALUE = "FORM_ENTITY_VALUE",
-}
-
-export enum AttachmentUploadStatus {
-  PENDING = "PENDING",
-  STARTED = "STARTED",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-}
-
-export enum TicketEnvironment {
-  DEVELOPMENT = "DEVELOPMENT",
-  STAGING = "STAGING",
-  PRODUCTION = "PRODUCTION",
-}
-
-export enum ReportedBy {
-  MERCHANT = "MERCHANT",
-  INTERNAL = "INTERNAL",
-}
-
-export enum ChannelScopeType {
-  DEFAULT = "DEFAULT",
-  DM = "DM",
-  TICKET = "TICKET",
-  DOCUMENT = "DOCUMENT",
-  GROUP_DM = "GROUP_DM",
-}
-
-export enum ChannelType {
-  DEFAULT = "DEFAULT",
-  EMAIL = "EMAIL",
-  SUPPORT = "SUPPORT",
-  SLACK = "SLACK",
-  APP = "APP",
-}
-
-export enum ChannelRole {
-  ADMIN = "ADMIN",
-  MEMBER = "MEMBER",
-}
-
-export enum ChannelVisibility {
-  PUBLIC = "PUBLIC",
-  PRIVATE = "PRIVATE",
-}
-
-export enum AppIncomingWebhookType {
-  SLACK = "SLACK",
-  SENTINELONE = "SENTINELONE",
-}
-
-export enum AppIncomingWebhookAction {
-  MESSAGE = "MESSAGE",
-  TICKET = "TICKET",
-}
-
-export enum CalendarVisibility {
-  PUBLIC = "PUBLIC",
-  PRIVATE = "PRIVATE",
-}
-
-export enum ChannelAddUserPolicy {
-  EVERYONE = "EVERYONE",
-  ADMINS_ONLY = "ADMINS_ONLY",
-}
-
-export enum ChannelSortOrder {
-  UNREAD = "UNREAD",
-  RECENCY = "RECENCY",
-  ALPHABETICAL = "ALPHABETICAL",
-}
-
-export enum MessageType {
-  USER = "USER",
-  BOT = "BOT",
-  SYSTEM = "SYSTEM",
-  FORWARDED = "FORWARDED",
-}
-
-export enum OrgRole {
-  OWNER = "OWNER",
-  ADMIN = "ADMIN",
-  MEMBER = "MEMBER",
-  VIEWER = "VIEWER",
-}
-
-export enum RecordingType {
-  AUDIO_ONLY = "AUDIO_ONLY",
-  AUDIO_SCREEN = "AUDIO_SCREEN",
-  AUDIO_VIDEO = "AUDIO_VIDEO",
-}
-
-export enum RecordingStatus {
-  RECORDING_ACTIVE = "RECORDING_ACTIVE",
-  RECORDING_STOPPED = "RECORDING_STOPPED",
-  PROCESSING_RECORDING = "PROCESSING_RECORDING",
-  RECORDING_UPLOADED = "RECORDING_UPLOADED",
-  RECORDING_FAILED = "RECORDING_FAILED",
-  RECORDING_UPLOAD_FAILED = "RECORDING_UPLOAD_FAILED",
-  PROCESSING_FAILED = "PROCESSING_FAILED",
-  RECORDING_EXPIRED = "RECORDING_EXPIRED",
-  RECORDING_DELETED = "RECORDING_DELETED",
-}
-
-export enum CallType {
-  AUDIO = "AUDIO",
-  VIDEO = "VIDEO",
-  HEADLESS = "HEADLESS",
-}
-
-export enum CallOrigin {
-  CHANNEL = "CHANNEL",
-  CONVERSATION = "CONVERSATION",
-  GOOGLE_CALENDAR = "GOOGLE_CALENDAR",
-  MICROSOFT_CALENDAR = "MICROSOFT_CALENDAR",
-}
-
-export enum CallStatus {
-  SCHEDULED = "SCHEDULED",
-  ACTIVE = "ACTIVE",
-  IN_PROGRESS = "IN_PROGRESS",
-  ENDED = "ENDED",
-  CANCELLED = "CANCELLED",
-}
-
-export enum InvitationResponse {
-  INVITED = "INVITED",
-  REQUESTED = "REQUESTED",
-  ACCEPTED = "ACCEPTED",
-  DECLINED = "DECLINED",
-  MISSED = "MISSED",
-  LEFT = "LEFT",
-}
-
-export enum MeetingStatus {
-  PENDING = "PENDING",
-  ACCEPTED = "ACCEPTED",
-  DECLINED = "DECLINED",
-  MAYBE = "MAYBE",
-  HIDDEN = "HIDDEN",
-}
-
-export enum RecurringCallSeriesStatus {
-  ACTIVE = "ACTIVE",
-  ENDED = "ENDED",
-  CANCELLED = "CANCELLED",
-}
-
-export enum ConversationParticipation {
-  AUTHOR = "AUTHOR",
-  MENTIONED = "MENTIONED",
-}
-
-export enum ProjectType {
-  DEFAULT = "DEFAULT",
-  DM = "DM",
-}
-
-export enum VCSProviderType {
-  GITHUB = "GITHUB",
-  BITBUCKET_CLOUD = "BITBUCKET_CLOUD",
-  BITBUCKET_SERVER = "BITBUCKET_SERVER",
-}
-
-export enum ReleaseTrackingMode {
-  COMMIT_RANGE = "COMMIT_RANGE",
-  VERSION = "VERSION",
-}
-
-export enum WorkflowEventType {
-  NO_OP = "NO_OP",
-  TICKET_CREATED = "TICKET_CREATED",
-  TICKET_UPDATED = "TICKET_UPDATED",
-  TICKET_COMMENTED = "TICKET_COMMENTED",
-  EMAIL_RECEIVED = "EMAIL_RECEIVED",
-  EMAIL_SENT = "EMAIL_SENT",
-  WEBHOOK = "WEBHOOK",
-  MESSAGE_RECEIVED = "MESSAGE_RECEIVED",
-  CALL_EVENT = "CALL_EVENT",
-}
-
-export enum WorkflowMappingEntityType {
-  AUTOMATION_WEBHOOK = "AUTOMATION_WEBHOOK",
-}
-
-export enum AuthProvider {
-  GOOGLE = "GOOGLE",
-  MICROSOFT = "MICROSOFT",
-  API_KEY = "API_KEY",
-  EMAIL = "EMAIL",
-}
-
-export enum UserStatus {
-  ACTIVE = "ACTIVE",
-  INACTIVE = "INACTIVE",
-}
-
-export enum UserType {
-  USER = "USER",
-  BOT = "BOT",
-  APP = "APP",
-}
-
-export enum UserPresenceStatus {
-  ONLINE = "ONLINE",
-  AWAY = "AWAY",
-  OFFLINE = "OFFLINE",
-}
-
-export enum AccessType {
-  ADMIN = "ADMIN",
-  READ = "READ",
-  WRITE = "WRITE",
-}
-
-export enum SessionStatus {
-  ACTIVE = "ACTIVE",
-  EXPIRED = "EXPIRED",
-  REVOKED = "REVOKED",
-}
-
-export enum Status {
-  ACTIVE = "ACTIVE",
-  ARCHIVED = "ARCHIVED",
-  DELETED = "DELETED",
-}
-
-export enum WorkspaceRole {
-  OWNER = "OWNER",
-  ADMIN = "ADMIN",
-  MEMBER = "MEMBER",
-  GUEST = "GUEST",
-}
-
-export enum ACLAuditEventType {
-  RESOURCE_CREATED = "RESOURCE_CREATED",
-  RESOURCE_UPDATED = "RESOURCE_UPDATED",
-  RESOURCE_DELETED = "RESOURCE_DELETED",
-  PERMISSION_GRANTED = "PERMISSION_GRANTED",
-  PERMISSION_REVOKED = "PERMISSION_REVOKED",
-  PERMISSION_UPDATED = "PERMISSION_UPDATED",
-  USER_GROUP_CREATED = "USER_GROUP_CREATED",
-  USER_GROUP_UPDATED = "USER_GROUP_UPDATED",
-  USER_GROUP_DELETED = "USER_GROUP_DELETED",
-  USER_GROUP_REACTIVATED = "USER_GROUP_REACTIVATED",
-  USER_GROUP_DEACTIVATED = "USER_GROUP_DEACTIVATED",
-}
-
-export enum ACLAuditTargetType {
-  RESOURCE = "RESOURCE",
-  RESOURCE_ACCESS = "RESOURCE_ACCESS",
-  USER_GROUP = "USER_GROUP",
-}
-
-export enum PRStatus {
-  OPEN = "OPEN",
-  UPDATED = "UPDATED",
-  DECLINED = "DECLINED",
-  MERGED = "MERGED",
-  DELETED = "DELETED",
-}
-
-export enum PRStatusEvent {
-  CREATED = "CREATED",
-  UPDATED = "UPDATED",
-  MERGED = "MERGED",
-  DECLINED = "DECLINED",
-  DELETED = "DELETED",
-}
-
-export enum TeamIntelligenceBatchStatus {
-  RECEIVED = "RECEIVED",
-  QUEUED = "QUEUED",
-  PARTIALLY_QUEUED = "PARTIALLY_QUEUED",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-}
-
-export enum TeamIntelligenceUserIngestionStatus {
-  RECEIVED = "RECEIVED",
-  QUEUED = "QUEUED",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-}
-
-export enum TeamIntelligenceBulletCategory {
-  SHIPPED = "SHIPPED",
-  ACHIEVEMENT = "ACHIEVEMENT",
-  COLLABORATION = "COLLABORATION",
-  LEARNING = "LEARNING",
-  RECOGNITION = "RECOGNITION",
-  LEARNED = "LEARNED",
-  HELPED = "HELPED",
-  MILESTONE = "MILESTONE",
-}
-
-export enum ApproverType {
-  USER = "USER",
-  ROLE = "ROLE",
-}
-
-export enum EmailType {
-  DEFAULT = "DEFAULT",
-  REPLY = "REPLY",
-  REPLY_ALL = "REPLY_ALL",
-  COMPOSE = "COMPOSE",
-}
-
-export enum ExternalEntityType {
-  MESSAGE = "MESSAGE",
-  EMAIL = "EMAIL",
-  TICKET = "TICKET",
-  ATTACHMENT = "ATTACHMENT",
-  CANVAS = "CANVAS",
-}
-
-export enum MessageDirection {
-  INCOMING = "INCOMING",
-  OUTGOING = "OUTGOING",
-}
-
-export enum ActivityClassification {
-  ACTIONABLE = "ACTIONABLE",
-  FYI = "FYI",
-  SKIP = "SKIP",
-  PENDING = "PENDING",
-  PROCESSING = "PROCESSING",
-  ERROR = "ERROR",
-}
-
-export enum ActivityClassificationJobType {
-  SINGLE = "SINGLE",
-  SPECIAL_MENTION_AUDIENCE = "SPECIAL_MENTION_AUDIENCE",
-}
-
-export enum NudgeType {
-  EXISTING_TICKET = "EXISTING_TICKET",
-  CREATE_TICKET = "CREATE_TICKET",
-  SET_REMINDER = "SET_REMINDER",
-  ADD_TO_KB = "ADD_TO_KB",
-  REVERSE_KB_LOOKUP = "REVERSE_KB_LOOKUP",
-  THREAD_FOLLOW_UP = "THREAD_FOLLOW_UP",
-  DECISION_PENDING = "DECISION_PENDING",
-  WAITING_ON_BLOCKED_BY = "WAITING_ON_BLOCKED_BY",
-}
-
-export enum NudgeKind {
-  CREATE_TICKET_FROM_MESSAGE = "CREATE_TICKET_FROM_MESSAGE",
-  FIND_RELATED_TICKET_FROM_MESSAGE = "FIND_RELATED_TICKET_FROM_MESSAGE",
-  FIND_RELATED_MESSAGE_FROM_MESSAGE = "FIND_RELATED_MESSAGE_FROM_MESSAGE",
-  LINK_PASTE_TO_SURFACE = "LINK_PASTE_TO_SURFACE",
-  FORWARD_MESSAGE_LINK = "FORWARD_MESSAGE_LINK",
-  DELETE_MESSAGE_CLEANUP = "DELETE_MESSAGE_CLEANUP",
-  SCHEDULE_CALL_FROM_THREAD = "SCHEDULE_CALL_FROM_THREAD",
-}
-
-export enum NudgeState {
-  ACTIVE = "ACTIVE",
-  DISMISSED = "DISMISSED",
-  ACTED_ON = "ACTED_ON",
-}
-
-export enum NotificationType {
-  TICKET_STATUS_CHANGE = "TICKET_STATUS_CHANGE",
-  TICKET_ASSIGNMENT = "TICKET_ASSIGNMENT",
-  TICKET_REASSIGNMENT = "TICKET_REASSIGNMENT",
-  TICKET_DUE_DATE_CHANGED = "TICKET_DUE_DATE_CHANGED",
-  TICKET_PRIORITY_CHANGED = "TICKET_PRIORITY_CHANGED",
-  TICKET_USER_GROUP_CHANGED = "TICKET_USER_GROUP_CHANGED",
-  TICKET_TITLE_CHANGED = "TICKET_TITLE_CHANGED",
-  TICKET_DESCRIPTION_CHANGED = "TICKET_DESCRIPTION_CHANGED",
-  TICKET_RCA_CREATED = "TICKET_RCA_CREATED",
-  TICKET_RCA_UPDATED = "TICKET_RCA_UPDATED",
-  TICKET_SUBTICKET_ADDED = "TICKET_SUBTICKET_ADDED",
-  TICKET_RELATED_TICKET_ADDED = "TICKET_RELATED_TICKET_ADDED",
-  TICKET_RELATED_TICKET_REMOVED = "TICKET_RELATED_TICKET_REMOVED",
-  CHANNEL_READ = "CHANNEL_READ",
-  THREAD_READ = "THREAD_READ",
-  CHANNEL_MESSAGE = "CHANNEL_MESSAGE",
-  MENTION = "MENTION",
-  DIRECT_MESSAGE = "DIRECT_MESSAGE",
-  WORKFLOW_COMPLETION = "WORKFLOW_COMPLETION",
-  WORKFLOW_FAILURE = "WORKFLOW_FAILURE",
-  THREAD_REPLY = "THREAD_REPLY",
-  INCOMING_CALL = "INCOMING_CALL",
-  MISSED_CALL = "MISSED_CALL",
-  CALL_DISMISS = "CALL_DISMISS",
-  CALL_REMINDER = "CALL_REMINDER",
-  CALL_SCHEDULED = "CALL_SCHEDULED",
-  CALL_UPDATED = "CALL_UPDATED",
-  EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
-  EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
-  CANVAS_SHARED = "CANVAS_SHARED",
-  EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
-  MESSAGE_DELETED = "MESSAGE_DELETED",
-  MESSAGE_EDITED = "MESSAGE_EDITED",
-  STAGE_APPROVAL_REQUESTED = "STAGE_APPROVAL_REQUESTED",
-  STAGE_APPROVAL_APPROVED = "STAGE_APPROVAL_APPROVED",
-  STAGE_APPROVAL_REJECTED = "STAGE_APPROVAL_REJECTED",
-}
-
-export enum NotificationStatus {
-  UNREAD = "UNREAD",
-  READ = "READ",
-  DISMISSED = "DISMISSED",
-  DELIVERED = "DELIVERED",
-  FAILED = "FAILED",
-}
-
-export enum NotificationDeliveryMethod {
-  BROWSER = "BROWSER",
-  EMAIL = "EMAIL",
-  SLACK = "SLACK",
-  MOBILE = "MOBILE",
-  IOS = "IOS",
-  ANDROID = "ANDROID",
-}
-
-export enum NotificationLevel {
-  ALL = "ALL",
-  MENTIONS_ONLY = "MENTIONS_ONLY",
-  THREADS_ONLY = "THREADS_ONLY",
-  NONE = "NONE",
-}
-
-export enum CanvasVisibility {
-  PUBLIC = "PUBLIC",
-  PRIVATE = "PRIVATE",
-}
-
-export enum CanvasRole {
-  OWNER = "OWNER",
-  EDITOR = "EDITOR",
-  VIEWER = "VIEWER",
-}
-
-export enum DocType {
-  Canvas = "Canvas",
-  Quarto = "Quarto",
-}
-
-export enum BookmarkEntityType {
-  MESSAGE = "MESSAGE",
-  CONVERSATION = "CONVERSATION",
-  TICKET = "TICKET",
-  CANVAS = "CANVAS",
-}
-
-export enum LinkVisibility {
-  DEFAULT = "DEFAULT",
-  PERSONAL = "PERSONAL",
-}
-
-export enum VespaInsertionStatus {
-  PENDING = "PENDING",
-  FAILED = "FAILED",
-  FAILED_MAX_RETRIES = "FAILED_MAX_RETRIES",
-}
-
-export enum VespaOperationType {
-  INSERT = "INSERT",
-  UPDATE = "UPDATE",
-  DELETE = "DELETE",
-  POST_INGEST_CLEAN = "POST_INGEST_CLEAN",
-}
-
-export enum FormFieldType {
-  STRING = "STRING",
-  NUMBER = "NUMBER",
-  BOOLEAN = "BOOLEAN",
-  DATE = "DATE",
-  SINGLE_SELECT = "SINGLE_SELECT",
-  MULTI_SELECT = "MULTI_SELECT",
-  USER = "USER",
-  DOC = "DOC",
-}
-
-export enum FormContextType {
-  BOARD = "BOARD",
-  RELEASE_CHANGE = "RELEASE_CHANGE",
-  STAGE = "STAGE",
-}
-
-export enum BoardType {
-  DEFAULT = "DEFAULT",
-  RELEASE = "RELEASE",
-  NON_LINEAR = "NON_LINEAR",
-}
-
-export enum VisitSlaMode {
-  STAGE_DEFAULT = "STAGE_DEFAULT",
-  NONE = "NONE",
-  FIXED_HOURS = "FIXED_HOURS",
-}
-
-export enum ReenterMode {
-  RESET = "RESET",
-  CONTINUE = "CONTINUE",
-}
-
-export enum FormEntityType {
-  TICKET = "TICKET",
-  SUB_TICKET = "SUB_TICKET",
-  RELEASE_MIGRATION_FORM = "RELEASE_MIGRATION_FORM",
-  RELEASE_ENV_FORM = "RELEASE_ENV_FORM",
-}
-
-export enum LookupType {
-  TICKET_TYPE = "TICKET_TYPE",
-  COE_ACTION_TYPE = "COE_ACTION_TYPE",
-  COE_ACTION_TYPE_RELIABILITY_CHANGE = "COE_ACTION_TYPE_RELIABILITY_CHANGE",
-  COE_ACTION_TYPE_RELIABILITY_CAPACITY = "COE_ACTION_TYPE_RELIABILITY_CAPACITY",
-  COE_ACTION_TYPE_RELIABILITY_FAULT = "COE_ACTION_TYPE_RELIABILITY_FAULT",
-  COE_ACTION_TYPE_PERF = "COE_ACTION_TYPE_PERF",
-  COE_ACTION_TYPE_UIUX = "COE_ACTION_TYPE_UIUX",
-  IMPACT_TYPE = "IMPACT_TYPE",
-  BUG_TYPE = "BUG_TYPE",
-  BUG_CATEGORY_TYPE = "BUG_CATEGORY_TYPE",
-  BUG_ISSUE_TYPE = "BUG_ISSUE_TYPE",
-  BUG_ISSUE_CATEGORY_CAPACITY = "BUG_ISSUE_CATEGORY_CAPACITY",
-  BUG_ISSUE_CATEGORY_CHANGE = "BUG_ISSUE_CATEGORY_CHANGE",
-  BUG_ISSUE_CATEGORY_FAULT = "BUG_ISSUE_CATEGORY_FAULT",
-  BUG_RESOLUTION_CAPACITY = "BUG_RESOLUTION_CAPACITY",
-  BUG_RESOLUTION_CHANGE = "BUG_RESOLUTION_CHANGE",
-  BUG_RESOLUTION_FAULT = "BUG_RESOLUTION_FAULT",
-  QUICK_FIX_OPTION = "QUICK_FIX_OPTION",
-}
-
-export enum Platform {
-  WEB = "WEB",
-  ELECTRON = "ELECTRON",
-  MOBILE = "MOBILE",
-}
-
-export enum IngestionStatus {
-  PENDING = "PENDING",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-  NONE = "NONE",
-}
-
-export enum CollectionRole {
-  OWNER = "OWNER",
-  EDITOR = "EDITOR",
-  VIEWER = "VIEWER",
-}
-
-export enum ReleaseEventType {
-  RELEASE = "RELEASE",
-  TICKET = "TICKET",
-  SUBTICKET = "SUBTICKET",
-  TESTING = "TESTING",
-  SYSTEM = "SYSTEM",
-  CANVAS = "CANVAS",
-}
-
-export enum RCAStatus {
-  DRAFT = "DRAFT",
-  IN_REVIEW = "IN_REVIEW",
-  APPROVED = "APPROVED",
-  CLOSED = "CLOSED",
-}
-
-export enum TicketStageRequestStatus {
-  DRAFT = "DRAFT",
-  SUBMITTED = "SUBMITTED",
-  APPROVED = "APPROVED",
-  REJECTED = "REJECTED",
-}
-
-export enum COEStatus {
-  OPEN = "OPEN",
-  IN_PROGRESS = "IN_PROGRESS",
-  COMPLETED = "COMPLETED",
-}
-
-export enum SEVERITY {
-  SEV_1 = "SEV_1",
-  SEV_2 = "SEV_2",
-  SEV_3 = "SEV_3",
-}
-
-export enum AttributionConfidence {
-  LOW = "LOW",
-  MEDIUM = "MEDIUM",
-  HIGH = "HIGH",
-}
-
-export enum SurfaceAreaType {
-  MESSAGE = "MESSAGE",
-  TICKET = "TICKET",
-  CANVAS = "CANVAS",
-  CALL = "CALL",
-  CONVERSATION = "CONVERSATION",
-}
-
-export enum SurfaceLinkKind {
-  RELATES_TO = "RELATES_TO",
-}
-
-export enum SessionRecordingProcessStatus {
-  PENDING = "PENDING",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-}
-
-export enum CommandType {
-  COMMAND = "COMMAND",
-  SHORTCUT = "SHORTCUT",
-}
-
-export enum CommandAccessibility {
-  CHAT = "CHAT",
-  THREAD = "THREAD",
-  BOTH = "BOTH",
-  MESSAGE = "MESSAGE",
-  GLOBAL = "GLOBAL",
-}
-
-export enum SavedConfigContextType {
-  BOARD = "BOARD",
-}
-
-export enum SavedConfigVisibility {
-  PRIVATE = "PRIVATE",
-  PUBLIC = "PUBLIC",
-}
-
-export enum SavedConfigEntityName {
-  TICKET = "TICKET",
-  FORM_ENTITY_VALUE = "FORM_ENTITY_VALUE",
-}
-
-export enum DelayedMessageStatus {
-  PENDING = "PENDING",
-  SENDING = "SENDING",
-  SENT = "SENT",
-  FAILED = "FAILED",
-  CANCELLED = "CANCELLED",
-}
-
-export enum DashboardVisibility {
-  PUBLIC = "PUBLIC",
-  PRIVATE = "PRIVATE",
-}
-
-export enum DashboardRole {
-  OWNER = "OWNER",
-  EDITOR = "EDITOR",
-  VIEWER = "VIEWER",
-}
-
-export enum QueryType {
-  internal = "internal",
-  external = "external",
-}
-
-export enum AppPermissionType {
-  READ = "READ",
-  WRITE = "WRITE",
-}
-
-export enum AppPermissionStatus {
-  UNAPPROVED = "UNAPPROVED",
-  APPROVED = "APPROVED",
-  PENDINGDELETE = "PENDINGDELETE",
-}
-
-export enum TagMethod {
-  MANUAL = "MANUAL",
-  LLM = "LLM",
-  AUTOMATED = "AUTOMATED",
-}
-
 // Define tables
 
 export const agentTable = table("agents")
@@ -900,6 +59,7 @@ export const toolTable = table("tools")
 
 export const agentToolsMappingTable = table("agent_tools_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     agentId: string(),
     toolId: string(),
@@ -915,8 +75,8 @@ export const ticketTable = table("tickets")
     id: string(),
     title: string(),
     description: string(),
-    status: enumeration<TicketStatus>(),
-    statusV2: enumeration<TicketStatusV2>(),
+    status: string(),
+    statusV2: string(),
     createdBy: string(),
     updatedBy: string(),
     assignedTo: string().optional(),
@@ -928,7 +88,7 @@ export const ticketTable = table("tickets")
     channelId: string(),
     eta: number().optional(),
     firstRespondedAt: number().optional(),
-    priority: enumeration<TicketPriority>(),
+    priority: string(),
     metadata: json().optional(),
     closedAt: number().optional(),
     closedBy: string().optional(),
@@ -971,6 +131,7 @@ export const subTicketTable = table("sub_tickets")
 
 export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     subTicketId: string(),
@@ -979,10 +140,11 @@ export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
 
 export const ticketAssignmentTable = table("ticket_assignments")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     userId: string().optional(),
-    userResponsibility: enumeration<UserResponsibility>().optional(),
+    userResponsibility: string().optional(),
     roleId: string().optional(),
     createdAt: number(),
     createdBy: string(),
@@ -991,26 +153,30 @@ export const ticketAssignmentTable = table("ticket_assignments")
 
 export const ticketActivityTable = table("ticket_activities")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     updatedBy: string(),
     timestamp: number(),
-    activityType: enumeration<ActivityType>(),
+    activityType: string(),
     value: json(),
+    channelId: string().optional(),
   })
   .primaryKey("id");
 
 export const ticketEntityMappingTable = table("ticket_entity_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
-    entityType: enumeration<EntityType>(),
+    entityType: string(),
     entityName: string(),
   })
   .primaryKey("id");
 
 export const ticketTagTable = table("ticket_tags")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     ticketId: string(),
@@ -1019,6 +185,7 @@ export const ticketTagTable = table("ticket_tags")
 
 export const projectTagTable = table("project_tags")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     projectId: string(),
@@ -1028,6 +195,7 @@ export const projectTagTable = table("project_tags")
 
 export const ticketTagMappingTable = table("ticket_tag_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     tagId: string(),
@@ -1038,10 +206,11 @@ export const ticketTagMappingTable = table("ticket_tag_mappings")
 
 export const ticketReferenceMappingTable = table("ticket_reference_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     sourceTicketId: string(),
     targetTicketId: string(),
-    relationType: enumeration<TicketReferenceRelation>(),
+    relationType: string(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -1050,6 +219,7 @@ export const ticketReferenceMappingTable = table("ticket_reference_mappings")
 
 export const ticketStageEtaTable = table("ticket_stage_eta")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -1074,7 +244,7 @@ export const workflowTable = table("workflows")
     metadata: string().optional(),
     configuration: string().optional(),
     workflowType: string().optional(),
-    eventType: enumeration<WorkflowEventType>(),
+    eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
     createdAt: number(),
@@ -1084,6 +254,7 @@ export const workflowTable = table("workflows")
 
 export const workflowExecutionTable = table("workflow_executions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     workflowId: string(),
     workflowType: string().optional(),
@@ -1097,13 +268,14 @@ export const workflowExecutionTable = table("workflow_executions")
     createdAt: number(),
     updatedAt: number(),
     ignoreDuration: number(),
-    mode: enumeration<WorkflowExecutionMode>(),
+    mode: string(),
     createdBy: string().optional(),
   })
   .primaryKey("id");
 
 export const workflowExecutionStateTable = table("workflow_execution_states")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     context: string().optional(),
@@ -1115,7 +287,7 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
 export const workflowMappingTable = table("workflow_mappings")
   .columns({
     id: string(),
-    entityType: enumeration<WorkflowMappingEntityType>(),
+    entityType: string(),
     entityId: string(),
     entitySecret: string(),
   })
@@ -1123,6 +295,7 @@ export const workflowMappingTable = table("workflow_mappings")
 
 export const workflowExecutionLockTable = table("workflow_execution_locks")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     workerId: string(),
@@ -1134,6 +307,7 @@ export const workflowExecutionLockTable = table("workflow_execution_locks")
 
 export const workflowExecutionUsersTable = table("workflow_execution_users")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     workflowExecutionId: string(),
@@ -1144,6 +318,7 @@ export const workflowExecutionUsersTable = table("workflow_execution_users")
 
 export const workflowStepTable = table("workflow_steps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     stepExecutorType: string(),
@@ -1162,6 +337,7 @@ export const workflowStepTable = table("workflow_steps")
 
 export const workflowKnowledgeTable = table("workflow_knowledge")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     checkpointId: string(),
@@ -1176,6 +352,7 @@ export const workflowKnowledgeTable = table("workflow_knowledge")
 
 export const knowledgeDocumentTable = table("knowledge_documents")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     projectId: string(),
     repositoryUrl: string().optional(),
@@ -1194,6 +371,7 @@ export const knowledgeDocumentTable = table("knowledge_documents")
 
 export const agentStepTable = table("agent_steps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     stepsId: string().optional(),
     toolCallId: string().optional(),
@@ -1210,6 +388,7 @@ export const agentStepTable = table("agent_steps")
 
 export const externalStepResponseTable = table("external_step_responses")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     workflowStepId: string(),
@@ -1221,6 +400,7 @@ export const externalStepResponseTable = table("external_step_responses")
 
 export const apiKeyTable = table("api_keys")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     description: string().optional(),
@@ -1244,7 +424,7 @@ export const userGroupTable = table("user_groups")
     description: string().optional(),
     metadata: json().optional(),
     autoRotationEnabled: boolean(),
-    rotationInterval: enumeration<RotationInterval>().optional(),
+    rotationInterval: string().optional(),
     rotationStartDate: number().optional(),
     createdAt: number(),
     updatedAt: number(),
@@ -1268,6 +448,7 @@ export const roleTable = table("roles")
 
 export const userRoleMappingTable = table("user_role_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     roleId: string(),
@@ -1278,13 +459,14 @@ export const userRoleMappingTable = table("user_role_mappings")
 
 export const userSessionTable = table("user_sessions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     refreshToken: string(),
     refreshTokenExpiry: number(),
     accessToken: string().optional(),
     accessTokenExpiry: number().optional(),
-    status: enumeration<SessionStatus>(),
+    status: string(),
     deviceInfo: string().optional(),
     deviceId: string().optional(),
     fcmToken: string().optional(),
@@ -1302,14 +484,14 @@ export const userTable = table("users")
     name: string(),
     email: string(),
     picture: string().optional(),
-    authProvider: enumeration<AuthProvider>(),
+    authProvider: string(),
     providerUserId: string(),
-    status: enumeration<UserStatus>(),
-    userType: enumeration<UserType>(),
+    status: string(),
+    userType: string(),
     metadata: json().optional(),
     displayName: string().optional(),
     workspaceId: string(),
-    role: enumeration<WorkspaceRole>(),
+    role: string(),
     orgMemberId: string(),
     leftAt: number().optional(),
     createdAt: number(),
@@ -1320,23 +502,24 @@ export const userTable = table("users")
     lastActiveAt: number().optional(),
     notificationsPausedUntil: number().optional(),
     assignmentUnavailableUntil: number().optional(),
-    calendarVisibility: enumeration<CalendarVisibility>(),
+    calendarVisibility: string(),
   })
   .primaryKey("id");
 
 export const userPreferenceTable = table("user_preferences")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(),
-    channelSortOrder: enumeration<ChannelSortOrder>(),
+    channelSortOrder: string(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
-    globalDesktopNotificationLevel: enumeration<NotificationLevel>().optional(),
-    globalMobileNotificationLevel: enumeration<NotificationLevel>().optional(),
+    globalDesktopNotificationLevel: string().optional(),
+    globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
     channelWideMentionsEnabled: boolean(),
-    notificationKeywords: json().optional(),
+    notificationKeywords: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1344,6 +527,7 @@ export const userPreferenceTable = table("user_preferences")
 
 export const userSkillTable = table("user_skills")
   .columns({
+    workspaceId: string().optional(),
     userId: string(),
     name: string(),
     description: string().optional(),
@@ -1354,6 +538,7 @@ export const userSkillTable = table("user_skills")
 
 export const scheduledMessageTable = table("scheduled_messages")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     title: string(),
     messageContent: string(),
@@ -1369,6 +554,7 @@ export const scheduledMessageTable = table("scheduled_messages")
 
 export const callMessageTable = table("call_messages")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     callId: string(),
     participantId: string(),
@@ -1379,11 +565,12 @@ export const callMessageTable = table("call_messages")
 
 export const userGroupMappingTable = table("user_group_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     userGroupId: string(),
     roleId: string().optional(),
-    responsibility: enumeration<UserResponsibility>().optional(),
+    responsibility: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
     createdAt: number(),
@@ -1393,6 +580,7 @@ export const userGroupMappingTable = table("user_group_mappings")
 
 export const userAssignmentStateTable = table("user_assignment_states")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1406,6 +594,7 @@ export const userAssignmentStateTable = table("user_assignment_states")
 
 export const boardComplexityScoreTable = table("board_complexity_scores")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userGroupId: string(),
     boardId: string(),
@@ -1419,6 +608,7 @@ export const boardComplexityScoreTable = table("board_complexity_scores")
 
 export const userWorkloadMappingTable = table("user_workload_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1433,6 +623,7 @@ export const userWorkloadMappingTable = table("user_workload_mappings")
 
 export const userExpertiseMappingTable = table("user_expertise_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1448,9 +639,10 @@ export const userExpertiseMappingTable = table("user_expertise_mappings")
 
 export const userPresenceTable = table("user_presence")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
-    status: enumeration<UserPresenceStatus>(),
+    status: string(),
     lastActiveAt: number(),
     lastSeenAt: number(),
     isManual: boolean(),
@@ -1467,6 +659,7 @@ export const userPresenceTable = table("user_presence")
 
 export const userProfileTable = table("user_profiles")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     dob: number().optional(),
@@ -1496,11 +689,12 @@ export const resourceTable = table("resources")
 
 export const resourceAccessTable = table("resource_access")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     groupId: string().optional(),
     userId: string().optional(),
     resourceId: string(),
-    accessType: enumeration<AccessType>(),
+    accessType: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1508,11 +702,12 @@ export const resourceAccessTable = table("resource_access")
 
 export const aclAuditLogTable = table("acl_audit_logs")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     timestamp: number(),
     actorUserId: string().optional(),
-    eventType: enumeration<ACLAuditEventType>(),
-    targetType: enumeration<ACLAuditTargetType>(),
+    eventType: string(),
+    targetType: string(),
     targetId: string(),
     description: string(),
     createdAt: number(),
@@ -1521,6 +716,7 @@ export const aclAuditLogTable = table("acl_audit_logs")
 
 export const pullRequestsTable = table("pull_requests")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     prId: number(),
     workflowExecutionId: string().optional(),
@@ -1532,7 +728,7 @@ export const pullRequestsTable = table("pull_requests")
     repositoryUrl: string(),
     prUrl: string(),
     updatedAt: number(),
-    status: enumeration<PRStatus>(),
+    status: string(),
     ticketId: string().optional(),
   })
   .primaryKey("id");
@@ -1567,7 +763,7 @@ export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_in
     totalUsers: number(),
     queuedUsers: number(),
     failedUsers: number(),
-    status: enumeration<TeamIntelligenceBatchStatus>(),
+    status: string(),
     receivedAt: number(),
     queuedAt: number().optional(),
     completedAt: number().optional(),
@@ -1579,6 +775,7 @@ export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_in
 
 export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_user_ingestions_v2")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -1591,7 +788,7 @@ export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_use
     contentUrl: string().optional(),
     contentSize: number().optional(),
     contentChecksum: string().optional(),
-    processingStatus: enumeration<TeamIntelligenceUserIngestionStatus>(),
+    processingStatus: string(),
     queueJobId: string().optional(),
     queuedAt: number().optional(),
     startedAt: number().optional(),
@@ -1605,6 +802,7 @@ export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_use
 
 export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_summaries_v2")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -1618,7 +816,7 @@ export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_
     contentUrl: string().optional(),
     contentSize: number().optional(),
     contentChecksum: string().optional(),
-    status: enumeration<TeamIntelligenceBatchStatus>(),
+    status: string(),
     queueJobId: string().optional(),
     queuedAt: number().optional(),
     startedAt: number().optional(),
@@ -1632,6 +830,7 @@ export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_
 
 export const teamIntelligenceOrgSummaryV2Table = table("team_intelligence_org_summaries_v2")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -1643,7 +842,7 @@ export const teamIntelligenceOrgSummaryV2Table = table("team_intelligence_org_su
     contentUrl: string().optional(),
     contentSize: number().optional(),
     contentChecksum: string().optional(),
-    status: enumeration<TeamIntelligenceBatchStatus>(),
+    status: string(),
     queueJobId: string().optional(),
     queuedAt: number().optional(),
     startedAt: number().optional(),
@@ -1663,7 +862,7 @@ export const organizationTable = table("organizations")
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
-    status: enumeration<Status>(),
+    status: string(),
     metadata: json().optional(),
   })
   .primaryKey("orgId");
@@ -1674,7 +873,7 @@ export const orgMemberTable = table("org_members")
     orgId: string(),
     userId: string(),
     email: string(),
-    role: enumeration<OrgRole>(),
+    role: string(),
     passwordHash: string().optional(),
     joinedAt: number(),
     invitedBy: string().optional(),
@@ -1687,7 +886,7 @@ export const workspaceOrganizationTable = table("workspace_organizations")
     id: string(),
     orgId: string(),
     workspaceId: string(),
-    role: enumeration<WorkspaceRole>(),
+    role: string(),
     leftAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
@@ -1701,8 +900,11 @@ export const workspaceTable = table("workspaces")
     name: string(),
     description: string().optional(),
     createdBy: string(),
-    status: enumeration<Status>(),
+    status: string(),
     metadata: json().optional(),
+    workspaceType: string().optional(),
+    joinPolicy: string().optional(),
+    landingChannelId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1714,14 +916,29 @@ export const invitationTable = table("invitations")
     orgId: string().optional(),
     workspaceId: string().optional(),
     email: string(),
-    role: enumeration<WorkspaceRole>(),
+    role: string(),
     invitedBy: string(),
     invitedAt: number(),
     expiredAt: number().optional(),
     acceptedAt: number().optional(),
     invitationId: string().optional(),
+    entityId: string().optional(),
+    entityType: string().optional(),
+    channelId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const guestAccessTable = table("guest_access")
+  .columns({
+    id: string(),
+    userId: string(),
+    workspaceId: string(),
+    accessibleEntityId: string(),
+    accessibleEntityType: string(),
+    invitedBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -1733,7 +950,7 @@ export const projectTable = table("projects")
     ticketSequence: number(),
     description: string().optional(),
     workspaceId: string(),
-    type: enumeration<ProjectType>(),
+    type: string(),
     createdBy: string(),
     updatedBy: string().optional(),
     createdAt: number(),
@@ -1745,15 +962,15 @@ export const boardTable = table("boards")
   .columns({
     id: string(),
     name: string(),
-    boardType: enumeration<BoardType>(),
+    boardType: string(),
     projectId: string(),
     workspaceId: string(),
     createdBy: string(),
     updatedBy: string().optional(),
     description: string().optional(),
     metadata: json().optional(),
-    vcsProvider: enumeration<VCSProviderType>().optional(),
-    releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
+    vcsProvider: string().optional(),
+    releaseTrackingMode: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1761,6 +978,7 @@ export const boardTable = table("boards")
 
 export const stageTable = table("stages")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     eta: number().optional(),
@@ -1770,22 +988,25 @@ export const stageTable = table("stages")
     updatedBy: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
-    defaultTicketStatus: enumeration<TicketStatus>(),
-    defaultTicketStatusV2: enumeration<TicketStatusV2>(),
+    defaultTicketStatus: string(),
+    defaultTicketStatusV2: string(),
+    requestApprovalOnEntry: boolean().optional(),
   })
   .primaryKey("id");
 
 export const stagePrStatusMappingTable = table("stage_pr_status_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     stageId: string(),
-    prStatus: enumeration<PRStatusEvent>(),
+    prStatus: string(),
     createdAt: number(),
   })
   .primaryKey("id");
 
 export const stageTransitionTable = table("stage_transitions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     boardId: string(),
     fromStageId: string().optional(),
@@ -1793,9 +1014,10 @@ export const stageTransitionTable = table("stage_transitions")
     formId: string().optional(),
     requiresApproval: boolean().optional(),
     bypassApprovalForAutomation: boolean().optional(),
-    visitSlaMode: enumeration<VisitSlaMode>().optional(),
+    requestApprovalOnEntry: boolean().optional(),
+    visitSlaMode: string().optional(),
     fixedEtaHours: number().optional(),
-    onReenter: enumeration<ReenterMode>().optional(),
+    onReenter: string().optional(),
     createdAt: number().optional(),
     updatedAt: number(),
   })
@@ -1806,9 +1028,9 @@ export const channelTable = table("channels")
     id: string(),
     name: string(),
     description: string().optional(),
-    type: enumeration<ChannelType>(),
-    scopeType: enumeration<ChannelScopeType>(),
-    visibility: enumeration<ChannelVisibility>(),
+    type: string(),
+    scopeType: string(),
+    visibility: string(),
     createdAt: number(),
     updatedAt: number(),
     lastActivityAt: number(),
@@ -1818,7 +1040,7 @@ export const channelTable = table("channels")
     workspaceId: string(),
     participantCount: number(),
     isMigrated: boolean().optional(),
-    addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
+    addUserPolicy: string().optional(),
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(),
@@ -1827,21 +1049,23 @@ export const channelTable = table("channels")
 
 export const channelStatsTable = table("channel_stats")
   .columns({
+    workspaceId: string().optional(),
     channelId: string(),
     lastActivityAt: number(),
     participantCount: number(),
-    addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
+    addUserPolicy: string().optional(),
     lastRecapHadMessages: boolean().optional(),
   })
   .primaryKey("channelId");
 
 export const channelParticipantTable = table("channel_participants")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     userId: string(),
     joinedAt: number(),
-    role: enumeration<ChannelRole>(),
+    role: string(),
     lastViewedAt: number(),
     lastViewedConversationId: string().optional(),
     isStarred: boolean(),
@@ -1851,6 +1075,7 @@ export const channelParticipantTable = table("channel_participants")
 
 export const channelUserStatusTable = table("channel_user_status")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1866,8 +1091,8 @@ export const channelUserStatusTable = table("channel_user_status")
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),
     customRecapPrompt: string().optional(),
-    desktopNotificationLevel: enumeration<NotificationLevel>().optional(),
-    mobileNotificationLevel: enumeration<NotificationLevel>().optional(),
+    desktopNotificationLevel: string().optional(),
+    mobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean().optional(),
     channelWideMentionsEnabled: boolean().optional(),
     isDeleted: boolean(),
@@ -1885,7 +1110,7 @@ export const channelSectionTable = table("channel_sections")
     position: string(),
     isCollapsed: boolean(),
     isDeleted: boolean(),
-    sortOrder: enumeration<ChannelSortOrder>().optional(),
+    sortOrder: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1916,10 +1141,11 @@ export const conversationTable = table("conversations")
 
 export const conversationParticipantTable = table("conversation_participants")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     conversationId: string(),
     userId: string(),
-    participationType: enumeration<ConversationParticipation>().optional(),
+    participationType: string().optional(),
     isSubscribed: boolean(),
     joinedAt: number(),
     lastReadAt: number().optional(),
@@ -1930,8 +1156,9 @@ export const conversationParticipantTable = table("conversation_participants")
 
 export const emailTable = table("emails")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
-    type: enumeration<EmailType>(),
+    type: string(),
     subject: string(),
     body: string(),
     to: json<string[]>(),
@@ -1952,13 +1179,19 @@ export const emailTable = table("emails")
 
 export const emailDraftTable = table("email_drafts")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
-    conversationId: string(),
+    conversationId: string().optional(),
     userId: string().optional(),
     channelId: string(),
     draftContent: string(),
+    subject: string().optional(),
+    fromAddress: string().optional(),
     attachmentIds: json().optional(),
-    autoDraftStatus: enumeration<AutoDraftStatus>().optional(),
+    toRecipients: string().optional(),
+    ccRecipients: string().optional(),
+    bccRecipients: string().optional(),
+    autoDraftStatus: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1966,6 +1199,7 @@ export const emailDraftTable = table("email_drafts")
 
 export const emailReadTable = table("email_reads")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     userId: string(),
@@ -1976,8 +1210,50 @@ export const emailReadTable = table("email_reads")
   })
   .primaryKey("id");
 
+export const conversationLabelTable = table("conversation_labels")
+  .columns({
+    id: string(),
+    name: string(),
+    color: string().optional(),
+    channelId: string(),
+    projectId: string(),
+    workspaceId: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const conversationLabelMappingTable = table("conversation_label_mappings")
+  .columns({
+    id: string(),
+    labelId: string(),
+    labelName: string(),
+    conversationId: string(),
+    channelId: string(),
+    workspaceId: string(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const ticketUserMailboxTable = table("ticket_user_mailbox")
+  .columns({
+    id: string(),
+    ticketId: string(),
+    userId: string(),
+    channelId: string(),
+    workspaceId: string(),
+    state: string().optional(),
+    starred: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const emailSignatureTable = table("email_signatures")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     name: string(),
@@ -2000,21 +1276,24 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     classificationPrompt: string().optional(),
     categoryField: string().optional(),
     subCategoryField: string().optional(),
-    emailMergeMode: enumeration<EmailMergeMode>(),
+    emailMergeMode: string(),
     twoStepSendEnabled: boolean(),
     priorityClassificationEnabled: boolean(),
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
-    autoDraftMode: enumeration<AutoDraftMode>(),
+    autoDraftMode: string(),
     autoDraftAgentSlug: string().optional(),
-    deskType: enumeration<DeskType>(),
+    deskType: string(),
     dlEmail: string().optional(),
     workspaceId: string().optional(),
+    metricsEnabled: boolean().optional(),
+    frtStageNames: string().optional(),
   })
   .primaryKey("channelId");
 
 export const classificationMappingTable = table("classification_mappings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     category: string(),
@@ -2026,9 +1305,10 @@ export const classificationMappingTable = table("classification_mappings")
 
 export const boardSlaPolicyTable = table("board_sla_policies")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     boardId: string(),
-    priority: enumeration<TicketPriority>(),
+    priority: string(),
     responseHours: number(),
     resolutionHours: number(),
     businessHoursOnly: boolean(),
@@ -2049,7 +1329,7 @@ export const messageTable = table("messages")
     senderId: string(),
     workspaceId: string().optional(),
     content: string(),
-    msgType: enumeration<MessageType>(),
+    msgType: string(),
     hasAttachment: boolean(),
     edited: boolean(),
     isDeleted: boolean(),
@@ -2066,6 +1346,7 @@ export const messageTable = table("messages")
 
 export const messageSearchTable = table("message_search")
   .columns({
+    workspaceId: string().optional(),
     messageId: string(),
     plaintextContent: string(),
     createdAt: number(),
@@ -2076,7 +1357,7 @@ export const messageSearchTable = table("message_search")
 export const messageAttachmentTable = table("message_attachments")
   .columns({
     id: string(),
-    entityType: enumeration<AttachmentEntityType>(),
+    entityType: string(),
     entityId: string(),
     workspaceId: string(),
     storageProvider: string(),
@@ -2093,12 +1374,13 @@ export const messageAttachmentTable = table("message_attachments")
     conversationId: string().optional(),
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
-    uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
+    uploadStatus: string().optional(),
   })
   .primaryKey("id");
 
 export const reactionTable = table("reactions")
   .columns({
+    workspaceId: string().optional(),
     reactionId: string(),
     messageId: string(),
     userId: string(),
@@ -2109,6 +1391,7 @@ export const reactionTable = table("reactions")
 
 export const reactionCountTable = table("reaction_counts")
   .columns({
+    workspaceId: string().optional(),
     countId: string(),
     messageId: string(),
     emojiName: string(),
@@ -2119,6 +1402,7 @@ export const reactionCountTable = table("reaction_counts")
 
 export const customEmojiTable = table("custom_emojis")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     url: string(),
@@ -2145,9 +1429,9 @@ export const activityTable = table("activities")
     canvasId: string().optional(),
     blockId: string().optional(),
     actorId: string(),
-    classification: enumeration<ActivityClassification>(),
+    classification: string(),
     classificationConfidence: number().optional(),
-    classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
+    classificationJobType: string().optional(),
     isRead: boolean(),
     isThreadActivity: boolean().optional(),
     createdAt: number(),
@@ -2158,6 +1442,7 @@ export const activityTable = table("activities")
 
 export const userExternalTokenTable = table("user_external_tokens")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     provider: string(),
@@ -2192,14 +1477,15 @@ export const externalSourceTable = table("external_sources")
 
 export const externalMessageTable = table("external_messages")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     externalSourceId: string(),
     externalId: string(),
     externalThreadId: string(),
-    entityType: enumeration<ExternalEntityType>(),
+    entityType: string(),
     entityId: string().optional(),
     messageId: string(),
-    direction: enumeration<MessageDirection>(),
+    direction: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2207,9 +1493,10 @@ export const externalMessageTable = table("external_messages")
 
 export const proactiveNudgeTable = table("proactive_nudges")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     messageId: string(),
-    type: enumeration<NudgeType>(),
+    type: string(),
     priority: string(),
     title: string(),
     description: string(),
@@ -2222,14 +1509,15 @@ export const proactiveNudgeTable = table("proactive_nudges")
 
 export const surfaceNudgeTable = table("surface_nudges")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
-    nudgeKind: enumeration<NudgeKind>(),
+    nudgeKind: string(),
     sourceId: string(),
     title: string(),
     description: string(),
     priority: string().optional(),
     actions: json().optional(),
-    state: enumeration<NudgeState>(),
+    state: string(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
     projectId: string(),
@@ -2240,6 +1528,7 @@ export const surfaceNudgeTable = table("surface_nudges")
 
 export const surfaceNudgeCountTable = table("surface_nudge_counts")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     nudgeCount: number(),
     userId: string().optional(),
@@ -2258,13 +1547,14 @@ export const surfaceNudgeCountTable = table("surface_nudge_counts")
 
 export const notificationTable = table("notifications")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
-    type: enumeration<NotificationType>(),
+    type: string(),
     title: string(),
     message: string(),
-    status: enumeration<NotificationStatus>(),
-    deliveryMethods: json<NotificationDeliveryMethod[]>(),
+    status: string(),
+    deliveryMethods: json<string[]>(),
     metadata: json().optional(),
     relatedEntityType: string().optional(),
     relatedEntityId: string().optional(),
@@ -2279,9 +1569,10 @@ export const notificationTable = table("notifications")
 
 export const notificationPreferenceTable = table("notification_preferences")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
-    notificationType: enumeration<NotificationType>(),
+    notificationType: string(),
     browserEnabled: boolean(),
     emailEnabled: boolean(),
     slackEnabled: boolean(),
@@ -2292,6 +1583,7 @@ export const notificationPreferenceTable = table("notification_preferences")
 
 export const browserNotificationSubscriptionTable = table("browser_notification_subscriptions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     endpoint: string(),
@@ -2307,6 +1599,7 @@ export const browserNotificationSubscriptionTable = table("browser_notification_
 
 export const callTable = table("calls")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     externalId: string(),
     title: string().optional(),
@@ -2315,9 +1608,9 @@ export const callTable = table("calls")
     channelId: string().optional(),
     orgName: string().optional(),
     description: string().optional(),
-    callType: enumeration<CallType>(),
-    callOrigin: enumeration<CallOrigin>(),
-    status: enumeration<CallStatus>(),
+    callType: string(),
+    callOrigin: string(),
+    status: string(),
     roomLink: string().optional(),
     startsAt: number().optional(),
     endsAt: number().optional(),
@@ -2337,18 +1630,21 @@ export const callTable = table("calls")
     updatedAt: number(),
     metadata: json().optional(),
     callUpdatesChannel: string().optional(),
+    participantCount: number().optional(),
+    participantPreviewUserIds: string().optional(),
   })
   .primaryKey("id");
 
 export const callParticipantTable = table("call_participants")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     callId: string(),
     userId: string(),
     invitedBy: string(),
     invitedAt: number(),
-    response: enumeration<InvitationResponse>().optional(),
-    meetingStatus: enumeration<MeetingStatus>(),
+    response: string().optional(),
+    meetingStatus: string(),
     respondedAt: number().optional(),
     joinedAt: number().optional(),
     leftAt: number().optional(),
@@ -2361,13 +1657,14 @@ export const callParticipantTable = table("call_participants")
 
 export const callRecordingTable = table("call_recordings")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     callId: string(),
     egressId: string().optional(),
     startedBy: string(),
     name: string().optional(),
-    recordingType: enumeration<RecordingType>(),
-    status: enumeration<RecordingStatus>(),
+    recordingType: string(),
+    status: string(),
     storagePath: string().optional(),
     segmentPrefix: string().optional(),
     messageId: string().optional(),
@@ -2380,6 +1677,7 @@ export const callRecordingTable = table("call_recordings")
 
 export const recurringCallSeriesTable = table("recurring_call_series")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     title: string(),
     description: string().optional(),
@@ -2389,7 +1687,7 @@ export const recurringCallSeriesTable = table("recurring_call_series")
     timezone: string(),
     startTime: string(),
     endTime: string(),
-    status: enumeration<RecurringCallSeriesStatus>(),
+    status: string(),
     startsOn: number(),
     endsOn: number().optional(),
     metadata: json().optional(),
@@ -2401,13 +1699,14 @@ export const recurringCallSeriesTable = table("recurring_call_series")
 
 export const recurringCallParticipantTable = table("recurring_call_participants")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     recurringSeriesId: string(),
     userId: string(),
     invitedBy: string(),
     invitedAt: number(),
-    response: enumeration<InvitationResponse>().optional(),
-    meetingStatus: enumeration<MeetingStatus>(),
+    response: string().optional(),
+    meetingStatus: string(),
     respondedAt: number().optional(),
     metadata: json().optional(),
     displayName: string().optional(),
@@ -2418,6 +1717,7 @@ export const recurringCallParticipantTable = table("recurring_call_participants"
 
 export const canvasFolderTable = table("canvas_folders")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     projectId: string().optional(),
     channelId: string().optional(),
@@ -2430,6 +1730,7 @@ export const canvasFolderTable = table("canvas_folders")
 
 export const canvasTable = table("canvases")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     title: string(),
     content: json(),
@@ -2439,7 +1740,7 @@ export const canvasTable = table("canvases")
     createdBy: string(),
     viewAccessId: string().optional(),
     editAccessId: string().optional(),
-    visibility: enumeration<CanvasVisibility>(),
+    visibility: string(),
     isTemplate: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),
@@ -2447,7 +1748,7 @@ export const canvasTable = table("canvases")
     updatedAt: number(),
     metadata: json().optional(),
     isCollaborative: boolean(),
-    docType: enumeration<DocType>(),
+    docType: string(),
     userRepo: string().optional(),
     repoId: string().optional(),
     branchName: string().optional(),
@@ -2459,6 +1760,7 @@ export const canvasTable = table("canvases")
 
 export const canvasVersionTable = table("canvas_versions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     canvasId: string(),
     name: string(),
@@ -2472,12 +1774,13 @@ export const canvasVersionTable = table("canvas_versions")
 
 export const canvasParticipantTable = table("canvas_participants")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     canvasId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
     channelId: string().optional(),
-    role: enumeration<CanvasRole>(),
+    role: string(),
     joinedAt: number(),
     updatedAt: number(),
   })
@@ -2485,6 +1788,7 @@ export const canvasParticipantTable = table("canvas_participants")
 
 export const canvasUserStatusTable = table("canvas_user_status")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     canvasId: string(),
     userId: string(),
@@ -2496,10 +1800,11 @@ export const canvasUserStatusTable = table("canvas_user_status")
 
 export const bookmarkTable = table("bookmarks")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     entityId: string(),
-    entityType: enumeration<BookmarkEntityType>(),
+    entityType: string(),
     createdAt: number(),
     updatedAt: number().optional(),
     isDeleted: boolean(),
@@ -2510,6 +1815,7 @@ export const bookmarkTable = table("bookmarks")
 
 export const linkTable = table("links")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     url: string(),
     title: string(),
@@ -2517,7 +1823,7 @@ export const linkTable = table("links")
     favicon: string().optional(),
     channelId: string(),
     createdBy: string(),
-    visibility: enumeration<LinkVisibility>(),
+    visibility: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2525,6 +1831,7 @@ export const linkTable = table("links")
 
 export const linkAccessTable = table("link_access")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     linkId: string(),
     userId: string(),
@@ -2534,11 +1841,12 @@ export const linkAccessTable = table("link_access")
 
 export const vespaInsertionLogsTable = table("vespa_insertion_logs")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     entityId: string(),
     entityType: string(),
-    type: enumeration<VespaOperationType>(),
-    status: enumeration<VespaInsertionStatus>(),
+    type: string(),
+    status: string(),
     namespace: string().optional(),
     cluster: string().optional(),
     errorMessage: string().optional(),
@@ -2552,6 +1860,7 @@ export const vespaInsertionLogsTable = table("vespa_insertion_logs")
 
 export const repoTable = table("repos")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     url: string(),
@@ -2564,7 +1873,7 @@ export const repoTable = table("repos")
 export const lookupValueTable = table("lookup_values")
   .columns({
     id: string(),
-    type: enumeration<LookupType>(),
+    type: string(),
     value: string(),
     createdAt: number(),
   })
@@ -2575,8 +1884,8 @@ export const formTable = table("forms")
     id: string(),
     formName: string(),
     formDescription: string().optional(),
-    entityType: enumeration<FormEntityType>(),
-    contextType: enumeration<FormContextType>(),
+    entityType: string(),
+    contextType: string(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -2586,30 +1895,50 @@ export const formTable = table("forms")
 
 export const formContextMappingTable = table("forms_context_mapping")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     formId: string(),
     contextId: string(),
-    contextType: enumeration<FormContextType>(),
-    entityType: enumeration<FormEntityType>(),
+    contextType: string(),
+    entityType: string(),
   })
   .primaryKey("id");
 
-export const formFieldsTable = table("form_fields")
+export const globalFieldTable = table("global_fields")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
-    formId: string(),
+    projectId: string(),
     fieldName: string(),
-    fieldType: enumeration<FormFieldType>(),
-    fieldEnum: json().optional(),
-    isOptional: boolean(),
-    sequenceNumber: number(),
+    fieldType: string(),
+    fieldEnum: string().optional(),
+    fieldOptions: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
   .primaryKey("id");
 
+export const formFieldsTable = table("form_fields")
+  .columns({
+    workspaceId: string().optional(),
+    id: string(),
+    formId: string(),
+    globalFieldId: string().optional(),
+    fieldName: string().optional(),
+    fieldType: string().optional(),
+    fieldEnum: json().optional(),
+    fieldOptions: string().optional(),
+    isOptional: boolean(),
+    sequenceNumber: number(),
+    createdAt: number(),
+    updatedAt: number(),
+    parentOptionId: string().optional(),
+  })
+  .primaryKey("id");
+
 export const formEntityValuesTable = table("form_entity_values")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     entityId: string(),
     entityType: string(),
@@ -2626,6 +1955,7 @@ export const formEntityValuesTable = table("form_entity_values")
 
 export const dashboardTable = table("dashboards")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2637,12 +1967,13 @@ export const dashboardTable = table("dashboards")
 
 export const queryTable = table("queries")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     title: string(),
     queryJson: json(),
-    entityType: enumeration<FormEntityType>().optional(),
+    entityType: string().optional(),
     targetEntity: string().optional(),
-    visualType: enumeration<QueryVisualizationType>().optional(),
+    visualType: string().optional(),
     position: string().optional(),
     createdBy: string(),
     createdAt: number(),
@@ -2652,6 +1983,7 @@ export const queryTable = table("queries")
 
 export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     dashboardId: string(),
     queryId: string(),
@@ -2670,6 +2002,7 @@ export const merchantTable = table("merchants")
 
 export const draftMessageTable = table("draft_messages")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -2684,6 +2017,7 @@ export const draftMessageTable = table("draft_messages")
 
 export const userActivityEventTable = table("user_activity_events")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     sessionId: string(),
@@ -2693,7 +2027,7 @@ export const userActivityEventTable = table("user_activity_events")
     url: string(),
     triggerType: string(),
     contextMetadata: json().optional(),
-    platform: enumeration<Platform>(),
+    platform: string(),
     timestamp: number(),
   })
   .primaryKey("id");
@@ -2713,6 +2047,7 @@ export const activityAliasTable = table("activity_aliases")
 
 export const collectionTable = table("collections")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     parentId: string().optional(),
     ownerId: string(),
@@ -2730,6 +2065,7 @@ export const collectionTable = table("collections")
 
 export const collectionItemTable = table("collection_items")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     rootCollectionId: string(),
     collectionId: string(),
@@ -2737,7 +2073,7 @@ export const collectionItemTable = table("collection_items")
     ownerId: string(),
     name: string(),
     uploadedById: string().optional(),
-    ingestionStatus: enumeration<IngestionStatus>(),
+    ingestionStatus: string(),
     versionNumber: number(),
     isLatest: boolean(),
     createdAt: number(),
@@ -2748,11 +2084,12 @@ export const collectionItemTable = table("collection_items")
 
 export const collectionPermissionTable = table("collection_permissions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
-    role: enumeration<CollectionRole>(),
+    role: string(),
     canShare: boolean(),
     grantedBy: string().optional(),
     createdAt: number(),
@@ -2762,10 +2099,11 @@ export const collectionPermissionTable = table("collection_permissions")
 
 export const stageApproversTable = table("stage_approvers")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string().optional(),
     roleId: string().optional(),
-    approverType: enumeration<ApproverType>().optional(),
+    approverType: string().optional(),
     stageId: string().optional(),
     transitionId: string().optional(),
     createdAt: number(),
@@ -2775,6 +2113,7 @@ export const stageApproversTable = table("stage_approvers")
 
 export const applicationTable = table("applications")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     projectId: string(),
@@ -2796,6 +2135,7 @@ export const applicationTable = table("applications")
 
 export const applicationReleaseTicketTable = table("application_release_tickets")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     applicationReleaseId: string(),
     ticketId: string(),
@@ -2810,10 +2150,11 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
 
 export const releaseEventTable = table("release_events")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
-    eventType: enumeration<ReleaseEventType>(),
+    eventType: string(),
     eventName: string(),
     message: string(),
     userId: string().optional(),
@@ -2827,6 +2168,7 @@ export const releaseEventTable = table("release_events")
 
 export const releaseChangeTable = table("release_changes")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2839,6 +2181,7 @@ export const releaseChangeTable = table("release_changes")
 
 export const releaseChangeTypeTable = table("release_change_types")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     applicationId: string(),
     changeType: string(),
@@ -2853,11 +2196,12 @@ export const releaseChangeTypeTable = table("release_change_types")
 
 export const ticketStageRequestTable = table("ticket_stage_requests")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     stageId: string(),
     formId: string().optional(),
-    status: enumeration<TicketStageRequestStatus>(),
+    status: string(),
     submittedBy: string(),
     reviewedBy: string().optional(),
     reviewerCommentMessageId: string().optional(),
@@ -2869,14 +2213,15 @@ export const ticketStageRequestTable = table("ticket_stage_requests")
 
 export const rcaTable = table("rcas")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     title: string(),
     ticketId: string(),
     ownerId: string(),
     summary: string().optional(),
     rootCause: string().optional(),
-    severity: enumeration<SEVERITY>(),
-    status: enumeration<RCAStatus>(),
+    severity: string(),
+    status: string(),
     bugTypeId: string(),
     categoryTypeId: string(),
     issueCategoryId: string().optional(),
@@ -2888,6 +2233,7 @@ export const rcaTable = table("rcas")
 
 export const impactTable = table("impacts")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     rcaId: string().optional(),
@@ -2899,12 +2245,13 @@ export const impactTable = table("impacts")
 
 export const coeTable = table("coes")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     rcaId: string(),
     ownerId: string(),
     actionTypeId: string(),
     action: string(),
-    status: enumeration<COEStatus>(),
+    status: string(),
     dueDate: number().optional(),
     createdAt: number(),
     completedAt: number().optional(),
@@ -2913,20 +2260,22 @@ export const coeTable = table("coes")
 
 export const releaseAttributionTable = table("release_attributions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     ticketId: string(),
     releaseId: string(),
     releaseApplicationId: string().optional(),
     rootCauseTicketId: string().optional(),
-    confidence: enumeration<AttributionConfidence>(),
+    confidence: string(),
     createdAt: number(),
   })
   .primaryKey("id");
 
 export const recapTable = table("recaps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
-    entityType: enumeration<RecapEntityType>(),
+    entityType: string(),
     entityId: string(),
     recapDate: number(),
     summary: string(),
@@ -2936,6 +2285,7 @@ export const recapTable = table("recaps")
 
 export const channelDailyRecapTable = table("channel_daily_recaps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2946,6 +2296,7 @@ export const channelDailyRecapTable = table("channel_daily_recaps")
 
 export const channelRecapTable = table("channel_recaps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2956,23 +2307,25 @@ export const channelRecapTable = table("channel_recaps")
 
 export const sessionRecordingFileTable = table("session_recording_files")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     sessionId: string(),
     userId: string(),
     url: string().optional(),
-    status: enumeration<SessionRecordingProcessStatus>(),
+    status: string(),
     lastProcessedTurn: number().optional(),
   })
   .primaryKey("id");
 
 export const surfaceLinkTable = table("surface_links")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
-    sourceType: enumeration<SurfaceAreaType>(),
+    sourceType: string(),
     sourceId: string(),
-    targetType: enumeration<SurfaceAreaType>(),
+    targetType: string(),
     targetId: string(),
-    linkKind: enumeration<SurfaceLinkKind>(),
+    linkKind: string(),
     createdBy: string(),
     projectId: string(),
     createdAt: number(),
@@ -2981,6 +2334,7 @@ export const surfaceLinkTable = table("surface_links")
 
 export const appsTable = table("apps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2997,6 +2351,7 @@ export const appsTable = table("apps")
 
 export const installedAppsTable = table("installed_apps")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     appId: string(),
     userId: string(),
@@ -3010,13 +2365,14 @@ export const installedAppsTable = table("installed_apps")
 
 export const installedAppCommandTable = table("installed_app_commands")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     installedAppId: string(),
     sourceCommandId: string(),
     commandName: string(),
     description: string(),
-    commandType: enumeration<CommandType>(),
-    commandAccessibility: enumeration<CommandAccessibility>(),
+    commandType: string(),
+    commandAccessibility: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3024,13 +2380,14 @@ export const installedAppCommandTable = table("installed_app_commands")
 
 export const appIncomingWebhookTable = table("app_incoming_webhooks")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     installedAppId: string(),
     channelId: string(),
     boardId: string().optional(),
     name: string(),
-    type: enumeration<AppIncomingWebhookType>(),
-    action: enumeration<AppIncomingWebhookAction>(),
+    type: string(),
+    action: string(),
     secret: string(),
     isActive: boolean(),
     createdBy: string(),
@@ -3042,12 +2399,13 @@ export const appIncomingWebhookTable = table("app_incoming_webhooks")
 
 export const appCommandTable = table("app_commands")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     appId: string(),
     commandName: string(),
     description: string(),
-    commandType: enumeration<CommandType>(),
-    commandAccessibility: enumeration<CommandAccessibility>(),
+    commandType: string(),
+    commandAccessibility: string(),
     isForThread: boolean().optional(),
     isForChat: boolean().optional(),
     createdAt: number(),
@@ -3057,12 +2415,13 @@ export const appCommandTable = table("app_commands")
 
 export const savedUserConfigurationTable = table("saved_user_configurations")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     userId: string(),
     name: string(),
-    contextType: enumeration<SavedConfigContextType>(),
+    contextType: string(),
     contextId: string(),
-    visibility: enumeration<SavedConfigVisibility>(),
+    visibility: string(),
     isStarred: boolean(),
     createdAt: number(),
     updatedAt: number(),
@@ -3071,9 +2430,10 @@ export const savedUserConfigurationTable = table("saved_user_configurations")
 
 export const savedUserConfigurationValueTable = table("saved_user_configuration_values")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     configId: string(),
-    entityName: enumeration<SavedConfigEntityName>(),
+    entityName: string(),
     fieldName: string(),
     fieldValue: string(),
     createdAt: number(),
@@ -3083,6 +2443,7 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
 
 export const delayedMessageTable = table("delayed_messages")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -3090,7 +2451,7 @@ export const delayedMessageTable = table("delayed_messages")
     content: string(),
     hasAttachment: boolean(),
     scheduledFor: number(),
-    status: enumeration<DelayedMessageStatus>(),
+    status: string(),
     failureReason: string().optional(),
     sentAt: number().optional(),
     createdAt: number(),
@@ -3116,6 +2477,7 @@ export const dataSourceTable = table("data_sources")
 
 export const dataSourceTableTable = table("data_source_tables")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     dataSourceId: string(),
     schemaName: string(),
@@ -3129,6 +2491,7 @@ export const dataSourceTableTable = table("data_source_tables")
 
 export const dataSourceColumnTable = table("data_source_columns")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     tableId: string(),
     columnName: string(),
@@ -3148,6 +2511,7 @@ export const dataSourceColumnTable = table("data_source_columns")
 
 export const dataSourceRelationshipTable = table("data_source_relationships")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     dataSourceId: string(),
     fromColumnId: string(),
@@ -3165,7 +2529,7 @@ export const dynamicDashboardTable = table("dynamic_dashboards")
     name: string(),
     description: string().optional(),
     createdBy: string(),
-    visibility: enumeration<DashboardVisibility>(),
+    visibility: string(),
     config: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -3174,10 +2538,11 @@ export const dynamicDashboardTable = table("dynamic_dashboards")
 
 export const dashboardParticipantTable = table("dashboard_participants")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     dashboardId: string(),
     userId: string(),
-    role: enumeration<DashboardRole>(),
+    role: string(),
     joinedAt: number(),
     updatedAt: number(),
   })
@@ -3185,6 +2550,7 @@ export const dashboardParticipantTable = table("dashboard_participants")
 
 export const dashboardActivityTable = table("dashboard_activity")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     entityType: string(),
     entityId: string(),
@@ -3197,13 +2563,14 @@ export const dashboardActivityTable = table("dashboard_activity")
 
 export const dynamicDashboardQueryTable = table("dynamic_dashboard_queries")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     title: string().optional(),
-    queryType: enumeration<QueryType>(),
+    queryType: string(),
     queryJson: json(),
-    entityType: enumeration<FormEntityType>().optional(),
+    entityType: string().optional(),
     targetEntity: string().optional(),
-    visualType: enumeration<QueryVisualizationType>().optional(),
+    visualType: string().optional(),
     position: string(),
     config: string(),
     createdBy: string(),
@@ -3214,6 +2581,7 @@ export const dynamicDashboardQueryTable = table("dynamic_dashboard_queries")
 
 export const dynamicDashboardQueryMappingTable = table("dynamic_dashboard_queries_mapping")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     dashboardId: string(),
     queryId: string(),
@@ -3227,7 +2595,7 @@ export const availableAppPermissionTable = table("available_app_permissions")
   .columns({
     id: string(),
     name: string(),
-    type: enumeration<AppPermissionType>(),
+    type: string(),
     description: string().optional(),
     createdAt: number(),
   })
@@ -3235,6 +2603,7 @@ export const availableAppPermissionTable = table("available_app_permissions")
 
 export const appPermissionTable = table("app_permission")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     appId: string(),
     permissionId: string(),
@@ -3245,10 +2614,11 @@ export const appPermissionTable = table("app_permission")
 
 export const installedAppPermissionTable = table("installed_app_permissions")
   .columns({
+    workspaceId: string().optional(),
     id: string(),
     installedAppId: string(),
     permissionId: string(),
-    status: enumeration<AppPermissionStatus>(),
+    status: string(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -3262,7 +2632,7 @@ export const tagTable = table("tags")
     configKey: string().optional(),
     tagCategory: string(),
     tag: string(),
-    method: enumeration<TagMethod>(),
+    method: string(),
     reason: string().optional(),
     createdBy: string().optional(),
     updatedBy: string().optional(),
@@ -3289,6 +2659,7 @@ export const tagsConfigTable = table("tags_config")
 
 export const doclingAsyncFileTable = table("docling_async_files")
   .columns({
+    workspaceId: string().optional(),
     fileId: string().from('file_id'),
     collectionId: string().from('collection_id'),
     sourcePath: string().from('source_path'),
@@ -3318,6 +2689,7 @@ export const doclingAsyncFileTable = table("docling_async_files")
 
 export const doclingAsyncPartTable = table("docling_async_parts")
   .columns({
+    workspaceId: string().optional(),
     fileId: string().from('file_id'),
     partIndex: number().from('part_index'),
     docId: string().from('doc_id'),
@@ -4274,6 +3646,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ["projectId"],
     destSchema: boardTable,
   }),
+  globalFields: many({
+    sourceField: ["id"],
+    destField: ["projectId"],
+    destSchema: globalFieldTable,
+  }),
   canvasFolders: many({
     sourceField: ["id"],
     destField: ["projectId"],
@@ -4735,11 +4112,29 @@ export const formTableRelationships = relationships(formTable, ({ many }) => ({
   })
 }));
 
+export const globalFieldTableRelationships = relationships(globalFieldTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ["projectId"],
+    destField: ["id"],
+    destSchema: projectTable,
+  }),
+  formFields: many({
+    sourceField: ["id"],
+    destField: ["globalFieldId"],
+    destSchema: formFieldsTable,
+  })
+}));
+
 export const formFieldsTableRelationships = relationships(formFieldsTable, ({ one }) => ({
   form: one({
     sourceField: ["formId"],
     destField: ["id"],
     destSchema: formTable,
+  }),
+  globalField: one({
+    sourceField: ["globalFieldId"],
+    destField: ["id"],
+    destSchema: globalFieldTable,
   })
 }));
 
@@ -5145,6 +4540,7 @@ export const schema = createSchema(
       workspaceOrganizationTable,
       workspaceTable,
       invitationTable,
+      guestAccessTable,
       projectTable,
       boardTable,
       stageTable,
@@ -5160,6 +4556,9 @@ export const schema = createSchema(
       emailTable,
       emailDraftTable,
       emailReadTable,
+      conversationLabelTable,
+      conversationLabelMappingTable,
+      ticketUserMailboxTable,
       emailSignatureTable,
       emailChannelPreferenceTable,
       classificationMappingTable,
@@ -5198,6 +4597,7 @@ export const schema = createSchema(
       lookupValueTable,
       formTable,
       formContextMappingTable,
+      globalFieldTable,
       formFieldsTable,
       formEntityValuesTable,
       dashboardTable,
@@ -5325,6 +4725,7 @@ export const schema = createSchema(
       canvasParticipantTableRelationships,
       canvasUserStatusTableRelationships,
       formTableRelationships,
+      globalFieldTableRelationships,
       formFieldsTableRelationships,
       collectionTableRelationships,
       collectionItemTableRelationships,
@@ -5414,6 +4815,7 @@ export type OrgMember = Row<typeof schema.tables.org_members>;
 export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizations>;
 export type Workspace = Row<typeof schema.tables.workspaces>;
 export type Invitation = Row<typeof schema.tables.invitations>;
+export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
@@ -5429,6 +4831,9 @@ export type ConversationParticipant = Row<typeof schema.tables.conversation_part
 export type Email = Row<typeof schema.tables.emails>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
+export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
+export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
+export type TicketUserMailbox = Row<typeof schema.tables.ticket_user_mailbox>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
@@ -5467,6 +4872,7 @@ export type Repo = Row<typeof schema.tables.repos>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
+export type GlobalField = Row<typeof schema.tables.global_fields>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;

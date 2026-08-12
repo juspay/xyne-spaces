@@ -1,6 +1,6 @@
-import { Prisma, TicketStatusV2 } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { DatabaseClient, readReplicaDb } from '../client';
-import { DeskMetricsAgentRow, DeskMetricsResponse, DeskMetricsTicketRow } from '@xyne/shared';
+import { DeskMetricsAgentRow, DeskMetricsResponse, DeskMetricsTicketRow, TicketStatusV2 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 /**

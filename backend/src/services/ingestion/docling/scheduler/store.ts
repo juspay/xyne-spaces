@@ -16,7 +16,8 @@ import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { getContextOrNull } from '@/database/tenant/context';
-import { IngestionStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { IngestionStatus } from '@xyne/shared';
 import {
   DOCLING_FILE_STATUS,
   DOCLING_PART_STATUS,
