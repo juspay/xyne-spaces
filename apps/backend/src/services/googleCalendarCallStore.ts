@@ -142,6 +142,7 @@ export async function storeGCalEventAsCall(
       endsAt,
       timezone: event.start?.timeZone ?? 'UTC',
       xyneManaged,
+      channelId: xyneManaged ? (event.extendedProperties?.private?.xyneChannelId ?? null) : null,
       metadata: {
         provider: 'google',
         calendarOwnerEmail,

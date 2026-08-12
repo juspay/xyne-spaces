@@ -82,6 +82,8 @@ export const CLEARED_CONFERENCE_DATA = null;
 export interface ReconcileConferenceOptions {
   roomLink: string;
   xyneCallId: string;
+  /** Organizer's self-DM channel backing the Call row, so joinCall can resolve a real Channel. */
+  channelId: string;
   /** True for internal-only events — also clears the existing conference entry. */
   replaceConference: boolean;
 }
@@ -98,6 +100,7 @@ function buildPatchBody(event: GCalEvent, options: ReconcileConferenceOptions) {
         xyneManaged: 'true',
         xyneCallId: options.xyneCallId,
         xyneRoomLink: options.roomLink,
+        xyneChannelId: options.channelId,
       },
     },
   };

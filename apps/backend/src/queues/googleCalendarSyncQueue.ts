@@ -112,7 +112,9 @@ async function performManualSync(sourceId: string): Promise<void> {
       MAX_CALENDAR_EVENTS_PER_SYNC
     );
 
-    const reconciledEvents = await reconcileXyneCallLinks(events, credentials, user.email);
+    const reconciledEvents = await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      reconcileXyneCallLinks(events, credentials, user.email, user.workspaceId),
+    );
 
     await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
       storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, {
@@ -172,7 +174,9 @@ async function performIncrementalSync(
       MAX_CALENDAR_EVENTS_PER_SYNC
     );
 
-    const reconciledEvents = await reconcileXyneCallLinks(events, credentials, user.email);
+    const reconciledEvents = await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      reconcileXyneCallLinks(events, credentials, user.email, user.workspaceId),
+    );
 
     await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
       storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, {
@@ -215,7 +219,9 @@ async function performIncrementalSync(
         MAX_CALENDAR_EVENTS_PER_SYNC
       );
 
-      const reconciledEvents = await reconcileXyneCallLinks(events, credentials, user.email);
+      const reconciledEvents = await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+        reconcileXyneCallLinks(events, credentials, user.email, user.workspaceId),
+      );
 
       await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
         storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, {
@@ -239,7 +245,7 @@ async function performIncrementalSync(
     }
 
     await runWithContext({ userId, workspaceId: user.workspaceId }, async () => {
-      const reconciledEvents = await reconcileXyneCallLinks(result.events, credentials, user.email);
+      const reconciledEvents = await reconcileXyneCallLinks(result.events, credentials, user.email, user.workspaceId);
       await storeGCalEventsAsCallsForUser(reconciledEvents, userId, user.email, { isFullSync: false });
     });
 

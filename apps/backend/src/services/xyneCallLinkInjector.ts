@@ -29,7 +29,7 @@
 import { type GCalEvent } from '@/services/googleCalendarCallStore';
 import { type CalendarCredentials } from '@/services/calendarTokenRefresh';
 import { isTeamEligible } from '@/services/calendarSyncConfig';
-import { resolveXyneCallForEvent } from '@/services/xyneCallService';
+import { resolveXyneCallForEvent, resolveXyneChannelForUser } from '@/services/xyneCallService';
 import { reconcileEventConference, escapeHtmlAttribute } from '@/services/calendarConferencePatcher';
 import { buildCalendarExternalId } from '@/services/calendarCallStore.utils';
 import { DatabaseClient } from '@/database/client';
@@ -100,7 +100,8 @@ function isAlreadyReconciled(event: GCalEvent, internalOnly: boolean): boolean {
 async function reconcileOne(
   event: GCalEvent,
   credentials: CalendarCredentials,
-  userEmail: string
+  userEmail: string,
+  workspaceId: string
 ): Promise<GCalEvent> {
 
 
@@ -131,6 +132,7 @@ async function reconcileOne(
 
   try {
     const { roomLink, isNew } = await resolveXyneCallForEvent(credentials.userId, event.id!);
+    const channelId = await resolveXyneChannelForUser(credentials.userId, workspaceId);
     logger.info(`${TAG} ${isNew ? 'call_created' : 'call_recovered'}`, {
       eventId: event.id,
       internalOnly,
@@ -140,6 +142,7 @@ async function reconcileOne(
     const patched = await reconcileEventConference(credentials.accessToken, event, {
       roomLink,
       xyneCallId,
+      channelId,
       replaceConference: internalOnly,
     });
 
@@ -165,12 +168,13 @@ async function reconcileOne(
 export async function reconcileXyneCallLinks(
   events: GCalEvent[],
   credentials: CalendarCredentials,
-  userEmail: string
+  userEmail: string,
+  workspaceId: string
 ): Promise<GCalEvent[]> {
   const results: GCalEvent[] = [];
   for (const event of events) {
     try {
-      results.push(await reconcileOne(event, credentials, userEmail));
+      results.push(await reconcileOne(event, credentials, userEmail, workspaceId));
     } catch (err) {
       logger.error(`${TAG} Unexpected reconciliation error, storing original event`, {
         eventId: event.id,

@@ -1936,7 +1936,8 @@ export class CallRepository {
     endsAt?: Date;
     timezone: string;
     xyneManaged?: boolean;
-    channelId: null;
+    /** Self-DM channel backing a Xyne-managed calendar call; null for a plain mirrored (unmanaged) event. */
+    channelId: string | null;
     isRecurring: boolean;
     recordingEnabled: boolean;
     startedAt: Date;
@@ -1955,12 +1956,14 @@ export class CallRepository {
       endsAt: true,
       timezone: true,
       xyneManaged: true,
+      channelId: true,
       metadata: true,
     });
 
     if (!existing) {
-      // No channel to denormalize from (external calendar calls have channelId=null),
-      // so inherit the workspace of the organizer who owns the calendar sync.
+      // Xyne-managed calendar calls carry a resolved self-DM channelId; plain
+      // mirrored (unmanaged) events have none, so inherit the workspace of the
+      // organizer who owns the calendar sync instead of denormalizing from a channel.
       const workspaceId = await resolveWorkspaceIdFromModel(DatabaseClient.getInstance(), 'user', { id: data.createdByUserId });
       await DatabaseClient.getInstance().call.create({ data: { ...data, workspaceId } });
       queueCallVespaFeed(data.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallCreate });
@@ -1980,6 +1983,7 @@ export class CallRepository {
         endsAt: data.endsAt,
         timezone: data.timezone,
         xyneManaged: data.xyneManaged ?? false,
+        channelId: data.channelId,
         metadata: data.metadata,
         updatedAt: data.updatedAt,
         lastActivityAt: data.lastActivityAt,
@@ -2015,6 +2019,7 @@ interface ExistingCallRow {
   endsAt: Date | null;
   timezone: string;
   xyneManaged: boolean;
+  channelId: string | null;
   metadata: Prisma.JsonValue;
 }
 
@@ -2040,6 +2045,7 @@ function hasExternalCallChanged(
     endsAt?: Date;
     timezone: string;
     xyneManaged?: boolean;
+    channelId: string | null;
     metadata: Prisma.InputJsonObject;
   },
 ): boolean {
@@ -2052,6 +2058,7 @@ function hasExternalCallChanged(
     existing.endsAt?.getTime() !== data.endsAt?.getTime() ||
     existing.timezone !== data.timezone ||
     existing.xyneManaged !== (data.xyneManaged ?? false) ||
+    existing.channelId !== data.channelId ||
     stableStringify(existing.metadata) !== stableStringify(data.metadata)
   );
 }

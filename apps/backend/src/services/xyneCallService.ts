@@ -10,8 +10,8 @@
  * route, since Calendar invitees — internal or external — shouldn't need a
  * Xyne account just to open the link (PRD: OPEN access, anyone with the link
  * can request or join). Actual persistence of the Call row (xyneManaged,
- * roomLink) happens through the existing storeGCalEventAsCall upsert pipeline
- * once the Calendar PATCH succeeds.
+ * roomLink, channelId) happens through the existing storeGCalEventAsCall
+ * upsert pipeline once the Calendar PATCH succeeds.
  */
 
 import { repositories } from '@/database/repositories';
@@ -44,4 +44,23 @@ export async function resolveXyneCallForEvent(
 
   const roomLink = buildCallInviteUrl(externalId);
   return { roomLink, isNew: !existing };
+}
+
+/**
+ * Resolves (or creates) the organizer's self-DM channel to back a Xyne-managed
+ * calendar call. The join API (`joinCall`) requires `call.channelId` to resolve
+ * a real Channel before it will create the LiveKit room on first join — without
+ * one it fails with "Channel not found", since calendar-mirrored calls are
+ * otherwise created with channelId=null (see calendarCallStore.utils.ts).
+ */
+export async function resolveXyneChannelForUser(
+  userId: string,
+  workspaceId: string
+): Promise<string> {
+  return repositories.channels.findOrCreateDMChannel(
+    userId,
+    [userId],
+    repositories.channelParticipants,
+    workspaceId
+  );
 }

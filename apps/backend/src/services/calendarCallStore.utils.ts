@@ -44,6 +44,8 @@ export interface ExternalCalendarCallData {
   endsAt?: Date;
   timezone: string;
   xyneManaged?: boolean;
+  /** Self-DM channel backing a Xyne-managed call so LiveKit room creation on join succeeds. */
+  channelId?: string | null;
   metadata: Prisma.InputJsonObject;
 }
 
@@ -88,7 +90,7 @@ export async function upsertExternalCalendarCall(
     endsAt: data.endsAt,
     timezone: data.timezone,
     xyneManaged: data.xyneManaged ?? false,
-    channelId: null,
+    channelId: data.channelId ?? null,
     isRecurring: false,
     recordingEnabled: false,
     startedAt: now,
