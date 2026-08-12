@@ -376,6 +376,28 @@ const electronAPI = {
     dragEnd: () => ipcRenderer.send('recording-pill:drag-end'),
   },
 
+  platform: process.platform,
+
+  tray: {
+    getVisible: () => ipcRenderer.invoke('tray:get-visible'),
+    setVisible: (visible: boolean) => ipcRenderer.send('tray:set-visible', visible),
+    onVisibleChanged: (callback: (visible: boolean) => void) => {
+      const listener = (_event: unknown, visible: boolean) => callback(visible);
+      ipcRenderer.on('tray:visible-changed', listener);
+      return () => ipcRenderer.removeListener('tray:visible-changed', listener);
+    },
+  },
+
+  recordingPillSettings: {
+    getEnabled: () => ipcRenderer.invoke('recording-pill:get-enabled'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('recording-pill:set-enabled', enabled),
+    onEnabledChanged: (callback: (enabled: boolean) => void) => {
+      const listener = (_event: unknown, enabled: boolean) => callback(enabled);
+      ipcRenderer.on('recording-pill:enabled-changed', listener);
+      return () => ipcRenderer.removeListener('recording-pill:enabled-changed', listener);
+    },
+  },
+
   clawOverlay: {
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('claw:set-ignore-mouse', ignore),
     setExpanded: (expanded: boolean) => ipcRenderer.send('claw:set-expanded', expanded),

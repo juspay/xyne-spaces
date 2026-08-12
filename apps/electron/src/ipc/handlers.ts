@@ -16,12 +16,18 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
-import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-window';
+import {
+  isPillSender,
+  isRecordingPillEnabled,
+  setRecordingPillTheme,
+} from '../services/recording-pill-window';
+import { isTrayVisible, setTrayVisible } from '../services/tray';
 import {
   focusMainWindow,
   markRendererReady,
   resumeRecordingFromOutside,
   setOverlayMinimized,
+  setRecordingPillEnabled,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
@@ -134,6 +140,23 @@ function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     errorLogger.warn('[ipc] Blocked privileged IPC from untrusted sender');
   }
   return trusted;
+}
+
+function isAppWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  const trusted =
+    !!frame && frame.parent === null && !!BrowserWindow.fromWebContents(event.sender);
+  if (!trusted) {
+    errorLogger.warn('[ipc] Blocked UI-preference IPC from untrusted sender');
+  }
+  return trusted;
+}
+
+function broadcastToAppWindows(channel: string, value: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send(channel, value);
+  }
 }
 
 // XYNE-16859 Issue 24: the error-report screen/mic capture handlers can enumerate
@@ -566,6 +589,22 @@ export function setupIpcHandlers(): void {
   ipcMain.on('recording-pill:resume-recording', (event) => {
     if (!isPillSender(event)) return;
     resumeRecordingFromOutside('pill');
+  });
+
+  ipcMain.handle('tray:get-visible', () => isTrayVisible());
+
+  ipcMain.on('tray:set-visible', (event, visible: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setTrayVisible(!!visible);
+    broadcastToAppWindows('tray:visible-changed', isTrayVisible());
+  });
+
+  ipcMain.handle('recording-pill:get-enabled', () => isRecordingPillEnabled());
+
+  ipcMain.on('recording-pill:set-enabled', (event, enabled: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setRecordingPillEnabled(!!enabled);
+    broadcastToAppWindows('recording-pill:enabled-changed', isRecordingPillEnabled());
   });
 
   ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {

@@ -41,7 +41,9 @@ export {
 export {
   resolveBoardAdditionalFields,
   buildLatestEntityWideValueByField,
+  resolveLeftoverFieldValues,
   type ResolvedBoardAdditionalField,
+  type LeftoverFieldValue,
 } from './boardFormEntityValues';
 
 export {

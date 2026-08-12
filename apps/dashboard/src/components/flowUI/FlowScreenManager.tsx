@@ -106,6 +106,9 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
         }
 
         case 'ack':
+          // `ack` carries an optional message; only show a toast when one is set,
+          // so a handler can acknowledge silently.
+          if (response.message) toast.success(response.message);
           break;
 
         case 'error':

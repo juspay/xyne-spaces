@@ -27,6 +27,7 @@ export type FlowComponentType =
   | 'pr'
   | 'pr_approval'
   | 'call_schedule'
+  | 'agent'
   | 'slash_command_artifact';
 
 export interface FlowComponent {
@@ -70,7 +71,8 @@ export type FlowAction =
   | { type: 'inputChange'; actionId: string; debounceMs?: number }
   | { type: 'update_state'; stateUpdates: Record<string, unknown>; successMessage?: string }
   | { type: 'close_screen'; finalMessage?: string }
-  | { type: 'navigate'; target: string };
+  | { type: 'navigate'; target: string }
+  | { type: 'copy'; value: string; successMessage?: string };
 
 // ============================================================================
 // VALIDATION RULES

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { AppController } from '../controllers/appController';
 import { incomingWebhookController } from '../controllers/incomingWebhookController';
@@ -32,7 +32,13 @@ const platformRegistry = new PlatformAdapterRegistry();
 
 platformRegistry.register(new SlackAdapter());
 
+// Type-prefixed webhook routes must stay ABOVE the 3-segment catch-all below,
+// otherwise the prefix is captured as :workspaceId.
 router.post('/webhooks/sentinel/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleSentinelIncoming);
+// Amazon SNS posts JSON with `Content-Type: text/plain`, which the global
+// express.json() ignores — parse the body as text here and JSON.parse it in the
+// controller.
+router.post('/webhooks/sns/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handleAmazonSnsIncoming);
 router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
 const commandController = new CommandController();
 
