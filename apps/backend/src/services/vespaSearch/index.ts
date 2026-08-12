@@ -7,6 +7,7 @@ import {
   type TransformedSearchResult,
 } from './resultTransform';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
@@ -311,9 +312,36 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
             cluster: config.cluster,
           });
           const fields = (raw?.fields ?? {}) as Record<string, any>;
-          // Enforce the same per-user gate the YQL-based search does.
+          // Access rule:
+          //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
+          //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
+          //     OR a participant of the doc's chat channel (`channelRef`).
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
-          if (perms.length > 0 && !perms.includes(userId)) {
+          const isOwner = fields.ownerId === userId;
+          const isShared = perms.includes(userId);
+          const isPublic = fields.isPrivate === false;
+          // Private docs: owner or explicit `permissions` only.
+          // Public docs: owner, `permissions`, OR a participant of the doc's
+          // chat channel (via `channelRef`).
+          let allowed = isOwner || isShared;
+          // Channel-participant access: a doc may belong to a chat channel via
+          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
+          // Only consulted for public docs, and only when the cheaper checks
+          // above didn't already pass.
+          if (!allowed && isPublic) {
+            const channelRef =
+              typeof fields.channelRef === 'string' ? fields.channelRef : '';
+            const channelId = channelRef ? (channelRef.split('::').pop() ?? '') : '';
+            if (channelId) {
+              const participant =
+                await repositories.channelParticipants.findParticipant(
+                  channelId,
+                  userId,
+                );
+              allowed = participant !== null;
+            }
+          }
+          if (!allowed) {
             res.status(403).json({ success: false, error: 'Forbidden' });
             return;
           }
