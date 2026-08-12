@@ -13,6 +13,7 @@ import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
+import { resolvePlaintextMentions } from '@/utils/resolvePlaintextMentions';
 import { redisService } from '@/services/redisService';
 
 const ChatActionBodySchema = z.object({
@@ -265,9 +266,13 @@ export class ChatController {
         content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">Flow JSON</div>`;
         isMarkdown = false;
       } else if (markdownText) {
-        content = sanitizeMessageContent(markdownText);
+        content = sanitizeMessageContent(
+          await resolvePlaintextMentions(markdownText, resolvedChannelId),
+        );
       } else if (contentFormat === ContentFormat.MARKDOWN) {
-        content = sanitizeMessageContent(text || '');
+        content = sanitizeMessageContent(
+          await resolvePlaintextMentions(text || '', resolvedChannelId),
+        );
       } else {
           content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }
