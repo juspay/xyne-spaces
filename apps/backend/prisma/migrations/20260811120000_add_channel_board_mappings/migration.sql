@@ -7,10 +7,9 @@ CREATE TABLE "public"."channel_board_mappings" (
     "channelId" TEXT NOT NULL,
     "boardId" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
-    "isDefault" BOOLEAN NOT NULL DEFAULT false,
+    "isDefault" BOOLEAN NOT NULL,
     "createdBy" TEXT NOT NULL,
-    "updatedBy" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "channel_board_mappings_pkey" PRIMARY KEY ("id")
