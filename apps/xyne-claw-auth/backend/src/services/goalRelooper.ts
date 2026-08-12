@@ -142,7 +142,13 @@ function buildSessionTraceDigest(args: {
 }
 
 export type SlashIntercept =
-  | { kind: "goalStarted"; condition: string; firstTurnTask: string; replyToUser: string }
+  | {
+      kind: "goalStarted";
+      condition: string;
+      firstTurnTask: string;
+      replyToUser: string;
+      providerOverride?: { provider: string; model?: string };
+    }
   | { kind: "goalStatusReply"; replyToUser: string }
   | { kind: "goalCleared"; replyToUser: string }
   | { kind: "passthrough" };
@@ -209,6 +215,7 @@ export async function handleSlashCommandBeforeRun(args: {
     kind: "goalStarted",
     condition: command.condition,
     firstTurnTask: NEXT_TURN_TASK_TEMPLATE(command.condition),
+    ...(command.providerOverride ? { providerOverride: command.providerOverride } : {}),
     // Don't echo the condition back — the user just typed it, the thread
     // already contains it. A short, fixed ack keeps the thread clean even
     // when the goal is multi-paragraph.

@@ -1964,7 +1964,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? slash
       : null;
   const intercept = await handleSlashCommandBeforeRun({ command: goalCommand, conversationId: payload.conversationId });
-  let pendingGoalStart: { condition: string } | null = null;
+  let pendingGoalStart: { condition: string; providerOverride?: { provider: string; model?: string } } | null = null;
   let task: string;
   if (intercept.kind === "goalStatusReply" || intercept.kind === "goalCleared") {
     await spacesAppFetch("/chat/postMessage", {
@@ -1985,7 +1985,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         ? `The user ran /compact. Summarize the conversation so far concisely, focusing on: ${slash.instructions}. Then we continue.`
         : "The user ran /compact. Give a concise summary of the conversation so far so we can continue with a smaller context.";
   } else if (intercept.kind === "goalStarted") {
-    pendingGoalStart = { condition: intercept.condition };
+    pendingGoalStart = {
+      condition: intercept.condition,
+      ...(intercept.providerOverride ? { providerOverride: intercept.providerOverride } : {}),
+    };
     task = intercept.firstTurnTask;
     // Show "Starting /goal…" on the ephemeral progress spinner (same surface as
     // tool calls), not as a permanent chat message — the goal loop's meta lines
@@ -2755,6 +2758,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // "parent" (inherit parent's provider) or "spaces" (platform default).
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
+      // `/goal provider=… model=…` pins every turn of the autonomous loop.
+      // The full dispatch body is persisted below and re-used by the relooper.
+      ...(pendingGoalStart?.providerOverride ? { providerOverride: pendingGoalStart.providerOverride } : {}),
       ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
       ...(inboundRecordingRefs.length > 0 ? { recordingRefs: inboundRecordingRefs } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
