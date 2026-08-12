@@ -210,12 +210,22 @@ export class DeskMetricsRepository {
       .map(v => { const i = v.indexOf(':'); return i === -1 ? null : { cat: v.slice(0, i), tag: v.slice(i + 1) }; })
       .filter((p): p is { cat: string; tag: string } => p !== null);
 
+    // Shared fragment: resolves the latest email for a ticket's conversation.
+    // Uses ORDER BY createdAt DESC, id DESC (clock-independent) so it works for
+    // both inbound and outbound emails without depending on lastEmailAt equality.
+    // Tags are read from the ticket's LATEST email only (matches Vespa mapper).
+    const latestEmailId = (conversationIdCol: string) => Prisma.sql`(
+      SELECT e2.id FROM "public"."emails" e2
+      WHERE e2."conversationId" = ${Prisma.raw(conversationIdCol)}
+      ORDER BY e2."createdAt" DESC, e2.id DESC
+      LIMIT 1
+    )`;
+
     const tagExists: Prisma.Sql =
       tagPairs.length > 0
         ? Prisma.sql`AND EXISTS (
             SELECT 1 FROM "public"."tickets" ft
-            JOIN "public"."emails" e ON e."conversationId" = ft."conversationId"
-              AND e."createdAt" = ft."lastEmailAt"
+            JOIN "public"."emails" e ON e.id = ${latestEmailId('ft."conversationId"')}
             JOIN non_zero.tags tg
               ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
               AND (${tagPairs
@@ -447,8 +457,12 @@ export class DeskMetricsRepository {
             SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category, tg.tag
             FROM cohort c
             JOIN "public"."tickets" t ON t.id = c."ticketId"
-            JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
-              AND e."createdAt" = t."lastEmailAt"
+            JOIN "public"."emails" e ON e.id = (
+              SELECT e2.id FROM "public"."emails" e2
+              WHERE e2."conversationId" = t."conversationId"
+              ORDER BY e2."createdAt" DESC, e2.id DESC
+              LIMIT 1
+            )
             JOIN non_zero.tags tg
               ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
           ) deduped
@@ -513,8 +527,12 @@ export class DeskMetricsRepository {
           SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category
           FROM cohort c
           JOIN "public"."tickets" t ON t.id = c."ticketId"
-          JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
-            AND e."createdAt" = t."lastEmailAt"
+          JOIN "public"."emails" e ON e.id = (
+            SELECT e2.id FROM "public"."emails" e2
+            WHERE e2."conversationId" = t."conversationId"
+            ORDER BY e2."createdAt" DESC, e2.id DESC
+            LIMIT 1
+          )
           JOIN non_zero.tags tg
             ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
         )
@@ -538,8 +556,12 @@ export class DeskMetricsRepository {
           SELECT DISTINCT c."ticketId", tg."tagCategory" AS tag_category, tg.tag
           FROM cohort c
           JOIN "public"."tickets" t ON t.id = c."ticketId"
-          JOIN "public"."emails" e ON e."conversationId" = t."conversationId"
-            AND e."createdAt" = t."lastEmailAt"
+          JOIN "public"."emails" e ON e.id = (
+            SELECT e2.id FROM "public"."emails" e2
+            WHERE e2."conversationId" = t."conversationId"
+            ORDER BY e2."createdAt" DESC, e2.id DESC
+            LIMIT 1
+          )
           JOIN non_zero.tags tg
             ON tg."sourceId" = e.id AND tg."sourceType" = 'desk-email' AND tg."isDeleted" = false
         )
