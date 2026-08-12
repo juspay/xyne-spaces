@@ -2658,6 +2658,9 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
         onPlan: async (sid, todos) => {
           await postProgress({ sessionId: sid, kind: "plan", todos });
         },
+        onUiWidget: async (sid, widget) => {
+          await postProgress({ sessionId: sid, kind: "ui-widget", widget });
+        },
         onProgressLabel: async (sid, payload) => {
           await postProgress({ sessionId: sid, ...payload });
         },

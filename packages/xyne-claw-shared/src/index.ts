@@ -1,5 +1,8 @@
 export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse, UserQuestion, UserQuestionType } from "./tools/types.js";
+export { isUiWidget } from "./types/ui-widget.js";
+export type { UiWidget, UiWidgetType } from "./types/ui-widget.js";
 export { getAllCustomTools, getCustomTool, getToolsBySource } from "./tools/registry.js";
+export { publishUiWidget } from "./tools/ui-widget.js";
 export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/add-citations/tools.js";
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";
 export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, type SubagentDefinition, type AgentToolsConfig } from "./tools/subagents/index.js";

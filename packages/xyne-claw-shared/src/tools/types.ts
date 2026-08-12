@@ -3,8 +3,10 @@
  * and xyne-claw (for execution).
  */
 
-import type { Todo } from "../flow/plan-flow.js";
 import type { Citation } from "../types/citation.js";
+import type { UiWidget, UserQuestion } from "../types/ui-widget.js";
+
+export type { UiWidget, UserQuestion, UserQuestionType } from "../types/ui-widget.js";
 
 export interface ToolInputSchema {
   type: "object";
@@ -26,18 +28,6 @@ export interface PendingQuestion {
   question?: string;
   options?: string[];
   purpose?: "clarification" | "follow_up_suggestions";
-}
-
-export type UserQuestionType = "single_choice" | "multiple_choice" | "open_ended";
-
-export interface UserQuestion {
-  id: string;
-  label?: string;
-  question: string;
-  type: UserQuestionType;
-  options?: string[];
-  required?: boolean;
-  placeholder?: string;
 }
 
 export interface PendingResponse {
@@ -67,8 +57,11 @@ export interface ToolExecutionContext {
   pendingResponses?: PendingResponse[];
   /** Progress URL for streaming tool invocations to the frontend (claw agent only) */
   progressUrl?: string;
-  /** In-process progress emitter for SSE-only plan cards (claw agent only) */
-  emitPlan?: (todos: Todo[]) => void;
+  /**
+   * Publish typed widget data through whichever transport this run uses.
+   * The runtime owns HTTP-vs-SSE selection; tools must not depend on it.
+   */
+  emitUiWidget?: (widget: UiWidget) => Promise<void>;
   /** Session ID for this agent run (claw agent only) */
   sessionId?: string;
   /** S2S key for authenticating with the progress endpoint (claw agent only) */
