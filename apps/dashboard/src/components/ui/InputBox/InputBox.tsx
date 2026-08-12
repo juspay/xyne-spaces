@@ -761,7 +761,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             // being empty so normal editing of a populated table is untouched.
             for (let depth = $from.depth; depth > 0; depth--) {
               const ancestor = $from.node(depth);
-              if (ancestor.type.spec.tableRole === 'table') {
+              if (ancestor.type.spec['tableRole'] === 'table') {
                 if (ancestor.textContent.trim() === '') {
                   event.preventDefault();
                   editor.chain().focus().deleteTable().run();
@@ -779,7 +779,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               const nodeBefore = view.state.doc.resolve(blockStart).nodeBefore;
               if (
                 nodeBefore &&
-                nodeBefore.type.spec.tableRole === 'table' &&
+                nodeBefore.type.spec['tableRole'] === 'table' &&
                 nodeBefore.textContent.trim() === ''
               ) {
                 event.preventDefault();
