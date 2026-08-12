@@ -1663,6 +1663,7 @@ model Board {
   mainReleaseApplications Application[] @relation("MainReleaseBoardApplications")
   ownedApplication        Application?  @relation("ApplicationBoard")
   incomingWebhooks      AppIncomingWebhook[]
+  channelMappings       ChannelBoardMapping[]
 
   @@unique([name, projectId])
   @@index([projectId])
@@ -1774,6 +1775,7 @@ model Channel {
   incomingWebhooks   AppIncomingWebhook[]
   canvasFolders      CanvasFolder[]
   emails             Email[]
+  boardMappings      ChannelBoardMapping[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -1783,6 +1785,30 @@ model Channel {
   @@index([workspaceId, id])
   @@index([workspaceId, name, id])
   @@map("channels")
+  @@schema("public")
+}
+
+// Links channels to zero or more boards. Board.projectId remains the source of
+// project ownership for ticket-producing operations.
+model ChannelBoardMapping {
+  id          String   @id @default(cuid())
+  channelId   String
+  boardId     String
+  workspaceId String
+  isDefault   Boolean  @default(false)
+  createdBy   String
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  board   Board   @relation(fields: [boardId], references: [id])
+
+  @@unique([channelId, boardId])
+  @@index([channelId])
+  @@index([boardId])
+  @@index([workspaceId, channelId])
+  @@map("channel_board_mappings")
   @@schema("public")
 }
 
