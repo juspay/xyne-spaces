@@ -301,8 +301,21 @@ export class ConversationParticipantRepository extends BaseRepository<
       userId,
       isSubscribed: true,
       lastReplyAt: { not: null },
-      // Skip orphan participants so a missing required conversation does not fail the entire query.
-      conversation: { is: {} },
+      // Restrict the Threads inbox to channels the user actually belongs to.
+      // A participant row alone (e.g. created by an @mention) is not enough: the
+      // shared ConversationParticipantsACL allows any PUBLIC channel, so without
+      // this predicate a user sees threads in public channels they never joined.
+      // Requiring channel membership here (ANDed with the ACL) also skips orphan
+      // participants whose required conversation is missing.
+      conversation: {
+        is: {
+          channel: {
+            is: {
+              participants: { some: { userId } },
+            },
+          },
+        },
+      },
       ...sectionWhere,
     });
 
