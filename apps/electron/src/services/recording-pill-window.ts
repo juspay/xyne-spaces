@@ -19,14 +19,21 @@ let displayRemovedHandler: (() => void) | null = null;
 let displayDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 let savedPosition: { x: number; y: number } | null = null;
-let currentStartTime: number | null = null;
+let currentState: RecordingPillState | null = null;
 let currentTheme: RecordingPillTheme = 'light';
 
 export type RecordingPillTheme = 'light' | 'dark';
 
+export interface RecordingPillState {
+  startTime: number;
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
+}
+
 const GUTTER = 32;
-const CARD_EXPANDED_WIDTH = 96;
-const CARD_MAX_HEIGHT = 110;
+const CARD_EXPANDED_WIDTH = 92;
+const CARD_MAX_HEIGHT = 98;
 const WINDOW_WIDTH = CARD_EXPANDED_WIDTH + GUTTER * 2;
 const WINDOW_HEIGHT = CARD_MAX_HEIGHT + GUTTER * 2;
 const EDGE_MARGIN = 20;
@@ -165,20 +172,25 @@ function stopDrag(): void {
   persistPosition(clamped);
 }
 
-export function showRecordingPill(recordingStartTime?: number): void {
+export function showRecordingPill(state: RecordingPillState): void {
+  const wasHiding = hideTimer !== null;
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
 
-  currentStartTime = recordingStartTime ?? Date.now();
+  currentState = state;
   pillRequested = true;
 
   if (pillWindow && !pillWindow.isDestroyed()) {
-    applyIgnoreMouseEvents(true);
     pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
-    pillWindow.webContents.send('recording-pill:show', currentStartTime);
-    if (!pillWindow.isVisible()) pillWindow.showInactive();
+    pillWindow.webContents.send('recording-pill:show', currentState);
+    if (!pillWindow.isVisible() || wasHiding) {
+      applyIgnoreMouseEvents(true);
+    }
+    if (!pillWindow.isVisible()) {
+      pillWindow.showInactive();
+    }
     return;
   }
 
@@ -256,9 +268,9 @@ export function showRecordingPill(recordingStartTime?: number): void {
       )
       .catch((error) => log.warn('[RecordingPill] Failed to inject layout CSS', error));
     applyIgnoreMouseEvents(true);
-    if (!pillRequested) return;
+    if (!pillRequested || !currentState) return;
     pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
-    pillWindow.webContents.send('recording-pill:show', currentStartTime ?? Date.now());
+    pillWindow.webContents.send('recording-pill:show', currentState);
     pillWindow.showInactive();
   });
 
