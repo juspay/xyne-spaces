@@ -227,17 +227,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
-    // "Does a DM already exist for this pair?" is a WORKSPACE-level question, not a
-    // "my rows" question. The default db client ANDs the per-user channel ACL onto every
-    // read (PUBLIC OR participants.some.userId = caller). A caller who is not a participant
-    // of the target DM — e.g. an automation submitter probing an admin's bot DM during the
-    // approval fan-out — would therefore never see the existing PRIVATE DM, get null back,
-    // and mint a duplicate. Run the existence probe under withWorkspaceScope so it executes
-    // as a service actor (workspace scope only, per-user predicate dropped). Tenant
-    // isolation is unchanged; only the participant filter is skipped.
-    //
-    // orderBy createdAt asc makes resolution deterministic: if duplicates already exist,
-    // every caller collapses onto the SAME (oldest) canonical DM instead of a random one.
+    // Run the existence probe under withWorkspaceScope (service actor) so the per-user
+    // channel ACL is dropped and only workspace scope applies — otherwise a non-participant
+    // caller (e.g. an automation submitter probing an admin's bot DM) never sees the existing
+    // PRIVATE DM and mints a duplicate. orderBy asc pins the oldest as the canonical match.
     return withWorkspaceScope(async () => {
       // Self-DM: channel name is stored as single userId, scopeType DM
       if (userId1 === userId2) {
