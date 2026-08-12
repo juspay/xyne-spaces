@@ -18,13 +18,12 @@ export const CardShell: React.FC<{
   style?: React.CSSProperties | undefined;
 }> = ({ children, style }) => (
   <div
-    // Fills its container up to 700px. Width tracks the thread rather than being
-    // pinned like the plan card's 450px: this artifact carries capability chips
-    // that wrap, so the extra room keeps a row like "MCP" on one line instead of
-    // stacking, and it still narrows cleanly on mobile. Height stays auto — it
-    // grows with content. Border, fill and radius stay identical to the plan card
-    // so the two read as one system in the thread.
-    className='flex w-full max-w-[700px] flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
+    // Same fixed 450px as the plan card (PlanNode's own CardShell), so the two
+    // artifacts sit at one width in the thread instead of the agent card running
+    // ~250px wider. `max-w-full` caps it on containers narrower than 450px
+    // (mobile). Height stays auto — it grows with content. Border, fill and
+    // radius already matched the plan card; now the width does too.
+    className='flex w-[450px] max-w-full flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
     style={style}
   >
     {children}

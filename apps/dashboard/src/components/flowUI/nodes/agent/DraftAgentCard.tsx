@@ -1,29 +1,33 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { MaximizeFourArrow, Spinner } from '@xyne/icons';
+import { MaximizeTwoArrow, Spinner } from '@xyne/icons';
 import type { AgentDraftProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
 import { useAgentProgress } from '../../../../hooks/useAgentProgress';
 import { cn } from '../../../../utils/classNames';
-import { AuditLine, CardShell, Mention, StatusChip, formatDecisionTime } from '../cardPrimitives';
+import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
-import { AgentIdentityBlock, AgentConnectPrompt } from './AgentIdentityBlock';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
  * the requester's decision.
  *
- *   pending  → capability chips are toggles; Approve / Decline in the footer.
- *   created  → Created chip, identity read-only, audit footer.
- *   rejected → Rejected chip, identity read-only, audit footer.
+ *   pending  → Decline / Edit / Create Agent in the footer.
+ *   created  → Created chip, audit footer.
+ *   rejected → Declined chip, audit footer.
  *
- * All three render the SAME identity block; the backend updates this card in
- * place (same screenId + component id) rather than posting a new message, so
- * the thread keeps one card per draft.
+ * Laid out to the "Agent Create" frame: a white inset panel carrying the
+ * identity (kind + state, name, @slug, description) over a flat footer of
+ * controls. The identity here is deliberately INLINE rather than the shared
+ * AgentIdentityBlock — that block is the richer profile/preview presentation
+ * (blue mention slug, model, capability chips, detail rows), and this frame
+ * draws a plainer subset. AgentIdentityBlock still backs the expanded preview,
+ * so the detailed view stays in one place.
  *
- * Selection lives in flow-state under this component's id, which is what the
- * server reads on submit. It can only NARROW the grant — the backend intersects
- * whatever arrives with the capabilities it resolved itself.
+ * Capability chips are NOT rendered on the card for now (see AgentPreview for
+ * the full list). Selection state is still seeded into flow-state below so the
+ * server receives the complete capability set on approve — hiding the chips
+ * must not silently narrow the grant.
  */
 export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftProps }> = ({
   node,
@@ -88,10 +92,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     }
   };
 
-  // The artifact's state rides beside the agent's name (the design's "Beta"
-  // pill position), which is what lets the card drop its header bar entirely.
-  // The chip itself is the plan card's StatusChip, tone for tone, so the two
-  // artifacts label their state identically.
   const statePill =
     props.phase === 'created' ? (
       <StatusChip label='Created' />
@@ -101,8 +101,9 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       <StatusChip label='Draft' tone='muted' />
     );
 
-  // Built as nodes, not a string, so the actor renders as a mention.
-  const decidedAtLabel = formatDecisionTime(props.decidedAt);
+  // Built as nodes, not a string, so the actor renders as a mention. No decision
+  // time — the chin names who decided, not when; the message's own timestamp in
+  // the thread already places it.
   const auditNode = (
     <div className='flex min-w-0 items-center gap-1.5'>
       {/* Same avatar treatment as the reply tray — the decider is a person, so
@@ -118,97 +119,155 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
             <Mention handle={props.decidedBy} />
           </>
         )}
-        {decidedAtLabel && ` · ${decidedAtLabel}`}
       </AuditLine>
     </div>
   );
 
   const approveLabel =
-    pending === 'approve' ? 'Creating…' : agentRunning ? 'Agent is working…' : 'Create agent';
+    pending === 'approve' ? 'Creating…' : agentRunning ? 'Agent is working…' : 'Create Agent';
 
   const interactive = decided ? undefined : { selected, onToggle: toggle, disabled: locked };
 
-  // Approve / Decline controls, shared by the compact card footer AND the
+  // Footer button shapes from the frame: text-only for the secondary actions, a
+  // bordered surface for the primary one.
+  const ghostButton = cn(
+    'inline-flex h-7 items-center gap-1.5 rounded-[10px] px-1.5',
+    'text-sm font-semibold leading-5 text-foreground',
+    'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+  );
+  const primaryButton = cn(
+    'inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-1.5',
+    'text-sm font-semibold leading-5 text-foreground',
+    'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+  );
+
+  // Decline / Edit / Create Agent — shared by the compact footer AND the
   // expanded preview footer (submit() closes the preview on a decision).
   const actionControls = (
-    <div className='flex shrink-0 items-center gap-2'>
-      {agentRunning && (
-        <span className='hidden text-xs text-muted-foreground sm:inline'>
-          Approve once it finishes.
-        </span>
-      )}
+    <div className='flex w-full items-center justify-between gap-3'>
       <button
         type='button'
         onClick={() => void submit('agent-draft-decline')}
         disabled={locked}
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-lg border border-transparent px-2 py-1.5',
-          'text-sm font-medium leading-[1.2] text-muted-foreground',
-          'hover:bg-foreground/[0.04] hover:text-foreground',
-          'disabled:cursor-not-allowed disabled:opacity-60',
-        )}
+        className={cn(ghostButton, 'px-2.5')}
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_DECLINE'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {pending === 'reject' ? 'Declining…' : 'Decline'}
       </button>
-      <button
-        type='button'
-        onClick={() => void submit('agent-draft-approve')}
-        disabled={locked || agentRunning}
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1.5',
-          'text-sm font-medium leading-[1.2] text-foreground',
-          'disabled:cursor-not-allowed disabled:opacity-60',
+
+      <div className='flex shrink-0 items-center gap-2'>
+        {agentRunning && (
+          <span className='hidden text-xs text-muted-foreground sm:inline'>
+            Approve once it finishes.
+          </span>
         )}
-        data-track-category='AGENT_ARTIFACT'
-        data-track-name='CLICK_APPROVE'
-      >
-        {(pending === 'approve' || agentRunning) && <Spinner size={14} className='animate-spin' />}
-        {approveLabel}
-      </button>
+        {/* Placeholder from the frame — no edit flow exists yet. Rendered so the
+            layout matches the design; wire it up when the behaviour is decided. */}
+        <button
+          type='button'
+          onClick={() => {
+            /* TODO: no edit flow yet — see the Agent Create frame. */
+          }}
+          disabled={locked}
+          className={cn(ghostButton, 'px-2.5')}
+          data-track-category='AGENT_ARTIFACT'
+          data-track-name='CLICK_EDIT'
+        >
+          Edit
+        </button>
+        <button
+          type='button'
+          onClick={() => void submit('agent-draft-approve')}
+          disabled={locked || agentRunning}
+          className={cn(primaryButton, 'px-2.5')}
+          data-track-category='AGENT_ARTIFACT'
+          data-track-name='CLICK_APPROVE'
+        >
+          {(pending === 'approve' || agentRunning) && (
+            <Spinner size={14} className='animate-spin' />
+          )}
+          {approveLabel}
+        </button>
+      </div>
     </div>
   );
 
   return (
     <CardShell style={node.style}>
-      <div className={cn('flex flex-col p-4', props.phase === 'rejected' && 'opacity-60')}>
-        {/* No header bar: the state pill sits beside the name and the expand
-            control rides in the same row, so nothing exists purely as chrome. */}
-        <AgentIdentityBlock
-          agent={props.agent}
-          {...(interactive ? { interactive } : {})}
-          note={props.note}
-          statePill={statePill}
-          trailing={
-            insidePreview ? undefined : (
-              <button
-                type='button'
-                onClick={(): void => setExpanded(true)}
-                aria-label='Expand agent'
-                className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-                data-track-category='AGENT_ARTIFACT'
-                data-track-name='EXPAND_ARTIFACT'
-              >
-                <MaximizeFourArrow size={16} className='shrink-0' />
-              </button>
-            )
-          }
-        />
+      {/* Inset panel — the frame's white card sitting on the shell's fill.
+          Radius is 11px, not the shell's 12px (`rounded-xl`): the panel sits
+          flush inside the shell's 1px border, so the radius it has to follow is
+          12 − 1. Matching the shell's 12px instead makes the two curves fight at
+          the top corners — concentric radii differ by the inset. */}
+      {/* Identical in every phase — the state reads from the chip and the chin
+          (footer) alone, so a declined agent is presented exactly as a pending
+          one rather than dimmed into a different-looking card. */}
+      <div className='flex flex-col gap-4 rounded-[11px] border border-border bg-card/80 p-3'>
+        <div className='flex h-6 items-center gap-1.5 pl-1'>
+          <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+            <span className='text-sm font-semibold leading-5 tracking-[-0.5px] text-muted-foreground'>
+              Agent
+            </span>
+            {statePill}
+          </div>
+          {!insidePreview && (
+            <button
+              type='button'
+              onClick={(): void => setExpanded(true)}
+              aria-label='Expand agent'
+              className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+              data-track-category='AGENT_ARTIFACT'
+              data-track-name='EXPAND_ARTIFACT'
+            >
+              <MaximizeTwoArrow size={16} className='shrink-0' />
+            </button>
+          )}
+        </div>
+
+        <div className='flex flex-col gap-3'>
+          <div className='flex min-w-0 flex-col pl-1 gap-1'>
+            <p className='break-words text-sm font-semibold leading-5 text-foreground'>
+              {props.agent.name}
+            </p>
+            <span className='block truncate text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
+              @{props.agent.slug}
+            </span>
+          </div>
+
+          {/* gap-1.5 is the frame's 6px. The body below is a <span>, not a second
+              <p>, for the same reason as the slug above: `.jp-message-html p + p`
+              (global.css) would add its own 8px on top of this gap and win, since
+              the card renders inside the message-content root. */}
+          {props.agent.description && (
+            <div className='flex min-w-0 flex-col gap-1 px-1'>
+              <p className='truncate text-sm font-semibold leading-5 text-foreground'>
+                Description
+              </p>
+              <span className='block break-words text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
+                {props.agent.description}
+              </span>
+            </div>
+          )}
+
+          {/* `props.note` (the server's "not granted — no such tool" footnote) is
+              intentionally NOT rendered here for now, alongside the hidden
+              capability chips. The server still sends it and the expanded
+              preview still shows it — this is a display choice, not a change to
+              the wire contract. */}
+        </div>
       </div>
 
-      {/* One row: the connect prompt (or audit) reads from the left, the decision
-          buttons sit at the right end. `justify-between` with the prompt allowed
-          to shrink keeps the buttons anchored even when there is no prompt. */}
-      <div className='flex items-center justify-between gap-3 border-t border-border bg-foreground/[0.03] px-4 py-3'>
-        <div className='flex min-w-0 items-center gap-3'>
-          {decided && auditNode}
-          {/* Only a CREATED draft has an agent to link to; a pending one goes to
-              the MCP list instead. */}
-          <AgentConnectPrompt agent={props.agent} agentExists={props.phase === 'created'} />
-        </div>
-        {!decided && actionControls}
+      {/* min-h pins the chin to its tallest state — the pending buttons (h-7 + the
+          16px of py-2). Without it the card contracts by ~12px the moment a
+          decision lands (an audit line is shorter than a button row, and shorter
+          again when there is no decider avatar), reflowing the thread under it. */}
+      <div className='flex min-h-[44px] items-center justify-between gap-3 px-3 py-2'>
+        {/* A decided card shows the audit line only. No connect prompt in either
+            phase — it belongs with the capability chips, which this card no
+            longer renders; the expanded preview still surfaces both. */}
+        {decided ? auditNode : actionControls}
       </div>
 
       <AgentPreview
