@@ -20,6 +20,7 @@ import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-
 import {
   focusMainWindow,
   markRendererReady,
+  resumeRecordingFromOutside,
   setOverlayMinimized,
   stopRecording,
   syncRecordingState,
@@ -562,6 +563,11 @@ export function setupIpcHandlers(): void {
     setOverlayMinimized(false);
   });
 
+  ipcMain.on('recording-pill:resume-recording', (event) => {
+    if (!isPillSender(event)) return;
+    resumeRecordingFromOutside('pill');
+  });
+
   ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {
     if (!isMainWindowSender(event)) return;
     setOverlayMinimized(!!isMinimized);
@@ -569,10 +575,23 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on(
     'recording:state-changed',
-    (event, state: { active: boolean; startTime?: number }) => {
+    (
+      event,
+      state: {
+        active: boolean;
+        startTime?: number;
+        paused?: boolean;
+        pauseStartedAt?: number | null;
+        accumulatedPausedMs?: number;
+      },
+    ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
-      syncRecordingState(!!state?.active, state?.startTime);
+      syncRecordingState(!!state?.active, state?.startTime, {
+        paused: !!state?.paused,
+        pauseStartedAt: state?.pauseStartedAt ?? null,
+        accumulatedPausedMs: state?.accumulatedPausedMs ?? 0,
+      });
     },
   );
 
