@@ -45,10 +45,6 @@ import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import {
-  getBuiltinRecordingSummaryTemplate,
-  type BuiltinRecordingSummaryTemplateId,
-} from '@/services/recordingSummaryTemplates';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 const UpdateHeadlessRecordingSchema = z
