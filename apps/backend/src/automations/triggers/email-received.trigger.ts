@@ -137,8 +137,8 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
   isReply: z.boolean(),
 });
 
-type EmailReceivedConfig = z.infer<typeof EmailReceivedConfigSchema>;
-type EmailReceivedPayload = z.infer<typeof EmailReceivedOutputSchema>;
+export type EmailReceivedConfig = z.infer<typeof EmailReceivedConfigSchema>;
+export type EmailReceivedPayload = z.infer<typeof EmailReceivedOutputSchema>;
 
 export function hasEmailReceivedFilterConstraints(
   filters: Partial<EmailReceivedConfig> | undefined,
@@ -203,7 +203,7 @@ function asStringArray(value: unknown): string[] {
   return [];
 }
 
-function matchEmailReceived(cfg: EmailReceivedConfig, payload: EmailReceivedPayload): boolean {
+export function matchEmailReceived(cfg: EmailReceivedConfig, payload: EmailReceivedPayload): boolean {
   const e = payload.email;
   const matchCase = cfg.matchCase === true;
   const norm = (s: string): string => (matchCase ? s : s.toLowerCase());

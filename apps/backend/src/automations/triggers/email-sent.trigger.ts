@@ -89,8 +89,8 @@ export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
   isFirstReply: z.boolean(),
 });
 
-type EmailSentConfig = z.infer<typeof EmailSentConfigSchema>;
-type EmailSentPayload = z.infer<typeof EmailSentOutputSchema>;
+export type EmailSentConfig = z.infer<typeof EmailSentConfigSchema>;
+export type EmailSentPayload = z.infer<typeof EmailSentOutputSchema>;
 
 export class EmailSentTrigger extends BaseTrigger<typeof EmailSentConfigSchema> {
   readonly type = EMAIL_SENT_EVENT;
@@ -129,7 +129,7 @@ function asStringArray(value: unknown): string[] {
   return [];
 }
 
-function matchEmailSent(cfg: EmailSentConfig, payload: EmailSentPayload): boolean {
+export function matchEmailSent(cfg: EmailSentConfig, payload: EmailSentPayload): boolean {
   const e = payload.email;
   const matchCase = cfg.matchCase === true;
   const norm = (s: string): string => (matchCase ? s : s.toLowerCase());
