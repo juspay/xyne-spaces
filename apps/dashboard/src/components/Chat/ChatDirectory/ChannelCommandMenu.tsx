@@ -1845,19 +1845,23 @@ const ChannelCommandMenu = ({
     });
   }, [syncEnterIntent, markNavigated]);
 
-  const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
-    // Handle attachment preview - show file preview modal
-    if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
-      return;
-    }
+  const handleFilePreview = useCallback(
+    (result: DisplaySearchResult): void => {
+      // Handle attachment preview - show file preview modal
+      if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
+        return;
+      }
 
-    setPreviewFile({
-      fileName: result.title,
-      fileUrl: result.searchContext.internalUrl,
-      mimeType: result.searchContext.mimeType || 'application/octet-stream',
-      fileSize: result.searchContext.fileSize || 0,
-    });
-  }, []);
+      setPreviewFile({
+        fileName: result.title,
+        fileUrl: result.searchContext.internalUrl,
+        mimeType: result.searchContext.mimeType || 'application/octet-stream',
+        fileSize: result.searchContext.fileSize || 0,
+      });
+      onOpenChange(false);
+    },
+    [onOpenChange],
+  );
 
   // Handle mouse hover over ticket and Desk items to show preview
   const handleTicketMouseEnter = useCallback(
@@ -2442,6 +2446,7 @@ const ChannelCommandMenu = ({
           const items = groupedChannels['channels'];
           const category = ChannelCategory.CHANNELS;
           const isExpanded = expandedCategories.has(category);
+          const routeSeeMore = searchMode === 'screen';
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
@@ -2471,11 +2476,17 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <SeeMoreItem
                   value={`__see-more-group-dm-${category as string}__`}
-                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                  onSelect={() => toggleCategoryExpansion(category)}
+                  label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() =>
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('channels')
+                      : toggleCategoryExpansion(category)
+                  }
                   hoverable={!isMobile}
-                  trackCategory='CHANNEL_SEARCH'
-                  trackName='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  trackName={
+                    routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  }
                   trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                 />
               )}
@@ -2498,6 +2509,7 @@ const ChannelCommandMenu = ({
           const items = groupedChannels['starred'];
           const category = ChannelCategory.STARRED;
           const isExpanded = expandedCategories.has(category);
+          const routeSeeMore = searchMode === 'screen';
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
@@ -2527,11 +2539,17 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <SeeMoreItem
                   value={`__see-more-channel-${category as string}__`}
-                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                  onSelect={() => toggleCategoryExpansion(category)}
+                  label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() =>
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('channels')
+                      : toggleCategoryExpansion(category)
+                  }
                   hoverable={!isMobile}
-                  trackCategory='CHANNEL_SEARCH'
-                  trackName='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                  trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  trackName={
+                    routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                  }
                   trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                 />
               )}
@@ -2567,6 +2585,7 @@ const ChannelCommandMenu = ({
           // per-keystroke render + cmdk bookkeeping cost.
           const category = ChannelCategory.GROUP_DMS;
           const isExpanded = expandedCategories.has(category);
+          const routeSeeMore = searchMode === 'screen';
           const hasMore = localGroupDMs.length > DISPLAY_LIMIT;
           const displayItems =
             !isExpanded && hasMore ? localGroupDMs.slice(0, DISPLAY_LIMIT) : localGroupDMs;
@@ -2597,11 +2616,17 @@ const ChannelCommandMenu = ({
                 {hasMore && (
                   <SeeMoreItem
                     value={`__see-more-group-dm-${category as string}__`}
-                    label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    onSelect={() => toggleCategoryExpansion(category)}
+                    label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                    onSelect={() =>
+                      routeSeeMore
+                        ? handleSeeMoreNavigate('channels')
+                        : toggleCategoryExpansion(category)
+                    }
                     hoverable={!isMobile}
-                    trackCategory='CHANNEL_SEARCH'
-                    trackName='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                    trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                    trackName={
+                      routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                    }
                     trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                   />
                 )}
@@ -2751,6 +2776,16 @@ const ChannelCommandMenu = ({
       {channelCallConfirm}
       {recordingActiveDialog}
       {resultActionsMenu}
+      {!inline && previewFile && (
+        <FilePreviewModal
+          isOpen={!!previewFile}
+          onClose={() => setPreviewFile(null)}
+          fileName={stripHtmlTags(previewFile.fileName)}
+          fileUrl={previewFile.fileUrl}
+          mimeType={previewFile.mimeType}
+          fileSize={previewFile.fileSize}
+        />
+      )}
     </>
   );
 
@@ -3603,6 +3638,7 @@ const ChannelCommandMenu = ({
               // container (Chrome can keyboard-focus scrollers) — both outline. Row
               // position is communicated by aria-selected, never by a ring here.
               'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
+              '[&_[cmdk-item]]:scroll-mb-[30px]',
               suppressHover && '[&_[cmdk-item]]:pointer-events-none',
             )}
             ref={el => {
@@ -4460,18 +4496,6 @@ const ChannelCommandMenu = ({
             ) : null}
           </div>
         </div>
-      )}
-
-      {/* File Preview Modal */}
-      {!inline && previewFile && (
-        <FilePreviewModal
-          isOpen={!!previewFile}
-          onClose={() => setPreviewFile(null)}
-          fileName={stripHtmlTags(previewFile.fileName)}
-          fileUrl={previewFile.fileUrl}
-          mimeType={previewFile.mimeType}
-          fileSize={previewFile.fileSize}
-        />
       )}
 
       {/* Desk Ticket Merge Dialog */}

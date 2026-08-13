@@ -23,7 +23,7 @@
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --foreground: 248.57 9.33% 14.71%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
@@ -157,7 +157,7 @@
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper-v2.png");
     --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --foreground: 248.57 9.33% 14.71%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
@@ -283,7 +283,7 @@
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper-midnight.png");
     --background: 232 9% 11%; /* #1A1A1F */
-    --foreground: 210 8% 93%;
+    --foreground: 220 18% 90%;
     --card: 233 11% 15%; /* #22232A */
     --card-foreground: 210 8% 93%;
     --popover: 216 6% 15%;
@@ -348,8 +348,8 @@
     --mention-group-color: #60a5fa;
     --search-result-highlight-bg: rgba(250, 204, 21, 0.35);
     --search-result-active-bg: rgba(251, 146, 60, 0.75);
-    --link-color: #2563eb;
-    --link-hover-color: #1d4ed8;
+    --link-color: #60a5fa;
+    --link-hover-color: #93c5fd;
     --mobile-panel-bg: #18191b;
 
     /* Stage status backgrounds - semantic for dark theme */
@@ -490,6 +490,25 @@
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {
     filter: brightness(0) invert(1);
     opacity: 0.85;
+  }
+
+  /* Text selection — app-wide, themed.
+     Without a rule here the browser falls back to the OS highlight colour, so
+     the selection changed with each user's macOS accent and looked different
+     from page to page. A light blue reads as selection without competing with
+     summer_breeze's coral --primary.
+     Rich-text and code surfaces (BlockNote, CodeMirror) keep their own selection
+     styling on purpose — they need range semantics this flat fill can't express. */
+  ::selection {
+    background-color: hsl(211 100% 86%);
+    color: hsl(var(--foreground));
+  }
+
+  /* Same hue, but light-on-dark: an 86%-lightness fill would blow out against
+     midnight's surfaces and swallow the text. */
+  [data-theme="midnight"] ::selection {
+    background-color: hsl(211 90% 58% / 0.4);
+    color: hsl(var(--foreground));
   }
 }
 
@@ -770,6 +789,13 @@
   }
   .chat-input-field :is(strong, em, s):has(+ code:not(pre code)) code:not(pre code) {
     @apply border-r-0 rounded-r-none pr-0;
+  }
+
+  /* Code Block */
+  .chat-input-field pre,
+  .chat-input-editor pre {
+    @apply bg-muted border border-border rounded p-2 my-2 relative;
+    overflow-x: auto;
   }
 
   /* Code Block Inner Code*/
@@ -1670,17 +1696,26 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   line-height: 1;
 }
 
-.jp-message-html p {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) p {
   @apply my-0;
 }
 
-.jp-message-html p + p {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) p + p {
   @apply mt-2;
+}
+
+/* ----------------------------
+   Horizontal rules
+   ---------------------------- */
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin: 12px 0;
 }
 
 /* The UA/preflight default `bolder` resolves to 700 against the 400 base.
    Pin to 600 so message bold matches the AI answer's `.bot-markdown-content`. */
-.jp-message-html :is(strong, b) {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) :is(strong, b) {
   font-weight: 600;
 }
 
@@ -1694,55 +1729,74 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* ----------------------------
    Inline code
    ---------------------------- */
-.jp-message-html code:not(pre code) {
-  @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-muted-foreground;
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  code:not(pre code) {
+  @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-primary;
 }
 
-.jp-message-html strong code:not(pre code),
-.jp-message-html code:not(pre code) strong {
+/* Seaming for adjacent inline-code runs — shared by both message renderers.
+   `:is()` (not `:where()`) so the root still contributes a class to specificity;
+   these must outweigh the base `code:not(pre code)` rule. */
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  :is(strong code:not(pre code), code:not(pre code) strong) {
   @apply font-semibold;
 }
-.jp-message-html code:not(pre code):has(+ :is(strong, em, s) code:not(pre code)) {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  code:not(pre code):has(+ :is(strong, em, s) code:not(pre code)) {
   @apply border-r-0 rounded-r-none pr-0;
 }
-.jp-message-html
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
   code:not(pre code)
   + :is(strong, em, s):has(+ code:not(pre code))
   code:not(pre code) {
   @apply border-x-0 rounded-none px-0;
 }
-.jp-message-html
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
   code:not(pre code)
   + :is(strong, em, s):not(:has(+ code:not(pre code)))
   code:not(pre code) {
   @apply border-l-0 rounded-l-none pl-0;
 }
-.jp-message-html :is(strong, em, s):has(code:not(pre code)) + code:not(pre code) {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  :is(strong, em, s):has(code:not(pre code))
+  + code:not(pre code) {
   @apply border-l-0 rounded-l-none pl-0;
 }
-.jp-message-html :is(strong, em, s):has(+ code:not(pre code)) code:not(pre code) {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  :is(strong, em, s):has(+ code:not(pre code))
+  code:not(pre code) {
   @apply border-r-0 rounded-r-none pr-0;
 }
 
 /* ----------------------------
    Code Blocks
    ---------------------------- */
-.jp-message-html pre,
+/* `border`/`border-radius` are reset so composer classes baked into already-sent
+   messages don't draw a second border inside the code block wrapper's. */
+.jp-message-html pre {
+  @apply bg-muted m-0 px-4 py-3 whitespace-pre-wrap relative;
+  overflow-x: auto;
+  overflow-wrap: break-word;
+  word-break: normal;
+  border: 0;
+  border-radius: 0;
+}
+
 .jp-message-html div.slack_code {
-  @apply bg-muted border border-border rounded-lg p-4 whitespace-pre-wrap relative mt-3 mb-3;
+  @apply bg-muted border border-border rounded px-4 py-3 whitespace-pre-wrap relative mt-3 mb-3;
   overflow-wrap: break-word;
   word-break: normal;
 }
 
 .jp-message-html div.slack_code code {
-  @apply !bg-transparent !p-0 !border-0 !text-[0.875rem] !leading-6 !font-mono !text-foreground !block;
+  @apply !bg-transparent !p-0 !border-0 !text-[0.875rem] !leading-5 !font-mono !text-foreground !block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: normal;
 }
 
-.jp-message-html pre code {
-  @apply bg-transparent p-0 border-0 text-[0.875rem] leading-6 font-mono text-foreground block;
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) pre code {
+  @apply bg-transparent p-0 border-0 text-[0.875rem] leading-5 font-mono text-foreground block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: normal;
@@ -1797,50 +1851,40 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   max-width: 100%;
 }
 
-.jp-message-html table {
-  border-collapse: collapse;
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) table {
+  border-collapse: separate;
+  border-spacing: 0;
   margin: 8px 0;
   font-size: 13px;
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
+  border-radius: 12px;
   overflow: hidden;
   min-width: 100%;
 }
 
-.jp-message-html th {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) th {
   text-align: left;
-  font-weight: 600;
-  color: hsl(var(--foreground)) !important;
-  padding: 8px 12px;
-  border-color: hsl(var(--border)) !important;
-  border-bottom: 2px solid hsl(var(--border)) !important;
-  border-right: 1px solid hsl(var(--border)) !important;
-  background: hsl(var(--muted)) !important;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: hsl(var(--foreground) / 0.6);
+  padding: 10px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
   white-space: nowrap;
 }
 
-.jp-message-html th:last-child {
-  border-right: none;
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) td {
+  padding: 10px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground) / 0.8);
 }
 
-.jp-message-html td {
-  padding: 6px 12px;
-  border-color: hsl(var(--border)) !important;
-  border-bottom: 1px solid hsl(var(--border)) !important;
-  border-right: 1px solid hsl(var(--border)) !important;
-  color: hsl(var(--foreground));
-}
-
-.jp-message-html td:last-child {
-  border-right: none;
-}
-
-.jp-message-html tr:last-child td {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) tr:last-child td {
   border-bottom: none;
 }
 
-.jp-message-html tbody tr:hover {
-  background: hsl(var(--muted) / 0.5);
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) tbody tr:hover td {
+  background: hsl(var(--foreground) / 0.04);
 }
 
 /* ----------------------------
@@ -1861,7 +1905,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 .jp-message-html blockquote {
-  @apply border-l-2 pl-2 m-0 sm:border-l-4 sm:pl-4;
+  @apply border-l-2 pl-2 my-2 sm:border-l-4 sm:pl-4;
   border-left-color: var(--border-color, hsl(var(--border)));
   max-width: 100%;
   overflow-wrap: break-word;
@@ -1885,81 +1929,92 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* ----------------------------
    Lists
    ---------------------------- */
-.jp-message-html ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul {
   @apply list-disc pl-6 my-2;
 }
 
-.jp-message-html ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul {
   list-style-type: circle;
 }
 
-.jp-message-html ul ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul ul {
   list-style-type: square;
 }
 
-.jp-message-html ul ul ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul ul ul {
   list-style-type: disc;
 }
 
-.jp-message-html ul ul ul ul ul {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ul ul ul ul ul {
   list-style-type: circle;
 }
 
-/* `list-style-position: inside` keeps the marker within the content box so it takes
-   its natural width at any digit count and can't be clipped by a scroll container.
-   No left padding at the top level so the marker aligns with adjacent paragraph text;
-   nested lists get their indent via the `li ol` rule below. */
-.jp-message-html ol {
-  @apply my-2;
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol {
+  @apply my-2 pl-6;
   list-style-type: decimal;
-  list-style-position: inside;
 }
 
-.jp-message-html li ol {
-  @apply pl-6;
-}
-
-.jp-message-html ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol {
   list-style-type: lower-alpha;
 }
 
-.jp-message-html ol ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol ol {
   list-style-type: lower-roman;
 }
 
-.jp-message-html ol ol ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol ol ol {
   list-style-type: decimal;
 }
 
-.jp-message-html ol ol ol ol ol {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) ol ol ol ol ol {
   list-style-type: lower-alpha;
 }
 
-.jp-message-html li {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) li {
   @apply my-1;
 }
 
 /* Inline the first <p> inside an <li> so the marker shares a line with the text
    instead of sitting alone above it. */
-.jp-message-html ol li > p:first-child,
-.jp-message-html ul li > p:first-child {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  li
+  > p:first-child {
   display: inline;
 }
 
 /* ----------------------------
    Links
    ---------------------------- */
-.jp-message-html a {
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) a {
   color: var(--link-color);
   text-decoration: underline;
+}
+
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) a:hover {
+  color: var(--link-hover-color);
 }
 
 /* ----------------------------
    Mentions
    (RenderMessageWithHTML adds the wrapper span)
    ---------------------------- */
-.jp-message-html .mention-text {
-  color: var(--mention-color);
+.expand-toggle-pill {
+  box-shadow:
+    0 6px 6px -3px rgb(0 0 0 / 0.05),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.05),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.05),
+    0 0 0 1px rgb(0 0 0 / 0.05);
+}
+
+[data-theme="midnight"] .expand-toggle-pill {
+  box-shadow:
+    0 6px 6px -3px rgb(0 0 0 / 0.3),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.3),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.3),
+    0 0 0 1px hsl(var(--border));
+}
+
+.mention-text {
   cursor: pointer;
   text-decoration: none;
 }
@@ -2794,9 +2849,18 @@ img.inline-emoji,
   margin: 0;
 }
 
-/* Base markdown content styling with text wrapping for overflow prevention */
-.bot-markdown-content {
-  margin: 8px 0;
+/* Base markdown content styling with text wrapping for overflow prevention.
+   Typography sits in `components` so a surface that sets its own size on the
+   wrapper (e.g. AIChatThread's `text-[15px] leading-7`) still wins. */
+@layer components {
+  .bot-markdown-content,
+  .bot-markdown-content-call-summary {
+    @apply text-sm leading-6 text-foreground;
+  }
+}
+
+.bot-markdown-content,
+.bot-markdown-content-call-summary {
   max-width: 100%;
   overflow-wrap: break-word;
   word-wrap: break-word;
@@ -2848,16 +2912,31 @@ img.inline-emoji,
   line-height: 1.6;
 }
 
+.bot-markdown-content :is(h1, h2, h3, h4, h5, h6),
+.bot-markdown-content-call-summary :is(h1, h2, h3, h4, h5, h6) {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.bot-markdown-content h1,
+.bot-markdown-content-call-summary h1 {
+  font-size: 16px;
+  margin: 16px 0 8px 0;
+}
+
 .bot-markdown-content h2,
 .bot-markdown-content-call-summary h2 {
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  color: hsl(var(--foreground)) !important;
-  margin: 16px 0 8px 0 !important;
-  border-bottom: none !important;
-  padding-bottom: 0 !important;
-  padding-left: 6px !important;
+  font-size: 15px;
+  margin: 16px 0 8px 0;
   position: relative;
+}
+
+.bot-markdown-content :is(h3, h4, h5, h6),
+.bot-markdown-content-call-summary :is(h3, h4, h5, h6) {
+  font-size: 14px;
+  margin: 12px 0 6px 0;
 }
 
 /* Horizontal line extending from vertical border to heading */
@@ -2873,65 +2952,43 @@ img.inline-emoji,
   border-bottom-left-radius: 6px;
 }
 
-.bot-markdown-content h2:first-child,
-.bot-markdown-content-call-summary h2:first-child {
-  margin-top: 0 !important;
+.bot-markdown-content :is(h1, h2, h3, h4, h5, h6):first-child,
+.bot-markdown-content-call-summary :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
 }
 
-.bot-markdown-content p,
-.bot-markdown-content-call-summary p {
-  margin: 0 0 8px 0 !important;
-  line-height: 1.55;
-  color: hsl(var(--foreground)) !important;
-  font-size: 14px !important;
-  padding-left: 6px !important;
+.bot-markdown-content blockquote,
+.bot-markdown-content-call-summary blockquote {
+  border-left: 2px solid hsl(var(--border));
+  padding-left: 0.5rem;
+  margin: 8px 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 
-[data-component="MessageBubble"] .bot-markdown-content {
-  margin: 0 !important;
-}
-[data-component="MessageBubble"] .bot-markdown-content p {
-  padding-left: 0 !important;
-}
-[data-component="MessageBubble"] .bot-markdown-content p:last-child {
-  margin-bottom: 0 !important;
+@media (min-width: 640px) {
+  .bot-markdown-content blockquote,
+  .bot-markdown-content-call-summary blockquote {
+    border-left-width: 4px;
+    padding-left: 1rem;
+  }
 }
 
-.bot-markdown-content ol,
-.bot-markdown-content-call-summary ol {
-  /* Enough inline space for 2–3 digit markers (10+) — default outside markers + narrow
-     padding were clipped by sidebar/message overflow-x-hidden + overflow-hidden. */
-  padding-left: 32px !important;
-  margin: 8px 0 !important;
-  list-style-type: decimal !important;
-  color: hsl(var(--foreground)) !important;
-  font-size: 14px !important;
+.bot-markdown-content pre,
+.bot-markdown-content-call-summary pre {
+  background: hsl(var(--muted));
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
-.bot-markdown-content ol li,
-.bot-markdown-content-call-summary ol li {
-  margin: 4px 0 !important;
-  color: hsl(var(--foreground)) !important;
-}
-
-.bot-markdown-content ul,
-.bot-markdown-content-call-summary ul {
-  padding-left: 16px !important;
-  margin: 8px 0 !important;
-  list-style-type: disc !important;
-  color: hsl(var(--foreground)) !important;
-  font-size: 14px !important;
-}
-
-.bot-markdown-content ul li,
-.bot-markdown-content-call-summary ul li {
-  margin: 4px 0 !important;
-  color: hsl(var(--foreground)) !important;
-  font-size: 14px !important;
+.bot-markdown-content-call-summary :is(p, h1, h2, h3, h4, h5, h6) {
+  padding-left: 6px;
 }
 
 /* ── XyneAI sidebar overrides — black text, blue links ── */
-.xyne-ai-markdown *:not(a):not(.mention-text):not(.mention-text *) {
+.xyne-ai-markdown *:not(a):not(code):not(.mention-text):not(.mention-text *) {
   color: hsl(var(--foreground)) !important;
 }
 
@@ -2965,45 +3022,6 @@ img.inline-emoji,
 .xyne-ai-markdown a.claw-citation-chip:hover,
 .bot-markdown-content a.claw-citation-chip:hover {
   color: inherit !important;
-}
-
-.bot-markdown-content table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 8px 0;
-  font-size: 13px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.bot-markdown-content th {
-  text-align: left;
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  padding: 8px 12px;
-  border-bottom: 2px solid hsl(var(--border));
-  border-right: 1px solid hsl(var(--border));
-  background: hsl(var(--muted));
-}
-
-.bot-markdown-content th:last-child {
-  border-right: none;
-}
-
-.bot-markdown-content td {
-  padding: 6px 12px;
-  border-bottom: 1px solid hsl(var(--border));
-  border-right: 1px solid hsl(var(--border));
-  color: hsl(var(--muted-foreground));
-}
-
-.bot-markdown-content td:last-child {
-  border-right: none;
-}
-
-.bot-markdown-content tr:last-child td {
-  border-bottom: none;
 }
 
 /* Memory table summary cell: force <p> inline so line-clamp works */
@@ -3160,52 +3178,6 @@ img.inline-emoji,
   filter: invert(1);
 }
 
-/* --- 2C: Message HTML Styles --- */
-[data-theme="midnight"] .jp-message-html {
-  color: #e5e7eb;
-}
-
-[data-theme="midnight"] .jp-message-html code:not(pre code) {
-  background: #1f2937;
-  border-color: #374151;
-  color: #d1d5db;
-}
-
-[data-theme="midnight"] .jp-message-html pre,
-[data-theme="midnight"] .jp-message-html div.slack_code {
-  background: #111827;
-  border-color: #374151;
-}
-
-[data-theme="midnight"] .jp-message-html pre code,
-[data-theme="midnight"] .jp-message-html div.slack_code code {
-  color: #f3f4f6;
-}
-
-[data-theme="midnight"] .jp-message-html pre::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-[data-theme="midnight"] .jp-message-html pre::-webkit-scrollbar-thumb {
-  background: #4b5563;
-}
-
-[data-theme="midnight"] .jp-message-html pre::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
-}
-
-[data-theme="midnight"] .jp-message-html a {
-  color: #60a5fa;
-}
-
-[data-theme="midnight"] .jp-message-html a:hover {
-  color: #93c5fd;
-}
-
-[data-theme="midnight"] .jp-message-html blockquote {
-  border-left-color: var(--border-color, #4b5563);
-}
-
 /* --- Mermaid Diagram --- */
 [data-theme="midnight"] .mermaid-tab-active {
   background-color: rgba(96, 165, 250, 0.15) !important;
@@ -3261,10 +3233,6 @@ img.inline-emoji,
 
 [data-theme="midnight"] .mention-text {
   background-color: var(--mention-bg);
-  color: var(--mention-color);
-}
-
-[data-theme="midnight"] .jp-message-html .mention-text {
   color: var(--mention-color);
 }
 
@@ -3351,58 +3319,6 @@ img.inline-emoji,
 [data-theme="midnight"] .hljs-addition {
   color: #4ade80 !important;
   background-color: #052e16;
-}
-
-/* --- 2F: Bot Markdown Content --- */
-[data-theme="midnight"] .bot-markdown-content-call-summary {
-  border-left-color: #4b5563;
-}
-
-[data-theme="midnight"] .bot-markdown-content-call-summary::before {
-  background: #4b5563;
-}
-
-[data-theme="midnight"] .bot-markdown-content-call-summary h2::before {
-  background: #4b5563;
-  border-bottom-color: #4b5563;
-}
-
-[data-theme="midnight"] .bot-markdown-content h2,
-[data-theme="midnight"] .bot-markdown-content-call-summary h2 {
-  color: #e5e7eb !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content p,
-[data-theme="midnight"] .bot-markdown-content-call-summary p {
-  color: #e5e7eb !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content ol,
-[data-theme="midnight"] .bot-markdown-content-call-summary ol,
-[data-theme="midnight"] .bot-markdown-content ol li,
-[data-theme="midnight"] .bot-markdown-content-call-summary ol li,
-[data-theme="midnight"] .bot-markdown-content ul,
-[data-theme="midnight"] .bot-markdown-content-call-summary ul,
-[data-theme="midnight"] .bot-markdown-content ul li,
-[data-theme="midnight"] .bot-markdown-content-call-summary ul li {
-  color: #e5e7eb !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content table {
-  border-color: #374151;
-}
-
-[data-theme="midnight"] .bot-markdown-content th {
-  color: #e5e7eb;
-  background: #1e1e23;
-  border-bottom-color: #374151;
-  border-right-color: #374151;
-}
-
-[data-theme="midnight"] .bot-markdown-content td {
-  color: #9ca3af;
-  border-bottom-color: #1e1e23;
-  border-right-color: #1e1e23;
 }
 
 /* --- Calendar call stripe pattern --- */
@@ -3665,106 +3581,6 @@ img.inline-emoji,
     0 8px 10px -6px rgba(0, 0, 0, 0.6);
 }
 
-/* Tables */
-.bot-markdown-content table,
-.bot-markdown-content-call-summary table {
-  border-collapse: collapse !important;
-  width: 100% !important;
-  margin: 8px 0 !important;
-  font-size: 13px !important;
-}
-
-.bot-markdown-content th,
-.bot-markdown-content-call-summary th {
-  background-color: #f3f4f6 !important;
-  font-weight: 600 !important;
-  color: #374151 !important;
-  text-align: left !important;
-  padding: 8px 12px !important;
-  border: 1px solid #e5e7eb !important;
-}
-
-.bot-markdown-content td,
-.bot-markdown-content-call-summary td {
-  padding: 6px 12px !important;
-  border: 1px solid #e5e7eb !important;
-  color: #788187 !important;
-}
-
-.bot-markdown-content tr:hover,
-.bot-markdown-content-call-summary tr:hover {
-  background-color: #f9fafb !important;
-}
-
-/* Headings h1, h3 */
-.bot-markdown-content h1,
-.bot-markdown-content-call-summary h1 {
-  font-size: 16px !important;
-  font-weight: 600 !important;
-  color: #1d1e1f !important;
-  margin: 16px 0 8px 0 !important;
-  padding-left: 6px !important;
-}
-
-.bot-markdown-content h3,
-.bot-markdown-content-call-summary h3 {
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  color: #1d1e1f !important;
-  margin: 12px 0 6px 0 !important;
-  padding-left: 6px !important;
-}
-
-/* Strong/bold text */
-.bot-markdown-content strong,
-.bot-markdown-content-call-summary strong {
-  color: #374151 !important;
-  font-weight: 600 !important;
-}
-
-/* Horizontal rules */
-.bot-markdown-content hr,
-.bot-markdown-content-call-summary hr {
-  border: none !important;
-  border-top: 1px solid #e5e7eb !important;
-  margin: 12px 0 !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content th,
-[data-theme="midnight"] .bot-markdown-content-call-summary th {
-  background-color: #1f2937 !important;
-  color: #e5e7eb !important;
-  border-color: #374151 !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content td,
-[data-theme="midnight"] .bot-markdown-content-call-summary td {
-  border-color: #374151 !important;
-  color: #9ca3af !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content tr:hover,
-[data-theme="midnight"] .bot-markdown-content-call-summary tr:hover {
-  background-color: #1f2937 !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content h1,
-[data-theme="midnight"] .bot-markdown-content-call-summary h1,
-[data-theme="midnight"] .bot-markdown-content h3,
-[data-theme="midnight"] .bot-markdown-content-call-summary h3 {
-  color: #e5e7eb !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content strong,
-[data-theme="midnight"] .bot-markdown-content-call-summary strong {
-  color: #d1d5db !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content hr,
-[data-theme="midnight"] .bot-markdown-content-call-summary hr {
-  border-top-color: #374151 !important;
-}
-
 /* Recording detail keeps summaries unframed and easy to scan. */
 .recording-summary-content.bot-markdown-content-call-summary {
   border-left: 0;
@@ -3881,57 +3697,6 @@ img.inline-emoji,
   line-height: 1.4;
 }
 
-/* Code blocks (fenced ``` ... ```) */
-.bot-markdown-content pre {
-  background-color: #f6f8fa !important;
-  border: 1px solid #e5e7eb !important;
-  border-radius: 6px !important;
-  padding: 12px 14px !important;
-  margin: 8px 0 !important;
-  overflow-x: auto !important;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace !important;
-  font-size: 12.5px !important;
-  line-height: 1.5 !important;
-  color: #1f2937 !important;
-  white-space: pre !important;
-}
-
-.bot-markdown-content pre code {
-  background: transparent !important;
-  border: none !important;
-  padding: 0 !important;
-  font-size: inherit !important;
-  color: inherit !important;
-  white-space: inherit !important;
-}
-
-/* Inline code (single backticks) */
-.bot-markdown-content code {
-  background-color: #f3f4f6 !important;
-  border: 1px solid #e5e7eb !important;
-  border-radius: 4px !important;
-  padding: 1px 5px !important;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace !important;
-  font-size: 12.5px !important;
-  color: #be185d !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content pre {
-  background-color: #0f172a !important;
-  border-color: #1f2937 !important;
-  color: #e5e7eb !important;
-}
-
-[data-theme="midnight"] .bot-markdown-content code {
-  background-color: #1f2937 !important;
-  border-color: #374151 !important;
-  color: #f472b6 !important;
-}
-
 /* --- 2K: AG Grid Dark Mode Fixes --- */
 [data-theme="midnight"] .ag-header {
   background-color: #1a1a1a !important;
@@ -4017,28 +3782,42 @@ img.inline-emoji,
   color: #9ca3af !important;
 }
 
-/* Blend DataTable header cells - ensure proper dark mode text color */
-[data-theme="midnight"] th,
-[data-theme="midnight"] th *,
-[data-theme="midnight"] th span {
+/* Blend DataTable header cells - ensure proper dark mode text color.
+   These target app data grids. Message tables must be excluded: the markdown
+   renderer emits a real <thead> (the composer does not), so without the guard
+   the two paths get different header colours in midnight. */
+[data-theme="midnight"]
+  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+[data-theme="midnight"]
+  th
+  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *),
+[data-theme="midnight"]
+  th
+  span:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
   color: #d1d5db !important;
 }
 
 /* Specific targeting for table header text with lower contrast */
-[data-theme="midnight"] thead th {
+[data-theme="midnight"]
+  thead
+  th:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
   color: #d1d5db !important;
   background-color: #1a1a1a !important;
 }
 
 /* Table header text spans (Type, User Query, Summary, etc.) */
-[data-theme="midnight"] th p,
-[data-theme="midnight"] th div,
-[data-theme="midnight"] th span {
+[data-theme="midnight"]
+  th
+  :is(p, div, span):not(
+    :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *
+  ) {
   color: #d1d5db !important;
 }
 
 /* Ensure high contrast for all header content */
-[data-theme="midnight"] thead * {
+[data-theme="midnight"]
+  thead
+  *:not(:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) *) {
   color: #d1d5db !important;
 }
 

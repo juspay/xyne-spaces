@@ -44,6 +44,8 @@ import { linkOpenPrefIsRelevant } from '../../../utils/openLink';
 import { logger } from '../../../utils/logger';
 
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
+import { MenuBarIconToggle } from '../MenuBarIconToggle';
+import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
@@ -620,6 +622,10 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       />
     </div>
 
+    <MenuBarIconToggle />
+
+    <RecordingPillToggle />
+
     {/* Recording section divider */}
     <div className='pt-2'>
       <p id='recording-tab-view-label' className='text-sm font-semibold text-foreground'>
@@ -690,6 +696,19 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
           to send)
         </Radio>
       </RadioGroup>
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Open formatting by default</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Show the formatting toolbar automatically in channel and thread message composers
+        </p>
+      </div>
+      <Switch
+        id='default-formatting-toolbar-open'
+        checked={state.defaultFormattingToolbarOpen}
+        onCheckedChange={state.setDefaultFormattingToolbarOpen}
+      />
     </div>
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>

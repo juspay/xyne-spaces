@@ -1,8 +1,23 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { CSSProperties, ReactElement, useMemo } from 'react';
+import { CSSProperties, ReactElement, useEffect, useMemo, useState } from 'react';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
-import { ChevronLeft, ChevronRight, GitCommit, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  GitCommit,
+  PlugZap,
+  Trash2,
+  Users,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { cn } from '../../../utils/classNames';
 import { SearchChannel } from '../../ui/SearchChannel/SearchChannel';
 import { ChannelScopeType } from '@xyne/shared';
@@ -42,7 +57,7 @@ const VCS_PROVIDERS: Array<{
     value: 'GITHUB',
     label: 'GitHub',
     description: 'GitHub.com or GitHub Enterprise',
-    enabled: false,
+    enabled: true,
   },
   {
     value: 'BITBUCKET_CLOUD',
@@ -144,6 +159,154 @@ const Step1VCSProvider = ({ selected, onSelect }: Step1Props): ReactElement => (
 
 // ─── Step 2: Applications + Channel ─────────────────────────────────────────
 
+// Chip-style input for comma-separated paths. The on-disk shape stays a CSV
+// string so save logic and ApplicationConfig don't need to change.
+interface PathChipsInputProps {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+}
+
+const PathChipsInput = ({
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+}: PathChipsInputProps): ReactElement => {
+  const [draft, setDraft] = useState('');
+  const paths = value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const commitMany = (incoming: string[]): void => {
+    const additions = incoming.map(s => s.trim()).filter(Boolean);
+    if (additions.length === 0) return;
+    // Dedupe against existing + within the batch itself.
+    const seen = new Set(paths);
+    const merged = [...paths];
+    for (const a of additions) {
+      if (!seen.has(a)) {
+        seen.add(a);
+        merged.push(a);
+      }
+    }
+    onChange(merged.join(', '));
+    setDraft('');
+  };
+
+  const remove = (path: string): void => {
+    onChange(paths.filter(p => p !== path).join(', '));
+  };
+
+  return (
+    // <label> forwards empty-area clicks to the input natively
+    <label className='border border-input rounded-md bg-background p-1 flex flex-wrap items-center gap-1 min-h-[34px] cursor-text focus-within:ring-1 focus-within:ring-ring'>
+      {paths.map(p => (
+        <span
+          key={p}
+          className='inline-flex items-center gap-1 bg-muted px-1.5 py-0.5 rounded text-xs font-mono max-w-full'
+          title={p}
+        >
+          <span className='truncate'>{p}</span>
+          <button
+            type='button'
+            onClick={() => remove(p)}
+            className='text-muted-foreground hover:text-destructive shrink-0'
+            aria-label={`Remove ${p}`}
+          >
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+      <input
+        type='text'
+        value={draft}
+        aria-label={ariaLabel}
+        placeholder={paths.length === 0 ? placeholder : ''}
+        onChange={e => {
+          const v = e.target.value;
+          // Pasting or typing a comma commits everything up to the last comma
+          // as chips and keeps the trailing text as the new draft.
+          if (v.includes(',')) {
+            const parts = v.split(',');
+            const tail = parts.pop() ?? '';
+            commitMany(parts);
+            setDraft(tail);
+          } else {
+            setDraft(v);
+          }
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commitMany([draft]);
+          } else if (e.key === 'Backspace' && draft === '' && paths.length > 0) {
+            // Standard chip-input behavior — backspace on empty pops the last chip.
+            remove(paths[paths.length - 1]!);
+          }
+        }}
+        onBlur={() => {
+          if (draft.trim()) commitMany([draft]);
+        }}
+        className='flex-1 min-w-[120px] bg-transparent outline-none text-sm px-1 py-0.5'
+      />
+    </label>
+  );
+};
+
+// ─── Owner Team Picker ──────────────────────────────────────────────────────
+// Wraps EntitySelector with user_group data. Stores the group NAME in
+// ownerTeam (string) to match the on-disk shape.
+const OwnerTeamPicker = ({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}): ReactElement => {
+  const groups = useUserGroups();
+
+  const options: SelectorOption[] = useMemo(() => {
+    const base: SelectorOption[] = groups
+      .filter(g => !!g.name)
+      .map(g => ({
+        value: g.name,
+        label: g.name,
+        icon: <Users size={14} className='text-muted-foreground' />,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    // If the current value doesn't match any user group, surface it as an
+    // "unmatched" option so legacy values (e.g. "@frontend-team") stay visible
+    // until the user picks a real group.
+    const trimmed = value.trim();
+    if (trimmed && !base.some(o => o.value === trimmed)) {
+      base.unshift({
+        value: trimmed,
+        label: trimmed,
+        icon: <AlertCircle size={14} className='text-amber-600' />,
+        subtitle: 'Not a user group — pick a real one to standardize ownership',
+      });
+    }
+    return base;
+  }, [groups, value]);
+
+  return (
+    <EntitySelector
+      options={options}
+      selectedValue={value.trim() || null}
+      onSelect={next => onChange(next ?? '')}
+      placeholder='Select owner team'
+      searchPlaceholder='Search user groups…'
+      showUnassignOption
+      unassignLabel='No owner team'
+      width='100%'
+    />
+  );
+};
+
 interface ApplicationRowProps {
   app: ApplicationConfig;
   index: number;
@@ -209,47 +372,30 @@ const ApplicationRow = ({
       </div>
 
       <div>
-        <label className={LABEL_CLASS} htmlFor={`application-owner-team-${app.id}`}>
-          Owner Team
-        </label>
-        <input
-          id={`application-owner-team-${app.id}`}
-          type='text'
-          value={app.ownerTeam}
-          onChange={e => onUpdate(app.id, 'ownerTeam', e.target.value)}
-          placeholder='e.g., Backend Team'
-          className={INPUT_CLASS}
-        />
+        <div className={LABEL_CLASS}>Owner Team</div>
+        <OwnerTeamPicker value={app.ownerTeam} onChange={v => onUpdate(app.id, 'ownerTeam', v)} />
       </div>
 
       <div className='md:col-span-2'>
-        <label className={LABEL_CLASS} htmlFor={`application-env-paths-${app.id}`}>
-          Environment File Paths
-        </label>
-        <input
-          id={`application-env-paths-${app.id}`}
-          type='text'
+        <div className={LABEL_CLASS}>Environment File Paths</div>
+        <PathChipsInput
           value={app.envPaths}
-          onChange={e => onUpdate(app.id, 'envPaths', e.target.value)}
+          onChange={v => onUpdate(app.id, 'envPaths', v)}
           placeholder='config/env.yml, .env.prod'
-          className={INPUT_CLASS}
+          ariaLabel={`Environment file paths for application ${index + 1}`}
         />
-        <p className={HELP_CLASS}>Comma-separated paths for this application</p>
+        <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
       </div>
 
       <div className='md:col-span-2'>
-        <label className={LABEL_CLASS} htmlFor={`application-migration-paths-${app.id}`}>
-          Migration File Paths
-        </label>
-        <input
-          id={`application-migration-paths-${app.id}`}
-          type='text'
+        <div className={LABEL_CLASS}>Migration File Paths</div>
+        <PathChipsInput
           value={app.migrationPaths}
-          onChange={e => onUpdate(app.id, 'migrationPaths', e.target.value)}
+          onChange={v => onUpdate(app.id, 'migrationPaths', v)}
           placeholder='migrations/, db/migrate/'
-          className={INPUT_CLASS}
+          ariaLabel={`Migration file paths for application ${index + 1}`}
         />
-        <p className={HELP_CLASS}>Comma-separated paths for this application</p>
+        <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
       </div>
     </div>
   </div>
@@ -270,6 +416,10 @@ interface Step3Props {
   onSharedRepoUrlChange: (v: string) => void;
   showGroupControls: boolean;
   allowApplicationListChanges: boolean;
+  onTestConnection: () => Promise<void>;
+  isTestingConnection: boolean;
+  /** null = not tested yet; otherwise the last test result. */
+  connectionTest: { ok: boolean; message: string } | null;
 }
 
 const Step3Applications = ({
@@ -287,6 +437,9 @@ const Step3Applications = ({
   onSharedRepoUrlChange,
   showGroupControls,
   allowApplicationListChanges,
+  onTestConnection,
+  isTestingConnection,
+  connectionTest,
 }: Step3Props): ReactElement => {
   return (
     <div className='space-y-3'>
@@ -305,14 +458,41 @@ const Step3Applications = ({
               <label className={LABEL_CLASS} htmlFor='release-repository-url'>
                 Repository URL *
               </label>
-              <input
-                id='release-repository-url'
-                type='text'
-                value={sharedRepoUrl}
-                onChange={e => onSharedRepoUrlChange(e.target.value)}
-                placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
-                className={INPUT_CLASS}
-              />
+              <div className='flex gap-2'>
+                <input
+                  id='release-repository-url'
+                  type='text'
+                  value={sharedRepoUrl}
+                  onChange={e => onSharedRepoUrlChange(e.target.value)}
+                  placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
+                  className={INPUT_CLASS}
+                />
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => void onTestConnection()}
+                  disabled={isTestingConnection || !sharedRepoUrl.trim()}
+                  title='Verify the repo URL and token before configuring applications'
+                >
+                  <PlugZap size={14} />
+                  {isTestingConnection ? 'Testing…' : 'Test'}
+                </Button>
+              </div>
+              {connectionTest ? (
+                <p
+                  className={cn(
+                    'text-[11px] mt-1 flex items-center gap-1',
+                    connectionTest.ok ? 'text-green-600 dark:text-green-500' : 'text-destructive',
+                  )}
+                >
+                  {connectionTest.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                  {connectionTest.message}
+                </p>
+              ) : (
+                <p className={HELP_CLASS}>
+                  Verifies the repo URL + token before you configure applications.
+                </p>
+              )}
             </div>
           </div>
 
@@ -502,6 +682,32 @@ const ReleaseConfigWizardForm = ({
       ? form.applications.filter(application => application.boardId === selectedApplication.boardId)
       : form.applications;
 
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(
+    null,
+  );
+  const handleTestConnection = async (): Promise<void> => {
+    if (!form.sharedRepoUrl.trim() || !form.vcsProvider) return;
+    setIsTestingConnection(true);
+    setConnectionTest(null);
+    try {
+      const response = await apiInstance.post<{ ok: boolean; message: string }>(
+        '/commits/analyze/test-connection',
+        { repoUrl: form.sharedRepoUrl.trim(), vcsProvider: form.vcsProvider },
+      );
+      setConnectionTest(response.data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Test failed';
+      setConnectionTest({ ok: false, message: msg });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  useEffect(() => {
+    setConnectionTest(null);
+  }, [form.sharedRepoUrl, form.vcsProvider]);
+
   // The form keeps the complete group in memory even when application edit
   // displays one row. The backend uses the submitted list to detect removals.
   const existingAppNames = useMemo(
@@ -559,6 +765,9 @@ const ReleaseConfigWizardForm = ({
             onSharedRepoUrlChange={form.setSharedRepoUrl}
             showGroupControls={!isApplicationEdit}
             allowApplicationListChanges={!isApplicationEdit}
+            onTestConnection={handleTestConnection}
+            isTestingConnection={isTestingConnection}
+            connectionTest={connectionTest}
           />
         )}
 

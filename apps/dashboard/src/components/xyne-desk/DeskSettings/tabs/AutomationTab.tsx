@@ -4,7 +4,7 @@ import { AutomationBuilder } from '../../../Automation/AutomationBuilder/Automat
 import { RunHistory } from '../../../Automation/AutomationRuns/RunHistory/RunHistory';
 import { RunDetail } from '../../../Automation/AutomationRuns/RunDetail/RunDetail';
 import { AutomationApprovalsList } from '../../../Automation/AutomationApprovalsList/AutomationApprovalsList';
-import type { Automation, AutomationRun } from '../../../Automation/Automation.types';
+import type { Automation, AutomationRunSummary } from '../../../Automation/Automation.types';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 
 type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
@@ -19,7 +19,7 @@ type AutomationView =
   | { screen: 'approvals' }
   | { screen: 'builder'; automation: Automation | null; approvalReviewMode?: boolean }
   | { screen: 'runs'; automation: Automation }
-  | { screen: 'run-detail'; automation: Automation; run: AutomationRun };
+  | { screen: 'run-detail'; automation: Automation; run: AutomationRunSummary };
 
 function automationScopesToChannel(
   automation: Automation,

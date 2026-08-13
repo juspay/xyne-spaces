@@ -69,6 +69,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
@@ -206,6 +207,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       getDroppedFilesForEntity,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
+    const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
@@ -302,10 +304,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-    const [showFormatToolbar, setShowFormatToolbar] = useState(false);
+    const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
-    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
+    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(
+      defaultFormattingToolbarOpen,
+    );
+
+    useEffect(() => {
+      setShowFormatToolbar(defaultFormattingToolbarOpen);
+      setShowMobileFormattingToolbar(defaultFormattingToolbarOpen);
+    }, [defaultFormattingToolbarOpen]);
 
     const [ticketCreated, setTicketCreated] = useState(false);
 
@@ -581,10 +590,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           lowlight,
           defaultLanguage: 'plaintext',
-          HTMLAttributes: {
-            class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-            style: 'padding: 0.75rem;',
-          },
         }),
         LinkExtension.extend({
           inclusive: false,

@@ -4,7 +4,7 @@ export const RECORDING_VERSION_STORAGE_KEY = 'xyne:recording-version';
 
 export type RecordingVersion = 'v1' | 'v2';
 
-const DEFAULT_RECORDING_VERSION: RecordingVersion = 'v1';
+const DEFAULT_RECORDING_VERSION: RecordingVersion = 'v2';
 
 const listeners = new Set<() => void>();
 
@@ -17,7 +17,7 @@ const getSnapshot = (): string => localStorage.getItem(RECORDING_VERSION_STORAGE
 const getServerSnapshot = (): string => DEFAULT_RECORDING_VERSION;
 
 const parseVersion = (raw: string): RecordingVersion =>
-  raw === 'v2' ? 'v2' : DEFAULT_RECORDING_VERSION;
+  raw === 'v2' || raw === 'v1' ? raw : DEFAULT_RECORDING_VERSION;
 
 const saveVersion = (version: RecordingVersion): void => {
   localStorage.setItem(RECORDING_VERSION_STORAGE_KEY, version);

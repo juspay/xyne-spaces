@@ -68,6 +68,9 @@ export interface ClawRunRequest {
   messageAttachmentIds?: string[];
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
+  /** Single search + single answer pass instead of the full agentic tool
+   *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
+  instant?: boolean;
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
@@ -140,6 +143,12 @@ export interface AccessibleClawAgent {
     fileId: string | null;
     rootCollectionId: string;
   }>;
+  /** From claw-auth's `agent.config.instantAgent` (see agents.ts's
+   *  lightAgentProjection). When true, every chat request to this agent
+   *  always runs the single-search/single-answer instant KB path — the
+   *  askAI composer shows a locked "Instant" indicator instead of its
+   *  normal per-message toggle for such agents, and never for others. */
+  instantAgent?: boolean;
 }
 
 export interface ClawConversationSummary {
@@ -553,6 +562,7 @@ export async function runClawAgentStream(
     }),
     ...(request.webSearchEnabled && { webSearchEnabled: true }),
     ...(request.deepResearchEnabled && { deepResearchEnabled: true }),
+    ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
@@ -849,6 +859,9 @@ interface RawClawAgent {
   /** Claw-auth's `INCLUDE_TOOLS_SKILLS` always loads collections + kbScope. */
   kbScope?: string;
   collections?: Array<{ id: string; agentId: string; collectionId: string; fileId: string | null }>;
+  /** Top-level in the light-list response (agents.ts's lightAgentProjection
+   *  derives it from config.instantAgent, but doesn't expose config itself). */
+  instantAgent?: boolean;
 }
 
 export async function listAccessibleClawAgents(req: {
@@ -929,6 +942,7 @@ export async function listAccessibleClawAgents(req: {
         fileId: c.fileId,
         rootCollectionId: rootByCollectionId.get(c.collectionId) ?? c.collectionId,
       })),
+      instantAgent: agent.instantAgent === true,
     };
   });
 

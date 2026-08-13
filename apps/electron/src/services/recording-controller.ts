@@ -1,13 +1,28 @@
 import { app, BrowserWindow, powerMonitor, powerSaveBlocker } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
-import { showRecordingPill, hideRecordingPill, isPillWindow } from './recording-pill-window';
+import {
+  showRecordingPill,
+  hideRecordingPill,
+  isPillWindow,
+  isRecordingPillEnabled,
+  persistRecordingPillEnabled,
+} from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
 
 export interface RecordingSnapshot {
   active: boolean;
   startTime: number | null;
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
+}
+
+export interface RecordingPauseState {
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
 }
 
 const RENDERER_READY_TIMEOUT_MS = 10_000;
@@ -20,6 +35,9 @@ let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
 let startTime: number | null = null;
+let paused = false;
+let pauseStartedAt: number | null = null;
+let accumulatedPausedMs = 0;
 let externalStartExpiry: ReturnType<typeof setTimeout> | null = null;
 
 let minimized = false;
@@ -33,7 +51,7 @@ const watchedRenderers = new WeakSet<BrowserWindow>();
 const listeners = new Set<(snapshot: RecordingSnapshot) => void>();
 
 function getSnapshot(): RecordingSnapshot {
-  return { active, startTime };
+  return { active, startTime, paused, pauseStartedAt, accumulatedPausedMs };
 }
 
 function notifyListeners(): void {
@@ -145,8 +163,13 @@ function cancelPendingPillSync(): void {
 
 function syncPillVisibility(): void {
   cancelPendingPillSync();
-  if (active && (minimized || !isMainWindowFocused())) {
-    showRecordingPill(startTime ?? Date.now());
+  if (active && isRecordingPillEnabled() && (minimized || !isMainWindowFocused())) {
+    showRecordingPill({
+      startTime: startTime ?? Date.now(),
+      paused,
+      pauseStartedAt,
+      accumulatedPausedMs,
+    });
   } else {
     hideRecordingPill();
   }
@@ -158,6 +181,12 @@ function scheduleSyncPillVisibility(): void {
     pillSyncTimer = null;
     syncPillVisibility();
   }, PILL_SYNC_DEBOUNCE_MS);
+}
+
+export function setRecordingPillEnabled(enabled: boolean): void {
+  persistRecordingPillEnabled(enabled);
+  syncPillVisibility();
+  log.info(`[RecordingController] Recording pill ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 export function setOverlayMinimized(next: boolean): void {
@@ -264,6 +293,22 @@ export function stopRecording(trigger: RecordingTrigger): void {
   log.info(`[RecordingController] Stop requested from ${trigger}`);
 }
 
+export function pauseRecordingFromOutside(trigger: RecordingTrigger): void {
+  if (!active || paused) return;
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('recording:pause-requested');
+  log.info(`[RecordingController] Pause requested from ${trigger}`);
+}
+
+export function resumeRecordingFromOutside(trigger: RecordingTrigger): void {
+  if (!active || !paused) return;
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('recording:resume-requested');
+  log.info(`[RecordingController] Resume requested from ${trigger}`);
+}
+
 export function toggleRecording(trigger: RecordingTrigger): void {
   if (active) {
     stopRecording(trigger);
@@ -272,12 +317,19 @@ export function toggleRecording(trigger: RecordingTrigger): void {
   }
 }
 
-export function syncRecordingState(nextActive: boolean, nextStartTime?: number): void {
+export function syncRecordingState(
+  nextActive: boolean,
+  nextStartTime?: number,
+  nextPause?: RecordingPauseState,
+): void {
   const wasActive = active;
   if (!nextActive && !wasActive) return;
 
   active = nextActive;
   startTime = nextActive ? (nextStartTime ?? Date.now()) : null;
+  paused = nextActive ? !!nextPause?.paused : false;
+  pauseStartedAt = nextActive ? (nextPause?.pauseStartedAt ?? null) : null;
+  accumulatedPausedMs = nextActive ? (nextPause?.accumulatedPausedMs ?? 0) : 0;
 
   if (nextActive && !wasActive) {
     clearExternalStartPending();

@@ -438,6 +438,7 @@ class MultiUserTranscriber:
         self._stt_model_override: Optional[str] = None  # User's STT model preference from UI
         self._pending_sessions: Set[str] = set()  # Participants with session creation in progress
         self._identifier: Optional[Any] = identifier  # RealtimeIdentifier for speaker ID
+        self._enabled: bool = True  # Host kill-switch; False = silenced (audio unsubscribed, no sinks)
 
         # === Multi-core VAD optimization ===
         # Silero VAD hardcodes ONNX to intra_op_num_threads=1, inter_op_num_threads=1.
@@ -837,7 +838,18 @@ class MultiUserTranscriber:
         """
         if track.kind != rtc.TrackKind.KIND_AUDIO:
             return
-        
+
+        # Host kill-switch: while transcription is off, drop the track immediately so
+        # no audio reaches STT — even for participants who join/publish during the pause.
+        if not self._enabled:
+            try:
+                publication.set_subscribed(False)
+            except Exception as e:
+                logger.warning(
+                    f"track_drop_while_disabled_failed | participant_id={participant.identity}, error={e}"
+                )
+            return
+
         participant_name = participant.name or participant.identity
         logger.info(
             f"track_subscribed | participant_id={participant.identity}, "
@@ -1035,6 +1047,46 @@ class MultiUserTranscriber:
             if self._stt_provider != "chutes":
                 logger.info(f"[{self.__class__.__name__}] STT model override: {model}")
     
+    def is_enabled(self) -> bool:
+        """Current authoritative transcription state (True = capturing)."""
+        return self._enabled
+
+    async def set_transcription_enabled(self, enabled: bool):
+        """Host kill-switch. Disabled → unsubscribe from all audio (nothing reaches
+        STT) and tear down every session; enabled → re-subscribe so the normal
+        track_subscribed flow rebuilds sessions. The agent never leaves the room, so
+        this is fully reversible without re-dispatch."""
+        if enabled == self._enabled:
+            logger.info(f"transcription_toggle_noop | enabled={enabled}")
+            return
+        self._enabled = enabled
+
+        if not enabled:
+            self._set_all_audio_subscribed(False)
+            for participant in list(self.ctx.room.remote_participants.values()):
+                self._destroy_participant_session(participant)
+                if self._identifier is not None:
+                    self._identifier.cancel_participant(participant.identity)
+            logger.info("transcription_disabled | audio_unsubscribed, sessions_torn_down")
+        else:
+            # Re-subscribe; track_subscribed rebuilds sessions for unmuted publishers.
+            self._set_all_audio_subscribed(True)
+            logger.info("transcription_enabled | audio_resubscribed")
+
+    def _set_all_audio_subscribed(self, subscribed: bool):
+        """(Un)subscribe the agent from every remote participant's audio track."""
+        for participant in self.ctx.room.remote_participants.values():
+            for pub in participant.track_publications.values():
+                if pub.kind != rtc.TrackKind.KIND_AUDIO:
+                    continue
+                try:
+                    pub.set_subscribed(subscribed)
+                except Exception as e:
+                    logger.warning(
+                        f"set_subscribed_failed | participant_id={participant.identity}, "
+                        f"subscribed={subscribed}, error={e}"
+                    )
+
     def _is_ai_enabled(self) -> bool:
         """Check if AI voice is currently enabled."""
         if self._ai_manager is None:
@@ -1043,11 +1095,18 @@ class MultiUserTranscriber:
     
     def _create_participant_session(self, participant: rtc.RemoteParticipant):
         """Create a new AgentSession for a participant from the pre-warmed pool.
-        
+
         Handles deduplication and race conditions:
         - Skips if session already exists or creation is in progress
         - After creation, re-checks mute state in case participant muted during async creation
         """
+        # Host kill-switch: no sessions while transcription is off (covers the
+        # track_unmuted path too, not just track_subscribed).
+        if not self._enabled:
+            logger.info(
+                f"session_create_skipped_transcription_off | participant_id={participant.identity}"
+            )
+            return
         if participant.identity in self._sessions or participant.identity in self._pending_sessions:
             logger.debug(f"session_already_exists_or_pending | participant_id={participant.identity}")
             return

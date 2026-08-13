@@ -1,5 +1,7 @@
 import {
+  ChannelFilterMode,
   ChannelScopeType,
+  ChannelSortOrder,
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
@@ -46,6 +48,39 @@ export const sumSectionUnread = (
       total + (channel.id === activeChannelId ? 0 : (unreadCounts[channel.id] ?? 0)),
     0,
   );
+
+export const DEFAULT_FILTER_MODE = ChannelFilterMode.ACTIVE;
+export const DEFAULT_GROUP_SORT_ORDER = ChannelSortOrder.UNREAD;
+export const ACTIVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+export interface ChannelFilterContext {
+  unreadCounts: Record<string, number>;
+  mentionCounts: Record<string, number>;
+  statuses: Map<string, ChannelUserStatus>;
+  activeChannelId?: string | undefined;
+  now: number;
+}
+
+export const applyChannelFilter = (
+  channels: VisibleChannel[],
+  mode: ChannelFilterMode,
+  { unreadCounts, mentionCounts, statuses, activeChannelId, now }: ChannelFilterContext,
+): VisibleChannel[] => {
+  if (mode === ChannelFilterMode.ALL) return channels;
+  const cutoff = now - ACTIVE_WINDOW_MS;
+  return channels.filter(channel => {
+    if (channel.id === activeChannelId) return true;
+    const unread = unreadCounts[channel.id] ?? 0;
+    if (mode === ChannelFilterMode.MENTIONS) return (mentionCounts[channel.id] ?? 0) > 0;
+    const lastActivity = channel.channelStats?.lastActivityAt ?? 0;
+    // Purely age-based, as the label says — an old unread does not keep a channel visible.
+    if (mode === ChannelFilterMode.ACTIVE) return lastActivity >= cutoff;
+    // UNREADS — same predicate the Unreads inbox uses.
+    if (unread > 0) return true;
+    if (isDMChannel(channel.scopeType)) return false;
+    return lastActivity > (statuses.get(channel.id)?.lastViewedAt ?? 0);
+  });
+};
 
 // Optimized function to group channels by scope type (single pass)
 export const groupChannelsByScope = (
