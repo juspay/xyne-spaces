@@ -70,7 +70,7 @@ export function UsageTab({
   );
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6'>
       <AdminToolbarPortal>
         <AdminSearchField
           value={query}
@@ -81,29 +81,29 @@ export function UsageTab({
           className='w-full'
         />
         <div className='flex flex-wrap items-center justify-end gap-2'>
-        <Select
-          value={String(range)}
-          onValueChange={value => setRange(value === 'all' ? 'all' : (Number(value) as 7 | 30))}
-        >
-          <SelectTrigger
-            className='w-auto max-w-[16rem] focus-visible:border-ring focus-visible:ring-0'
-            aria-label='Date range'
+          <Select
+            value={String(range)}
+            onValueChange={value => setRange(value === 'all' ? 'all' : (Number(value) as 7 | 30))}
           >
-            <SelectValue>
-              <span className='flex min-w-0 items-center gap-2'>
-                <CalendarRange className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-                <span className='truncate'>
-                  {range === 'all' ? 'All time' : `Last ${range} days`}
+            <SelectTrigger
+              className='w-auto max-w-[16rem] focus-visible:border-ring focus-visible:ring-0'
+              aria-label='Date range'
+            >
+              <SelectValue>
+                <span className='flex min-w-0 items-center gap-2'>
+                  <CalendarRange className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                  <span className='truncate'>
+                    {range === 'all' ? 'All time' : `Last ${range} days`}
+                  </span>
                 </span>
-              </span>
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='7'>Last 7 days</SelectItem>
-            <SelectItem value='30'>Last 30 days</SelectItem>
-            <SelectItem value='all'>All time</SelectItem>
-          </SelectContent>
-        </Select>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='7'>Last 7 days</SelectItem>
+              <SelectItem value='30'>Last 30 days</SelectItem>
+              <SelectItem value='all'>All time</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </AdminToolbarPortal>
 
@@ -113,7 +113,7 @@ export function UsageTab({
         <StatCard label='Tokens Out' value={fmt(totals.tokensOut)} />
       </div>
 
-      <section className='flex flex-col gap-2'>
+      <section className='flex min-h-0 flex-1 flex-col gap-2'>
         <h3 className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
           Per-agent usage
         </h3>
@@ -129,11 +129,11 @@ export function UsageTab({
             headers={[
               { label: 'Agent' },
               ...(showOrgLabels ? [{ label: 'Org' }] : []),
-              { label: 'Runs', align: 'right' as const },
-              { label: 'Tokens In', align: 'right' as const },
-              { label: 'Tokens Out', align: 'right' as const },
-              { label: 'Cache Read', align: 'right' as const },
-              { label: 'Cache Write', align: 'right' as const },
+              { label: 'Runs' },
+              { label: 'Tokens In' },
+              { label: 'Tokens Out' },
+              { label: 'Cache Read' },
+              { label: 'Cache Write' },
             ]}
           >
             {visible.map((stat: AgentUsageStat) => (
@@ -147,19 +147,19 @@ export function UsageTab({
                     <OrgBadge orgName={orgLabel(stat.orgId, stat.orgName, orgNamesById)} />
                   </td>
                 )}
-                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-muted-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 font-mono text-muted-foreground'>
                   {fmt(stat.runs)}
                 </td>
-                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 font-mono text-foreground'>
                   {fmt(stat.tokensIn)}
                 </td>
-                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 font-mono text-foreground'>
                   {fmt(stat.tokensOut)}
                 </td>
-                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-muted-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 font-mono text-muted-foreground'>
                   {fmt(stat.tokensCacheRead)}
                 </td>
-                <td className='whitespace-nowrap px-4 py-3 text-right font-mono text-muted-foreground'>
+                <td className='whitespace-nowrap px-4 py-3 font-mono text-muted-foreground'>
                   {fmt(stat.tokensCacheWrite)}
                 </td>
               </tr>

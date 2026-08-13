@@ -35,15 +35,9 @@ export function OrganizationSurfacesSection({
   const slackConfig = surfaces.data?.find(
     connection => connection.surface.key === 'slack' && connection.surfaceTenantId === '',
   );
-  const slackWorkspace = surfaces.data?.find(
-    connection => connection.surface.key === 'slack' && connection.surfaceTenantId !== '',
-  );
   const rawStatus = slackConfig?.config?.['configTokenStatus'];
   const tokenStatus =
     rawStatus === 'valid' || rawStatus === 'present' || rawStatus === 'expired' ? rawStatus : null;
-  const rawTeamName = slackWorkspace?.config?.['teamName'];
-  const teamName =
-    typeof rawTeamName === 'string' && rawTeamName.trim() ? rawTeamName.trim() : null;
   const isAccessTokenMissing = !accessToken.trim();
   const isRefreshTokenMissing = !refreshToken.trim();
   const connectDisabled = isAccessTokenMissing || isRefreshTokenMissing;
@@ -87,15 +81,6 @@ export function OrganizationSurfacesSection({
           </span>
           <div className='min-w-0 flex-1'>
             <p className='text-sm font-medium leading-5 text-foreground'>Slack</p>
-            <p className='truncate text-xs leading-4 text-muted-foreground'>
-              {surfaces.isLoading
-                ? 'Checking connection…'
-                : surfaces.isError
-                  ? 'Couldn’t load connection status'
-                  : tokenStatus
-                    ? `Configuration token: ${tokenStatus}${teamName ? ` · Installed in ${teamName}` : ''}`
-                    : 'Not connected'}
-            </p>
           </div>
           {!surfaces.isLoading && !surfaces.isError && (
             <Pill tone={tokenStatus === 'valid' ? 'success' : 'neutral'}>

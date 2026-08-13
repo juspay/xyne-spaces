@@ -150,7 +150,7 @@ export function ScheduledTab({
 
   if (isPending) {
     return (
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <Skeleton className='h-40 w-full' />
       </div>
@@ -159,7 +159,7 @@ export function ScheduledTab({
 
   if (isError) {
     return (
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <TabMessage>Couldn’t load scheduled jobs.</TabMessage>
       </div>
@@ -180,7 +180,7 @@ export function ScheduledTab({
 
   if (visible.length === 0) {
     return (
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <TabMessage>No scheduled jobs.</TabMessage>
       </div>
@@ -188,7 +188,7 @@ export function ScheduledTab({
   }
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6'>
       {filterBar}
 
       <AdminTable

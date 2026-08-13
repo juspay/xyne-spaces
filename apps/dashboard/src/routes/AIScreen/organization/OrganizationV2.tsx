@@ -374,7 +374,6 @@ const OrganizationV2 = (): ReactElement => {
                 })}
               </ul>
             )}
-
           </section>
         ) : (
           <div className='flex w-full flex-col gap-3'>

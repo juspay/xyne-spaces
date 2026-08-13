@@ -133,7 +133,7 @@ export function AuditTab({
 
   if (isPending) {
     return (
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <Skeleton className='h-40 w-full' />
       </div>
@@ -142,7 +142,7 @@ export function AuditTab({
 
   if (isError) {
     return (
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <TabMessage>Couldn’t load audit logs.</TabMessage>
       </div>
@@ -160,7 +160,7 @@ export function AuditTab({
 
   if (visible.length === 0) {
     return (
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <TabMessage>No audit logs match these filters.</TabMessage>
       </div>
@@ -168,7 +168,7 @@ export function AuditTab({
   }
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6'>
       {filterBar}
 
       <AdminTable

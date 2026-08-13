@@ -12,15 +12,15 @@ export function AdminTable({
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className='overflow-x-auto rounded-xl border border-border'>
+    <div className='min-h-0 overflow-auto rounded-xl border border-border'>
       <table className='w-max min-w-full text-sm'>
         <thead>
-          <tr className='border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground'>
+          <tr className='text-left text-xs uppercase tracking-wide text-muted-foreground'>
             {headers.map(header => (
               <th
                 key={header.label}
                 className={cn(
-                  'whitespace-nowrap px-4 py-2.5',
+                  'sticky top-0 z-10 whitespace-nowrap bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] px-4 py-2.5 shadow-[inset_0_-1px_0_var(--border)]',
                   header.align === 'right' && 'text-right',
                   header.width,
                 )}

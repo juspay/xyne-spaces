@@ -170,9 +170,6 @@ export function OrganizationServiceTokensSection({
           </span>
           <div className='min-w-0 flex-1'>
             <p className='text-sm font-medium leading-5 text-foreground'>Service tokens</p>
-            <p className='text-xs leading-4 text-muted-foreground'>
-              Long-lived, revocable credentials for servers calling the Claw API.
-            </p>
           </div>
           {canManage && (
             <Button

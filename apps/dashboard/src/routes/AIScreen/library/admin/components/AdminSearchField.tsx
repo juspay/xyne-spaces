@@ -34,6 +34,12 @@ export function AdminSearchField({
         }}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        name='admin-search'
+        autoComplete='off'
+        spellCheck={false}
+        data-1p-ignore
+        data-lpignore='true'
+        data-bwignore='true'
         data-track-category='Claw Admin'
         data-track-name={trackName}
         className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground'

@@ -76,7 +76,7 @@ function CredentialsForm({
       ) : (
         <>
           {existingKeys.length > 0 && (
-            <p className='mb-3 text-xs text-muted-foreground'>
+            <p className='mb-3 px-3 text-xs text-muted-foreground'>
               Replacing existing creds:{' '}
               <span className='font-mono text-foreground'>{existingKeys.join(', ')}</span>. Saving
               overwrites all fields.
@@ -85,7 +85,7 @@ function CredentialsForm({
           <div className='flex flex-col gap-3'>
             {fields.map(field => (
               <label key={field.name} className='flex flex-col gap-2'>
-                <span className='text-xs font-medium text-foreground'>
+                <span className='px-3 text-xs font-medium text-foreground'>
                   {field.label}
                   {!field.optional && <span className='text-destructive'> *</span>}
                 </span>
@@ -97,7 +97,10 @@ function CredentialsForm({
                     setValues(current => ({ ...current, [field.name]: event.target.value }))
                   }
                   spellCheck={false}
-                  autoComplete='off'
+                  autoComplete={field.type === 'password' ? 'new-password' : 'off'}
+                  data-1p-ignore
+                  data-lpignore='true'
+                  data-bwignore='true'
                 />
               </label>
             ))}
@@ -105,7 +108,7 @@ function CredentialsForm({
         </>
       )}
 
-      {error && <p className='mt-3 text-xs text-destructive'>{error}</p>}
+      {error && <p className='mt-3 px-3 text-xs text-destructive'>{error}</p>}
 
       <div className='mt-4 flex items-center justify-end gap-2'>
         <Button type='button' variant='ghost' disabled={save.isPending} onClick={onCancel}>
@@ -211,88 +214,86 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
     : servers;
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto'>
       {searchBar}
 
       {visibleServers.length === 0 ? (
         <TabMessage>No MCP servers match your search.</TabMessage>
       ) : (
-      <ul className='flex flex-col'>
-        {visibleServers.map((server: AdminMcpServerSummary) => {
-          const fields = fieldsByType?.[server.type] ?? [];
-          const formOpen = openForm === server.type;
+        <ul className='flex flex-col'>
+          {visibleServers.map((server: AdminMcpServerSummary) => {
+            const fields = fieldsByType?.[server.type] ?? [];
+            const formOpen = openForm === server.type;
 
-          return (
-            <li key={server.id} className='border-b border-border last:border-b-0'>
-              <div className='flex items-center justify-between gap-3 px-1 py-4'>
-                <div className='flex min-w-0 flex-1 items-center gap-3'>
-                  <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                    <span className='truncate text-sm font-medium text-foreground'>
-                      {server.name}
-                    </span>
-                    {server.hasGlobalCredentials ? (
-                      <Pill tone='success'>Creds set</Pill>
-                    ) : (
-                      <Pill tone='neutral'>No creds</Pill>
-                    )}
+            return (
+              <li key={server.id} className='border-b border-border last:border-b-0'>
+                <div className='flex items-center justify-between gap-3 px-1 py-4'>
+                  <div className='flex min-w-0 flex-1 items-center gap-3'>
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      <span className='truncate text-sm font-medium text-foreground'>
+                        {server.name}
+                      </span>
+                      <Pill tone={server.hasGlobalCredentials ? 'success' : 'neutral'}>
+                        {server.hasGlobalCredentials ? 'Creds set' : 'No creds'}
+                      </Pill>
+                    </div>
                   </div>
-                </div>
 
-                <div className='flex shrink-0 items-center gap-2'>
-                  <Switch
-                    checked={server.allowGlobalFallback}
-                    onCheckedChange={allow => toggleFallback.mutate({ type: server.type, allow })}
-                    aria-label={`Allow fallback for ${server.name}`}
-                  />
-                  <span className='text-xs text-muted-foreground'>Allow fallback</span>
-                </div>
+                  <div className='flex shrink-0 items-center gap-2'>
+                    <Switch
+                      checked={server.allowGlobalFallback}
+                      onCheckedChange={allow => toggleFallback.mutate({ type: server.type, allow })}
+                      aria-label={`Allow fallback for ${server.name}`}
+                    />
+                    <span className='text-xs text-muted-foreground'>Allow fallback</span>
+                  </div>
 
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='sm'
-                  className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
-                  onClick={() => setOpenForm(formOpen ? null : server.type)}
-                  data-track-category='Claw Admin'
-                  data-track-name='Toggle global MCP credentials form'
-                >
-                  <KeySlant className='size-4' />
-                  {server.hasGlobalCredentials ? 'Update creds' : 'Set creds'}
-                </Button>
-
-                {server.hasGlobalCredentials && (
                   <Button
                     type='button'
                     variant='ghost'
                     size='sm'
-                    aria-label='Delete global credentials'
                     className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
-                    onClick={() => setDeleteTarget(server)}
+                    onClick={() => setOpenForm(formOpen ? null : server.type)}
                     data-track-category='Claw Admin'
-                    data-track-name='Delete global MCP credentials'
+                    data-track-name='Toggle global MCP credentials form'
                   >
-                    <DeleteDustbin01 className='size-4' />
-                    Delete creds
+                    <KeySlant className='size-4' />
+                    {server.hasGlobalCredentials ? 'Update creds' : 'Set creds'}
                   </Button>
-                )}
-              </div>
 
-              {formOpen && (
-                <CredentialsForm
-                  userId={userId}
-                  server={server}
-                  fields={fields}
-                  onSaved={() => {
-                    setOpenForm(null);
-                    refresh();
-                  }}
-                  onCancel={() => setOpenForm(null)}
-                />
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                  {server.hasGlobalCredentials && (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      aria-label='Delete global credentials'
+                      className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
+                      onClick={() => setDeleteTarget(server)}
+                      data-track-category='Claw Admin'
+                      data-track-name='Delete global MCP credentials'
+                    >
+                      <DeleteDustbin01 className='size-4' />
+                      Delete creds
+                    </Button>
+                  )}
+                </div>
+
+                {formOpen && (
+                  <CredentialsForm
+                    userId={userId}
+                    server={server}
+                    fields={fields}
+                    onSaved={() => {
+                      setOpenForm(null);
+                      refresh();
+                    }}
+                    onCancel={() => setOpenForm(null)}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       <ConfirmDialog

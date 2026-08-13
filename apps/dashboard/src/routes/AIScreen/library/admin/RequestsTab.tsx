@@ -57,7 +57,11 @@ const KIND_OPTIONS = [
   { value: '', label: 'All types', icon: <FilterFunnel className='size-4' aria-hidden /> },
   { value: 'agent', label: 'Agent', icon: <Bot className='size-4' aria-hidden /> },
   { value: 'skill', label: 'Skill', icon: <LayerTwo className='size-4' aria-hidden /> },
-  { value: 'mcp', label: 'MCP connector', icon: <PluginAddonDefault className='size-4' aria-hidden /> },
+  {
+    value: 'mcp',
+    label: 'MCP connector',
+    icon: <PluginAddonDefault className='size-4' aria-hidden />,
+  },
   { value: 'workflow', label: 'Workflow', icon: <GitBranch className='size-4' aria-hidden /> },
 ];
 
@@ -453,7 +457,9 @@ export function RequestsTab({
                       {row.title}
                     </button>
                   ) : (
-                    <span className='truncate text-sm font-medium text-foreground'>{row.title}</span>
+                    <span className='truncate text-sm font-medium text-foreground'>
+                      {row.title}
+                    </span>
                   )}
                   {showOrgLabels && row.orgName && <OrgBadge orgName={row.orgName} />}
                 </div>
@@ -483,9 +489,7 @@ export function RequestsTab({
                       size='icon'
                       aria-label='View details'
                       aria-expanded={openDetailKey === row.key}
-                      onClick={() =>
-                        setOpenDetailKey(prev => (prev === row.key ? null : row.key))
-                      }
+                      onClick={() => setOpenDetailKey(prev => (prev === row.key ? null : row.key))}
                       className='size-7 text-muted-foreground hover:text-foreground'
                       data-track-category='Claw Admin'
                       data-track-name='View request details'
@@ -563,7 +567,7 @@ export function RequestsTab({
   );
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto'>
       {registration.flow && (
         <RegistrationFlowCard
           flow={registration.flow}

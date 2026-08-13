@@ -87,7 +87,7 @@ export function AddOrgMemberDialog({
     <V2Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title='Add people'
+      title='Add organization member'
       description='Add someone to this organization.'
       testId='add-org-member-dialog'
       footer={
@@ -99,7 +99,7 @@ export function AddOrgMemberDialog({
           data-track-category='Claw Organization'
           data-track-name='Organization: add members'
         >
-          {selected.length > 1 ? `Add ${selected.length} people` : 'Add person'}
+          {selected.length > 1 ? `Add ${selected.length} members` : 'Add member'}
         </Button>
       }
     >
@@ -126,6 +126,7 @@ export function AddOrgMemberDialog({
           disabled={saving}
           label='Role for the people being added'
           trackName='Organization: set new member role'
+          triggerClassName='border-border shadow-none focus-visible:ring-[2px] focus-visible:ring-ring/10'
           onChange={next => {
             if (isAddableOrgRole(next)) setRole(next);
           }}

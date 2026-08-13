@@ -14,7 +14,7 @@ export function FilterSelect({
   onChange,
   ariaLabel,
   icon,
-  className = 'w-auto max-w-[16rem]',
+  className = 'w-auto',
 }: {
   value: string;
   options: readonly { value: string; label: string; icon?: ReactNode }[];
@@ -24,6 +24,8 @@ export function FilterSelect({
   className?: string;
 }): ReactElement {
   const current = options.find(option => (option.value || 'all') === (value || 'all'));
+  const label = current?.label ?? '';
+  const widthAnchor = options.find(option => !option.value)?.label ?? options[0]?.label ?? '';
 
   return (
     <Select value={value || 'all'} onValueChange={next => onChange(next === 'all' ? '' : next)}>
@@ -32,9 +34,16 @@ export function FilterSelect({
         aria-label={ariaLabel}
       >
         <SelectValue>
-          <span className='flex min-w-0 items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground'>
+          <span className='flex items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground'>
             {current?.icon ?? icon}
-            <span className='truncate'>{current?.label ?? ''}</span>
+            <span className='relative block'>
+              <span className='invisible block whitespace-nowrap' aria-hidden>
+                {widthAnchor}
+              </span>
+              <span className='absolute inset-0 truncate text-left' title={label}>
+                {label}
+              </span>
+            </span>
           </span>
         </SelectValue>
       </SelectTrigger>
@@ -43,7 +52,7 @@ export function FilterSelect({
           <SelectItem key={option.value || 'all'} value={option.value || 'all'}>
             <span className='flex min-w-0 items-center gap-2'>
               {option.icon}
-              <span className='truncate'>{option.label}</span>
+              <span className='block max-w-[15rem] truncate'>{option.label}</span>
             </span>
           </SelectItem>
         ))}

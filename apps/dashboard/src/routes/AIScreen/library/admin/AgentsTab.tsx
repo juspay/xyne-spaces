@@ -371,7 +371,7 @@ export function AgentsTab({
   };
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto'>
       {searchBar}
 
       {registration.flow && (

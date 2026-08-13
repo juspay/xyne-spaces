@@ -36,12 +36,12 @@ export function V2Dialog({
       description={description}
       testId={testId}
       className={cn(
-        'flex max-h-[min(85vh,720px)] w-full flex-col gap-4 overflow-hidden rounded-2xl border-[0.8px] border-border bg-card p-1',
+        'flex max-h-[min(85vh,720px)] w-full flex-col gap-4 overflow-hidden rounded-2xl border-[0.8px] border-border bg-card p-3',
         WIDTH[width],
         className,
       )}
     >
-      <div className='flex h-9 shrink-0 items-center justify-between gap-2 pl-[18px] pr-2'>
+      <div className='flex h-9 shrink-0 items-center justify-between gap-2 pl-[22px] pr-2'>
         <span className='text-base font-semibold leading-6 tracking-[-0.16px] text-foreground'>
           {title}
         </span>

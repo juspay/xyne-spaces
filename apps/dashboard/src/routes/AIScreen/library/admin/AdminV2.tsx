@@ -157,7 +157,6 @@ export default function AdminV2(): ReactElement {
     enabled: Boolean(userId),
   });
 
-
   const tabs = useMemo<TabItem[]>(
     () => [
       { id: 'agents', label: 'Agents' },
@@ -171,8 +170,8 @@ export default function AdminV2(): ReactElement {
   );
 
   return (
-    <div className='max-w-ai-content mx-auto flex min-h-full w-full flex-col px-6'>
-      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+    <div className='max-w-ai-content mx-auto flex h-full min-h-0 w-full flex-col px-6'>
+      <div className='flex shrink-0 flex-col bg-background'>
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
             <h1 className='text-2xl font-semibold leading-tight tracking-tight text-foreground'>
@@ -223,69 +222,66 @@ export default function AdminV2(): ReactElement {
 
       <AdminToolbarSlotProvider value={toolbarSlot}>
         <AdminFooterSlotProvider value={footerSlot}>
-        <input
-          type='file'
-          accept='image/*'
-          className='hidden'
-          ref={registration.fileInputProps.ref}
-          onChange={registration.fileInputProps.onChange}
-        />
+          <input
+            type='file'
+            accept='image/*'
+            className='hidden'
+            ref={registration.fileInputProps.ref}
+            onChange={registration.fileInputProps.onChange}
+          />
 
-        {tab === 'requests' && (
-          <RequestsTab
-            userId={userId}
-            scope={scope}
-            orgId={orgId}
-            orgNamesById={orgNamesById}
-            showOrgLabels={orgFilter === ALL_ORGS}
-            registration={registration}
-          />
-        )}
-        {tab === 'agents' && (
-          <AgentsTab
-            userId={userId}
-            scope={scope}
-            orgId={orgId}
-            orgNamesById={orgNamesById}
-            showOrgLabels={orgFilter === ALL_ORGS}
-            registration={registration}
-          />
-        )}
-        {tab === 'global-mcp' && <GlobalMcpTab userId={userId} />}
-        {tab === 'audit' && (
-          <AuditTab
-            userId={userId}
-            scope={scope}
-            orgId={orgId}
-            orgNamesById={orgNamesById}
-            showOrgLabels={orgFilter === ALL_ORGS}
-          />
-        )}
-        {tab === 'usage' && (
-          <UsageTab
-            userId={userId}
-            scope={scope}
-            orgId={orgId}
-            orgNamesById={orgNamesById}
-            showOrgLabels={orgFilter === ALL_ORGS}
-          />
-        )}
-        {tab === 'scheduled' && (
-          <ScheduledTab
-            userId={userId}
-            scope={scope}
-            orgId={orgId}
-            orgNamesById={orgNamesById}
-            showOrgLabels={orgFilter === ALL_ORGS}
-          />
-        )}
+          {tab === 'requests' && (
+            <RequestsTab
+              userId={userId}
+              scope={scope}
+              orgId={orgId}
+              orgNamesById={orgNamesById}
+              showOrgLabels={orgFilter === ALL_ORGS}
+              registration={registration}
+            />
+          )}
+          {tab === 'agents' && (
+            <AgentsTab
+              userId={userId}
+              scope={scope}
+              orgId={orgId}
+              orgNamesById={orgNamesById}
+              showOrgLabels={orgFilter === ALL_ORGS}
+              registration={registration}
+            />
+          )}
+          {tab === 'global-mcp' && <GlobalMcpTab userId={userId} />}
+          {tab === 'audit' && (
+            <AuditTab
+              userId={userId}
+              scope={scope}
+              orgId={orgId}
+              orgNamesById={orgNamesById}
+              showOrgLabels={orgFilter === ALL_ORGS}
+            />
+          )}
+          {tab === 'usage' && (
+            <UsageTab
+              userId={userId}
+              scope={scope}
+              orgId={orgId}
+              orgNamesById={orgNamesById}
+              showOrgLabels={orgFilter === ALL_ORGS}
+            />
+          )}
+          {tab === 'scheduled' && (
+            <ScheduledTab
+              userId={userId}
+              scope={scope}
+              orgId={orgId}
+              orgNamesById={orgNamesById}
+              showOrgLabels={orgFilter === ALL_ORGS}
+            />
+          )}
         </AdminFooterSlotProvider>
       </AdminToolbarSlotProvider>
 
-      <div
-        ref={setFooterSlot}
-        className='sticky bottom-0 z-10 mt-auto bg-background py-3 empty:hidden'
-      />
+      <div ref={setFooterSlot} className='mt-auto shrink-0 bg-background py-3 empty:hidden' />
     </div>
   );
 }
