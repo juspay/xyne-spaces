@@ -1915,7 +1915,14 @@ Output ONLY the processed transcript, nothing else.`;
         callMessage.conversationId,
         undefined,
         { callTitlePromise },
-      );
+      ).catch((error) => {
+        logger.error(`[${callId}] detailed_summary_failed`, {
+          stage: 'detailed_summary_generation',
+          error,
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      });
 
       const summaryUiPromise = summaryPromise.then(async (summary) => {
         if (!summary) return null;
