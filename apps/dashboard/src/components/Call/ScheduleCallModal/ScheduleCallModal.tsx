@@ -67,6 +67,7 @@ import { useExternalInviteSuggestions } from './hooks/useExternalInviteSuggestio
 import { usePostCallUpdates } from './hooks/usePostCallUpdates';
 import { useScheduleCallInitialization } from './hooks/useScheduleCallInitialization';
 import { useChannelMemberExclusions } from './hooks/useChannelMemberExclusions';
+import { getDefaultScheduledCallTitle } from './defaults';
 import {
   validateCallDateTimes,
   validateRecurringCallTimes,
@@ -170,10 +171,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     formState: { errors, isSubmitting },
   } = useForm<ScheduleCallFormData>({
     defaultValues: {
-      title: (() => {
-        const displayName = getUserDisplayName(user);
-        return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
-      })(),
+      title: getDefaultScheduledCallTitle(user),
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000), // Default 1 hours after start time
       participants: [],
@@ -941,9 +939,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Reset form and close modal
   const handleClose = useCallback((): void => {
-    const displayName = getUserDisplayName(user);
     reset({
-      title: displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '',
+      title: getDefaultScheduledCallTitle(user),
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
       participants: [],
