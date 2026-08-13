@@ -53,6 +53,21 @@ export class UserService {
     this.prisma = DatabaseClient.getInstance();
   }
 
+  async hasCompletedOnboarding(email: string): Promise<boolean> {
+    const normalizedEmail = email.toLowerCase().trim();
+    return await runAsSystem(async () => {
+      const onboardingResponse = await this.prisma.questionnaireResponse.findFirst({
+        where: {
+          questionnaireType: 'onboarding',
+          email: normalizedEmail,
+        },
+        select: { id: true },
+      });
+
+      return Boolean(onboardingResponse);
+    });
+  }
+
   /**
    * Get org role by memberId
    */
@@ -772,13 +787,14 @@ export class UserService {
       }
 
       const normalizedAuthProvider = (userData.authProvider?.toUpperCase() as AuthProvider) || AuthProvider.GOOGLE;
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
 
       if (workspaceUser) {
         workspaceUser = await this.prisma.user.update({
           where: { id: workspaceUser.id },
           data: { authProvider: normalizedAuthProvider }
         });
-        return { user: workspaceUser, isNewUser: false };
+        return { user: workspaceUser, isNewUser: !hasCompletedOnboarding };
       }
 
       // Also check by email (for users created by seed script or when providerUserId is unavailable)
@@ -900,7 +916,7 @@ export class UserService {
       });
 
       logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
-      return { user: workspaceUser, isNewUser: true };
+      return { user: workspaceUser, isNewUser: !hasCompletedOnboarding };
     } catch (error) {
       logger.error('Error creating workspace user:', error);
       throw error instanceof Error ? error : new Error('Failed to create workspace user');
@@ -996,6 +1012,8 @@ export class UserService {
       // Step 4: Add/upgrade user as OrgMember first so they can create additional workspaces later.
       // A COMMUNITY_MEMBER row is the only global OrgMember row public users have before
       // joining/creating an enterprise workspace. Move that row to the enterprise org.
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
+
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email },
       });
@@ -1103,7 +1121,7 @@ export class UserService {
       }
 
       logger.info(`Created organization ${orgName} with workspace ${workspaceName} for ${userData.email}`);
-      return { organization, workspace, workspaceUser, isNewUser: true };
+      return { organization, workspace, workspaceUser, isNewUser: !hasCompletedOnboarding };
     } catch (error) {
       logger.error('Error creating organization:', error);
       if (isOrganizationPolicyError(error) || (error as Error & { statusCode?: number }).statusCode) {

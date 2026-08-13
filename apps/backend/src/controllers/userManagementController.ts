@@ -1017,6 +1017,52 @@ export class UserManagementController {
       const type = questionnaireType.trim();
       const questionnairePayload = payload as Prisma.InputJsonValue;
       const prisma = DatabaseClient.getInstance();
+      const normalizedEmail =
+        type === 'onboarding'
+          ? (
+              await prisma.user.findUnique({
+                where: { id: userId },
+                select: { email: true },
+              })
+            )?.email.toLowerCase().trim()
+          : undefined;
+
+      if (type === 'onboarding' && !normalizedEmail) {
+        res.status(400).json({ error: 'User email is required for onboarding questionnaire' });
+        return;
+      }
+
+      if (type === 'onboarding') {
+        const saved = await prisma.questionnaireResponse.upsert({
+          where: {
+            questionnaireType_email: {
+              questionnaireType: type,
+              email: normalizedEmail!,
+            },
+          },
+          update: {
+            workspaceId,
+            userId,
+            payload: questionnairePayload,
+            updatedAt: new Date(),
+          },
+          create: {
+            workspaceId,
+            userId,
+            email: normalizedEmail,
+            questionnaireType: type,
+            payload: questionnairePayload,
+          },
+        });
+
+        res.status(200).json({
+          id: saved.id,
+          questionnaireType: saved.questionnaireType,
+          payload: saved.payload,
+        });
+        return;
+      }
+
       const saved = await prisma.questionnaireResponse.upsert({
         where: {
           workspaceId_questionnaireType_userId: {
@@ -1032,6 +1078,7 @@ export class UserManagementController {
         create: {
           workspaceId,
           userId,
+          email: null,
           questionnaireType: type,
           payload: questionnairePayload,
         },

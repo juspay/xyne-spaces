@@ -922,12 +922,14 @@ model QuestionnaireResponse {
   workspaceId       String
   id                String   @id @default(cuid())
   userId            String
+  email             String?
   questionnaireType String
   payload           Json
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@unique([workspaceId, questionnaireType, userId])
+  @@unique([questionnaireType, email])
   @@map("questionnaire_responses")
   @@schema("non_zero")
 }
