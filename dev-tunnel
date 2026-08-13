@@ -1,0 +1,156 @@
+#!/bin/sh
+
+set -u
+
+SSH_HOST="dev-please-work"
+PORTS="5173 5174 3001 3002 3003 9080 4848"
+MODE="normal"
+
+usage() {
+  cat <<'EOF'
+Usage: dev-tunnel [--persistent | --save-config | --help]
+
+  no option       Start tunnels in foreground; Ctrl+C stops them
+  --persistent    Use autossh when installed; otherwise fall back to ssh
+  --save-config   Save all forwards in ~/.ssh/config, then exit
+EOF
+}
+
+case "${1:-}" in
+  "") ;;
+  --persistent) MODE="persistent" ;;
+  --save-config) MODE="save-config" ;;
+  -h|--help) usage; exit 0 ;;
+  *)
+    printf 'Unknown option: %s\n' "$1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [ "$#" -gt 1 ]; then
+  printf 'Only one option may be supplied.\n' >&2
+  usage >&2
+  exit 2
+fi
+
+save_config() {
+  config_dir="${HOME}/.ssh"
+  config_file="${config_dir}/config"
+  begin_marker="# BEGIN dev-tunnel managed forwards"
+  end_marker="# END dev-tunnel managed forwards"
+
+  mkdir -p "$config_dir" || exit 1
+  chmod 700 "$config_dir" || exit 1
+  touch "$config_file" || exit 1
+  chmod 600 "$config_file" || exit 1
+
+  temp_file=$(mktemp "${TMPDIR:-/tmp}/dev-tunnel-config.XXXXXX") || exit 1
+  trap 'rm -f "$temp_file"' EXIT HUP INT TERM
+
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { managed = 1; next }
+    $0 == end   { managed = 0; next }
+    !managed    { print }
+  ' "$config_file" >"$temp_file" || exit 1
+
+  {
+    printf '\n%s\n' "$begin_marker"
+    printf 'Host %s\n' "$SSH_HOST"
+    for port in $PORTS; do
+      printf '  LocalForward 127.0.0.1:%s 127.0.0.1:%s\n' "$port" "$port"
+    done
+    printf '%s\n' "$end_marker"
+  } >>"$temp_file" || exit 1
+
+  mv "$temp_file" "$config_file" || exit 1
+  chmod 600 "$config_file" || exit 1
+  trap - EXIT HUP INT TERM
+
+  printf 'Saved forwards in %s for Host %s:\n' "$config_file" "$SSH_HOST"
+  for port in $PORTS; do
+    printf '  localhost:%s -> %s:localhost:%s\n' "$port" "$SSH_HOST" "$port"
+  done
+}
+
+if [ "$MODE" = "save-config" ]; then
+  save_config
+  exit 0
+fi
+
+port_in_use() {
+  port=$1
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  elif command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+FORWARDED_PORTS=""
+SKIPPED_PORTS=""
+
+set -- -N -o ExitOnForwardFailure=yes
+
+for port in $PORTS; do
+  if port_in_use "$port"; then
+    printf '⚠ Port %s is in use locally — skipping. Close the local process or remove this port from the forward list.\n' "$port" >&2
+    SKIPPED_PORTS="${SKIPPED_PORTS} ${port}"
+  else
+    set -- "$@" -L "127.0.0.1:${port}:127.0.0.1:${port}"
+    FORWARDED_PORTS="${FORWARDED_PORTS} ${port}"
+  fi
+done
+
+SUMMARY_PRINTED=0
+print_summary() {
+  [ "$SUMMARY_PRINTED" -eq 0 ] || return
+  SUMMARY_PRINTED=1
+
+  printf '\nTunnel summary for %s:\n' "$SSH_HOST"
+  if [ -n "$FORWARDED_PORTS" ]; then
+    for port in $FORWARDED_PORTS; do
+      printf '  forwarded: localhost:%s -> %s:localhost:%s\n' "$port" "$SSH_HOST" "$port"
+    done
+  else
+    printf '  forwarded: none\n'
+  fi
+  if [ -n "$SKIPPED_PORTS" ]; then
+    for port in $SKIPPED_PORTS; do
+      printf '  skipped:   localhost:%s (already in use)\n' "$port"
+    done
+  fi
+}
+
+trap 'print_summary' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ -z "$FORWARDED_PORTS" ]; then
+  printf 'No free ports to forward.\n' >&2
+  exit 1
+fi
+
+SSH_PROGRAM="ssh"
+if [ "$MODE" = "persistent" ]; then
+  if command -v autossh >/dev/null 2>&1; then
+    SSH_PROGRAM="autossh"
+    export AUTOSSH_GATETIME=0
+    export AUTOSSH_PORT=0
+  else
+    printf '⚠ autossh not found — using ssh without auto-reconnect.\n' >&2
+  fi
+fi
+
+printf 'Opening %s tunnel(s) to %s. Press Ctrl+C to stop.\n' "$SSH_PROGRAM" "$SSH_HOST"
+"$SSH_PROGRAM" "$@" "$SSH_HOST"
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  printf '%s exited with status %s.\n' "$SSH_PROGRAM" "$status" >&2
+fi
+
+exit "$status"

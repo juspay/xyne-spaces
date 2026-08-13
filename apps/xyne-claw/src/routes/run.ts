@@ -39,7 +39,7 @@ import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
-import { trustedSdlcWikiToolBindings } from "../sdlc-wiki-tool-bindings.js";
+import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, type ExperimentContext } from "../experiment.js";
@@ -1716,7 +1716,7 @@ async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedWikiToolBindings = trustedSdlcWikiToolBindings(agentConfig?.["sdlcContext"]);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
     const {
       groups: mcpGroups,
       cleanup,
@@ -1730,7 +1730,7 @@ async function processTask(
       agentSlug,
       mcpOutputDir,
       (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedWikiToolBindings,
+      trustedSdlcBindings,
     );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
@@ -3603,10 +3603,9 @@ async function processTask(
         userName,
         userEmail,
         customTools: tools,
-        // Wiki source is isolated in the Kata repository sandbox. Removing the
-        // local Claw cwd tools prevents the model from guessing host workspace
-        // paths; historical reads must use sandbox-sdlc-wiki-git-context.
-        localFileTools: !isTrustedSdlcWikiRun,
+        // SDLC source is isolated in repository sandboxes. Never expose Claw's
+        // host-cwd read/write/grep/find/ls tools to the SDLC agent.
+        localFileTools: agentSlug !== "sdlc-agent",
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,

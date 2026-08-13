@@ -1,5 +1,6 @@
 import { createLogger } from "../logger.js";
 import { interact, spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -240,23 +241,62 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
   return null;
 });
 
-register("xyne-spaces", "spaces-sdlc-update-baseline", async (params) => {
+register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
+  const artifactType = String(params["artifactType"] ?? "");
   const action = String(params["action"] ?? "");
-  if (!["begin", "upsert_section", "finalize"].includes(action)) {
-    return "action must be begin, upsert_section, or finalize";
+  if (!["WIKI", "BASELINE", "PRD", "TECH_DOC"].includes(artifactType)) {
+    return "artifactType must be WIKI, BASELINE, PRD, or TECH_DOC";
   }
-  for (const key of ["repoId", "baselineKind", "setupExecutionId", "workflowExecutionId", "title"]) {
-    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+  if (artifactType === "BASELINE") {
+    if (!["begin", "upsert_section", "finalize"].includes(action)) {
+      return "BASELINE action must be begin, upsert_section, or finalize";
+    }
+    for (const key of ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (action === "upsert_section") {
+      for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
+        if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
+      }
+    }
+    return null;
   }
-  if (action === "upsert_section") {
-    for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
+  if (artifactType === "PRD" || artifactType === "TECH_DOC") {
+    if (!["create", "update"].includes(action)) return `${artifactType} action must be create or update`;
+    if (action === "create") {
+      for (const key of ["title", "markdown", "workflowExecutionId"]) {
+        if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
+      }
+      if (artifactType === "TECH_DOC" && !String(params["parentCanvasId"] ?? "").trim()) {
+        return "parentCanvasId is required for TECH_DOC create";
+      }
+    } else {
+      for (const key of ["viewAccessId", "markdown"]) {
+        if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
+      }
+    }
+    return null;
+  }
+  for (const key of ["executionId", "sessionId", "commitSha"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required for WIKI`;
+  }
+  if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
+    return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
+  }
+  if (!["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore"].includes(action)) {
+    return "unsupported WIKI action";
+  }
+  if (!String(params["path"] ?? "").trim()) return "path is required for WIKI";
+  if (action === "move") {
+    for (const key of ["destinationPath", "expectedContentHash"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for move`;
     }
   }
   return null;
 });
 
-register("xyne-spaces", "spaces-sdlc-create-pull-request", async (params) => {
+register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
   for (const key of ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"]) {
     if (!String(params[key] ?? "").trim()) return `${key} is required`;
   }
@@ -268,45 +308,61 @@ register("xyne-spaces", "spaces-sdlc-create-pull-request", async (params) => {
 });
 
 for (const tool of [
-  "spaces-sdlc-wiki-list-pages",
-  "spaces-sdlc-wiki-read-page",
-  "spaces-sdlc-wiki-begin-checkpoint",
-  "spaces-sdlc-wiki-write-page",
-  "spaces-sdlc-wiki-move-page",
-  "spaces-sdlc-wiki-finalize-commit",
+  SDLC_TOOL_NAMES.beginWikiCheckpoint,
+  SDLC_TOOL_NAMES.verifyWikiSources,
+  SDLC_TOOL_NAMES.finalizeWikiCommit,
 ]) {
   register("xyne-spaces", tool, async (params) => {
     for (const key of ["executionId", "sessionId", "repoId"]) {
       if (!String(params[key] ?? "").trim()) return `${key} is required`;
     }
-    if (tool === "spaces-sdlc-wiki-read-page" && !String(params["path"] ?? "").trim()) {
-      return "path is required";
-    }
     if (
-      tool === "spaces-sdlc-wiki-begin-checkpoint" ||
-      tool === "spaces-sdlc-wiki-write-page" ||
-      tool === "spaces-sdlc-wiki-move-page" ||
-      tool === "spaces-sdlc-wiki-finalize-commit"
+      tool === SDLC_TOOL_NAMES.beginWikiCheckpoint ||
+      tool === SDLC_TOOL_NAMES.verifyWikiSources ||
+      tool === SDLC_TOOL_NAMES.finalizeWikiCommit
     ) {
       if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
         return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
       }
     }
-    if (tool === "spaces-sdlc-wiki-write-page") {
-      if (!params["page"] || typeof params["page"] !== "object" || Array.isArray(params["page"])) {
-        return "page must be one Wiki page action";
-      }
+    if (tool === SDLC_TOOL_NAMES.verifyWikiSources) {
+      if (!Array.isArray(params["paths"]) || params["paths"].length === 0) return "paths is required";
     }
-    if (tool === "spaces-sdlc-wiki-move-page") {
-      for (const key of ["sourcePath", "destinationPath", "expectedContentHash"]) {
-        if (!String(params[key] ?? "").trim()) return `${key} is required`;
-      }
-    }
-    if (tool === "spaces-sdlc-wiki-finalize-commit") {
+    if (tool === SDLC_TOOL_NAMES.finalizeWikiCommit) {
       if (!String(params["summary"] ?? "").trim()) return "summary is required";
       if (!['changes', 'noop'].includes(String(params["outcome"] ?? ''))) {
         return "outcome must be changes or noop";
       }
+    }
+    return null;
+  });
+}
+
+for (const tool of [
+  SDLC_TOOL_NAMES.listArtifacts,
+  SDLC_TOOL_NAMES.readArtifact,
+  SDLC_TOOL_NAMES.listArtifactVersions,
+  SDLC_TOOL_NAMES.readArtifactVersion,
+]) {
+  register("xyne-spaces", tool, async (params) => {
+    for (const key of ["repoId", "workspaceId", "actorUserId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (tool === SDLC_TOOL_NAMES.listArtifacts) return null;
+    const selector = params["selector"];
+    if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
+      return "selector is required";
+    }
+    const selected = selector as Record<string, unknown>;
+    if (selected["type"] === "WIKI_PAGE") {
+      if (!String(selected["path"] ?? "").trim()) return "selector.path is required";
+    } else if (selected["type"] === "SDLC_CANVAS") {
+      if (!String(selected["canvasId"] ?? "").trim()) return "selector.canvasId is required";
+    } else {
+      return "selector.type must be WIKI_PAGE or SDLC_CANVAS";
+    }
+    if (tool === SDLC_TOOL_NAMES.readArtifactVersion && !String(params["versionId"] ?? "").trim()) {
+      return "versionId is required";
     }
     return null;
   });

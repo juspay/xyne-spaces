@@ -11,7 +11,7 @@ export {
   sandboxDestroy,
   sandboxRepoSetup,
   gitRead,
-  sdlcWikiGitContext,
+  sdlcGitContext,
   SANDBOX_CONFIG_SCHEMA,
   makeRepoSetupTool,
   getSandboxSession,

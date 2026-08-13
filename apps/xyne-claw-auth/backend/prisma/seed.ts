@@ -3,7 +3,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { getAllCustomTools } from "xyne-claw-shared";
+import { buildSdlcAgentToolProfile, getAllCustomTools } from "xyne-claw-shared";
+import { tools as xyneSpacesTools } from "../src/mcp/servers/xyne-spaces-tools.js";
 
 const prisma = new PrismaClient();
 
@@ -868,7 +869,8 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
-- **spaces-sdlc-create-artifact** — create a PRD or Tech Doc only when the active Spaces context explicitly identifies an SDLC repository. This V1 action creates the editable canvas immediately; use the supplied SDLC repository id and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Repo Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -966,7 +968,7 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-create-artifact",
+            "spaces-sdlc-mutate-artifact",
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
@@ -1047,7 +1049,7 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-create-artifact",
+            "spaces-sdlc-mutate-artifact",
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
@@ -1071,70 +1073,19 @@ You:
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
 
-  const SDLC_DIRECT_TOOL_SLUGS = [
-    // Selecting the connector subagents exposes their complete read palettes.
-    // Keep connector write tools direct so the normal approval gates still apply.
-    "spaces-whoami",
-    "spaces-search",
-    "spaces-tickets",
-    "spaces-messages",
-    "spaces-message-detail",
-    "spaces-channels",
-    "spaces-users",
-    "spaces-activity",
-    "spaces-projects",
-    "spaces-project-team-members",
-    "spaces-boards",
-    "spaces-calls",
-    "spaces-canvases",
-    "spaces-read-canvas",
-    "spaces-meeting-insights",
-    "spaces-emails",
-    "spaces-thread-attachments",
-    "spaces-fetch-attachment",
-    "spaces-workflow-stats",
-    "spaces-create-ticket",
-    "spaces-update-ticket",
-    "spaces-schedule-call",
-    "user-send-message",
-    "spaces-create-canvas",
-    "spaces-edit-canvas",
-    "spaces-upload-to-kb",
-    "spaces-sdlc-create-artifact",
-    "spaces-sdlc-update-baseline",
-    "create_repository",
-    "merge_pull_request",
-  ];
-  const sdlcSandboxToolSlugs = customTools
-    .filter((tool) => tool.source === "custom:sandbox")
-    .map((tool) => tool.slug);
-  const sdlcCustomToolSlugs = [
-    ...new Set([
-      ...sdlcSandboxToolSlugs,
-      "web-search",
-      "todo-read",
-      "todo-write",
-    ]),
-  ];
-  const SDLC_TOOL_PERMISSIONS = {
-    "xyne-spaces__spaces-create-ticket": "ask",
-    "xyne-spaces__spaces-update-ticket": "ask",
-    "xyne-spaces__spaces-schedule-call": "ask",
-    "xyne-spaces__user-send-message": "ask",
-    "xyne-spaces__spaces-create-canvas": "ask",
-    "xyne-spaces__spaces-edit-canvas": "ask",
-    "xyne-spaces__spaces-upload-to-kb": "ask",
-    "xyne-spaces__spaces-sdlc-create-artifact": "allow",
-    "xyne-spaces__spaces-sdlc-update-baseline": "allow",
-  };
+  const sdlcToolProfile = buildSdlcAgentToolProfile(
+    xyneSpacesTools.map((tool) => tool.name),
+  );
 
   const SDLC_AGENT_PROMPT = `You are **SDLC Assistant** — the focused engineering agent for repository-backed software delivery in Xyne Spaces.
 
 Every repository operation must use the SDLC repository pinned by trusted run context. Never infer a repository from its display name, search Spaces to discover one, or select a repository from an error message. If no valid SDLC repository context is attached, explain that the user must select a repository from an SDLC Hub and stop without calling repository or artifact tools.
 
-For baseline work, use sandbox-repo-setup for the pinned repository, search the pinned repository channel for relevant imported Wiki canvases with spaces-search, read their full content with spaces-read-canvas, and verify their claims against the live repository. Then use spaces-sdlc-update-baseline to begin one draft, checkpoint each required section immediately after its focused inspection, and finalize only after all sections are present. Cite exact relative paths and symbols, distinguish source evidence from inference, and record Wiki/source disagreements with the live repository treated as authoritative. If repository setup or source inspection fails, report the failure and leave the resumable draft unfinalized.
+For baseline work, use sandbox-repo-setup for the pinned repository, search the pinned repository channel for relevant imported Wiki canvases with spaces-search, read their full content with spaces-read-canvas, and verify their claims against the live repository. Then use spaces-sdlc-mutate-artifact with artifactType BASELINE to begin one draft, checkpoint each required section immediately after its focused inspection, and finalize only after all sections are present. Cite exact relative paths and symbols, distinguish source evidence from inference, and record Wiki/source disagreements with the live repository treated as authoritative. If repository setup or source inspection fails, report the failure and leave the resumable draft unfinalized.
 
-Create PRDs and Tech Docs only with spaces-sdlc-create-artifact. A Tech Doc requires its parent PRD. Never use a generic canvas for an SDLC artifact. Repository access and SDLC Hub membership are mandatory; treat an authorization failure as terminal.
+Create PRDs and Tech Docs only with spaces-sdlc-mutate-artifact and action create. A Tech Doc requires its parent PRD. Never use a generic canvas for an SDLC artifact. Repository access and SDLC Hub membership are mandatory; treat an authorization failure as terminal.
+
+When historical context is relevant, read the current artifact first, list a bounded page of versions with spaces-sdlc-list-artifact-versions, and read only the needed snapshot with spaces-sdlc-read-artifact-version. Never treat old artifact text as more authoritative than current repository evidence.
 
 For implementation work, modify only the pinned repository and requested branch, run relevant existing checks, avoid unrelated changes, never expose secrets, and never claim a push or pull request succeeded without verification.`;
 
@@ -1151,11 +1102,11 @@ For implementation work, modify only the pinned repository and requested branch,
       config: {
         requireSdlcRepository: true,
         tools: {
-          subagents: ["spaces", "context7", "github", "bitbucket"],
-          direct: SDLC_DIRECT_TOOL_SLUGS,
-          custom: sdlcCustomToolSlugs,
+          subagents: sdlcToolProfile.tools.subagents,
+          direct: sdlcToolProfile.tools.direct,
+          custom: sdlcToolProfile.tools.custom,
         },
-        toolPermissions: SDLC_TOOL_PERMISSIONS,
+        toolPermissions: sdlcToolProfile.toolPermissions,
       },
     },
     update: {
@@ -1167,11 +1118,11 @@ For implementation work, modify only the pinned repository and requested branch,
       config: {
         requireSdlcRepository: true,
         tools: {
-          subagents: ["spaces", "context7", "github", "bitbucket"],
-          direct: SDLC_DIRECT_TOOL_SLUGS,
-          custom: sdlcCustomToolSlugs,
+          subagents: sdlcToolProfile.tools.subagents,
+          direct: sdlcToolProfile.tools.direct,
+          custom: sdlcToolProfile.tools.custom,
         },
-        toolPermissions: SDLC_TOOL_PERMISSIONS,
+        toolPermissions: sdlcToolProfile.toolPermissions,
       },
     },
   });
@@ -1221,28 +1172,20 @@ For implementation work, modify only the pinned repository and requested branch,
     });
   }
 
-  for (const slug of [
-    "builtin__read",
-    "todo-read",
-    "todo-write",
-    "web-search",
-    // Core SDLC sandbox operations are safe inside the ephemeral repository
-    // sandbox. Other selected sandbox tools keep their normal runtime gates.
-    "sandbox-repo-setup",
-    "sandbox-run",
-    "sandbox-run-detached",
-    "sandbox-poll-job",
-    "sandbox-read-file",
-    "sandbox-destroy",
-  ]) {
+  const sdlcAgentToolIds: string[] = [];
+  for (const slug of sdlcToolProfile.agentToolAllows) {
     const tool = await prisma.tool.findUnique({ where: { slug } });
     if (!tool) continue;
+    sdlcAgentToolIds.push(tool.id);
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: sdlcAgent.id, toolId: tool.id } },
       create: { agentId: sdlcAgent.id, toolId: tool.id, permission: "allow" },
       update: { permission: "allow" },
     });
   }
+  await prisma.agentTool.deleteMany({
+    where: { agentId: sdlcAgent.id, toolId: { notIn: sdlcAgentToolIds } },
+  });
   console.log(`[seed] Upserted sdlc-agent; shared provider bindings=${askAiSharedBindings.length}`);
 
   // Attach genius-analytics and genius-investigation tools to ask-ai agent

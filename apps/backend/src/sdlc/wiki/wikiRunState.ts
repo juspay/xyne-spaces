@@ -15,6 +15,8 @@ const revisionEvidenceSchema = z.object({
   contentHash: z.string().min(1).max(128),
   sourcePaths: z.array(z.string().min(1)),
   path: z.string().min(1).optional(),
+  title: z.string().min(1).max(500).optional(),
+  archived: z.boolean().optional(),
   sourceReferences: z
     .array(
       z.object({

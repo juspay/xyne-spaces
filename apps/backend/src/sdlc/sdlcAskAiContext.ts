@@ -30,7 +30,7 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     `Repository: ${input.repo.name} (${input.repo.url})`,
     `SDLC repository ID: ${input.repo.id}`,
     `Repository channel ID: ${input.channelId}`,
-    'When the user explicitly asks to create a PRD or Tech Doc, use spaces-sdlc-create-artifact instead of spaces-create-canvas. Pass this SDLC repository ID. A Tech Doc must be linked to an existing parent PRD canvas; ask which PRD when it is ambiguous. V1 creates the editable canvas immediately without a separate approval card.',
+    'When the user explicitly asks to create a PRD or Tech Doc, use spaces-sdlc-mutate-artifact with action create instead of spaces-create-canvas. Pass this SDLC repository ID. A Tech Doc must be linked to an existing parent PRD canvas; ask which PRD when it is ambiguous. V1 creates the editable canvas immediately without a separate approval card.',
     canvasPreflight,
     'After the canvas preflight, inspect the live pinned codebase and relevant repository Tickets, conversations, explicitly linked context, and repository-channel history. Keep every lookup subject to its existing authorization.',
     'The approved baseline documents below are already loaded into this session. Use them directly; do not spend tool calls rediscovering their canvas IDs.',

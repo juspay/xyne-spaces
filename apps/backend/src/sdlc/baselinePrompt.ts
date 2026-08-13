@@ -9,14 +9,14 @@ export function buildBaselineExecutionPrompt(input: {
   setupExecutionId: string;
   definition: BaselineDefinition;
 }): string {
-  const common = `- repoId: ${input.repoId}\n- baselineKind: ${input.definition.kind}\n- setupExecutionId: ${input.setupExecutionId}\n- workflowExecutionId: ${input.setupExecutionId}\n- title: ${input.definition.title}`;
+  const common = `- repoId: ${input.repoId}\n- artifactType: BASELINE\n- baselineKind: ${input.definition.kind}\n- setupExecutionId: ${input.setupExecutionId}\n- workflowExecutionId: ${input.setupExecutionId}\n- title: ${input.definition.title}`;
   const sections = input.definition.sections
     .map(
       (
         section,
         index
       ) => `${index + 1}. Inspect only the files needed for **${section.title}**. ${section.instructions}
-   Then call spaces-sdlc-update-baseline with:
+   Then call spaces-sdlc-mutate-artifact with:
    - action: upsert_section
    ${common}
    - sectionKey: ${section.key}
@@ -27,7 +27,7 @@ export function buildBaselineExecutionPrompt(input: {
 
   return `You are executing one SDLC baseline step for ${input.repoName}.
 Repository identity is server-pinned. Never use Spaces search to discover or substitute another repository.
-Baseline update identifiers are also server-pinned and injected into every spaces-sdlc-update-baseline call.
+Baseline update identifiers are also server-pinned and injected into every spaces-sdlc-mutate-artifact call.
 After context compaction, never search for repoId, setupExecutionId, workflowExecutionId, or baselineKind;
 omit forgotten identifier fields and call the baseline update tool with the action and section content.
 Pinned URL: ${input.repoUrl}
@@ -64,7 +64,7 @@ Imported Wiki evidence is required context for this baseline:
    record the discrepancy in the baseline. If no relevant Wiki page exists, say so in the draft and
    continue from repository evidence.
 
-Immediately after repository setup, call spaces-sdlc-update-baseline with:
+Immediately after repository setup, call spaces-sdlc-mutate-artifact with:
 - action: begin
 ${common}
 
@@ -73,7 +73,7 @@ before inspecting the next section. Combine related file reads and avoid dumping
 
 ${sections}
 
-After every section is checkpointed, call spaces-sdlc-update-baseline with:
+After every section is checkpointed, call spaces-sdlc-mutate-artifact with:
 - action: finalize
 ${common}
 

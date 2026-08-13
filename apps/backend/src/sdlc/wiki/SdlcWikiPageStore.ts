@@ -652,6 +652,14 @@ export class SdlcWikiPageStore {
       canvasVersionId: moved!,
       contentHash,
       sourcePaths,
+      path: destinationPath,
+      title: input.request.title ?? page.title,
+      archived: typeof metadata.wikiArchivedAt === 'string',
+      sourceReferences: metadataSourceReferences(
+        typeof metadata.wikiArchivedAt === 'string'
+          ? metadata.wikiArchivedSourceReferences
+          : metadata.wikiSourceReferences
+      ),
     };
     const pages = [...(pending?.pages ?? []), { path: destinationPath, requestHash, revision }];
     const nextContext = parseWikiExecutionContext(
@@ -857,6 +865,8 @@ export class SdlcWikiPageStore {
         contentHash: existingMetadata.wikiContentHash,
         sourcePaths: revisionSources.evidenceSourcePaths,
         path,
+        title: existing.title,
+        archived: typeof existingMetadata.wikiArchivedAt === 'string',
         sourceReferences: priorSourceReferences,
       };
     }
@@ -1029,6 +1039,8 @@ export class SdlcWikiPageStore {
       contentHash,
       sourcePaths: revisionSources.evidenceSourcePaths,
       path,
+      title: input.action.action === 'archive' ? existing!.title : input.action.title,
+      archived,
       sourceReferences,
     };
   }

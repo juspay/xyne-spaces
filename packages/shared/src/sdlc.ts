@@ -342,6 +342,8 @@ export const sdlcWikiRevisionEvidenceSchema = z.object({
   contentHash: z.string().trim().min(1).max(128),
   sourcePaths: sdlcWikiSourcePathsSchema,
   path: sdlcWikiPagePathSchema.optional(),
+  title: z.string().trim().min(1).max(500).optional(),
+  archived: z.boolean().optional(),
   sourceReferences: z.array(sdlcWikiRevisionSourceReferenceSchema).max(500).optional(),
 });
 export type SdlcWikiRevisionEvidence = z.infer<

@@ -332,7 +332,7 @@ export class SdlcWikiExecutionService {
               }
             : {}),
         },
-        existingPageSummaries: 'Use spaces-sdlc-wiki-list-pages when this role permits Wiki reads.',
+        existingPageSummaries: 'Use spaces-sdlc-list-artifacts when this role permits Wiki reads.',
         ...(role === 'CORRECTOR'
           ? { validatorFeedback: JSON.stringify(context.validatorReports) }
           : {}),

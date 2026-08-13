@@ -1,6 +1,7 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+import { SDLC_TOOL_NAMES } from "../sdlc-registry.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
@@ -2195,11 +2196,11 @@ export function sanitizeWikiGitCommitOutput(
 }
 
 /** Historical Git reader dedicated to backend-supervised SDLC Wiki runs. */
-export const sdlcWikiGitContext: ToolDefinition = {
-  slug: "sandbox-sdlc-wiki-git-context",
-  name: "SDLC Wiki Git Context",
+export const sdlcGitContext: ToolDefinition = {
+  slug: SDLC_TOOL_NAMES.gitContext,
+  name: "SDLC Git Context",
   description:
-    "Read bounded historical code for the trusted SDLC Wiki run. " +
+    "Read bounded historical code for the trusted SDLC run. " +
     "No checkout, branch, commit, push, reset, clean, interpreter, or arbitrary shell input.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
