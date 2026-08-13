@@ -64,7 +64,7 @@ export function useEmailDrafts(
   isMember: boolean,
 ): EmailDraftRecord[] {
   const [dbDrafts] = useCachedQuery(
-    queries.getDraftForConversation({
+    queries.getDraftForConversationV2({
       conversationId: conversationId || '',
       channelId,
       isMember,

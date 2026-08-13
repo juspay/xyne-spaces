@@ -3622,7 +3622,7 @@ export const SupportTicketDetail = ({
   );
 
   const [allEmails] = useCachedQuery(
-    queries.getEmailsForConversations({
+    queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,
       isMember,
