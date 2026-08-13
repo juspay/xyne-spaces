@@ -393,17 +393,20 @@ export async function handleQueries(request: Request): Promise<any> {
 
   try {
     const result = await handleQueryRequest(
-      async (queryName, args) => {
-        capturedQueryName = queryName;
-        if (await isQueryDisabled(queryName)) {
-          getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
-          logger.warn('zero_query_disabled', { query: queryName });
-          throw new Error(`Query '${queryName}' is disabled`);
-        }
-        const query = mustGetBackendQuery(queryName);
-        const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
-        return query.fn({ args, ctx: context });
-      },
+      // zero's QueryRequestHandler type is sync-only but the runtime awaits the
+      // handler result, so returning a promise (typed as any) is safe.
+      (queryName, args): any =>
+        (async () => {
+          capturedQueryName = queryName;
+          if (await isQueryDisabled(queryName)) {
+            getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
+            logger.warn('zero_query_disabled', { query: queryName });
+            throw new Error(`Query '${queryName}' is disabled`);
+          }
+          const query = mustGetBackendQuery(queryName);
+          const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
+          return query.fn({ args, ctx: context });
+        })(),
       schema,
       request
     );
