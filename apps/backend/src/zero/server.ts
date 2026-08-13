@@ -243,7 +243,13 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAsyncTasks,
             mutationAwaitedPostCommitTasks,
           );
-          const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
+          const wrappedTx = wrapTransactionWithACL(
+            tx,
+            context,
+            mutationVespaJobs,
+            mutationSideEffectJobs,
+            mutatorName,
+          );
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
         }).then((mutatorResult) => {
@@ -603,7 +609,8 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         tx,
         { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
         vespaJobs,
-        sideEffectJobs
+        sideEffectJobs,
+        mutation.name,
       );
       const mutator = mustGetMutator(mutators, mutation.name);
       await mutator.fn({

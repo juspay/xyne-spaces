@@ -69,6 +69,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
@@ -206,6 +207,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       getDroppedFilesForEntity,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
+    const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
@@ -302,10 +304,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-    const [showFormatToolbar, setShowFormatToolbar] = useState(false);
+    const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
-    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
+    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(
+      defaultFormattingToolbarOpen,
+    );
+
+    useEffect(() => {
+      setShowFormatToolbar(defaultFormattingToolbarOpen);
+      setShowMobileFormattingToolbar(defaultFormattingToolbarOpen);
+    }, [defaultFormattingToolbarOpen]);
 
     const [ticketCreated, setTicketCreated] = useState(false);
 
@@ -733,6 +742,50 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               const listItemPos = $from.before($from.depth);
               if (listItemPos > 0) {
                 return false;
+              }
+            }
+          }
+
+          // Empty-table cleanup. prosemirror-tables refuses to delete a table
+          // via Backspace from inside a cell, so once a user erases all the text
+          // from a pasted table they are left with an empty, undeletable table
+          // box (editor.isEmpty is even true, so the placeholder/empty logic
+          // treats the input as empty while the table node lingers). Detect that
+          // state and remove the whole table on Backspace.
+          if (event.key === 'Backspace' && editor) {
+            const { selection } = view.state;
+            const { $from } = selection;
+
+            // Case A: the cursor/selection sits inside a table whose cells are
+            // all blank -> delete the entire table. Guarded on the whole table
+            // being empty so normal editing of a populated table is untouched.
+            for (let depth = $from.depth; depth > 0; depth--) {
+              const ancestor = $from.node(depth);
+              if (ancestor.type.spec['tableRole'] === 'table') {
+                if (ancestor.textContent.trim() === '') {
+                  event.preventDefault();
+                  editor.chain().focus().deleteTable().run();
+                  return true;
+                }
+                break;
+              }
+            }
+
+            // Case B: the cursor is at the very start of the block immediately
+            // after an empty table (e.g. the trailing paragraph a pasted table
+            // leaves behind) -> remove that empty table.
+            if (selection.empty && $from.parentOffset === 0) {
+              const blockStart = $from.before($from.depth);
+              const nodeBefore = view.state.doc.resolve(blockStart).nodeBefore;
+              if (
+                nodeBefore &&
+                nodeBefore.type.spec['tableRole'] === 'table' &&
+                nodeBefore.textContent.trim() === ''
+              ) {
+                event.preventDefault();
+                const from = blockStart - nodeBefore.nodeSize;
+                editor.chain().focus().deleteRange({ from, to: blockStart }).run();
+                return true;
               }
             }
           }

@@ -58,9 +58,17 @@ function sameStringList(a: string[] | null | undefined, b: string[] | null | und
 /**
  * Returns all drafts visible to the current user for a conversation from Zero cache.
  */
-export function useEmailDrafts(conversationId: string | null | undefined): EmailDraftRecord[] {
+export function useEmailDrafts(
+  conversationId: string | null | undefined,
+  channelId: string,
+  isMember: boolean,
+): EmailDraftRecord[] {
   const [dbDrafts] = useCachedQuery(
-    queries.getDraftForConversation({ conversationId: conversationId || '' }),
+    queries.getDraftForConversationV2({
+      conversationId: conversationId || '',
+      channelId,
+      isMember,
+    }),
     { enabled: !!conversationId },
   );
   return useMemo(() => {

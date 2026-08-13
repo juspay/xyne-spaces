@@ -2044,7 +2044,7 @@ function FollowUpDiagnosticsSection({ diagnostic }: { diagnostic: FollowUpDiagno
           {diagnostic.agentContextDescription}
         </p>
       )}
-      {diagnostic.suggestions.length > 0 && (
+      {(diagnostic.suggestions?.length ?? 0) > 0 && (
         <ol className='list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-xyne-fg-secondary'>
           {diagnostic.suggestions.map(suggestion => (
             <li key={suggestion}>{suggestion}</li>

@@ -10,6 +10,7 @@ import {
   Ticket as TicketIcon,
   Users,
   Clock,
+  Phone,
 } from 'lucide-react';
 import {
   getAnchorTargetProps,
@@ -47,6 +48,7 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
+import { callLobbyService } from '../../../services/Call/callLobbyService';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -71,6 +73,8 @@ const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
       return <TicketIcon className='h-3.5 w-3.5' />;
     case 'canvas':
       return <FileText className='h-3.5 w-3.5' />;
+    case 'call':
+      return <Phone className='h-3.5 w-3.5' />;
     default:
       return <MessageSquare className='h-3.5 w-3.5' />;
   }
@@ -101,7 +105,8 @@ export const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const copyHref = withWorkspacePrefix(resolvedHref, workspaceId);
+  const copyHref =
+    parsedLink?.kind === 'call' ? resolvedHref : withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
   const { userID } = useAuthContextValues();
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
@@ -114,12 +119,38 @@ export const InternalXyneLink = ({
   });
   const [copied, setCopied] = useState(false);
 
+  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
+    onClick?.(event);
+    if (event.defaultPrevented) return;
+    if (parsedLink?.kind !== 'call' || !parsedLink.callId) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+    event.preventDefault();
+    void callLobbyService
+      .resolveInternalRoute(parsedLink.callId)
+      .then(resolution => {
+        if (resolution.result === 'internal') {
+          window.location.assign(
+            `/${encodeURIComponent(resolution.workspaceId)}/call/${encodeURIComponent(parsedLink.callId!)}`,
+          );
+          return;
+        }
+
+        // Users without a valid session for the call's workspace enter through
+        // the external lobby in the same Spaces tab.
+        window.location.assign(resolvedHref);
+      })
+      .catch(() => {
+        window.location.assign(resolvedHref);
+      });
+  };
+
   if (!resolvedHref || !parsedLink) {
     return (
       <a
         href={href}
         className={className}
-        onClick={onClick}
+        onClick={handleOpen}
         data-track-category='MESSAGE'
         data-track-name='OPEN_MESSAGE_LINK'
         {...props}
@@ -160,7 +191,7 @@ export const InternalXyneLink = ({
       <a
         href={href}
         className={className}
-        onClick={onClick}
+        onClick={handleOpen}
         data-track-category='MESSAGE'
         data-track-name='OPEN_INTERNAL_LINK'
         data-track-metadata={JSON.stringify({ href: copyHref, kind: parsedLink.kind })}
@@ -186,14 +217,14 @@ export const InternalXyneLink = ({
   return (
     <span className='group/internal-link inline-flex items-center gap-1.5 align-baseline max-w-full'>
       {parsedLink.kind === 'canvas' ? (
-        <CanvasLink href={href} className={linkClassName} onClick={onClick} {...props}>
+        <CanvasLink href={href} className={linkClassName} onClick={handleOpen} {...props}>
           {linkContent}
         </CanvasLink>
       ) : (
         <a
           href={resolvedHref}
           className={linkClassName}
-          onClick={onClick}
+          onClick={handleOpen}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
