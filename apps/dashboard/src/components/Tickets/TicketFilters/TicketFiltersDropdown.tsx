@@ -438,8 +438,8 @@ export const TicketFiltersDropdown = ({
   const hasAssigneeFilter = getFilterAssigneeCount() > 0;
 
   const handleClearAllFilters = useCallback((): void => {
-    onFiltersChange({});
-  }, [onFiltersChange]);
+    onFiltersChange(filters.boards?.length ? { boards: filters.boards } : {});
+  }, [onFiltersChange, filters.boards]);
 
   // Serialize current filters (excluding boards) into config values rows
   const filtersToValues = useCallback((): {
