@@ -538,22 +538,10 @@ export const queries = defineQueries({
       .where('type', MessageArtifactType.SLASH_COMMAND)
       .where('status', MessageArtifactStatus.ACTIVE)
       // Banner delivery is participant-only even when public channel messages are readable.
-      .whereExists('message', message =>
-        message.where('isDeleted', false).whereExists('conversation', conversation =>
-          conversation.whereExists('channel', channel =>
-            channel.whereExists('participants', participant =>
-              participant.where('userId', ctx.userID),
-            ),
-          ),
-        ),
+      .whereExists('channelParticipants', participant =>
+        participant.where('userId', ctx.userID),
       )
-      .orderBy('updatedAt', 'desc')
-      .related('message', message =>
-        message
-          .related('conversation', conversation => conversation.related('channel'))
-          .related('sender'),
-      )
-      .related('call', call => call.related('participants')),
+      .orderBy('updatedAt', 'desc'),
   ),
 
   slashCommandArtifactByMessageId: defineQuery(

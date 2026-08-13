@@ -927,6 +927,12 @@ export const messageArtifactTable = table('message_artifacts') // Prisma model: 
     id: string(),
     workspaceId: string(),
     messageId: string(),
+    channelId: string(),
+    conversationId: string(),
+    conversationCreatedAt: number(),
+    messagePreview: string(),
+    isInitialMessage: boolean(),
+    visibleTo: string().optional(),
     type: enumeration<MessageArtifactType>(),
     command: string(),
     status: enumeration<MessageArtifactStatus>(),
@@ -3294,18 +3300,26 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
   }),
 }));
 
-export const messageArtifactTableRelationships = relationships(messageArtifactTable, ({ one }) => ({
-  message: one({
-    sourceField: ['messageId'],
-    destField: ['messageId'],
-    destSchema: messageTable,
+export const messageArtifactTableRelationships = relationships(
+  messageArtifactTable,
+  ({ one, many }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    channelParticipants: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
+    }),
+    call: one({
+      sourceField: ['callExternalId'],
+      destField: ['externalId'],
+      destSchema: callTable,
+    }),
   }),
-  call: one({
-    sourceField: ['callExternalId'],
-    destField: ['externalId'],
-    destSchema: callTable,
-  }),
-}));
+);
 
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
   attachments: many({

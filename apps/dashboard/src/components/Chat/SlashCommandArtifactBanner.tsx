@@ -3,7 +3,6 @@ import { ArrowRight, ChevronLeft, ChevronRight, Phone, TriangleAlert, X } from '
 import { useSelector } from '@xstate/react';
 import { useMatches, useNavigate } from 'react-router-dom';
 import { getSlashCommandArtifactDiagnosticKey } from '@xyne/shared';
-import { useCallDuration } from '../../hooks/useCalls';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
@@ -70,15 +69,11 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
   const item = visibleItems[currentIndex];
   const channel = useChannel(item?.channelId ?? '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
-  const callDuration = useCallDuration(
-    item?.activeCallStartedAt,
-    !!item?.activeCallExternalId && item?.activeCallStartedAt !== undefined,
-  );
   if (!item) return null;
 
   const isInThisCall = currentCallId === item.activeCallExternalId;
   const channelLabel = `${channel && isDMChannel(channel.scopeType) ? '' : '#'}${
-    channelDisplayName || item.channelName
+    channelDisplayName || 'channel'
   }`;
   const showPagination = visibleItems.length > 1;
   const paginate = (direction: -1 | 1): void => {
@@ -110,30 +105,32 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
   };
 
   return (
-    <aside className='fixed bottom-[124px] left-[10px] z-[100] hidden sm:block'>
-      <button
-        type='button'
-        onClick={() => setIsOpen(open => !open)}
-        className='relative flex size-10 items-center justify-center rounded-xl border border-orange-300 bg-orange-50 text-orange-600 shadow-lg transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300 dark:hover:bg-orange-900'
-        aria-label={`${visibleItems.length} active slash command artifact${visibleItems.length === 1 ? '' : 's'}`}
-        aria-expanded={isOpen}
-        aria-controls='slash-command-artifact-banner-popover'
-        data-track-category='SLASH_COMMAND_ARTIFACT'
-        data-track-name='TOGGLE_BANNER_POPOVER'
-      >
-        <span className='absolute inset-1 animate-ping rounded-lg border border-orange-400 opacity-40 motion-reduce:animate-none' />
-        <TriangleAlert className='relative size-5' strokeWidth={2} />
-        <span className='absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-sidebar bg-orange-500 px-1 text-[10px] font-bold text-white'>
-          {visibleItems.length > 99 ? '99+' : visibleItems.length}
-        </span>
-      </button>
+    <>
+      <aside className='fixed bottom-[124px] left-[10px] hidden sm:block'>
+        <button
+          type='button'
+          onClick={() => setIsOpen(open => !open)}
+          className='relative flex size-10 items-center justify-center rounded-xl border border-orange-300 bg-orange-50 text-orange-600 shadow-lg transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300 dark:hover:bg-orange-900'
+          aria-label={`${visibleItems.length} active slash command artifact${visibleItems.length === 1 ? '' : 's'}`}
+          aria-expanded={isOpen}
+          aria-controls='slash-command-artifact-banner-popover'
+          data-track-category='SLASH_COMMAND_ARTIFACT'
+          data-track-name='TOGGLE_BANNER_POPOVER'
+        >
+          <span className='absolute inset-1 animate-ping rounded-lg border border-orange-400 opacity-40 motion-reduce:animate-none' />
+          <TriangleAlert className='relative size-5' strokeWidth={2} />
+          <span className='absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-sidebar bg-orange-500 px-1 text-[10px] font-bold text-white'>
+            {visibleItems.length > 99 ? '99+' : visibleItems.length}
+          </span>
+        </button>
+      </aside>
 
       {isOpen && (
         <section
           id='slash-command-artifact-banner-popover'
           role='dialog'
           aria-label={`${item.banner.badge} alert in ${channelLabel}`}
-          className='fixed bottom-4 left-[58px] flex h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl dark:border-orange-800 dark:bg-orange-950 dark:text-orange-100'
+          className='fixed bottom-4 left-[58px] z-[100] hidden h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl sm:flex dark:border-orange-800 dark:bg-orange-950 dark:text-orange-100'
         >
           <div className='flex min-w-0 items-center gap-2'>
             <span className='relative flex size-2 shrink-0'>
@@ -185,6 +182,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                   type='button'
                   onClick={() => {
                     if (!isInThisCall) {
+                      setIsOpen(false);
                       logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
                         action: 'join_call_from_banner',
                         artifactKey: getSlashCommandArtifactDiagnosticKey(item.messageId),
@@ -205,7 +203,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                 >
                   <Phone className='size-3' />
                   {isInThisCall ? 'In call' : 'Join call'}
-                  <span className='font-mono text-[10px] opacity-80'>{callDuration || '0:00'}</span>
                 </button>
               )}
             </div>
@@ -240,6 +237,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
           </div>
         </section>
       )}
-    </aside>
+    </>
   );
 };

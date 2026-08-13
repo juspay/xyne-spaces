@@ -39,6 +39,7 @@ export interface MessagePreviousValue {
   msgType: string;
   content?: string;
   isDeleted?: boolean;
+  visibleTo?: string | null;
   channelId?: string;
   isThreadReply: boolean;
 }

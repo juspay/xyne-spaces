@@ -7,20 +7,15 @@ import React, {
   type ReactNode,
 } from 'react';
 import type { QueryResultType } from '@rocicorp/zero';
-import {
-  CallStatus,
-  parseSlashCommandArtifactMessage,
-  type SlashCommandArtifactBannerSideEffect,
-} from '@xyne/shared';
+import type { SlashCommandArtifactBannerSideEffect } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Event, logger } from '../../utils/logger';
 import { queries } from '../../zero/queries';
+import { getSlashCommandArtifactDefinition } from './SlashCommandArtifacts';
 
 type ActiveSlashCommandArtifact = QueryResultType<
   typeof queries.activeSlashCommandArtifacts
 >[number];
-type SlashCommandArtifactCall = NonNullable<ActiveSlashCommandArtifact['call']>;
 
 export interface SlashCommandArtifactBannerItem {
   id: string;
@@ -28,17 +23,12 @@ export interface SlashCommandArtifactBannerItem {
   messageId: string;
   conversationId: string;
   channelId: string;
-  channelName: string;
   messagePreview: string;
-  declaredBy: string;
   createdAt: number;
   conversationCreatedAt: number;
   isInitialMessage: boolean;
   banner: SlashCommandArtifactBannerSideEffect;
-  activeCall?: SlashCommandArtifactCall;
-  /** Durable linked id fallback when the related call is delayed or ACL-filtered. */
   activeCallExternalId?: string;
-  activeCallStartedAt?: number;
 }
 
 export interface SlashCommandArtifactSideEffectContextValue {
@@ -62,22 +52,12 @@ export const deriveSlashCommandArtifactSideEffects = (
 ): SlashCommandArtifactSideEffectContextValue => {
   const bannerItems: SlashCommandArtifactBannerItem[] = [];
   for (const activeArtifact of activeArtifacts) {
-    const message = activeArtifact.message;
-    if (!message) continue;
-
-    const artifact = parseSlashCommandArtifactMessage(message.content);
-    if (!artifact) continue;
-
-    const bannerSideEffects = artifact.props.sideEffects.filter(
+    const definition = getSlashCommandArtifactDefinition(activeArtifact.command);
+    if (!definition) continue;
+    const bannerSideEffects = definition.sideEffects.filter(
       (sideEffect): sideEffect is SlashCommandArtifactBannerSideEffect =>
         sideEffect.type === 'banner',
     );
-    const conversation = message.conversation;
-    const channel = conversation?.channel;
-    if (!conversation || !channel) continue;
-
-    const linkedCall = activeArtifact.call;
-    if (linkedCall && linkedCall.status !== CallStatus.ACTIVE) continue;
 
     for (const sideEffect of bannerSideEffects) {
       const canonicalSideEffect: SlashCommandArtifactBannerSideEffect = {
@@ -85,25 +65,20 @@ export const deriveSlashCommandArtifactSideEffects = (
         status: 'active',
         callExternalId: activeArtifact.callExternalId ?? undefined,
       };
-      const activeCall = linkedCall?.status === CallStatus.ACTIVE ? linkedCall : undefined;
-      const activeCallExternalId =
-        activeCall?.externalId ?? activeArtifact.callExternalId ?? undefined;
       bannerItems.push({
-        id: `${message.messageId}:banner`,
-        type: artifact.props.command,
-        messageId: message.messageId,
-        conversationId: message.conversationId,
-        channelId: channel.id,
-        channelName: channel.name,
-        messagePreview: artifact.body.replace(/\s+/g, ' ').trim(),
-        declaredBy: getUserDisplayName(message.sender) || 'Someone',
-        createdAt: message.createdAt,
-        conversationCreatedAt: conversation.createdAt,
-        isInitialMessage: conversation.initialMessageId === message.messageId,
+        id: `${activeArtifact.messageId}:banner`,
+        type: activeArtifact.command,
+        messageId: activeArtifact.messageId,
+        conversationId: activeArtifact.conversationId,
+        channelId: activeArtifact.channelId,
+        messagePreview: activeArtifact.messagePreview,
+        createdAt: activeArtifact.createdAt,
+        conversationCreatedAt: activeArtifact.conversationCreatedAt,
+        isInitialMessage: activeArtifact.isInitialMessage,
         banner: canonicalSideEffect,
-        ...(activeCall ? { activeCall } : {}),
-        ...(activeCallExternalId && { activeCallExternalId }),
-        ...(activeCall ? { activeCallStartedAt: activeCall.startedAt } : {}),
+        ...(activeArtifact.callExternalId
+          ? { activeCallExternalId: activeArtifact.callExternalId }
+          : {}),
       });
     }
   }
@@ -130,54 +105,32 @@ export const SlashCommandArtifactSideEffectProvider = ({
   );
 
   const diagnostics = useMemo(() => {
-    let parsedArtifactRows = 0;
-    let invalidArtifactRows = 0;
-    let missingMessageRelations = 0;
+    let supportedArtifactRows = 0;
+    let unsupportedArtifactRows = 0;
     let activeBannerSideEffects = 0;
-    let completedBannerSideEffects = 0;
     let bannerSideEffectsWithCallLink = 0;
-    let missingConversationRelations = 0;
-    let missingChannelRelations = 0;
-    let linkedCallRows = 0;
-    let missingLinkedCallRelations = 0;
 
     for (const activeArtifact of activeArtifacts) {
-      const message = activeArtifact.message;
-      if (!message) {
-        missingMessageRelations += 1;
+      const definition = getSlashCommandArtifactDefinition(activeArtifact.command);
+      if (!definition) {
+        unsupportedArtifactRows += 1;
         continue;
       }
-      const artifact = parseSlashCommandArtifactMessage(message.content);
-      if (!artifact) {
-        invalidArtifactRows += 1;
-        continue;
-      }
-      parsedArtifactRows += 1;
-      if (!message.conversation) missingConversationRelations += 1;
-      else if (!message.conversation.channel) missingChannelRelations += 1;
-      if (activeArtifact.call) linkedCallRows += 1;
-      else if (activeArtifact.callExternalId) missingLinkedCallRelations += 1;
-      for (const sideEffect of artifact.props.sideEffects) {
+      supportedArtifactRows += 1;
+      for (const sideEffect of definition.sideEffects) {
         if (sideEffect.type !== 'banner') continue;
-        if (sideEffect.status === 'completed') completedBannerSideEffects += 1;
-        else activeBannerSideEffects += 1;
-        if (sideEffect.callExternalId) bannerSideEffectsWithCallLink += 1;
+        activeBannerSideEffects += 1;
+        if (activeArtifact.callExternalId) bannerSideEffectsWithCallLink += 1;
       }
     }
 
     return {
       artifactQueryState: activeArtifactQuery.type,
       artifactRows: activeArtifacts.length,
-      parsedArtifactRows,
-      invalidArtifactRows,
-      missingMessageRelations,
+      supportedArtifactRows,
+      unsupportedArtifactRows,
       activeBannerSideEffects,
-      completedBannerSideEffects,
       bannerSideEffectsWithCallLink,
-      missingConversationRelations,
-      missingChannelRelations,
-      linkedCallRows,
-      missingLinkedCallRelations,
       resolvedBannerItems: value.bannerItems.length,
       resolvedChannelIndicators: value.channelIdsWithActiveSideEffects.size,
     };
@@ -189,18 +142,10 @@ export const SlashCommandArtifactSideEffectProvider = ({
     lastDiagnosticSignature.current = signature;
 
     logger.info(Event.SLASH_COMMAND_ARTIFACT_SIDE_EFFECTS_RECONCILED, diagnostics);
-    if (
-      diagnostics.invalidArtifactRows > 0 ||
-      diagnostics.missingMessageRelations > 0 ||
-      diagnostics.missingConversationRelations > 0 ||
-      diagnostics.missingChannelRelations > 0
-    ) {
+    if (diagnostics.unsupportedArtifactRows > 0) {
       logger.warn(Event.SLASH_COMMAND_ARTIFACT_INVARIANT_FAILED, {
-        reason: 'artifact_subscription_rows_incomplete',
-        invalidArtifactRows: diagnostics.invalidArtifactRows,
-        missingMessageRelations: diagnostics.missingMessageRelations,
-        missingConversationRelations: diagnostics.missingConversationRelations,
-        missingChannelRelations: diagnostics.missingChannelRelations,
+        reason: 'artifact_subscription_command_unsupported',
+        unsupportedArtifactRows: diagnostics.unsupportedArtifactRows,
       });
     }
   }, [diagnostics]);

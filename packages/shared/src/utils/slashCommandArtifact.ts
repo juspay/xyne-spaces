@@ -71,6 +71,7 @@ export interface SlashCommandMessageArtifact {
   command: string;
   status: MessageArtifactStatus;
   callExternalId: string | null;
+  messagePreview: string;
 }
 
 interface SlashCommandArtifactAudienceUser {
@@ -210,8 +211,9 @@ export const parseSlashCommandArtifactMessage = (
 };
 
 /**
- * Return the normalized shared row stored in message_artifacts. FlowJSON stays
- * on messages as the rendering contract; this record is the queryable lifecycle.
+ * Return the normalized dynamic state stored in message_artifacts. Static
+ * banner presentation remains code-defined; the compact preview lets global
+ * subscriptions render without loading the source message.
  */
 export const getSlashCommandMessageArtifact = (
   content: string | null | undefined,
@@ -230,6 +232,7 @@ export const getSlashCommandMessageArtifact = (
         ? MessageArtifactStatus.COMPLETED
         : MessageArtifactStatus.ACTIVE,
     callExternalId: banner?.callExternalId ?? null,
+    messagePreview: artifact.body.replace(/\s+/g, " ").trim(),
   };
 };
 

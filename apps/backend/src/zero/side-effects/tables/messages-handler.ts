@@ -271,6 +271,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         hasAttachment: true,
         createdAt: true,
         isDeleted: true,
+        visibleTo: true,
       },
     });
 
@@ -324,7 +325,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
-        initialMessageId: true
+        initialMessageId: true,
+        createdAt: true,
       },
     });
 
@@ -435,23 +437,25 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
     const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
     const artifactRecord = getSlashCommandMessageArtifact(content);
-    if (artifactRecord) {
+    if (artifactRecord && !message.isDeleted) {
+      const projection = {
+        workspaceId: message.workspaceId,
+        messageId,
+        channelId,
+        conversationId,
+        conversationCreatedAt: conversation.createdAt,
+        messagePreview: artifactRecord.messagePreview,
+        isInitialMessage: conversation.initialMessageId === messageId,
+        visibleTo: message.visibleTo,
+        type: artifactRecord.type,
+        command: artifactRecord.command,
+        status: artifactRecord.status,
+        callExternalId: artifactRecord.callExternalId,
+      };
       await db.messageArtifact.upsert({
         where: { messageId },
-        create: {
-          workspaceId: message.workspaceId,
-          messageId,
-          type: artifactRecord.type,
-          command: artifactRecord.command,
-          status: artifactRecord.status,
-          callExternalId: artifactRecord.callExternalId,
-        },
-        update: {
-          type: artifactRecord.type,
-          command: artifactRecord.command,
-          status: artifactRecord.status,
-          callExternalId: artifactRecord.callExternalId,
-        },
+        create: projection,
+        update: projection,
       });
     }
     const hasChannelArtifactActivity =
@@ -2036,6 +2040,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
     const previousValue = job.previousValue as MessagePreviousValue | undefined;
+    await db.messageArtifact.deleteMany({ where: { messageId } });
     // Emit MESSAGE.DELETED to trigger cleanup of surface links and nudges.
     // We need conversation/channel/project context; fetch what's still available.
     try {
@@ -2215,11 +2220,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     }
     const currentMessage = await db.message.findUnique({
       where: { messageId: previousValue.messageId },
-      select: { isDeleted: true, content: true, edited: true },
+      select: { isDeleted: true, content: true, edited: true, visibleTo: true },
     });
     if (!currentMessage) return;
 
     if (!previousValue.isDeleted && currentMessage.isDeleted) {
+      await db.messageArtifact.deleteMany({ where: { messageId: previousValue.messageId } });
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_DELETED,
         previousValue.messageId,
@@ -2227,7 +2233,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         previousValue.conversationId,
         previousValue.isThreadReply,
       );
-    } else if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
+    } else if (
+      !currentMessage.isDeleted &&
+      (currentMessage.content !== previousValue.content ||
+        currentMessage.visibleTo !== previousValue.visibleTo)
+    ) {
+      await this.syncSlashCommandArtifactProjection(previousValue.messageId);
+      if (!currentMessage.edited || currentMessage.content === previousValue.content) return;
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_EDITED,
         previousValue.messageId,
@@ -2237,6 +2249,52 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         currentMessage.content,
       );
     }
+  }
+
+  private async syncSlashCommandArtifactProjection(messageId: string): Promise<void> {
+    const message = await db.message.findUnique({
+      where: { messageId },
+      select: {
+        messageId: true,
+        workspaceId: true,
+        conversationId: true,
+        content: true,
+        isDeleted: true,
+        visibleTo: true,
+        conversation: {
+          select: {
+            channelId: true,
+            initialMessageId: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+    const artifactRecord = getSlashCommandMessageArtifact(message?.content);
+    if (!message || message.isDeleted || !artifactRecord || !message.conversation.channelId) {
+      await db.messageArtifact.deleteMany({ where: { messageId } });
+      return;
+    }
+
+    const projection = {
+      workspaceId: message.workspaceId,
+      messageId: message.messageId,
+      channelId: message.conversation.channelId,
+      conversationId: message.conversationId,
+      conversationCreatedAt: message.conversation.createdAt,
+      messagePreview: artifactRecord.messagePreview,
+      isInitialMessage: message.conversation.initialMessageId === message.messageId,
+      visibleTo: message.visibleTo,
+      type: artifactRecord.type,
+      command: artifactRecord.command,
+      status: artifactRecord.status,
+      callExternalId: artifactRecord.callExternalId,
+    };
+    await db.messageArtifact.upsert({
+      where: { messageId },
+      create: projection,
+      update: projection,
+    });
   }
 
   private async sendMessageChangeNotifications(

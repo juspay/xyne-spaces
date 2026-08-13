@@ -12,25 +12,23 @@ export class MessageArtifactsACL extends BaseQueryACL<'message_artifacts'> {
   canSelect<TReturn>(
     query: Query<'message_artifacts', Schema, TReturn>
   ): Query<'message_artifacts', Schema, TReturn> {
-    return query.whereExists('message', (message) =>
-      message
-        .where(({ or, cmp }) => or(cmp('visibleTo', 'IS', null), cmp('visibleTo', this.ctx.userID)))
-        .whereExists('conversation', (conversation) =>
-          conversation.whereExists('channel', (channel) => {
-            const scoped = channel.where('workspaceId', '=', this.ctx.workspaceId);
-            if (isGuestContext(this.ctx)) {
-              return scoped.where(guestChannelAccessWhere(this.ctx));
-            }
-            return scoped.where(({ or, cmp, exists }) =>
-              or(
-                cmp('visibility', '=', ChannelVisibility.PUBLIC),
-                exists('participants', (participant) =>
-                  participant.where('userId', this.ctx.userID)
-                )
-              )
-            );
-          })
-        )
-    );
+    return query
+      .where(({ or, cmp }) =>
+        or(cmp('visibleTo', 'IS', null), cmp('visibleTo', this.ctx.userID))
+      )
+      .whereExists('channel', (channel) => {
+        const scoped = channel.where('workspaceId', '=', this.ctx.workspaceId);
+        if (isGuestContext(this.ctx)) {
+          return scoped.where(guestChannelAccessWhere(this.ctx));
+        }
+        return scoped.where(({ or, cmp, exists }) =>
+          or(
+            cmp('visibility', '=', ChannelVisibility.PUBLIC),
+            exists('participants', (participant) =>
+              participant.where('userId', this.ctx.userID)
+            )
+          )
+        );
+      });
   }
 }

@@ -94,6 +94,11 @@ export const SEV2_COMMAND = SLASH_COMMAND_ARTIFACT_DEFINITIONS.sev2.command;
 const isSlashCommandArtifactType = (value: string): value is SlashCommandArtifactType =>
   Object.prototype.hasOwnProperty.call(SLASH_COMMAND_ARTIFACT_DEFINITIONS, value);
 
+export const getSlashCommandArtifactDefinition = (
+  command: string,
+): SlashCommandArtifactDefinition | null =>
+  isSlashCommandArtifactType(command) ? SLASH_COMMAND_ARTIFACT_DEFINITIONS[command] : null;
+
 export interface ParsedSupportedSlashCommandArtifact {
   type: SlashCommandArtifactType;
   props: SlashCommandArtifactProps;
@@ -105,11 +110,13 @@ export const getSlashCommandArtifact = (
   content: string | null | undefined,
 ): ParsedSupportedSlashCommandArtifact | null => {
   const parsed = parseSlashCommandArtifactMessage(content);
-  if (!parsed || !isSlashCommandArtifactType(parsed.props.command)) return null;
+  if (!parsed) return null;
+  const definition = getSlashCommandArtifactDefinition(parsed.props.command);
+  if (!definition) return null;
   return {
-    type: parsed.props.command,
+    type: definition.type,
     props: parsed.props,
-    definition: SLASH_COMMAND_ARTIFACT_DEFINITIONS[parsed.props.command],
+    definition,
     body: parsed.body,
   };
 };

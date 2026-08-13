@@ -2238,20 +2238,27 @@ model Message {
   @@schema("public")
 }
 
-// Shared lifecycle for structured message artifacts. messageId is deliberately
-// one-way: Message remains the rendering source and does not own artifact state.
+// Lightweight read projection for structured message artifacts. The banner can
+// render and authorize from this row without subscribing to the messages table.
 model MessageArtifact {
-  id             String   @id @default(cuid())
-  workspaceId    String
-  messageId      String   @unique
-  type           String
-  command        String
-  status         String
-  callExternalId String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  workspaceId           String
+  messageId             String   @unique
+  channelId             String
+  conversationId        String
+  conversationCreatedAt DateTime
+  messagePreview        String
+  isInitialMessage      Boolean
+  visibleTo             String?
+  type                  String
+  command               String
+  status                String
+  callExternalId        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@index([workspaceId, type, status, updatedAt])
+  @@index([channelId])
   @@map("message_artifacts")
   @@schema("public")
 }

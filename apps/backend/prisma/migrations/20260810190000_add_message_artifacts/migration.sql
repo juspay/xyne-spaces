@@ -3,6 +3,12 @@ CREATE TABLE "public"."message_artifacts" (
     "id" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "messageId" TEXT NOT NULL,
+    "channelId" TEXT NOT NULL,
+    "conversationId" TEXT NOT NULL,
+    "conversationCreatedAt" TIMESTAMP(3) NOT NULL,
+    "messagePreview" TEXT NOT NULL,
+    "isInitialMessage" BOOLEAN NOT NULL,
+    "visibleTo" TEXT,
     "type" TEXT NOT NULL,
     "command" TEXT NOT NULL,
     "status" TEXT NOT NULL,
@@ -20,3 +26,7 @@ ON "public"."message_artifacts"("messageId");
 -- CreateIndex
 CREATE INDEX "message_artifacts_workspaceId_type_status_updatedAt_idx"
 ON "public"."message_artifacts"("workspaceId", "type", "status", "updatedAt");
+
+-- CreateIndex
+CREATE INDEX "message_artifacts_channelId_idx"
+ON "public"."message_artifacts"("channelId");

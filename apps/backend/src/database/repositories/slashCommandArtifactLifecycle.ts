@@ -57,10 +57,29 @@ export const updateArtifactBannerLifecycle = async (
     if (!existingArtifact) {
       const bootstrapMessage = await tx.message.findUnique({
         where: { messageId: artifactMessageId },
-        select: { workspaceId: true, content: true },
+        select: {
+          messageId: true,
+          workspaceId: true,
+          conversationId: true,
+          content: true,
+          isDeleted: true,
+          visibleTo: true,
+          conversation: {
+            select: {
+              channelId: true,
+              initialMessageId: true,
+              createdAt: true,
+            },
+          },
+        },
       });
       const bootstrapArtifact = getSlashCommandMessageArtifact(bootstrapMessage?.content);
-      if (!bootstrapMessage || !bootstrapArtifact) {
+      if (
+        !bootstrapMessage ||
+        bootstrapMessage.isDeleted ||
+        !bootstrapArtifact ||
+        !bootstrapMessage.conversation.channelId
+      ) {
         logger.warn('slash_command_artifact_lifecycle_record_missing', logContext);
         return;
       }
@@ -69,6 +88,13 @@ export const updateArtifactBannerLifecycle = async (
         create: {
           workspaceId: bootstrapMessage.workspaceId,
           messageId: artifactMessageId,
+          channelId: bootstrapMessage.conversation.channelId,
+          conversationId: bootstrapMessage.conversationId,
+          conversationCreatedAt: bootstrapMessage.conversation.createdAt,
+          messagePreview: bootstrapArtifact.messagePreview,
+          isInitialMessage:
+            bootstrapMessage.conversation.initialMessageId === bootstrapMessage.messageId,
+          visibleTo: bootstrapMessage.visibleTo,
           type: bootstrapArtifact.type,
           command: bootstrapArtifact.command,
           status: bootstrapArtifact.status,
