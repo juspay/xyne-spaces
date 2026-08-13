@@ -89,9 +89,6 @@ export interface StreamRequest {
   webSearchEnabled: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
-  /** Single search + single answer pass instead of the full agentic tool
-   *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
-  instant?: boolean;
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -1001,7 +998,6 @@ class XyneAIStreamManager {
           webSearchEnabled: request.webSearchEnabled,
           deepResearchEnabled: request.deepResearchEnabled ?? false,
           createCanvasEnabled: request.createCanvasEnabled ?? false,
-          instant: request.instant ?? false,
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {

@@ -27,7 +27,6 @@ import {
   Mic,
   Hash,
   Lock,
-  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -42,8 +41,6 @@ import {
   type ContextSelections,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
-import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
-import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 
 export interface AIComposerAttachment {
   id: string;
@@ -151,15 +148,10 @@ function ContextPill({
   );
 }
 
-// Ghost toolbar button matching the /ai composer's look. `visibleText` is
-// opt-in — when set, the button widens into a pill with the icon plus a text
-// node instead of the default icon-only circle (used for the Instant toggle
-// so it reads as a named mode, not just an icon other buttons could be
-// mistaken for).
+// Ghost toolbar button matching the /ai composer's look.
 function ToolbarButton({
   icon,
   label,
-  visibleText,
   onClick,
   active,
   activeClass,
@@ -168,7 +160,6 @@ function ToolbarButton({
 }: {
   icon: ReactElement;
   label: string;
-  visibleText?: string;
   onClick: () => void;
   active?: boolean;
   activeClass?: string;
@@ -184,8 +175,7 @@ function ToolbarButton({
       title={label}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center justify-center rounded-full transition',
-        visibleText ? 'gap-1 px-2.5' : 'w-8',
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
         active
           ? (activeClass ?? 'bg-secondary text-foreground')
           : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
@@ -195,7 +185,6 @@ function ToolbarButton({
       data-track-name={trackName}
     >
       {icon}
-      {visibleText && <span className='text-xs font-medium'>{visibleText}</span>}
     </button>
   );
 }
@@ -237,24 +226,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
 
-  // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
-  // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
-  // request to an instant agent always runs instant (enforced server-side
-  // regardless of what this composer sends), so there's no per-message
-  // choice; the same `['accessible-claw-agents']` query the agent selector
-  // uses is free here via the React Query cache.
-  const { selectedAgentSlug } = useSelectedAgent();
-  const { data: composerAgents } = useQuery({
-    queryKey: ['accessible-claw-agents'],
-    queryFn: fetchAccessibleClawAgents,
-    staleTime: 5 * 60 * 1000,
-  });
-  const selectedAgent = useMemo(
-    () => composerAgents?.find(a => a.slug === selectedAgentSlug) ?? null,
-    [composerAgents, selectedAgentSlug],
-  );
-  const instant = selectedAgent?.instantAgent === true;
-
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
     queryFn: async (): Promise<XyneAIConfigResponse> => {
@@ -279,7 +250,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
-      instant,
     }),
     [
       selections,
@@ -288,7 +258,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
-      instant,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -782,24 +751,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 activeClass='bg-secondary text-primary'
                 trackName='TOGGLE_CREATE_CANVAS'
               />
-              {/* Locked indicator, not a toggle — only rendered when the
-                  selected agent is configured as an "Instant Agent"
-                  (agent.config.instantAgent, see xyne-claw-auth's
-                  AgentDetailLeftColumn.tsx). Every request to such an
-                  agent always runs instant (enforced server-side in
-                  agent-chat.ts/run-stream.ts regardless of what this
-                  composer sends), so there's nothing to toggle — other
-                  agents show no instant affordance at all. */}
-              {instant && (
-                <div
-                  title='This agent always answers instantly from the Knowledge Base'
-                  aria-label='Instant agent'
-                  className='inline-flex h-8 shrink-0 cursor-default items-center justify-center gap-1 rounded-full bg-secondary px-2.5 text-status-pending'
-                >
-                  <Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />
-                  <span className='text-xs font-medium'>Instant</span>
-                </div>
-              )}
             </div>
 
             <div className='flex shrink-0 items-center gap-1.5'>
