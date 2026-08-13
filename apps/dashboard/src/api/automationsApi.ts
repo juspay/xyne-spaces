@@ -484,6 +484,15 @@ export interface RunDetail {
   }>;
 }
 
+/** Every row in this automation's lineage (all past + current versions), newest first. */
+export function fetchAutomationVersions(automationId: string): Promise<Automation[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<Automation[]>>(
+      `/automations/${encodeURIComponent(automationId)}/versions`,
+    ),
+  );
+}
+
 export function fetchAutomationRun(executionId: string): Promise<RunDetail> {
   return unwrap(
     apiInstance.get<SuccessEnvelope<RunDetail>>(

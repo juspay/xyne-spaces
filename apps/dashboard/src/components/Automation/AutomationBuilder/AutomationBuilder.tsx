@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  GitBranch,
   History,
   Pencil,
   Power,
@@ -37,6 +38,7 @@ import {
 } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
+  fetchAutomationVersions,
   fetchOperators,
   fetchStepCatalog,
   fetchStepSchema,
@@ -158,6 +160,8 @@ export function AutomationBuilder({
   onAfterApprovalDecision,
   onBack,
   onShowRuns,
+  onShowVersionHistory,
+  readOnlyPreview = false,
 }: AutomationBuilderProps): React.ReactElement {
   const [name, setName] = useState(automation?.name ?? initialName ?? '');
   const [description, setDescription] = useState(
@@ -207,6 +211,23 @@ export function AutomationBuilder({
     queryFn: fetchOperators,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Lets the header show "which version am I looking at" (e.g. "v2 of 3"). Skipped
+  // in readOnlyPreview (the compare view), where the badge never renders.
+  const versionsQuery = useQuery({
+    queryKey: ['automation-versions', savedId],
+    queryFn: () => fetchAutomationVersions(savedId!),
+    enabled: !!savedId && !readOnlyPreview,
+    staleTime: 5 * 60 * 1000,
+  });
+  const versionPosition = useMemo(() => {
+    const versions = versionsQuery.data;
+    if (!versions || !savedId) return null;
+    // Versions come back newest-first; number chronologically (oldest = v1).
+    const indexFromNewest = versions.findIndex(v => v.id === savedId);
+    if (indexFromNewest === -1) return null;
+    return { number: versions.length - indexFromNewest, total: versions.length };
+  }, [versionsQuery.data, savedId]);
 
   const triggerSchemaQuery = useQuery({
     queryKey: ['automations', 'schema', 'trigger', config.trigger.type],
@@ -766,22 +787,24 @@ export function AutomationBuilder({
     <div className='flex h-full w-full flex-col bg-background'>
       <div className='flex flex-col gap-3 border-b border-border bg-background px-6 py-4'>
         <div className='flex items-center gap-3'>
-          <Tooltip content='Back to automations' side='bottom'>
-            <button
-              type='button'
-              onClick={onBack}
-              aria-label='Back to automations list'
-              data-track-category='automation-builder'
-              data-track-name='back-to-list'
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-                'hover:text-foreground hover:bg-accent/40',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-              )}
-            >
-              <ArrowLeft className='size-4' aria-hidden='true' />
-            </button>
-          </Tooltip>
+          {!readOnlyPreview && (
+            <Tooltip content='Back to automations' side='bottom'>
+              <button
+                type='button'
+                onClick={onBack}
+                aria-label='Back to automations list'
+                data-track-category='automation-builder'
+                data-track-name='back-to-list'
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
+                  'hover:text-foreground hover:bg-accent/40',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                )}
+              >
+                <ArrowLeft className='size-4' aria-hidden='true' />
+              </button>
+            </Tooltip>
+          )}
           <InlineEditableText
             value={name}
             onChange={setName}
@@ -800,203 +823,240 @@ export function AutomationBuilder({
               {STATUS_LABEL[savedStatus] ?? savedStatus}
             </span>
           )}
+          {!editMode && !readOnlyPreview && versionPosition && (
+            <Tooltip
+              content={
+                versionPosition.total > 1
+                  ? `Version ${versionPosition.number} of ${versionPosition.total}`
+                  : 'Version 1'
+              }
+              side='bottom'
+            >
+              <button
+                type='button'
+                onClick={() => savedId && onShowVersionHistory?.(savedId)}
+                disabled={!onShowVersionHistory}
+                data-track-category='automation-builder'
+                data-track-name='header-version-indicator'
+                className='rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/40 disabled:pointer-events-none'
+              >
+                v{versionPosition.number}
+                {versionPosition.total > 1 ? ` / ${versionPosition.total}` : ''}
+              </button>
+            </Tooltip>
+          )}
 
-          {editMode ? (
-            <>
-              <Button
-                variant='outline'
-                onClick={() => {
-                  if (automation) {
-                    setName(automation.name);
-                    setDescription(automation.description ?? '');
-                    setConfig(automation.config);
-                    setErrorMessage(null);
-                    setValidation(null);
-                    setEditMode(false);
-                    return;
-                  }
-                  if (forkSourceAutomationId) {
-                    void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
-                    return;
-                  }
-                  onBack();
-                }}
-                data-track-category='automation-builder'
-                data-track-name='header-cancel-edit'
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSaveNow}
-                loading={saveMutation.isPending}
-                disabled={saveMutation.isPending || !!nameError}
-                data-track-category='automation-builder'
-                data-track-name='header-save'
-                className='font-semibold'
-              >
-                <SaveIcon className='size-4' />
-                Save
-              </Button>
-            </>
-          ) : (
-            <>
-              {savedId && onShowRuns ? (
+          {!readOnlyPreview &&
+            (editMode ? (
+              <>
                 <Button
                   variant='outline'
-                  size='sm'
-                  onClick={() => onShowRuns(savedId)}
+                  onClick={() => {
+                    if (automation) {
+                      setName(automation.name);
+                      setDescription(automation.description ?? '');
+                      setConfig(automation.config);
+                      setErrorMessage(null);
+                      setValidation(null);
+                      setEditMode(false);
+                      return;
+                    }
+                    if (forkSourceAutomationId) {
+                      void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                      return;
+                    }
+                    onBack();
+                  }}
                   data-track-category='automation-builder'
-                  data-track-name='header-runs'
+                  data-track-name='header-cancel-edit'
                 >
-                  <History className='size-4' />
-                  Runs
+                  Cancel
                 </Button>
-              ) : null}
-              {savedId ? (
                 <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => void navigate(`/automations/new?fork=${savedId}&clone=1`)}
+                  onClick={handleSaveNow}
+                  loading={saveMutation.isPending}
+                  disabled={saveMutation.isPending || !!nameError}
                   data-track-category='automation-builder'
-                  data-track-name='header-clone'
+                  data-track-name='header-save'
+                  className='font-semibold'
                 >
-                  <Copy className='size-4' />
-                  Clone
+                  <SaveIcon className='size-4' />
+                  Save
                 </Button>
-              ) : null}
-              {/* Activate is open to anyone for any LIVE row. Disable is
-                  admin-only — pulling a running automation can have
-                  wide-reaching effects, so it's gated. */}
-              {isLiveRow && savedId ? (
-                savedStatus === AutomationStatusValues.ACTIVE ? (
-                  isAutomationsAdmin ? (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      onClick={handleDisable}
-                      disabled={disableMutation.isPending}
-                      data-track-category='automation-builder'
-                      data-track-name='header-disable'
-                    >
-                      <Power className='size-4' />
-                      Disable
-                    </Button>
-                  ) : null
-                ) : (
+              </>
+            ) : (
+              <>
+                {savedId && onShowRuns ? (
                   <Button
                     variant='outline'
                     size='sm'
-                    onClick={handleActivate}
-                    disabled={activateMutation.isPending}
+                    onClick={() => onShowRuns(savedId)}
                     data-track-category='automation-builder'
-                    data-track-name='header-activate'
+                    data-track-name='header-runs'
                   >
-                    <Power className='size-4' />
-                    Activate
+                    <History className='size-4' />
+                    Runs
                   </Button>
-                )
-              ) : null}
-              {/* Admin-only: permanently retire an automation. Only offered once it is
+                ) : null}
+                {savedId && onShowVersionHistory ? (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => onShowVersionHistory(savedId)}
+                    data-track-category='automation-builder'
+                    data-track-name='header-version-history'
+                  >
+                    <GitBranch className='size-4' />
+                    Versions
+                  </Button>
+                ) : null}
+                {savedId ? (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => void navigate(`/automations/new?fork=${savedId}&clone=1`)}
+                    data-track-category='automation-builder'
+                    data-track-name='header-clone'
+                  >
+                    <Copy className='size-4' />
+                    Clone
+                  </Button>
+                ) : null}
+                {/* Activate is open to anyone for any LIVE row. Disable is
+                  admin-only — pulling a running automation can have
+                  wide-reaching effects, so it's gated. */}
+                {isLiveRow && savedId ? (
+                  savedStatus === AutomationStatusValues.ACTIVE ? (
+                    isAutomationsAdmin ? (
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={handleDisable}
+                        disabled={disableMutation.isPending}
+                        data-track-category='automation-builder'
+                        data-track-name='header-disable'
+                      >
+                        <Power className='size-4' />
+                        Disable
+                      </Button>
+                    ) : null
+                  ) : (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={handleActivate}
+                      disabled={activateMutation.isPending}
+                      data-track-category='automation-builder'
+                      data-track-name='header-activate'
+                    >
+                      <Power className='size-4' />
+                      Activate
+                    </Button>
+                  )
+                ) : null}
+                {/* Admin-only: permanently retire an automation. Only offered once it is
                   DISABLED, so it has to be switched off first. */}
-              {savedId && isAutomationsAdmin && savedStatus === AutomationStatusValues.DISABLED ? (
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={handleArchive}
-                  disabled={archiveMutation.isPending}
-                  data-track-category='automation-builder'
-                  data-track-name='header-archive'
-                >
-                  <Archive className='size-4' />
-                  Archive
-                </Button>
-              ) : null}
-              {/* DRAFT proposals can be sent for approval. */}
-              {savedId && savedStatus === AutomationStatusValues.DRAFT && !isLiveRow ? (
-                <Button
-                  onClick={() => submitForApprovalMutation.mutate(savedId)}
-                  loading={submitForApprovalMutation.isPending}
-                  disabled={submitForApprovalMutation.isPending}
-                  data-track-category='automation-builder'
-                  data-track-name='header-submit-for-approval'
-                  className='font-semibold'
-                >
-                  <Send className='size-4' />
-                  Send for approval
-                </Button>
-              ) : null}
-              {/* PENDING_APPROVAL: the author can revoke. The proposer is the
+                {savedId &&
+                isAutomationsAdmin &&
+                savedStatus === AutomationStatusValues.DISABLED ? (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={handleArchive}
+                    disabled={archiveMutation.isPending}
+                    data-track-category='automation-builder'
+                    data-track-name='header-archive'
+                  >
+                    <Archive className='size-4' />
+                    Archive
+                  </Button>
+                ) : null}
+                {/* DRAFT proposals can be sent for approval. */}
+                {savedId && savedStatus === AutomationStatusValues.DRAFT && !isLiveRow ? (
+                  <Button
+                    onClick={() => submitForApprovalMutation.mutate(savedId)}
+                    loading={submitForApprovalMutation.isPending}
+                    disabled={submitForApprovalMutation.isPending}
+                    data-track-category='automation-builder'
+                    data-track-name='header-submit-for-approval'
+                    className='font-semibold'
+                  >
+                    <Send className='size-4' />
+                    Send for approval
+                  </Button>
+                ) : null}
+                {/* PENDING_APPROVAL: the author can revoke. The proposer is the
                   row's createdById (set when the proposal was created). */}
-              {savedId &&
-              savedStatus === AutomationStatusValues.PENDING_APPROVAL &&
-              automation?.createdById === me?.id ? (
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => revokeMutation.mutate(savedId)}
-                  disabled={revokeMutation.isPending}
-                  data-track-category='automation-builder'
-                  data-track-name='header-revoke'
-                >
-                  <Undo2 className='size-4' />
-                  Revoke
-                </Button>
-              ) : null}
-              {/* Edit a DRAFT proposal in place, or fork a new proposal
+                {savedId &&
+                savedStatus === AutomationStatusValues.PENDING_APPROVAL &&
+                automation?.createdById === me?.id ? (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => revokeMutation.mutate(savedId)}
+                    disabled={revokeMutation.isPending}
+                    data-track-category='automation-builder'
+                    data-track-name='header-revoke'
+                  >
+                    <Undo2 className='size-4' />
+                    Revoke
+                  </Button>
+                ) : null}
+                {/* Edit a DRAFT proposal in place, or fork a new proposal
                   from a LIVE row. Both flows route through a confirm dialog
                   — the body differs per case. */}
-              {canEdit ? (
-                <Button
-                  onClick={() => {
-                    if (forksOnEdit) setProposeChangeConfirmOpen(true);
-                    else setEditConfirmOpen(true);
-                  }}
-                  data-track-category='automation-builder'
-                  data-track-name={forksOnEdit ? 'header-propose-change' : 'header-edit'}
-                  className='font-semibold'
-                >
-                  <Pencil className='size-4' />
-                  {isLiveRow ? 'Propose change' : 'Edit'}
-                </Button>
-              ) : null}
-              {/* Approval review mode: admin opened this proposal from the
+                {canEdit ? (
+                  <Button
+                    onClick={() => {
+                      if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                      else setEditConfirmOpen(true);
+                    }}
+                    data-track-category='automation-builder'
+                    data-track-name={forksOnEdit ? 'header-propose-change' : 'header-edit'}
+                    className='font-semibold'
+                  >
+                    <Pencil className='size-4' />
+                    {isLiveRow ? 'Propose change' : 'Edit'}
+                  </Button>
+                ) : null}
+                {/* Approval review mode: admin opened this proposal from the
                   inbox. Inline Approve / Reject actions on the page they're
                   reviewing rather than the row card. Authors can't decide
                   on their own proposals — same rule enforced server-side. */}
-              {approvalReviewMode &&
-              isAutomationsAdmin &&
-              savedId &&
-              savedStatus === AutomationStatusValues.PENDING_APPROVAL &&
-              automation?.createdById !== me?.id ? (
-                <>
-                  <Button
-                    variant='outline'
-                    onClick={() => {
-                      setRejectNote('');
-                      setRejectDialogOpen(true);
-                    }}
-                    disabled={rejectMutation.isPending || approveMutation.isPending}
-                    data-track-category='automation-builder'
-                    data-track-name='header-reject'
-                  >
-                    <X className='size-4' />
-                    Reject
-                  </Button>
-                  <Button
-                    onClick={() => approveMutation.mutate(savedId)}
-                    loading={approveMutation.isPending}
-                    disabled={rejectMutation.isPending || approveMutation.isPending}
-                    data-track-category='automation-builder'
-                    data-track-name='header-approve'
-                    className='font-semibold'
-                  >
-                    <Check className='size-4' />
-                    Approve
-                  </Button>
-                </>
-              ) : null}
-            </>
-          )}
+                {approvalReviewMode &&
+                isAutomationsAdmin &&
+                savedId &&
+                savedStatus === AutomationStatusValues.PENDING_APPROVAL &&
+                automation?.createdById !== me?.id ? (
+                  <>
+                    <Button
+                      variant='outline'
+                      onClick={() => {
+                        setRejectNote('');
+                        setRejectDialogOpen(true);
+                      }}
+                      disabled={rejectMutation.isPending || approveMutation.isPending}
+                      data-track-category='automation-builder'
+                      data-track-name='header-reject'
+                    >
+                      <X className='size-4' />
+                      Reject
+                    </Button>
+                    <Button
+                      onClick={() => approveMutation.mutate(savedId)}
+                      loading={approveMutation.isPending}
+                      disabled={rejectMutation.isPending || approveMutation.isPending}
+                      data-track-category='automation-builder'
+                      data-track-name='header-approve'
+                      className='font-semibold'
+                    >
+                      <Check className='size-4' />
+                      Approve
+                    </Button>
+                  </>
+                ) : null}
+              </>
+            ))}
         </div>
         {editMode && nameError ? (
           <p className='pl-11 text-xs text-red-600 dark:text-red-400' role='alert'>
@@ -1018,9 +1078,9 @@ export function AutomationBuilder({
       <div
         className={cn(
           'flex-1 overflow-y-auto bg-muted/30',
-          !editMode && canEdit && 'cursor-pointer',
+          !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
         )}
-        {...(!editMode && canEdit
+        {...(!editMode && canEdit && !readOnlyPreview
           ? {
               onClick: (): void => {
                 if (forksOnEdit) setProposeChangeConfirmOpen(true);
@@ -1035,6 +1095,10 @@ export function AutomationBuilder({
             !editMode && 'pointer-events-none select-none opacity-90',
           )}
           aria-readonly={!editMode}
+          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
+          // form fields from the tab order, so they could still be focused and typed
+          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
+          inert={readOnlyPreview}
         >
           <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
           <RuleSummaryCard

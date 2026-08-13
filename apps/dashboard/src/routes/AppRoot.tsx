@@ -245,6 +245,7 @@ import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
 import AutomationRunDetailScreen from './AutomationsScreen/AutomationRunDetailScreen';
+import AutomationVersionHistoryScreen from './AutomationsScreen/AutomationVersionHistoryScreen';
 import AutomationApprovalsScreen from './AutomationsScreen/AutomationApprovalsScreen';
 import TeamIntelligenceScreen from './TeamIntelligenceScreen/TeamIntelligenceScreen.tsx';
 import TeamIntelligenceOrgScreen from './TeamIntelligenceScreen/TeamIntelligenceOrgScreen.tsx';
@@ -1587,6 +1588,10 @@ export const router = createBrowserRouter(
                 {
                   path: 'automations/:id/runs/:runId',
                   element: <AutomationRunDetailScreen />,
+                },
+                {
+                  path: 'automations/:id/history',
+                  element: <AutomationVersionHistoryScreen />,
                 },
                 {
                   path: 'apps',

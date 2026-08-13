@@ -96,6 +96,7 @@ export default function AutomationBuilderScreen(): ReactElement {
           }
         }}
         onShowRuns={id => void navigate(`../${id}/runs`, { relative: 'path' })}
+        onShowVersionHistory={id => void navigate(`../${id}/history`, { relative: 'path' })}
         onAfterApprovalDecision={() => void navigate('../approvals', { relative: 'path' })}
       />
     </div>
