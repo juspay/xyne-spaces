@@ -1,4 +1,7 @@
 import { CallType } from '@xyne/shared';
+
+export type GlassTier = 'liquid' | 'vibrancy' | 'mica' | 'none';
+
 export interface ScreenSource {
   id: string;
   name: string;
@@ -107,7 +110,8 @@ export interface ElectronAPI {
    * Optional for the same reasons as {@link isGlassActive}.
    */
   glass?: {
-    getSettings: () => Promise<{ supported: boolean; enabled: boolean }>;
+    getSettings: () => Promise<{ supported: boolean; enabled: boolean; tier?: GlassTier }>;
+    getTier?: () => Promise<GlassTier>;
     setEnabled: (enabled: boolean) => void;
     /** Fires with whether a material is now live. Returns an unsubscribe fn. */
     onActiveChanged: (callback: (active: boolean) => void) => () => void;

@@ -9,6 +9,7 @@ import {
   applyGlassAppearance,
   isGlassActive,
   isGlassEnabled,
+  getGlassTier,
   isGlassSupported,
   setGlassEnabled,
 } from '../window/glass';
@@ -304,7 +305,10 @@ export function setupIpcHandlers(): void {
   ipcMain.handle('glass:get-settings', () => ({
     supported: isGlassSupported(),
     enabled: isGlassEnabled(),
+    tier: getGlassTier(),
   }));
+
+  ipcMain.handle('glass:get-tier', () => getGlassTier());
 
   ipcMain.on('glass:set-enabled', (event: IpcMainEvent, enabled: unknown) => {
     const mainWindow = getMainWindow();

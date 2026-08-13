@@ -483,6 +483,10 @@
   /* Wallpaper layer — see components/Wallpaper/Wallpaper.tsx. Reads a per-theme
      CSS variable, so adding a theme only means setting --wallpaper-image in its
      block. */
+  .app-wallpaper {
+    opacity: var(--wallpaper-opacity, 1);
+  }
+
   .app-wallpaper-image {
     background-image: var(--wallpaper-image);
   }
@@ -4497,17 +4501,11 @@ img.inline-emoji,
   z-index: 10;
 }
 
-[data-theme="midnight"][data-glass="on"] {
-  --glass-scrim-color: var(--background);
-  --glass-scrim-opacity: var(--glass-scrim-opacity-user, 30%);
+[data-glass="on"] {
+  --wallpaper-opacity-default: 30%;
+  --wallpaper-opacity: var(--wallpaper-opacity-user, var(--wallpaper-opacity-default));
 }
 
-[data-theme="classic"][data-glass="on"],
-[data-theme="summer_breeze"][data-glass="on"] {
-  --glass-scrim-color: var(--background);
-  --glass-scrim-opacity: var(--glass-scrim-opacity-user, 30%);
-}
-
-[data-glass="on"] body {
-  background-color: hsl(var(--glass-scrim-color) / var(--glass-scrim-opacity));
+[data-glass="on"][data-glass-tier="liquid"] {
+  --wallpaper-opacity-default: 0%;
 }

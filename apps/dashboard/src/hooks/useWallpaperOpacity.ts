@@ -6,10 +6,10 @@ import {
   getEffectiveOpacity,
   hasStoredOpacity,
   setStoredOpacity,
-  subscribeGlassScrim,
-} from '../stores/glassScrimStore';
+  subscribeWallpaperOpacity,
+} from '../stores/wallpaperOpacityStore';
 
-export function useApplyGlassScrimOpacity(): void {
+export function useApplyWallpaperOpacity(): void {
   useEffect(() => {
     applyStoredOpacity(currentTheme());
 
@@ -22,7 +22,7 @@ export function useApplyGlassScrimOpacity(): void {
   }, []);
 }
 
-export function useGlassScrimOpacity(): {
+export function useWallpaperOpacity(): {
   theme: string;
   value: number;
   isCustom: boolean;
@@ -45,9 +45,9 @@ export function useGlassScrimOpacity(): {
     const observer = new MutationObserver(sync);
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-theme'],
+      attributeFilter: ['data-theme', 'data-glass', 'data-glass-tier'],
     });
-    const unsubscribe = subscribeGlassScrim(sync);
+    const unsubscribe = subscribeWallpaperOpacity(sync);
     return (): void => {
       observer.disconnect();
       unsubscribe();
@@ -55,8 +55,7 @@ export function useGlassScrimOpacity(): {
   }, []);
 
   const setValue = useCallback((next: number) => {
-    const active = currentTheme();
-    setStoredOpacity(active, next);
+    setStoredOpacity(currentTheme(), next);
   }, []);
 
   const reset = useCallback(() => {

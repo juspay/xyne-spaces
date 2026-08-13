@@ -49,6 +49,13 @@ import {
 } from 'electron';
 import Store from 'electron-store';
 import log from 'electron-log/main';
+import {
+  applyLiquidGlassClarityKnobs,
+  attachLiquidGlass,
+  isLiquidGlassAvailable,
+  LIQUID_GLASS_VARIANT_BY_APPEARANCE,
+  setLiquidGlassVariant,
+} from './liquid-glass';
 
 /**
  * Derived from `setVibrancy`, NOT from the constructor option, on purpose: the
@@ -135,6 +142,14 @@ const WINDOWS_BACKGROUND_MATERIAL: NonNullable<
 let glassSupported = false;
 let resolved = false;
 
+export type GlassTier = 'liquid' | 'vibrancy' | 'mica' | 'none';
+
+let glassTier: GlassTier = 'none';
+
+export function getGlassTier(): GlassTier {
+  return glassTier;
+}
+
 /** Same persistence primitive the claw-overlay toggle uses. */
 const glassStore = new Store({ name: 'glass' });
 const ENABLED_KEY = 'enabled';
@@ -197,8 +212,17 @@ export function resolveGlassWindowOptions(): BrowserWindowConstructorOptions {
   glassSupported = detectGlassSupport();
 
   if (!glassSupported) {
+    glassTier = 'none';
     return {};
   }
+
+  if (process.platform === 'darwin' && isLiquidGlassAvailable()) {
+    glassTier = 'liquid';
+    log.info('[Glass] tier: liquid (NSGlassEffectView via electron-liquid-glass)');
+    return { backgroundColor: '#00000000', transparent: true };
+  }
+
+  glassTier = process.platform === 'darwin' ? 'vibrancy' : 'mica';
 
   // Translucent-capable from the start, so toggling the material on later has
   // something to blend against. See the note above.
@@ -231,6 +255,23 @@ export function resolveGlassWindowOptions(): BrowserWindowConstructorOptions {
     material: WINDOWS_BACKGROUND_MATERIAL,
   });
   return { ...base, backgroundMaterial: WINDOWS_BACKGROUND_MATERIAL };
+}
+
+export function applyGlassToWindow(win: BrowserWindow): void {
+  if (glassTier !== 'liquid' || !isGlassEnabled() || win.isDestroyed()) {
+    return;
+  }
+  if (!attachLiquidGlass(win)) {
+    glassTier = 'vibrancy';
+    const material = VIBRANCY_MATERIAL_BY_APPEARANCE[currentAppearance()];
+    win.setVibrancy(material);
+    appliedVibrancyMaterial = material;
+    log.warn('[Glass] liquid attach failed; recovered to vibrancy at runtime', { material });
+    return;
+  }
+  win.setWindowButtonVisibility(true);
+  setLiquidGlassVariant(LIQUID_GLASS_VARIANT_BY_APPEARANCE[currentAppearance()]);
+  applyLiquidGlassClarityKnobs();
 }
 
 /** Platform / OS-setting capability only — says nothing about the user's choice. */
@@ -289,6 +330,13 @@ export function setGlassEnabled(win: BrowserWindow, enabled: boolean): void {
   log.info('[Glass] enabled set to', { enabled, supported: glassSupported });
 
   if (!glassSupported || win.isDestroyed()) {
+    return;
+  }
+
+  if (glassTier === 'liquid') {
+    if (enabled) {
+      applyGlassToWindow(win);
+    }
     return;
   }
 
@@ -351,6 +399,12 @@ export function applyGlassAppearance(win: BrowserWindow, appearance: 'light' | '
   if (process.platform !== 'darwin') {
     return;
   }
+
+  if (glassTier === 'liquid') {
+    setLiquidGlassVariant(LIQUID_GLASS_VARIANT_BY_APPEARANCE[appearance]);
+    return;
+  }
+
   const material = VIBRANCY_MATERIAL_BY_APPEARANCE[appearance];
   if (material === appliedVibrancyMaterial) {
     return;
