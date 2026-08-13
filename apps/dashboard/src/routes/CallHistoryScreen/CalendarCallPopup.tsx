@@ -590,7 +590,7 @@ const CalendarCallPopup = ({
 
   const isCallUnavailable = !canJoinCall(call);
   const isJoinDisabled = isCurrentUserInCall || isCallUnavailable;
-  const shouldUsePrimaryJoinStyle = isLive || hasReachedScheduledStart;
+  const shouldUsePrimaryJoinStyle = isLive;
   const isManageableScheduledCall = isScheduledCallManageable(call, currentUserId);
 
   const canEdit = isManageableScheduledCall && !!onEditClick;
