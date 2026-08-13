@@ -2916,6 +2916,7 @@ model Canvas {
   userStatuses CanvasUserStatus[]
   versions     CanvasVersion[]
   commentThreads CanvasCommentThread[]
+  labels       CanvasLabel[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // Quarto Doc fields - when docType is Quarto
@@ -2941,6 +2942,22 @@ model Canvas {
   @@index([createdBy, updatedAt(sort: Desc), id])
   @@index([docType, updatedAt(sort: Desc), id])
   @@map("canvases")
+  @@schema("public")
+}
+
+model CanvasLabel {
+  id          String   @id @default(cuid())
+  workspaceId String
+  canvasId    String
+  name        String
+  createdAt   DateTime @default(now())
+
+  canvas      Canvas   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  @@unique([canvasId, name])
+  @@index([workspaceId])
+  @@index([canvasId])
+  @@map("canvas_labels")
   @@schema("public")
 }
 

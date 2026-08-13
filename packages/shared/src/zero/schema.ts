@@ -1303,6 +1303,16 @@ export const canvasTable = table('canvases')
   })
   .primaryKey('id');
 
+export const canvasLabelTable = table('canvas_labels')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    canvasId: string(),
+    name: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 export const canvasVersionTable = table('canvas_versions')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -3724,6 +3734,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['canvasId'],
     destSchema: canvasParticipantTable,
   }),
+  labels: many({
+    sourceField: ['id'],
+    destField: ['canvasId'],
+    destSchema: canvasLabelTable,
+  }),
   userStatuses: many({
     sourceField: ['id'],
     destField: ['canvasId'],
@@ -3768,6 +3783,14 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
+  }),
+}));
+
+export const canvasLabelTableRelationships = relationships(canvasLabelTable, ({ one }) => ({
+  canvas: one({
+    sourceField: ['canvasId'],
+    destField: ['id'],
+    destSchema: canvasTable,
   }),
 }));
 
@@ -4609,6 +4632,7 @@ export const schema = createSchema({
     recurringCallParticipantTable,
     canvasFolderTable,
     canvasTable,
+    canvasLabelTable,
     canvasVersionTable,
     canvasCommentThreadTable,
     canvasCommentTable,
@@ -4731,6 +4755,7 @@ export const schema = createSchema({
     recurringCallParticipantTableRelationships,
     canvasFolderTableRelationships,
     canvasTableRelationships,
+    canvasLabelTableRelationships,
     canvasVersionTableRelationships,
     canvasCommentThreadTableRelationships,
     canvasCommentTableRelationships,
@@ -4874,6 +4899,7 @@ export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
 export type CanvasCommentThread = Row<typeof schema.tables.canvas_comment_threads>;
 export type CanvasComment = Row<typeof schema.tables.canvas_comments>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
+export type CanvasLabel = Row<typeof schema.tables.canvas_labels>;
 export type CanvasUserStatus = Row<typeof schema.tables.canvas_user_status>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;
 export type Link = Row<typeof schema.tables.links>;

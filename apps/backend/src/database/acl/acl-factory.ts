@@ -14,6 +14,7 @@ import {
   BookmarksACL,
   CallParticipantsACL,
   CallsACL,
+  CanvasLabelsACL,
   CanvasesACL,
   CanvasParticipantsACL,
   CanvasVersionsACL,
@@ -162,6 +163,8 @@ export class ACLFactory {
       return new CallParticipantsACL(ctx, prisma)
     case 'canvas':
       return new CanvasesACL(ctx, prisma)
+    case 'canvasLabel':
+      return new CanvasLabelsACL(ctx, prisma)
     case 'canvasParticipant':
       return new CanvasParticipantsACL(ctx, prisma)
     case 'canvasVersion':

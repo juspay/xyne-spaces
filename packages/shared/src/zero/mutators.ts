@@ -357,6 +357,38 @@ async function hasCanvasVersionEditAccess(
   return false;
 }
 
+const CANVAS_LABEL_ID_PREFIX = 'canvas_label_';
+
+const normalizeCanvasLabelName = (name: string): string => name.trim().replace(/\s+/g, ' ');
+
+const normalizeCanvasLabelKey = (name: string): string =>
+  normalizeCanvasLabelName(name).toLowerCase();
+
+const getStableCanvasLabelId = (canvasId: string, labelKey: string): string => {
+  const input = `${canvasId}:${labelKey}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${CANVAS_LABEL_ID_PREFIX}${(hash >>> 0).toString(36)}`;
+};
+
+const isUniqueConstraintError = (error: unknown): boolean => {
+  if (error && typeof error === 'object') {
+    const { code, cause } = error as { code?: unknown; cause?: unknown };
+    if (code === 'P2002' || code === '23505' || code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return true;
+    }
+    if (cause && cause !== error && isUniqueConstraintError(cause)) {
+      return true;
+    }
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /unique|constraint|duplicate/i.test(message);
+};
+
 async function assertCanvasCommentEditAccess(
   tx: Transaction<Schema>,
   canvasId: string,
@@ -5723,6 +5755,76 @@ export const mutators = defineMutators({
           ...(resolvedProjectId !== undefined && { projectId: resolvedProjectId }),
           ...(resolvedChannelId !== undefined && { channelId: resolvedChannelId }),
         });
+      },
+    ),
+    addCanvasLabel: defineMutator(
+      z.object({ canvasId: z.string(), name: z.string() }),
+      async ({ tx, ctx, args: { canvasId, name } }) => {
+        const labelName = normalizeCanvasLabelName(name);
+        if (!labelName) {
+          throw new Error('Label name cannot be empty');
+        }
+        const labelKey = normalizeCanvasLabelKey(labelName);
+
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
+        if (!canEdit) {
+          throw new Error('You do not have permission to edit this canvas');
+        }
+
+        const existingLabels = await tx.run(zql.canvas_labels.where('canvasId', canvasId));
+        const existing = existingLabels.find(
+          label => normalizeCanvasLabelKey(label.name) === labelKey,
+        );
+        if (existing) {
+          return;
+        }
+
+        try {
+          await tx.mutate.canvas_labels.insert({
+            id: getStableCanvasLabelId(canvasId, labelKey),
+            workspaceId: canvas.workspaceId ?? ctx.workspaceId,
+            canvasId,
+            name: labelName,
+            createdAt: Date.now(),
+          });
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            return;
+          }
+          throw error;
+        }
+      },
+    ),
+    removeCanvasLabel: defineMutator(
+      z.object({ canvasId: z.string(), labelId: z.string() }),
+      async ({ tx, ctx, args: { canvasId, labelId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
+        if (!canEdit) {
+          throw new Error('You do not have permission to edit this canvas');
+        }
+
+        const label = await tx.run(zql.canvas_labels.where('id', labelId).one());
+        if (!label || label.canvasId !== canvasId) {
+          return;
+        }
+
+        await tx.mutate.canvas_labels.delete({ id: labelId });
       },
     ),
     delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {

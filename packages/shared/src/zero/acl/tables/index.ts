@@ -20,6 +20,7 @@ export { CallsACL } from './calls-acl';
 export { EntityAccessACL } from './entity-access-acl';
 export { SummaryTemplatesACL } from './summary-templates-acl';
 export { CanvasFoldersACL } from './canvas-folders-acl';
+export { CanvasLabelsACL } from './canvas-labels-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
 export { CanvasUserStatusACL } from './canvas-user-status-acl';
 export { CanvasesACL } from './canvases-acl';

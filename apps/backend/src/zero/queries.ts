@@ -522,7 +522,9 @@ const applyCanvasVisibilityQueryFilter = (
   );
 
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
-  query.related('userStatuses', (status: any) => status.where('userId', userId));
+  query
+    .related('labels', (labels: any) => labels.orderBy('name', 'asc'))
+    .related('userStatuses', (status: any) => status.where('userId', userId));
 
 // Keep in sync with the identical helper in packages/shared/src/zero/queries.ts if archive-filter behavior changes.
 const applyArchiveFilter = <T extends { where: Function }>(
@@ -3182,6 +3184,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         );
       })
       .related('participants')
+      .related('labels', labels => labels.orderBy('name', 'asc'))
       .related('channel'),
       ctx.userID
     ).one();
@@ -3955,6 +3958,14 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     ({ args: { channelId } }) => {
       return zql.conversation_labels
         .where('channelId', channelId)
+        .orderBy('name', 'asc');
+    },
+  ),
+  workspaceCanvasLabels: defineQuery(
+    z.object({ workspaceId: z.string() }),
+    ({ ctx, args: { workspaceId } }) => {
+      return zql.canvas_labels
+        .where('workspaceId', workspaceId || ctx.workspaceId)
         .orderBy('name', 'asc');
     },
   ),

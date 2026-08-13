@@ -1824,6 +1824,16 @@ export const canvasTable = table("canvases")
   })
   .primaryKey("id");
 
+export const canvasLabelTable = table("canvas_labels")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    canvasId: string(),
+    name: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const canvasVersionTable = table("canvas_versions")
   .columns({
     workspaceId: string(),
@@ -4242,6 +4252,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ["canvasId"],
     destSchema: canvasCommentThreadTable,
   }),
+  labels: many({
+    sourceField: ["id"],
+    destField: ["canvasId"],
+    destSchema: canvasLabelTable,
+  }),
   folder: one({
     sourceField: ["folderId"],
     destField: ["id"],
@@ -4251,6 +4266,14 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ["projectId"],
     destField: ["id"],
     destSchema: projectTable,
+  })
+}));
+
+export const canvasLabelTableRelationships = relationships(canvasLabelTable, ({ one }) => ({
+  canvas: one({
+    sourceField: ["canvasId"],
+    destField: ["id"],
+    destSchema: canvasTable,
   })
 }));
 
@@ -4830,6 +4853,7 @@ export const schema = createSchema(
       recurringCallParticipantTable,
       canvasFolderTable,
       canvasTable,
+      canvasLabelTable,
       canvasVersionTable,
       canvasCommentThreadTable,
       canvasCommentTable,
@@ -4970,6 +4994,7 @@ export const schema = createSchema(
       recurringCallParticipantTableRelationships,
       canvasFolderTableRelationships,
       canvasTableRelationships,
+      canvasLabelTableRelationships,
       canvasVersionTableRelationships,
       canvasCommentThreadTableRelationships,
       canvasCommentTableRelationships,
@@ -5117,6 +5142,7 @@ export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series
 export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_participants>;
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
+export type CanvasLabel = Row<typeof schema.tables.canvas_labels>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
 export type CanvasCommentThread = Row<typeof schema.tables.canvas_comment_threads>;
 export type CanvasComment = Row<typeof schema.tables.canvas_comments>;
