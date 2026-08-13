@@ -1,4 +1,11 @@
-import { type ReactElement, type ReactNode, useCallback, useEffect, useRef } from 'react';
+import {
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from 'react';
 import { useReducedMotion } from 'framer-motion';
 import {
   Panel,
@@ -14,17 +21,20 @@ import {
   XYNE_CALENDAR_SIDEBAR_MIN_WIDTH,
   getXyneCalendarSidebarWidth,
   saveXyneCalendarSidebarWidth,
-  useIsXyneCalendarSidebarOpen,
+  useXyneCalendarSidebarState,
 } from './xyneCalendarSidebar.utils';
 
 interface XyneCalendarSidebarHostProps {
   children: ReactNode;
+  isAskAIOpen: boolean;
 }
 
 export const XyneCalendarSidebarHost = ({
   children,
+  isAskAIOpen,
 }: XyneCalendarSidebarHostProps): ReactElement => {
-  const isOpen = useIsXyneCalendarSidebarOpen();
+  const { isOpen: isCalendarOpen, transition } = useXyneCalendarSidebarState();
+  const isOpen = isCalendarOpen && !isAskAIOpen;
   const { isMobile } = usePlatform();
   const shouldReduceMotion = useReducedMotion();
 
@@ -33,8 +43,24 @@ export const XyneCalendarSidebarHost = ({
   const calendarPanelElementRef = useRef<HTMLDivElement>(null);
   const hasOpenedRef = useRef(isOpen);
 
+  // Resize the panel when the sidebar is opened/closed via handoff (no transition jumps).
+  useLayoutEffect(() => {
+    if (transition !== 'handoff') return;
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    if (isOpen) {
+      panel.resize(getXyneCalendarSidebarWidth());
+      hasOpenedRef.current = true;
+    } else {
+      panel.collapse();
+    }
+  }, [isOpen, transition]);
+
   // Animate open/close layout changes, then restore instant panel resizing for dragging.
   useEffect(() => {
+    if (transition === 'handoff') return;
+
     const panel = panelRef.current;
     if (!panel || (!isOpen && !hasOpenedRef.current)) return;
     if (isOpen) hasOpenedRef.current = true;
@@ -43,11 +69,11 @@ export const XyneCalendarSidebarHost = ({
       (element): element is HTMLDivElement => element !== null,
     );
     const previousTransitions = panelElements.map(element => element.style.transition);
-    const transition = shouldReduceMotion
+    const panelTransition = shouldReduceMotion
       ? ''
       : `flex-grow ${XYNE_CALENDAR_SIDEBAR_ANIMATION_DURATION}s cubic-bezier(0.22, 1, 0.36, 1)`;
 
-    for (const element of panelElements) element.style.transition = transition;
+    for (const element of panelElements) element.style.transition = panelTransition;
 
     const frameId = requestAnimationFrame(() => {
       if (isOpen) {
@@ -59,7 +85,7 @@ export const XyneCalendarSidebarHost = ({
 
     const restoreTransitions = (): void => {
       panelElements.forEach((element, index) => {
-        if (element.style.transition === transition) {
+        if (element.style.transition === panelTransition) {
           element.style.transition = previousTransitions[index] ?? '';
         }
       });
@@ -74,7 +100,7 @@ export const XyneCalendarSidebarHost = ({
       window.clearTimeout(timeoutId);
       restoreTransitions();
     };
-  }, [isOpen, shouldReduceMotion]);
+  }, [isOpen, shouldReduceMotion, transition]);
 
   const handlePanelResize = useCallback(
     ({ inPixels }: { inPixels: number }): void => {

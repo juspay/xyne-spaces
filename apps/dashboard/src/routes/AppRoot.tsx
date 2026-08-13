@@ -77,7 +77,7 @@ import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
-import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
+import { ReactElement, ReactNode, useRef, useEffect, useLayoutEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
@@ -207,7 +207,10 @@ import {
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
-import { XyneCalendarSidebarHost } from '../components/Chat/XyneCalendarSidebar';
+import {
+  XyneCalendarSidebarHost,
+  closeXyneCalendarSidebarForHandoff,
+} from '../components/Chat/XyneCalendarSidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
 import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
@@ -514,6 +517,11 @@ const AppRoot = (): ReactElement => {
   // The SDLC bundle wants the same chromeless layout as the browser panel.
   const isInPanelWebview = useIsInPanelWebview() || isSdlcSurface;
 
+  // Ask AI can open from many surfaces; it always takes over the global right sidebar.
+  useLayoutEffect(() => {
+    if (isXyneAIDrawerOpen) closeXyneCalendarSidebarForHandoff();
+  }, [isXyneAIDrawerOpen]);
+
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
@@ -807,7 +815,7 @@ const AppRoot = (): ReactElement => {
                           <Outlet />
                         </main>
                       ) : (
-                        <XyneCalendarSidebarHost>
+                        <XyneCalendarSidebarHost isAskAIOpen={isXyneAIDrawerOpen}>
                         {showXyneAIPanel ||
                         showSdlcDebuggerPanel ||
                         browserPanelState === 'open' ||
