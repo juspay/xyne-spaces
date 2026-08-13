@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { setGlassActive } from '../stores/glassModeStore';
+import { trackGlassToggled } from '../services/otel/glassMetrics';
 
 /**
  * The Preferences -> Appearance glass toggle.
@@ -18,6 +19,7 @@ export function useGlassSettings(): {
   const api = window.electronAPI?.glass;
   const [isSupported, setIsSupported] = useState(false);
   const [enabled, setEnabledState] = useState(false);
+  const tierRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!api) return;
@@ -27,6 +29,7 @@ export function useGlassSettings(): {
       .getSettings()
       .then(settings => {
         if (cancelled) return;
+        tierRef.current = settings.tier;
         setIsSupported(settings.supported);
         setEnabledState(settings.enabled);
       })
@@ -60,6 +63,7 @@ export function useGlassSettings(): {
       // and the bare desktop shows through.
       setGlassActive(next);
       api.setEnabled(next);
+      trackGlassToggled(next, tierRef.current);
     },
     [api],
   );

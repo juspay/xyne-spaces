@@ -233,8 +233,12 @@ const electronAPI = {
   // Preferences -> Appearance toggle. `supported` is the machine's capability
   // (hide the control when false); `enabled` is the user's saved choice.
   glass: {
-    getSettings: (): Promise<{ supported: boolean; enabled: boolean; tier: string }> =>
-      ipcRenderer.invoke('glass:get-settings'),
+    getSettings: (): Promise<{
+      supported: boolean;
+      enabled: boolean;
+      tier: string;
+      osReleaseBand: string;
+    }> => ipcRenderer.invoke('glass:get-settings'),
     getTier: (): Promise<string> => ipcRenderer.invoke('glass:get-tier'),
     setEnabled: (enabled: boolean) => ipcRenderer.send('glass:set-enabled', enabled),
     onActiveChanged: (callback: (active: boolean) => void) => {

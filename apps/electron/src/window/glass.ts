@@ -1,46 +1,3 @@
-/**
- * Native "glass" window material (desktop-shows-through) capability detection.
- *
- * This is the ONLY place that decides whether the main window gets an OS-drawn
- * translucent material. Everything else (renderer CSS, the wallpaper fallback)
- * keys off `isGlassActive()` via the `glass:is-active` IPC channel.
- *
- * ── Why no `transparent: true` / `frame: false` ────────────────────────────
- * Both are deliberately avoided. Verified against the Electron 33.4.11 sources:
- *
- *  1. `native_window_mac.mm` sets `set_has_frame(false)` for any non-normal
- *     `titleBarStyle`. The main window already uses `hiddenInset`, so it is
- *     internally treated as frameless and `[window setOpaque:NO]` is already
- *     applied — which is the precondition NSVisualEffectView's behind-window
- *     blending needs. `transparent: true` would add nothing but would cost us
- *     the window shadow, rounded corners and resize smoothness.
- *
- *  2. `native_window.cc` (`InitFromOptions`) does:
- *         SkColor background_color = SK_ColorWHITE;
- *         if (options.Get(kBackgroundColor, &color)) { ...parse... }
- *         else if (IsTranslucent()) { background_color = SK_ColorTRANSPARENT; }
- *     and `IsTranslucent()` returns true when `vibrancy` is set (macOS) or when
- *     `backgroundMaterial` is set and != "none" (Windows). So as long as we do
- *     NOT pass `backgroundColor`, Electron makes the window transparent for us.
- *     Passing `#00000000` explicitly would also work but invites the documented
- *     `#AARRGGBB` vs CSS `#RRGGBBAA` ambiguity in `ParseCSSColor` — omitting it
- *     is strictly safer, and leaves the opaque white default untouched on the
- *     platforms where we intentionally do nothing.
- *
- * ── Material choice: `under-window` ───────────────────────────────────────
- * Electron applies `NSVisualEffectBlendingModeBehindWindow` to *every* vibrancy
- * material (`NativeWindowMac::SetVibrancy`), so the material name does not
- * decide whether the desktop is sampled — all of them sample it. It only picks
- * the tint recipe. `under-window` (NSVisualEffectMaterialUnderWindowBackground)
- * is Apple's material for "the area behind a window's background", which is
- * exactly this architecture: one whole-window vibrant plate with an opaque
- * content card composited on top. `sidebar` is meant for a discrete AppKit
- * sidebar view inside an otherwise opaque window; stretched across the whole
- * window it lays a second gray under our CSS scrim and mutes it.
- *
- * Flip MACOS_VIBRANCY_MATERIAL if a real Mac says otherwise — it is one line
- * and the renderer does not care which material is in use.
- */
 import {
   nativeTheme,
   systemPreferences,
@@ -67,36 +24,8 @@ import {
  */
 type VibrancyMaterial = NonNullable<Parameters<BrowserWindow['setVibrancy']>[0]>;
 
-/** See the module doc above for why this is `under-window` and not `sidebar`. */
 const MACOS_VIBRANCY_MATERIAL: VibrancyMaterial = 'fullscreen-ui';
 
-/**
- * ── THE NATIVE TINT KNOB ───────────────────────────────────────────────────
- * The material is the ONLY native control over the plate's tint. Electron
- * exposes no blur-radius and no tint-colour API (verified against the 33.4.11
- * typings: the sole "blur" entries are window focus events, and
- * `UpdateVibrancyRadii` in native_window_mac.mm is CORNER radius, not blur).
- *
- * Two levers, applied together by applyGlassAppearance():
- *   1. nativeTheme.themeSource -> flips the NSAppearance, which decides whether
- *      a material renders as its light or dark variant. This is the polarity.
- *   2. this map -> picks WHICH material, i.e. how strongly tinted that variant
- *      is. This is the degree.
- *
- * Both entries are `under-window` today, deliberately: the reported bug (a
- * light, warm plate under the midnight theme) was lever 1 sending the wrong
- * value, not lever 2 being wrong. Shipping a speculative material change at the
- * same time would make it impossible to tell which one fixed it.
- *
- * If midnight still is not dark enough once the appearance is correct, change
- * the `dark` entry here — it applies at runtime via `win.setVibrancy()`, no
- * restart of the window needed. Candidates, roughly darkest-first in dark
- * appearance: 'hud', 'under-page', 'sidebar', 'content', 'window'. All of them
- * sample the desktop identically (Electron hardcodes
- * NSVisualEffectBlendingModeBehindWindow for every material); they differ only
- * in the shade they mix in, which is exactly the "keep the blur's detailing"
- * property the flat CSS scrim destroyed.
- */
 const VIBRANCY_MATERIAL_BY_APPEARANCE: Record<'light' | 'dark', VibrancyMaterial> = {
   light: 'fullscreen-ui',
   dark: 'fullscreen-ui',
@@ -167,6 +96,69 @@ function getWindowsBuildNumber(): number | null {
     log.warn('[Glass] Could not read system version', error);
     return null;
   }
+}
+
+export type OsReleaseBand =
+  | 'macos_26_plus'
+  | 'macos_15'
+  | 'macos_14'
+  | 'macos_pre_14'
+  | 'win11_22h2_plus'
+  | 'win11_pre_22h2'
+  | 'win10_or_older'
+  | 'win_unknown'
+  | 'linux'
+  | 'unknown';
+
+const WINDOWS_MIN_WIN11_BUILD = 22000;
+
+function getMacOsMajorVersion(): number | null {
+  try {
+    const major = Number(process.getSystemVersion().split('.')[0]);
+    return Number.isFinite(major) ? major : null;
+  } catch (error) {
+    log.warn('[Glass] Could not read system version', error);
+    return null;
+  }
+}
+
+export function getOsReleaseBand(): OsReleaseBand {
+  if (process.platform === 'darwin') {
+    const major = getMacOsMajorVersion();
+    if (major === null) {
+      return 'unknown';
+    }
+    if (major >= 26) {
+      return 'macos_26_plus';
+    }
+    if (major === 15) {
+      return 'macos_15';
+    }
+    if (major === 14) {
+      return 'macos_14';
+    }
+    return 'macos_pre_14';
+  }
+
+  if (process.platform === 'win32') {
+    const build = getWindowsBuildNumber();
+    if (build === null) {
+      return 'win_unknown';
+    }
+    if (build >= WINDOWS_MIN_MATERIAL_BUILD) {
+      return 'win11_22h2_plus';
+    }
+    if (build >= WINDOWS_MIN_WIN11_BUILD) {
+      return 'win11_pre_22h2';
+    }
+    return 'win10_or_older';
+  }
+
+  if (process.platform === 'linux') {
+    return 'linux';
+  }
+
+  return 'unknown';
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   isGlassActive,
   isGlassEnabled,
   getGlassTier,
+  getOsReleaseBand,
   isGlassSupported,
   setGlassEnabled,
 } from '../window/glass';
@@ -306,6 +307,7 @@ export function setupIpcHandlers(): void {
     supported: isGlassSupported(),
     enabled: isGlassEnabled(),
     tier: getGlassTier(),
+    osReleaseBand: getOsReleaseBand(),
   }));
 
   ipcMain.handle('glass:get-tier', () => getGlassTier());

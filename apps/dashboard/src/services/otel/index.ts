@@ -42,6 +42,8 @@ export {
 
 export { trackNudgeActed, trackNudgeDismissed } from './nudgeMetrics';
 
+export { glassToggleTotal, registerGlassStateGauge, trackGlassToggled } from './glassMetrics';
+
 export {
   componentRenderDuration,
   componentRenderTotal,

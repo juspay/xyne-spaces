@@ -2,6 +2,18 @@ import { CallType } from '@xyne/shared';
 
 export type GlassTier = 'liquid' | 'vibrancy' | 'mica' | 'none';
 
+export type OsReleaseBand =
+  | 'macos_26_plus'
+  | 'macos_15'
+  | 'macos_14'
+  | 'macos_pre_14'
+  | 'win11_22h2_plus'
+  | 'win11_pre_22h2'
+  | 'win10_or_older'
+  | 'win_unknown'
+  | 'linux'
+  | 'unknown';
+
 export interface ScreenSource {
   id: string;
   name: string;
@@ -110,7 +122,12 @@ export interface ElectronAPI {
    * Optional for the same reasons as {@link isGlassActive}.
    */
   glass?: {
-    getSettings: () => Promise<{ supported: boolean; enabled: boolean; tier?: GlassTier }>;
+    getSettings: () => Promise<{
+      supported: boolean;
+      enabled: boolean;
+      tier?: GlassTier;
+      osReleaseBand?: OsReleaseBand;
+    }>;
     getTier?: () => Promise<GlassTier>;
     setEnabled: (enabled: boolean) => void;
     /** Fires with whether a material is now live. Returns an unsubscribe fn. */
