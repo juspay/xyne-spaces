@@ -25,7 +25,7 @@ import {
   getStatusText,
   hasAnyoneJoined,
   hasPreviewParticipantJoined,
-  isScheduledCallJoinable,
+  canJoinCall,
 } from './callHistoryItem.utils';
 import { cn } from '../../utils/classNames';
 import { ReactElement } from 'react';
@@ -107,7 +107,7 @@ export const CallCard = ({
       ? participantUsers.map(user => user.name || user.email || 'Unknown')
       : fallbackParticipantData.displayNames;
 
-  const isCallJoinable = isScheduledCallJoinable(call);
+  const isCallJoinable = canJoinCall(call);
   const isActiveState = call.status === CallStatus.ACTIVE;
 
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
