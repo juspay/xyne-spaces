@@ -1,6 +1,7 @@
 import { InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { encryptField, decryptField, isEncryptedField, decryptionCache } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
+import { logger } from '../utils/logger';
 
 /**
  * Recursively encrypt all string fields in an object.
@@ -106,7 +107,7 @@ export async function encryptionRequestInterceptor(
   const encryptedData = await encryptObject(config.data);
 
   if (encryptedData !== config.data) {
-    console.log('[encryption] Encrypted request body', {
+    logger.info('[encryption] Encrypted request body', {
       url: config.url,
       method: config.method,
     });
@@ -136,7 +137,7 @@ export async function encryptionResponseInterceptor(
   const decryptedData: unknown = await decryptObject(response.data);
 
   if (decryptedData !== response.data) {
-    console.log('[encryption] Decrypted response body', {
+    logger.info('[encryption] Decrypted response body', {
       url: response.config.url,
       status: response.status,
     });

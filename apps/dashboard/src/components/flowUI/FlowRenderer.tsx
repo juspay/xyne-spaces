@@ -179,7 +179,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           await navigator.clipboard.writeText(value);
           toast.success(successMessage ?? 'Copied to clipboard');
         } catch (error) {
-          console.error('[FlowRenderer] clipboard write failed:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[FlowRenderer] clipboard write failed:'),
+            context: [error],
+          });
           toast.error('Could not copy — select the URL in the message instead.');
         }
         return;

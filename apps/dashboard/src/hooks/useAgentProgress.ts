@@ -130,7 +130,7 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
         message: String('Received session_activity event'),
         context: [evt],
       });
-      if (evt?.message?.msgType !== 'SYSTEM') return;
+      if (evt?.message?.msgType !== MessageType.SYSTEM) return;
       let parsed: AgentProgressData | undefined;
       try {
         parsed = JSON.parse(evt.message.content) as AgentProgressData;
