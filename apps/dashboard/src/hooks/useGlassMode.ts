@@ -118,13 +118,30 @@ export function useGlassMode(): void {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (glassActive) {
-      root.setAttribute('data-glass', 'on');
-    } else {
+    if (!glassActive) {
       root.removeAttribute('data-glass');
+      root.removeAttribute('data-glass-tier');
+      return;
     }
+
+    root.setAttribute('data-glass', 'on');
+
+    let cancelled = false;
+    const probe = window.electronAPI?.glass?.getTier;
+    if (probe) {
+      void probe()
+        .then(tier => {
+          if (!cancelled) {
+            root.setAttribute('data-glass-tier', tier);
+          }
+        })
+        .catch(() => undefined);
+    }
+
     return (): void => {
+      cancelled = true;
       root.removeAttribute('data-glass');
+      root.removeAttribute('data-glass-tier');
     };
   }, [glassActive]);
 }

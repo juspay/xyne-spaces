@@ -1,10 +1,12 @@
-const STORAGE_KEY = 'xyne-glass-scrim-opacity';
-const USER_VAR = '--glass-scrim-opacity-user';
-const EFFECTIVE_VAR = '--glass-scrim-opacity';
+const STORAGE_KEY = 'xyne-wallpaper-opacity';
+const USER_VAR = '--wallpaper-opacity-user';
+const EFFECTIVE_VAR = '--wallpaper-opacity';
 
-export const SCRIM_MIN = 5;
-export const SCRIM_MAX = 90;
-export const SCRIM_STEP = 1;
+export const WALLPAPER_OPACITY_MIN = 0;
+export const WALLPAPER_OPACITY_MAX = 100;
+export const WALLPAPER_OPACITY_STEP = 1;
+
+const CSS_DEFAULT_FALLBACK = 0;
 
 type StoredMap = Record<string, number>;
 
@@ -16,7 +18,7 @@ function emit(): void {
   }
 }
 
-export function subscribeGlassScrim(listener: () => void): () => void {
+export function subscribeWallpaperOpacity(listener: () => void): () => void {
   listeners.add(listener);
   return (): void => {
     listeners.delete(listener);
@@ -28,6 +30,10 @@ export function currentTheme(): string {
     return '';
   }
   return document.documentElement.getAttribute('data-theme') ?? '';
+}
+
+export function clamp(value: number): number {
+  return Math.min(WALLPAPER_OPACITY_MAX, Math.max(WALLPAPER_OPACITY_MIN, Math.round(value)));
 }
 
 function readMap(): StoredMap {
@@ -66,15 +72,9 @@ function writeMap(map: StoredMap): void {
   }
 }
 
-export function clamp(value: number): number {
-  return Math.min(SCRIM_MAX, Math.max(SCRIM_MIN, Math.round(value)));
-}
-
 export function getStoredOpacity(theme: string): number | null {
   return readMap()[theme] ?? null;
 }
-
-const CSS_DEFAULT_FALLBACK = 30;
 
 export function getCssDefaultOpacity(): number {
   if (typeof document === 'undefined') {

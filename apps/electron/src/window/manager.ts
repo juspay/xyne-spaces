@@ -13,7 +13,7 @@ import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 import { callInvitePath } from '../utils/validation';
-import { resolveGlassWindowOptions } from './glass';
+import { applyGlassToWindow, resolveGlassWindowOptions } from './glass';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -365,9 +365,21 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   // Restore maximized/windowed state, then reveal once painted to avoid a resize flash.
   applyPostCreate(mainWindow);
   track(mainWindow, () => isCompactMode);
-  mainWindow.once('ready-to-show', () =>
-    options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
-  );
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (mainWindow) {
+      applyGlassToWindow(mainWindow);
+    }
+  });
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow) {
+      applyGlassToWindow(mainWindow);
+    }
+    if (options?.inactive) {
+      mainWindow?.showInactive();
+    } else {
+      mainWindow?.show();
+    }
+  });
 
   applyWindowPolicy(mainWindow);
 
