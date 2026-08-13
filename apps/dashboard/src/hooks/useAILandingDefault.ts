@@ -10,7 +10,8 @@ const subscribe = (listener: () => void): (() => void) => {
   return () => listeners.delete(listener);
 };
 
-const getSnapshot = (): boolean => localStorage.getItem(AI_LANDING_KEY) === 'true';
+// Defaults to enabled — only an explicit 'false' (user disabled it) turns it off.
+const getSnapshot = (): boolean => localStorage.getItem(AI_LANDING_KEY) !== 'false';
 
 export const useAILandingDefault = (): {
   aiLandingDefault: boolean;
