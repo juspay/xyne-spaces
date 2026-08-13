@@ -32,6 +32,27 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+import { superpositionClient } from '@/services/superpositionClient';
+
+const ZERO_DISABLED_QUERIES_KEY = 'zero_disabled_queries';
+
+const parseDisabledQueries = (raw: string): Set<string> =>
+  new Set(
+    raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  );
+
+const isQueryDisabled = async (name: string): Promise<boolean> => {
+  try {
+    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, '', {});
+    return parseDisabledQueries(raw).has(name);
+  } catch (error) {
+    logger.error('Failed to read disabled queries from superposition', { error });
+    return false;
+  }
+};
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -361,8 +382,13 @@ export async function handleQueries(request: Request): Promise<any> {
 
   try {
     const result = await handleQueryRequest(
-      (queryName, args) => {
+      async (queryName, args) => {
         capturedQueryName = queryName;
+        if (await isQueryDisabled(queryName)) {
+          getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
+          logger.warn('zero_query_disabled', { query: queryName });
+          throw new Error(`Query '${queryName}' is disabled`);
+        }
         const query = mustGetQuery(queries, queryName);
         const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
         return query.fn({ args, ctx: context });
