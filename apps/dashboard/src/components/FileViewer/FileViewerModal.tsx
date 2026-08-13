@@ -1,5 +1,6 @@
 import React, { JSX, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Download, X, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
+import { Download, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../hooks/useClipboard';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useLocation } from 'react-router-dom';
@@ -648,10 +649,13 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   }, [isImage, fileData]);
 
   const { copyImage } = useClipboard();
+  const [copied, setCopied] = useState(false);
 
   const handleCopyImage = async (): Promise<void> => {
     if (!fileData || !isImage) return;
     await copyImage(fileData);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
   };
 
   // Helper function to render floating top bar with optional close button
@@ -684,7 +688,11 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               data-track-name='COPY_IMAGE_FROM_MODAL'
               title='Copy Image'
             >
-              <Copy className='h-4 w-4' />
+              {copied ? (
+                <CopyCopied className='h-4 w-4' />
+              ) : (
+                <CopyDefault className='h-4 w-4' />
+              )}
             </button>
           )}
           <button
@@ -1375,10 +1383,13 @@ const AttachmentGalleryModalInner: React.FC = () => {
   };
 
   const { copyImage: copyImageGallery } = useClipboard();
+  const [copiedGallery, setCopiedGallery] = useState(false);
 
   const handleCopyImageGallery = async (): Promise<void> => {
     if (!machineFileData || !isImage) return;
     await copyImageGallery(machineFileData);
+    setCopiedGallery(true);
+    window.setTimeout(() => setCopiedGallery(false), 1200);
   };
 
   // Floating top bar
@@ -1409,7 +1420,11 @@ const AttachmentGalleryModalInner: React.FC = () => {
               title='Copy Image'
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
             >
-              <Copy className='h-4 w-4' />
+              {copiedGallery ? (
+                <CopyCopied className='h-4 w-4' />
+              ) : (
+                <CopyDefault className='h-4 w-4' />
+              )}
             </button>
           )}
           <button
