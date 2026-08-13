@@ -2243,6 +2243,7 @@ export function createMutators(
             id: userStatus.id,
             sectionId,
             sectionPosition: sectionId ? position : null,
+            ...(sectionId ? { isStarred: false } : {}),
             updatedAt: timestamp,
           });
         },

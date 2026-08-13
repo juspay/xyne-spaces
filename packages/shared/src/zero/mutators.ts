@@ -1290,6 +1290,7 @@ export const mutators = defineMutators({
           id: userStatus.id,
           sectionId,
           sectionPosition: sectionId ? position : null,
+          ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
       },
