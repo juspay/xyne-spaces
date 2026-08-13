@@ -1,4 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import path from 'path';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { authMiddleware } from '@/middleware/auth';
@@ -210,8 +211,8 @@ router.get('/context', ...authenticateAdmin, async (req: Request, res: Response)
   }
 });
 
-const DATASET_PATH = process.env.ENTERPRISE_RAG_DATASET_PATH || '/data/enterprise-rag-bench/documents.jsonl';
-const DATASET_QUESTIONS_PATH = process.env.ENTERPRISE_RAG_QUESTIONS_PATH || '/data/enterprise-rag-bench/questions.jsonl';
+const DATASET_PATH = path.join(__dirname, '..', 'dataset', 'documents.jsonl');
+const DATASET_QUESTIONS_PATH = path.join(__dirname, '..', 'dataset', 'questions.jsonl');
 
 const ingestDatasetSchema = z.object({
   sourceType: z.enum(ENTERPRISE_RAG_SOURCE_TYPES).optional(),
