@@ -119,6 +119,7 @@ export interface MailFilters {
   createdAfter?: string;
   createdOn?: string;
   createdRange?: string;
+  parentMailOnly?: boolean;
 }
 
 export interface CallFilters {
@@ -1252,6 +1253,11 @@ export class YqlBuilder {
     const conditions: string[] = [`entity contains "support_desk"`];
 
     conditions.push(`permissions contains ${params.bind('permissions', userId)}`);
+
+    //All tab mail filter
+    if (filters.parentMailOnly) {
+      conditions.push(`isParentMail = true`);
+    }
 
     if (filters.channelId && filters.channelId.length > 0) {
       const channels = filters.channelId

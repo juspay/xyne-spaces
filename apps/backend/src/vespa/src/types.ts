@@ -458,6 +458,7 @@ export interface VespaSamTranscriptDocument extends VespaDocument {
 export interface VespaMailDocument extends VespaDocument {
   threadId: string;
   parentThreadId?: string;
+  isParentMail?: boolean;
   mailId?: string;
   xyneId?: string;
   ticketFormFields?: TicketFormFields;

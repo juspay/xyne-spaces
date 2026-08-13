@@ -82,7 +82,9 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 }
 
 const MAX_FILTER_VALUES = 50;
-const MAX_VESPA_RESULT_WINDOW = 1000;
+// Vespa rejects any query asking for more than this many hits ("N hits
+// requested, configured limit: 400"), so every computed fetch window clamps here.
+const MAX_VESPA_HITS = 400;
 
 /**
  * Keep every non-mail hit, but only the highest-ranked mail hit for each Desk
@@ -887,28 +889,20 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     const mailGroupOffset = isMailOnlySearch
       ? Math.max(Number(offset) || 0, 0)
       : 0;
-    const flatSearchOffset = isFlatMultiAppMailSearch
-      ? Math.max(Number(offset) || 0, 0)
-      : 0;
 
     // Vespa's top-level offset paginates hits, not grouping buckets. Desk mail
     // results are grouped by threadId, so fetch the ranked group prefix and
     // slice the requested page after parsing the grouping response.
     if (isMailOnlySearch && mailGroupOffset > 0) {
       options.offset = 0;
-      options.limit = mailGroupOffset + effectiveLimit;
+      options.limit = Math.min(MAX_VESPA_HITS, mailGroupOffset + effectiveLimit);
     }
 
-    // For flat All-tab searches, fetch from the start so mail threads can be
-    // deduplicated consistently across pages. Over-fetch to compensate for
-    // conversations that have several matching mail documents.
+    // Requires mail to carry `isParentMail`, which is only set on documents fed
+    // after that field was added: the corpus must be re-fed before this ships,
+    // or the All tab returns no mail at all.
     if (isFlatMultiAppMailSearch) {
-      const requestedUniquePrefix = flatSearchOffset + effectiveLimit;
-      options.offset = 0;
-      options.limit = Math.min(
-        MAX_VESPA_RESULT_WINDOW,
-        requestedUniquePrefix * 4,
-      );
+      options.mail.parentMailOnly = true;
     }
 
     // Call vespa search
@@ -982,19 +976,13 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Return flat results (backward compatible)
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
-      const transformedResults = dedupeMailResults(
-        await transformVespaResults(
-          dedupeMailHits(parsedResults.hits || []),
-          db,
-          wantDebugInfo,
-        ),
+      // No mail dedupe here: the only flat search that reaches mail is the All
+      // tab, and `isParentMail` already limits it to one hit per conversation.
+      const pageResults = await transformVespaResults(
+        parsedResults.hits || [],
+        db,
+        wantDebugInfo,
       );
-      const pageResults = isFlatMultiAppMailSearch
-        ? transformedResults.slice(
-            flatSearchOffset,
-            flatSearchOffset + effectiveLimit,
-          )
-        : transformedResults;
 
       res.json({
         success: true,

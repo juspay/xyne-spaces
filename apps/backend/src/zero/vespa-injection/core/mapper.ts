@@ -1499,11 +1499,19 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
   const plainBody = extractPlainTextFromHtml(email.body || '') || email.subject;
   const chunks = chunkPlainText(plainBody);
 
+  //checking if the mail is parent mail or not
+  const parentMail = await db.email.findFirst({
+    where: { conversationId: email.conversationId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true },
+  });
+
   return {
     docId: email.id,
     docType: VespaDocType.MAIL,
     threadId: email.conversationId,
     parentThreadId: email.externalThreadId || undefined,
+    isParentMail: parentMail ? parentMail.id === email.id : true,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
     ticketFormFields,
