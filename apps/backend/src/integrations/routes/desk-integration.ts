@@ -26,8 +26,8 @@ import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { microsoftDeskService } from '@/services/microsoftDeskService';
-import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '../core/types';
+import { stopGmailWatchBeforeDeactivation } from '@/services/gmailWatchStopService';
 import { extractEmailAddress } from '@/utils/email';
 // Reuse the OAuth primitives from the route files that own them — keeps
 // connect and reconnect on the exact same scopes, OAuth client config, and
@@ -85,7 +85,7 @@ async function findActiveSourceForChannel(
   channelId: string,
 ): Promise<{ id: string; sourceType: string; displayName: string; credentials: string } | null> {
   return db.externalSource.findFirst({
-    where: { channelId, isActive: true },
+    where: { channelId, isActive: true, NOT: { name: { startsWith: 'google-dl-sync' } } },
     select: { id: true, sourceType: true, displayName: true, credentials: true },
     orderBy: { createdAt: 'desc' },
   });
@@ -161,21 +161,8 @@ router.post(
         return;
       }
 
-      // Best-effort: stop Gmail publishing this mailbox's events to the topic.
-      // Must run BEFORE the OAuth revoke below, since stop() needs a valid
-      // OAuth token. A failure here just means the watch will time out
-      // naturally within 7 days — disconnect continues either way.
-      if (source.sourceType === ExternalSourcePlatform.GOOGLE && source.credentials) {
-        try {
-          const svc = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
-          await svc.stopGmailWatch();
-        } catch (err) {
-          logger.warn(`${TAG} Best-effort Gmail watch stop failed`, {
-            sourceId: source.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      // Must run BEFORE the OAuth revoke below, since stop() needs a valid token.
+      await stopGmailWatchBeforeDeactivation(source, TAG);
 
       // Best-effort token revocation at the provider. Don't let a revoke
       // failure block the local disconnect — the source is being marked
