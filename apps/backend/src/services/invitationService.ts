@@ -7,6 +7,7 @@ import { PrismaClient, Invitation, User } from '@prisma/client';
 import {
   GuestEntity,
   WorkspaceRole,
+  WorkspaceType,
   AuthProvider,
   ChannelRole,
   CanvasRole,
@@ -56,10 +57,11 @@ export class InvitationService {
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
   }
 
-  private toEnterpriseOrgRole(role: WorkspaceRole): 'OWNER' | 'ADMIN' | 'MEMBER' {
-    if (role === WorkspaceRole.OWNER) return 'OWNER';
-    if (role === WorkspaceRole.ADMIN) return 'ADMIN';
-    return 'MEMBER';
+  private toEnterpriseOrgRole(role: WorkspaceRole): OrgRole {
+    if (role === WorkspaceRole.OWNER) return OrgRole.OWNER;
+    if (role === WorkspaceRole.ADMIN) return OrgRole.ADMIN;
+    if (role === WorkspaceRole.COMMUNITY_MEMBER) return OrgRole.COMMUNITY_MEMBER;
+    return OrgRole.MEMBER;
   }
 
   /**
@@ -93,7 +95,7 @@ export class InvitationService {
       orgId = derivedOrgId;
 
       // Ensure the invitee exists in the org_members table (any org)
-      if (role !== 'GUEST') {
+      if (role !== WorkspaceRole.GUEST && role !== WorkspaceRole.COMMUNITY_MEMBER) {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
         // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
         // outside would execute the query after withWorkspaceScope has exited — back in the
@@ -128,8 +130,24 @@ export class InvitationService {
     // Validate role — provision flow (explicit orgId) allows OWNER; normal flow allows ADMIN/MEMBER
     const validRoles: WorkspaceRole[] = explicitOrgId
       ? [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]
-      : [WorkspaceRole.ADMIN, WorkspaceRole.MEMBER, WorkspaceRole.GUEST];
-    const invitationRole = role && validRoles.includes(role) ? role : 'MEMBER';
+      : [
+          WorkspaceRole.ADMIN,
+          WorkspaceRole.MEMBER,
+          WorkspaceRole.GUEST,
+          WorkspaceRole.COMMUNITY_MEMBER,
+        ];
+    const invitationRole = role && validRoles.includes(role) ? role : WorkspaceRole.MEMBER;
+
+    if (invitationRole === WorkspaceRole.COMMUNITY_MEMBER) {
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { workspaceType: true },
+      });
+
+      if (workspace?.workspaceType !== WorkspaceType.COMMUNITY) {
+        throw new Error('Community member invitations are only supported for community workspaces');
+      }
+    }
 
     if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
       throw new Error('Guest invitations must target a project, channel, or canvas');
