@@ -786,7 +786,6 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
     workspaceId: string(),
     isDefault: boolean(),
     createdBy: string(),
-    updatedBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
