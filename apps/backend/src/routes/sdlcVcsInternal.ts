@@ -15,7 +15,9 @@ router.post(
   route(async (req, res) => {
     const binding = bootstrapSdlcRuntimeCredentialSchema.parse(req.body);
     const envelope = await sdlcVcs.bootstrapSandboxCredential(binding);
-    res.status(200).json({ success: true, envelope });
+    res.status(200).json(
+      envelope ? { success: true, envelope } : { success: true, anonymous: true }
+    );
   }),
 );
 

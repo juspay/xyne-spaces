@@ -8,10 +8,7 @@ import type { SdlcActor } from '../types';
 import { isSafeSdlcGitRef, requireSdlcBaseBranch } from '../sdlcRepositoryContext';
 import { credentialFingerprint } from './credentialEnvelope';
 import { GitHubVcsAdapter } from './GitHubVcsAdapter';
-import {
-  SdlcVcsCredentialStore,
-  type StoredSdlcVcsCredential,
-} from './SdlcVcsCredentialStore';
+import { SdlcVcsCredentialStore, type StoredSdlcVcsCredential } from './SdlcVcsCredentialStore';
 import { classifyRuntimeAccessFailure } from './accessCheckPolicy';
 import {
   encryptSandboxCredentialEnvelope,
@@ -123,7 +120,10 @@ export class SdlcVcsService implements SdlcVcs {
     await this.requireWorkspaceAdmin(actor);
     const row = await this.requireConnectedCredential(actor.workspaceId, provider);
     try {
-      const validation = await this.adapter(provider).validateCredential(row.token, row.resourceOwner);
+      const validation = await this.adapter(provider).validateCredential(
+        row.token,
+        row.resourceOwner
+      );
       const now = new Date().toISOString();
       await this.prisma.$transaction(async (tx) => {
         await this.credentialStore.save(tx, {
@@ -301,11 +301,7 @@ export class SdlcVcsService implements SdlcVcs {
     let credentialInvalidated = false;
     try {
       const parsed = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
-      const credential = await this.credentialStore.find(
-        this.prisma,
-        input.workspaceId,
-        provider
-      );
+      const credential = await this.credentialStore.find(this.prisma, input.workspaceId, provider);
       const credentialState = this.credentialState(credential);
       let token: string | undefined;
       let identityLogin: string | null = null;
@@ -460,10 +456,14 @@ export class SdlcVcsService implements SdlcVcs {
     operation: 'CLONE' | 'PUSH';
     sandboxId: string;
     sandboxPublicKey: string;
-  }): Promise<SandboxCredentialEnvelope> {
+  }): Promise<SandboxCredentialEnvelope | null> {
     const [execution, repo] = await Promise.all([
       this.prisma.workflowExecution.findFirst({
-        where: { id: binding.executionId, status: 'RUNNING' },
+        // Callback/handoff recovery may park an already-dispatched execution
+        // in PENDING while its bound Claw session is still active. The session,
+        // repository, operation, and agent checks below remain the authority;
+        // a merely queued run has no bound session and cannot pass them.
+        where: { id: binding.executionId, status: { in: ['PENDING', 'RUNNING'] } },
         select: { id: true, workspaceId: true, createdBy: true, context: true },
       }),
       this.prisma.repo.findUnique({
@@ -500,7 +500,11 @@ export class SdlcVcsService implements SdlcVcs {
     const required: VcsCapability[] =
       binding.operation === 'CLONE' ? ['READ_REPOSITORY'] : ['READ_REPOSITORY', 'PUSH_BRANCH'];
     await this.requireCapabilities(actor, repo.id, required);
-    const credential = await this.requireConnectedCredential(repo.workspaceId, 'GITHUB');
+    const credential = await this.connectedCredential(repo.workspaceId, 'GITHUB');
+    if (!credential && binding.operation !== 'CLONE') {
+      throw new AppError('Workspace GitHub credential is not connected', 409);
+    }
+    if (!credential) return null;
     const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
     const auth = this.adapter('GITHUB').buildGitAuthentication(credential.token);
     return encryptSandboxCredentialEnvelope(
@@ -627,6 +631,95 @@ export class SdlcVcsService implements SdlcVcs {
         );
       }
       throw this.toAppError(mapped);
+    }
+  }
+
+  async verifySourcePaths(repoId: string, commitHash: string, paths: string[]): Promise<void> {
+    const repo = await this.prisma.repo.findUnique({ where: { id: repoId } });
+    if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
+    if (paths.length === 0) return;
+    const credential = await this.connectedCredential(repo.workspaceId, 'GITHUB');
+    const adapter = this.adapter('GITHUB');
+    const repository = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
+    try {
+      await adapter.verifyPathsAtCommit(credential?.token, repository, commitHash, paths);
+    } catch (error) {
+      throw this.toAppError(this.providerError(error));
+    }
+  }
+
+  async verifySourceRanges(
+    repoId: string,
+    commitHash: string,
+    references: import('./types').SourceLineRange[]
+  ): Promise<void> {
+    const repo = await this.prisma.repo.findUnique({ where: { id: repoId } });
+    if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
+    if (references.length === 0) return;
+    const credential = await this.connectedCredential(repo.workspaceId, 'GITHUB');
+    const adapter = this.adapter('GITHUB');
+    const repository = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
+    try {
+      await adapter.verifySourceRangesAtCommit(
+        credential?.token,
+        repository,
+        commitHash,
+        references
+      );
+    } catch (error) {
+      throw this.toAppError(this.providerError(error));
+    }
+  }
+
+  async verifyBaseBranchHead(repoId: string, commitHash: string): Promise<void> {
+    const repo = await this.prisma.repo.findUnique({ where: { id: repoId } });
+    if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
+    const credential = await this.connectedCredential(repo.workspaceId, 'GITHUB');
+    const adapter = this.adapter('GITHUB');
+    const repository = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
+    try {
+      await adapter.verifyRemoteCommit(
+        credential?.token,
+        repository,
+        requireSdlcBaseBranch(repo.baseBranch),
+        commitHash
+      );
+    } catch (error) {
+      throw this.toAppError(this.providerError(error));
+    }
+  }
+
+  async resolveBaseBranchHead(repoId: string): Promise<string> {
+    const repo = await this.prisma.repo.findUnique({ where: { id: repoId } });
+    if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
+    const credential = await this.connectedCredential(repo.workspaceId, 'GITHUB');
+    const adapter = this.adapter('GITHUB');
+    const repository = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
+    try {
+      return await adapter.resolveBranchHead(
+        credential?.token,
+        repository,
+        requireSdlcBaseBranch(repo.baseBranch)
+      );
+    } catch (error) {
+      throw this.toAppError(this.providerError(error));
+    }
+  }
+
+  async listBaseBranchFirstParentHistory(repoId: string) {
+    const repo = await this.prisma.repo.findUnique({ where: { id: repoId } });
+    if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
+    const credential = await this.connectedCredential(repo.workspaceId, 'GITHUB');
+    const adapter = this.adapter('GITHUB');
+    const repository = adapter.parseRepositoryUrl(repo.canonicalUrl || repo.url);
+    try {
+      return await adapter.listFirstParentHistory(
+        credential?.token,
+        repository,
+        requireSdlcBaseBranch(repo.baseBranch)
+      );
+    } catch (error) {
+      throw this.toAppError(this.providerError(error));
     }
   }
 
@@ -790,6 +883,17 @@ export class SdlcVcsService implements SdlcVcs {
     workspaceId: string,
     provider: VcsProvider
   ): Promise<StoredSdlcVcsCredential & { token: string; resourceOwner: string }> {
+    const row = await this.connectedCredential(workspaceId, provider);
+    if (!row) {
+      throw new AppError('Workspace GitHub credential is not connected', 409);
+    }
+    return row;
+  }
+
+  private async connectedCredential(
+    workspaceId: string,
+    provider: VcsProvider
+  ): Promise<(StoredSdlcVcsCredential & { token: string; resourceOwner: string }) | null> {
     const row = await this.credentialStore.find(this.prisma, workspaceId, provider);
     if (
       !row ||
@@ -798,7 +902,7 @@ export class SdlcVcsService implements SdlcVcs {
       !row.token ||
       !row.resourceOwner
     ) {
-      throw new AppError('Workspace GitHub credential is not connected', 409);
+      return null;
     }
     return row as StoredSdlcVcsCredential & { token: string; resourceOwner: string };
   }

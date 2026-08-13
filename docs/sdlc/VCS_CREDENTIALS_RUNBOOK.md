@@ -159,10 +159,22 @@ Preview SDLC state that would be removed:
 pnpm sdlc:cleanup
 ```
 
+Preview one repository only (exact repository ID, name, or URL):
+
+```bash
+pnpm sdlc:cleanup -- --repo <repository>
+```
+
 Delete it after reviewing counts:
 
 ```bash
 pnpm sdlc:cleanup -- --yes
 ```
 
-Cleanup is hard-blocked unless both database hosts are loopback and the Spaces backend runs in development/test mode. It removes all local SDLC repository hubs, generated boards, Tickets, Canvases, conversations, workflow executions, Claw run history, and SDLC Redis queue/admission state. It preserves workspace registration, users, Projects, agent configuration, and workspace GitHub credentials.
+Delete one repository only:
+
+```bash
+pnpm sdlc:cleanup -- --repo <repository> --yes
+```
+
+Cleanup is hard-blocked unless both database hosts are loopback and the Spaces backend runs in development/test mode. Without `--repo`, it removes all local SDLC repository hubs, generated boards, Tickets, Canvases (including Wiki pages and versions), conversations, workflow executions (including Wiki runs), Claw run history, and SDLC Redis queue/admission state. With `--repo`, it removes only matching repository state and preserves a shared Project board while another SDLC repository still uses it. It always preserves workspace registration, users, Projects, agent configuration, and workspace GitHub credentials.

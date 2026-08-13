@@ -1,3 +1,6 @@
+import type { WikiFreshnessContext } from './wiki/wikiFreshness';
+import { wikiAskAiFreshnessInstruction } from './wiki/wikiFreshness';
+
 interface SdlcAskAiContextInput {
   repo: {
     id: string;
@@ -7,6 +10,7 @@ interface SdlcAskAiContextInput {
   channelId: string;
   baselineDocuments: Array<{ title: string; content: string }>;
   linkedContext: string[];
+  wikiFreshness?: WikiFreshnessContext;
 }
 
 export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
@@ -16,6 +20,9 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     '2. Read up to three of the most relevant results with spaces-read-canvas before inspecting live code. Prioritize imported Wiki pages; also read relevant PRDs and Tech Docs.',
     '3. If search returns no relevant canvas, say that explicitly and continue with repository inspection.',
     'Do not answer a substantive repository question without this canvas preflight. Do not treat repository code as a substitute for checking the repository knowledge canvases.',
+    input.wikiFreshness
+      ? wikiAskAiFreshnessInstruction(input.wikiFreshness)
+      : 'Wiki freshness is unknown. Use the Wiki only for orientation, inspect live code before factual repository claims, and disclose the freshness limitation.',
   ].join('\n');
 
   return [

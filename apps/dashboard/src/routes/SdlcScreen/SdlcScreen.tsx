@@ -62,7 +62,13 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { SdlcTicketsBoard } from './SdlcTicketsBoard';
 import { artifactCta } from './artifactCtaPolicy';
 import { baselineApprovalAction } from './baselinePolicy';
-import { SdlcWikiSection, SdlcWikiSidebarTree, type SdlcWikiPage } from './SdlcWikiSection';
+import {
+  SdlcWikiSection,
+  SdlcWikiSidebarTree,
+  type SdlcWikiPage,
+  type SdlcWikiRun,
+  type SdlcWikiStartInput,
+} from './SdlcWikiSection';
 import { SdlcConversationPanel } from './SdlcConversationPanel';
 import { SdlcAssistantPanel } from './SdlcAssistantPanel';
 import { SdlcDebuggerPanel } from './SdlcDebuggerPanel';
@@ -284,7 +290,32 @@ export default function SdlcScreen(): ReactElement {
     },
     enabled: Boolean(repoId && section === 'wiki'),
   });
+  const wikiRunQuery = useQuery({
+    queryKey: ['sdlc-wiki-run', repoId],
+    queryFn: async () => {
+      const response = await apiInstance.get<{ success: boolean; run: SdlcWikiRun | null }>(
+        `/sdlc/repositories/${encodeURIComponent(repoId!)}/wiki/run`,
+      );
+      return response.data.run;
+    },
+    enabled: Boolean(repoId && section === 'wiki'),
+    refetchInterval: query => {
+      const phase = query.state.data?.phase;
+      return phase &&
+        ['QUEUED', 'PREPARING', 'BOOTSTRAPPING', 'PROCESSING', 'VALIDATING', 'CORRECTING'].includes(
+          phase,
+        )
+        ? 2_000
+        : false;
+    },
+  });
   const wikiPages = wikiQuery.data ?? [];
+  const refetchWikiPages = wikiQuery.refetch;
+  const wikiRunUpdatedAt = wikiRunQuery.data?.updatedAt;
+  useEffect(() => {
+    if (!wikiRunUpdatedAt) return;
+    void refetchWikiPages();
+  }, [refetchWikiPages, wikiRunUpdatedAt]);
   const selectedWikiPage = wikiPages.find(page => page.canvasId === selectedCanvasId);
   const assistantCanvas = useMemo(
     () =>
@@ -519,6 +550,21 @@ export default function SdlcScreen(): ReactElement {
       });
       return;
     }
+    if (wikiRunQuery.data && externalDebuggerTarget.executionId === wikiRunQuery.data.executionId) {
+      updateExternalDebugger(repoId, {
+        conversationId: wikiRunQuery.data.conversationId || externalDebuggerTarget.conversationId,
+        sessionId: wikiRunQuery.data.sessionId,
+        running: [
+          'QUEUED',
+          'PREPARING',
+          'BOOTSTRAPPING',
+          'PROCESSING',
+          'VALIDATING',
+          'CORRECTING',
+        ].includes(wikiRunQuery.data.phase),
+      });
+      return;
+    }
     const ticketExecution = tickets
       .flatMap(ticket => ticket.workflows ?? [])
       .flatMap(workflow => workflow.workflowExecutions ?? [])
@@ -541,6 +587,7 @@ export default function SdlcScreen(): ReactElement {
     state.sessionId,
     tickets,
     updateExternalDebugger,
+    wikiRunQuery.data,
   ]);
 
   const approvedCount = baseline.filter(
@@ -604,6 +651,31 @@ export default function SdlcScreen(): ReactElement {
       setBusy(null);
     }
   };
+
+  const callWikiAction = async (
+    key: string,
+    path: 'generate' | 'refresh' | 'retry' | 'cancel',
+    body: unknown,
+    success: string,
+  ): Promise<void> => {
+    await call(
+      key,
+      async () => {
+        await apiInstance.post(`/sdlc/repositories/${repoId!}/wiki/${path}`, body);
+        await Promise.all([wikiRunQuery.refetch(), wikiQuery.refetch()]);
+      },
+      success,
+    );
+  };
+
+  const generateWiki = (input: SdlcWikiStartInput): Promise<void> =>
+    callWikiAction('wiki-generate', 'generate', input, 'Wiki generation started');
+  const refreshWiki = (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>): Promise<void> =>
+    callWikiAction('wiki-refresh', 'refresh', input, 'Wiki refresh started');
+  const retryWiki = (): Promise<void> =>
+    callWikiAction('wiki-retry', 'retry', {}, 'Wiki run resumed');
+  const cancelWiki = (): Promise<void> =>
+    callWikiAction('wiki-cancel', 'cancel', {}, 'Wiki run cancelled');
 
   const ownerHasConversations = useCallback(
     (ownerCanvasId: string | null): boolean => sdlcOwnerHasConversations(ownerCanvasId, links),
@@ -1674,6 +1746,32 @@ export default function SdlcScreen(): ReactElement {
                     error={wikiQuery.isError}
                     onRetry={() => void wikiQuery.refetch()}
                     onOpen={openWikiPage}
+                    run={wikiRunQuery.data ?? null}
+                    isAdmin={isAdmin}
+                    actionPending={busy?.startsWith('wiki-') ?? false}
+                    onGenerate={generateWiki}
+                    onRefresh={refreshWiki}
+                    onRetryRun={retryWiki}
+                    onCancelRun={cancelWiki}
+                    onDebugRun={() => {
+                      const run = wikiRunQuery.data;
+                      if (!run?.conversationId) return;
+                      openSdlcDebugger({
+                        source: 'sdlc',
+                        repoId: repo.id,
+                        executionId: run.executionId,
+                        conversationId: run.conversationId,
+                        sessionId: run.sessionId,
+                        running: [
+                          'QUEUED',
+                          'PREPARING',
+                          'BOOTSTRAPPING',
+                          'PROCESSING',
+                          'VALIDATING',
+                          'CORRECTING',
+                        ].includes(run.phase),
+                      });
+                    }}
                   />
                 )}
 

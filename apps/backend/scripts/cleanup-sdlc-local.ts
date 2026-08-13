@@ -1,10 +1,11 @@
 import Bull from 'bull';
 import Redis from 'ioredis';
+import { writeFile } from 'node:fs/promises';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getBaseRedisOptions } from '../src/services/redisFactory';
 
 const prisma = new PrismaClient();
-const SDLC_WORKFLOW_TYPES = ['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK'];
+const SDLC_WORKFLOW_TYPES = ['SDLC_SETUP', 'SDLC_ARTIFACT', 'SDLC_WORK', 'SDLC_WIKI'];
 const PROTECTED_TABLES = new Set([
   'users',
   'workspaces',
@@ -32,11 +33,56 @@ function requireLocalDatabase(rawUrl: string | undefined): void {
   }
 }
 
-function parseArgs(): { confirmed: boolean } {
+function parseArgs(): { confirmed: boolean; repoSelector?: string; clawScopeFile?: string } {
   const args = process.argv.slice(2);
-  const unknown = args.find((arg) => arg !== '--yes');
-  if (unknown) throw new Error(`Unknown option: ${unknown}`);
-  return { confirmed: args.includes('--yes') };
+  let confirmed = false;
+  let repoSelector: string | undefined;
+  let clawScopeFile: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--') {
+      continue;
+    } else if (arg === '--yes') {
+      confirmed = true;
+    } else if (arg === '--repo' || arg.startsWith('--repo=')) {
+      if (repoSelector) throw new Error('--repo may only be supplied once');
+      repoSelector = arg === '--repo' ? args[++index] : arg.slice('--repo='.length);
+      if (!repoSelector) throw new Error('--repo requires a repository ID, name, or URL');
+    } else if (arg === '--claw-scope-file') {
+      clawScopeFile = args[++index];
+      if (!clawScopeFile) throw new Error('--claw-scope-file requires a path');
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+  return { confirmed, repoSelector, clawScopeFile };
+}
+
+type RepoRow = {
+  id: string;
+  name: string;
+  url: string;
+  canonicalUrl: string | null;
+  channelId: string;
+  projectId: string | null;
+};
+
+async function resolveRepos(repoSelector?: string): Promise<RepoRow[]> {
+  const rows = await prisma.$queryRawUnsafe<RepoRow[]>(
+    `SELECT r.id, r.name, r.url, r."canonicalUrl", r."channelId", r."projectId"
+       FROM public.repos r
+       JOIN public.channels c ON c.id = r."channelId"
+      WHERE c.metadata->>'surface' = 'SDLC'
+        AND ($1::text IS NULL OR $1 IN (r.id, r.name, r.url, r."canonicalUrl"))`,
+    repoSelector ?? null
+  );
+  if (repoSelector && rows.length === 0) {
+    throw new Error(`SDLC repository not found: ${repoSelector}`);
+  }
+  if (repoSelector && rows.length > 1) {
+    throw new Error(`Repository selector is ambiguous; use repo ID: ${repoSelector}`);
+  }
+  return rows;
 }
 
 async function textIds(query: string, params: unknown[] = []): Promise<string[]> {
@@ -70,7 +116,14 @@ async function deleteByKnownColumns(tx: Prisma.TransactionClient, sets: IdSet[])
   return deleted;
 }
 
-async function inspectQueue(): Promise<{
+async function repoAdmissionPermitKeys(redis: Redis, repoId: string): Promise<string[]> {
+  const keys = await redis.keys('sdlc:admission:permit:*');
+  if (keys.length === 0) return [];
+  const values = await redis.pipeline(keys.map((key) => ['hget', key, 'repoId'])).exec();
+  return keys.filter((_, index) => values?.[index]?.[1] === repoId);
+}
+
+async function inspectQueue(repoId?: string): Promise<{
   queueJobs: number;
   activeJobs: number;
   admissionKeys: number;
@@ -79,6 +132,22 @@ async function inspectQueue(): Promise<{
   const queue = new Bull('sdlc', { redis: { ...redisOptions, lazyConnect: false } });
   const redis = new Redis(redisOptions);
   try {
+    if (repoId) {
+      const jobs = await queue.getJobs(
+        ['waiting', 'active', 'delayed', 'failed', 'completed', 'paused'],
+        0,
+        -1
+      );
+      const selected = jobs.filter((job) => job.data.repoId === repoId);
+      const states = await Promise.all(selected.map((job) => job.getState()));
+      const permitKeys = await repoAdmissionPermitKeys(redis, repoId);
+      const repoKeys = await redis.keys(`sdlc:admission:repo:${repoId}:*`);
+      return {
+        queueJobs: selected.length,
+        activeJobs: states.filter((state) => state === 'active').length,
+        admissionKeys: permitKeys.length + repoKeys.length,
+      };
+    }
     const counts = await queue.getJobCounts(
       'wait',
       'active',
@@ -99,15 +168,35 @@ async function inspectQueue(): Promise<{
   }
 }
 
-async function clearQueue(): Promise<void> {
+async function clearQueue(repoId?: string): Promise<void> {
   const redisOptions = getBaseRedisOptions();
   const queue = new Bull('sdlc', { redis: { ...redisOptions, lazyConnect: false } });
   const redis = new Redis(redisOptions);
   try {
-    await queue.pause(false, true);
-    await queue.obliterate({ force: true });
-    const keys = await redis.keys('sdlc:admission:*');
-    if (keys.length > 0) await redis.del(...keys);
+    if (!repoId) {
+      await queue.pause(false, true);
+      await queue.obliterate({ force: true });
+      const keys = await redis.keys('sdlc:admission:*');
+      if (keys.length > 0) await redis.del(...keys);
+      return;
+    }
+
+    const jobs = await queue.getJobs(
+      ['waiting', 'delayed', 'failed', 'completed', 'paused'],
+      0,
+      -1
+    );
+    await Promise.all(jobs.filter((job) => job.data.repoId === repoId).map((job) => job.remove()));
+
+    const permitKeys = await repoAdmissionPermitKeys(redis, repoId);
+    const permitIds = permitKeys.map((key) => key.slice('sdlc:admission:permit:'.length));
+    const pipeline = redis.pipeline();
+    pipeline.del(`sdlc:admission:repo:${repoId}:active`);
+    pipeline.del(`sdlc:admission:repo:${repoId}:pending`);
+    pipeline.zrem('sdlc:admission:pending:repos', repoId);
+    if (permitIds.length > 0) pipeline.zrem('sdlc:admission:global:active', ...permitIds);
+    if (permitKeys.length > 0) pipeline.del(...permitKeys);
+    await pipeline.exec();
   } finally {
     await queue.close();
     redis.disconnect();
@@ -116,34 +205,63 @@ async function clearQueue(): Promise<void> {
 
 async function main(): Promise<void> {
   requireLocalDatabase(process.env.DATABASE_URL);
-  const { confirmed } = parseArgs();
+  const { confirmed, repoSelector, clawScopeFile } = parseArgs();
 
-  const repoIds = await textIds(
-    `SELECT r.id
-       FROM public.repos r
-       JOIN public.channels c ON c.id = r."channelId"
-      WHERE c.metadata->>'surface' = 'SDLC'`
-  );
-  const channelIds = await textIds(
-    `SELECT c.id
-       FROM public.channels c
-      WHERE c.metadata->>'surface' = 'SDLC'`
-  );
-  const boardIds = await textIds(
-    `SELECT DISTINCT p."sdlcBoardId" AS id
-       FROM public.projects p
-      WHERE p."sdlcBoardId" IS NOT NULL`
-  );
+  const repos = await resolveRepos(repoSelector);
+  const repoIds = repos.map((repo) => repo.id);
+  const channelIds = repos.map((repo) => repo.channelId);
+  const projectIds = repos.flatMap((repo) => (repo.projectId ? [repo.projectId] : []));
+  const boardIds = repoSelector
+    ? projectIds.length === 0
+      ? []
+      : await textIds(
+          `SELECT DISTINCT p."sdlcBoardId" AS id
+             FROM public.projects p
+            WHERE p.id = ANY($1::text[])
+              AND p."sdlcBoardId" IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM public.repos other
+                  JOIN public.channels c ON c.id = other."channelId"
+                 WHERE other."projectId" = p.id
+                   AND other.id <> ALL($2::text[])
+                   AND c.metadata->>'surface' = 'SDLC'
+              )`,
+          [projectIds, repoIds]
+        )
+    : await textIds(
+        `SELECT DISTINCT p."sdlcBoardId" AS id
+           FROM public.projects p
+          WHERE p."sdlcBoardId" IS NOT NULL`
+      );
   const workflowIds = await textIds(
     `SELECT id FROM public.workflows
-      WHERE "workflowType" = ANY($1::text[])`,
-    [SDLC_WORKFLOW_TYPES]
+      WHERE "workflowType" = ANY($1::text[])
+        AND ($2::text IS NULL OR metadata::jsonb->>'repoId' = $2)`,
+    [SDLC_WORKFLOW_TYPES, repoSelector ? repoIds[0] : null]
   );
   const executionIds = await textIds(
     `SELECT id FROM public.workflow_executions
-      WHERE "workflowType" = ANY($1::text[])`,
-    [SDLC_WORKFLOW_TYPES]
+      WHERE "workflowType" = ANY($1::text[])
+        AND ($2::text IS NULL OR "workflowId" = ANY($3::text[])
+          OR context::jsonb->>'repoId' = $2)`,
+    [SDLC_WORKFLOW_TYPES, repoSelector ? repoIds[0] : null, workflowIds]
   );
+  const clawConversationIds = executionIds.length
+    ? await textIds(
+        `SELECT DISTINCT context::jsonb->>'conversationId' AS id
+           FROM public.workflow_executions
+          WHERE id = ANY($1::text[])
+            AND context::jsonb->>'conversationId' IS NOT NULL`,
+        [executionIds]
+      )
+    : [];
+  if (clawScopeFile) {
+    await writeFile(
+      clawScopeFile,
+      JSON.stringify({ executionIds, conversationIds: clawConversationIds })
+    );
+  }
   const canvases = channelIds.length
     ? await textIds('SELECT id FROM public.canvases WHERE "channelId" = ANY($1::text[])', [
         channelIds,
@@ -176,7 +294,7 @@ async function main(): Promise<void> {
   const stages = boardIds.length
     ? await textIds('SELECT id FROM public.stages WHERE "boardId" = ANY($1::text[])', [boardIds])
     : [];
-  const queue = await inspectQueue();
+  const queue = await inspectQueue(repoSelector ? repoIds[0] : undefined);
 
   const summary = {
     repos: repoIds.length,
@@ -189,6 +307,9 @@ async function main(): Promise<void> {
     executions: executionIds.length,
     ...queue,
   };
+  if (repoSelector) {
+    console.log(`Repository: ${repos[0].name} (${repos[0].id})`);
+  }
   console.table(summary);
 
   if (!confirmed) {
@@ -202,7 +323,7 @@ async function main(): Promise<void> {
     );
   }
 
-  await clearQueue();
+  await clearQueue(repoSelector ? repoIds[0] : undefined);
   const sets: IdSet[] = [
     { label: 'repo', columns: ['repoId'], ids: repoIds },
     { label: 'channel', columns: ['channelId'], ids: channelIds },

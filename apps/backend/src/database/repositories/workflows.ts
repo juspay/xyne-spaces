@@ -34,6 +34,8 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
     ? `AND "workflowType" = '${workflowType.replace(/'/g, "''")}'`
     : ''
 
+  const dedicatedExecutionFilter = `AND ("workflowType" IS NULL OR "workflowType" NOT IN (${GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES.map(type => `'${type}'`).join(', ')}))`
+
   return `
     WITH claimed AS (
       SELECT "id"
@@ -41,6 +43,7 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
       WHERE "status" = 'PENDING'
       ${tagFilter}
       ${typeFilter}
+      ${dedicatedExecutionFilter}
       ORDER BY "createdAt" ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED

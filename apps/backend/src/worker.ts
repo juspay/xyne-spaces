@@ -41,6 +41,7 @@ import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { sdlcWorker } from '@/workers/sdlcWorker';
 import { sdlcClawExecutionService } from '@/sdlc/SdlcClawExecutionService';
+import { sdlcWikiExecutionService } from '@/sdlc/wiki/SdlcWikiExecutionService';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
@@ -301,6 +302,9 @@ class WorkerService {
         const reconcileSdlc = (): void => {
           void sdlcClawExecutionService.reconcileExecutions().catch(error => {
             logger.error('[SDLC-CLAW] reconciliation failed', error);
+          });
+          void sdlcWikiExecutionService.reconcileExecutions().catch(error => {
+            logger.error('[SDLC-WIKI] reconciliation failed', error);
           });
         };
         reconcileSdlc();

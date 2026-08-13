@@ -4,6 +4,7 @@ import { sdlcAdmission } from '@/queues/sdlcAdmission';
 import { sdlcQueue, type SdlcJobData } from '@/queues/sdlcQueue';
 import { sdlcClawExecutionService } from '@/sdlc/SdlcClawExecutionService';
 import { sdlcVcs } from '@/sdlc/vcs/SdlcVcsService';
+import { sdlcWikiExecutionService } from '@/sdlc/wiki/SdlcWikiExecutionService';
 import { logger } from '@/utils/logger';
 
 class SdlcCapacityError extends Error {
@@ -19,10 +20,13 @@ class SdlcWorker {
   async start(): Promise<void> {
     if (this.started) return;
     await sdlcQueue.initialize();
-    await sdlcClawExecutionService.restoreAdmissionPermits();
+    await Promise.all([
+      sdlcClawExecutionService.restoreAdmissionPermits(),
+      sdlcWikiExecutionService.restoreAdmissionPermits(),
+    ]);
     const queue = sdlcQueue.getQueue();
     if (!queue) throw new Error('[SDLC-WORKER] queue unavailable');
-    queue.process(config.sdlcGlobalActiveLimit, job => this.process(job));
+    queue.process(config.sdlcGlobalActiveLimit, (job) => this.process(job));
     queue.on('failed', (job, error) => {
       if (error.name === 'SdlcCapacityError') return;
       logger.error('[SDLC-WORKER] job failed', {
@@ -71,13 +75,19 @@ class SdlcWorker {
           ? await sdlcClawExecutionService.dispatchSetup(job.data.executionId, permit.permitId)
           : job.data.type === 'ARTIFACT'
             ? await sdlcClawExecutionService.dispatchArtifact(job.data.executionId, permit.permitId)
-            : await sdlcClawExecutionService.dispatchWork(job.data.executionId, permit.permitId);
+            : job.data.type === 'WORK'
+              ? await sdlcClawExecutionService.dispatchWork(job.data.executionId, permit.permitId)
+              : await sdlcWikiExecutionService.dispatch(job.data.executionId, permit.permitId);
       if (!dispatched) await sdlcAdmission.release(permit.permitId);
       return { dispatched };
     } catch (error) {
       await sdlcAdmission.release(permit.permitId);
       job.discard();
-      await sdlcClawExecutionService.failDispatch(job.data.executionId, error);
+      if (job.data.type === 'WIKI') {
+        await sdlcWikiExecutionService.failDispatch(job.data.executionId, error);
+      } else {
+        await sdlcClawExecutionService.failDispatch(job.data.executionId, error);
+      }
       throw error;
     }
   }

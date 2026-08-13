@@ -28,7 +28,11 @@ export function SdlcDebuggerPanel(): ReactElement | null {
       agentSlug='ask-ai'
       liveEvents={[]}
       running={target.running}
-      selectedSessionId={target.sessionId}
+      // An SDLC execution may contain several Claw attempts under one
+      // conversation (provider recovery mints a fresh AgentRun session). This
+      // panel represents the whole execution, so show all attempts and let the
+      // debugger open the latest one instead of pinning the original session.
+      selectedSessionId={null}
       fetchArtifacts={fetchArtifacts}
       onClose={close}
     />

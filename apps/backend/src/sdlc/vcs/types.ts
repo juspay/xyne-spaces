@@ -71,6 +71,22 @@ export interface PullRequestInspection {
   numberOfComments: number;
 }
 
+export interface FirstParentCommitIdentity {
+  sha: string;
+  parentSha: string | null;
+}
+
+export interface FirstParentHistory {
+  targetHeadSha: string;
+  commits: FirstParentCommitIdentity[];
+}
+
+export interface SourceLineRange {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+}
+
 export interface VcsProviderAdapter {
   readonly provider: VcsProvider;
   parseRepositoryUrl(url: string): ParsedRepository;
@@ -91,10 +107,32 @@ export interface VcsProviderAdapter {
     number: number
   ): Promise<PullRequestInspection>;
   verifyRemoteCommit(
-    token: string,
+    token: string | undefined,
     repository: ParsedRepository,
     branch: string,
     commitHash: string
+  ): Promise<void>;
+  resolveBranchHead(
+    token: string | undefined,
+    repository: ParsedRepository,
+    branch: string
+  ): Promise<string>;
+  listFirstParentHistory(
+    token: string | undefined,
+    repository: ParsedRepository,
+    branch: string
+  ): Promise<FirstParentHistory>;
+  verifyPathsAtCommit(
+    token: string | undefined,
+    repository: ParsedRepository,
+    commitHash: string,
+    paths: string[]
+  ): Promise<void>;
+  verifySourceRangesAtCommit(
+    token: string | undefined,
+    repository: ParsedRepository,
+    commitHash: string,
+    references: SourceLineRange[]
   ): Promise<void>;
   validatePullRequestUrl(repository: ParsedRepository, url: string): boolean;
 }
@@ -128,19 +166,26 @@ export interface SdlcVcs {
     repoId: string,
     capabilities: VcsCapability[]
   ): Promise<void>;
-  createDraftPullRequest(
-    input: {
-      executionId: string;
-      sessionId: string;
-      repoId: string;
-      title: string;
-      body: string;
-      head: string;
-      base: string;
-      commitHash: string;
-    }
-  ): Promise<DraftPullRequestResult>;
+  createDraftPullRequest(input: {
+    executionId: string;
+    sessionId: string;
+    repoId: string;
+    title: string;
+    body: string;
+    head: string;
+    base: string;
+    commitHash: string;
+  }): Promise<DraftPullRequestResult>;
   inspectPullRequest(repoId: string, number: number): Promise<PullRequestInspection>;
+  resolveBaseBranchHead(repoId: string): Promise<string>;
+  listBaseBranchFirstParentHistory(repoId: string): Promise<FirstParentHistory>;
+  verifyBaseBranchHead(repoId: string, commitHash: string): Promise<void>;
+  verifySourcePaths(repoId: string, commitHash: string, paths: string[]): Promise<void>;
+  verifySourceRanges(
+    repoId: string,
+    commitHash: string,
+    references: SourceLineRange[]
+  ): Promise<void>;
 }
 
 export class VcsProviderError extends Error {
