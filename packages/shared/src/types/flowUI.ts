@@ -34,7 +34,8 @@ export type FlowComponentType =
   | 'chart'
   | 'agent'
   | 'mcpConfigure'
-  | 'slash_command_artifact';
+  | 'slash_command_artifact'
+  | 'sandbox';
 
 export interface FlowComponent {
   id: string;

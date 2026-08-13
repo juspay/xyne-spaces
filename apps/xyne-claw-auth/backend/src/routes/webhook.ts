@@ -120,6 +120,8 @@ import {
   hashSkillContent,
   buildPrFlow,
   prScreenId,
+  buildSandboxFlow,
+  sandboxScreenId,
   isTwinDelivery,
   SDLC_REQUIRED_TOOLS,
   type PrProvider,
@@ -239,6 +241,12 @@ const USE_EPHEMERAL_PROGRESS = true;
 // run-recovery re-delivers the same payload. Bounded (FIFO) so it can't grow
 // unbounded over the process lifetime — every announced sessionId used to be
 // retained forever.
+/** Sandbox-router paths are served from the bare prefix, so a URL without the
+ *  trailing slash 404s. Idempotent. */
+function withTrailingSlash(url: string): string {
+  return url.endsWith("/") ? url : `${url}/`;
+}
+
 const announcedSandboxPreviews = new Set<string>();
 const ANNOUNCED_PREVIEWS_MAX = 5000;
 function rememberAnnouncedPreview(sessionId: string): void {
@@ -7356,12 +7364,29 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     if (!ctx || ctx.responseMode !== "conversation") return;
     const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
     try {
+      // The sandbox-router serves these paths from the bare prefix, so both URLs
+      // need the trailing slash. claw builds the preview URL with one and the
+      // code URL without (the old markdown announce appended it inline) — do it
+      // here so the card never ships a URL that 404s.
+      const flow = buildSandboxFlow(
+        {
+          previewUrl: withTrailingSlash(sandboxPreviewUrl),
+          ...(sandboxCodePreviewUrl ? { codeUrl: withTrailingSlash(sandboxCodePreviewUrl) } : {}),
+        },
+        {
+          screenId: sandboxScreenId(sandboxId),
+          data: {
+            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+          },
+        },
+      );
       await spacesAppFetch("/chat/postMessage", {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        markdownText: `🖥️ **Live preview** — agent is working in this room. Anyone in this channel can watch (and drive) chromium over noVNC.\n\n👉 ${sandboxPreviewUrl}${sandboxCodePreviewUrl ? `\n\nCode Changes available at ${sandboxCodePreviewUrl}/` : ""}`,
+        flow,
         userId: ctx.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
       }, ctx.appToken);
       log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId})`);
     } catch (err) {
