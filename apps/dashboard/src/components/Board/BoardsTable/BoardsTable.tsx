@@ -19,6 +19,7 @@ interface BoardsTableProps {
   boards: readonly BoardWithStages[] | undefined;
   onEdit: (board: BoardWithStages) => void;
   onClone?: (board: BoardWithStages) => void;
+  onCopyConfig?: (board: BoardWithStages) => void;
   applicationBoardIds?: Set<string>;
 }
 
@@ -26,6 +27,7 @@ export const BoardsTable = ({
   boards,
   onEdit,
   onClone,
+  onCopyConfig,
   applicationBoardIds,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
@@ -158,6 +160,22 @@ export const BoardsTable = ({
                       <Edit2 size={14} />
                       {getBoardEditLabel(board, applicationBoardIds)}
                     </Button>
+                    {onCopyConfig && (
+                      <Button
+                        variant='secondary'
+                        onClick={() => onCopyConfig(board)}
+                        data-testid='copy-board-config-button'
+                        data-track-category='Board'
+                        data-track-name='Copy_Board_Config_Table'
+                        data-track-metadata={JSON.stringify({
+                          boardId: board.id,
+                          boardName: board.name,
+                        })}
+                      >
+                        <Copy size={14} />
+                        Copy config
+                      </Button>
+                    )}
                   </div>
                 </td>
               </tr>
