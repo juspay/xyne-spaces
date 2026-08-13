@@ -157,6 +157,17 @@ export interface ElectronAPI {
     dragStart: () => void;
     dragEnd: () => void;
   };
+  platform?: string;
+  tray?: {
+    getVisible: () => Promise<boolean>;
+    setVisible: (visible: boolean) => void;
+    onVisibleChanged: (callback: (visible: boolean) => void) => () => void;
+  };
+  recordingPillSettings?: {
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => void;
+    onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
+  };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;
     setExpanded: (expanded: boolean) => void;

@@ -1,5 +1,6 @@
 import { Menu, Tray, nativeImage } from 'electron';
 import path from 'path';
+import Store from 'electron-store';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
 import {
@@ -16,8 +17,12 @@ import { RECORDING_SHORTCUT } from './global-shortcuts';
 
 const PAUSED_TITLE = ' Paused';
 
+const trayStore = new Store({ name: 'tray' });
+const VISIBLE_KEY = 'trayVisible';
+
 let tray: Tray | null = null;
 let timerInterval: ReturnType<typeof setInterval> | null = null;
+let unsubscribeRecordingState: (() => void) | null = null;
 
 function formatElapsed(snapshot: RecordingSnapshot): string {
   const startTime = snapshot.startTime ?? Date.now();
@@ -103,7 +108,7 @@ function syncTrayToState(snapshot: RecordingSnapshot): void {
   }
 }
 
-export function initTray(): void {
+function createTray(): void {
   if (tray) return;
 
   const iconPath = path.join(__dirname, '..', '..', 'assets', 'images', 'xyneMenubarTemplate.png');
@@ -120,7 +125,43 @@ export function initTray(): void {
     tray.on('click', () => void openXyne());
   }
   syncTrayToState(getRecordingSnapshot());
-  onRecordingStateChange(syncTrayToState);
+  unsubscribeRecordingState = onRecordingStateChange(syncTrayToState);
 
   log.info('[Tray] Menu bar icon initialized');
+}
+
+function destroyTray(): void {
+  if (unsubscribeRecordingState) {
+    unsubscribeRecordingState();
+    unsubscribeRecordingState = null;
+  }
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  if (!tray) return;
+  tray.destroy();
+  tray = null;
+  log.info('[Tray] Menu bar icon removed');
+}
+
+export function isTrayVisible(): boolean {
+  return trayStore.get(VISIBLE_KEY, true) as boolean;
+}
+
+export function setTrayVisible(visible: boolean): void {
+  trayStore.set(VISIBLE_KEY, visible);
+  if (visible) {
+    createTray();
+  } else {
+    destroyTray();
+  }
+}
+
+export function initTray(): void {
+  if (!isTrayVisible()) {
+    log.info('[Tray] Menu bar icon hidden by preference');
+    return;
+  }
+  createTray();
 }
