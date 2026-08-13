@@ -91,7 +91,7 @@ const buildInitialEmailBody = async (recording: RecordingDetail): Promise<string
   const title = escapeHtml(recording.title?.trim() || 'this recording');
   const summary = await summaryHtmlForEmail(recording);
   const summarySection = summary
-    ? `<p><strong>Summary</strong></p>${summary}`
+    ? summary
     : '<p><strong>Summary</strong></p><p>Add the key discussion points, decisions, and owners here.</p>';
 
   return [

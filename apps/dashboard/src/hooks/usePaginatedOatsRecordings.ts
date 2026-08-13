@@ -47,7 +47,9 @@ export function usePaginatedOatsRecordings(
   const recordingsRef = useRef(recordings);
   recordingsRef.current = recordings;
 
-  const [page, details] = useCachedQuery(recordingQuery(scope, cursor));
+  const [page, details] = useCachedQuery(recordingQuery(scope, cursor), {
+    cursorEnabled: true,
+  });
 
   useEffect(() => {
     setCursor(null);

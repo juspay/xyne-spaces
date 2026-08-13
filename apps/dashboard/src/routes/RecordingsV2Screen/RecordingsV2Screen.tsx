@@ -167,19 +167,21 @@ const RecordingsV2Screen = (): ReactElement => {
     activeListTab === 'created' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
     isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
+  const hiddenLiveRecordingId =
+    recordingCallId ?? (recordingStatus === 'starting' ? liveRecording?.externalId : null);
 
   const filteredRecordings = useMemo(
     () =>
       filterRecordingsByLabels(
         ownershipFilteredRecordings.filter(
-          // Hide only the recording currently shown in the live pill.
+          // Hide the local live row
           recording =>
-            recording.externalId !== recordingCallId &&
+            recording.externalId !== hiddenLiveRecordingId &&
             isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
         ),
         selectedLabels,
       ),
-    [ownershipFilteredRecordings, recordingCallId, selectedDatePreset, selectedLabels],
+    [ownershipFilteredRecordings, hiddenLiveRecordingId, selectedDatePreset, selectedLabels],
   );
   const recordingsCapturedThisWeek = useMemo(
     () =>
