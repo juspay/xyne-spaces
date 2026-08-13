@@ -40,7 +40,7 @@ import type { AutomationsListProps } from './AutomationsList.types';
 import { formatRelative, statusPillClasses, summarizeAutomation } from './AutomationsList.utils';
 import { AutomationFiltersBar } from './AutomationFiltersBar/AutomationFiltersBar';
 import {
-  EMPTY_AUTOMATION_FILTERS,
+  DEFAULT_AUTOMATION_FILTERS,
   filterAutomations,
   hasActiveFilters,
   isVisibleToUser,
@@ -54,7 +54,7 @@ export function AutomationsList({
   filterPredicate,
 }: AutomationsListProps): React.ReactElement {
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState<AutomationFilters>(EMPTY_AUTOMATION_FILTERS);
+  const [filters, setFilters] = useState<AutomationFilters>(DEFAULT_AUTOMATION_FILTERS);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();

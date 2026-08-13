@@ -29,11 +29,18 @@ export function VersionHistory({
   const versions = data ?? [];
 
   if (comparing) {
+    // Default the comparison to the current version against its nearest
+    // neighbor — defaulting both sides to `automationId` would open the
+    // diff view showing a version compared against itself.
+    const currentIndex = versions.findIndex(v => v.id === automationId);
+    const defaultToId =
+      (currentIndex >= 0 ? (versions[currentIndex + 1] ?? versions[currentIndex - 1])?.id : null) ??
+      automationId;
     return (
       <VersionDiffView
         versions={versions}
         initialFromId={automationId}
-        initialToId={automationId}
+        initialToId={defaultToId}
         onClose={() => setComparing(false)}
       />
     );

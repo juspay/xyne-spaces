@@ -7,14 +7,13 @@ import {
   CircleDot,
   Hash,
   Mail,
+  Search,
   User as UserIcon,
   X,
 } from 'lucide-react';
 import { Button } from '../../../ui/Button/Button';
 import { Popover } from '../../../ui/Popover/Popover';
 import { DateRangeFilter } from '../../../ui/DateRangeFilter/DateRangeFilter';
-import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
-import type { SelectorOption } from '../../../ui/EntitySelector/EntitySelector.types';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { cn } from '../../../../utils/classNames';
 import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
@@ -23,7 +22,7 @@ import { useUserSearch, useUsersById } from '../../../../hooks/useUsers';
 import {
   TRIGGER_TYPE_OPTIONS,
   STATUS_OPTIONS,
-  EMPTY_AUTOMATION_FILTERS,
+  DEFAULT_AUTOMATION_FILTERS,
   hasActiveFilters,
   type AutomationDateField,
   type AutomationFilters,
@@ -47,7 +46,7 @@ interface TriggerButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   count: number;
 }
 
-/** Shared compact trigger for the fixed-option filter popovers (Trigger/Status). */
+/** Shared compact trigger for every multi-select filter popover in this bar. */
 const FilterTriggerButton = forwardRef<HTMLButtonElement, TriggerButtonProps>(
   ({ icon, label, count, className, ...rest }, ref) => (
     <button
@@ -75,40 +74,86 @@ const FilterTriggerButton = forwardRef<HTMLButtonElement, TriggerButtonProps>(
 );
 FilterTriggerButton.displayName = 'FilterTriggerButton';
 
-/** Multi-select checklist popover body, for the small fixed-option filters (Trigger/Status). */
+interface ChecklistOption<T extends string> {
+  value: T;
+  label: string;
+  icon?: React.ReactNode;
+  subtitle?: string | null;
+  isDeactivated?: boolean;
+}
+
+/** Shared multi-select checklist popover body — fixed-option (Trigger/Status) and entity (Channel/Created by) filters alike. */
 function OptionsChecklist<T extends string>({
   options,
   selectedValues,
   onChange,
+  search,
 }: {
-  options: { value: T; label: string }[];
+  options: ChecklistOption<T>[];
   selectedValues: T[];
   onChange: (values: T[]) => void;
+  search?: { value: string; onChange: (value: string) => void; placeholder: string; name: string };
 }): React.ReactElement {
   return (
-    <div className='w-56 py-1' role='listbox' aria-multiselectable='true'>
-      {options.map(option => {
-        const isSelected = selectedValues.includes(option.value);
-        return (
-          <button
-            key={option.value}
-            type='button'
-            onClick={() =>
-              onChange(
-                isSelected
-                  ? selectedValues.filter(v => v !== option.value)
-                  : [...selectedValues, option.value],
-              )
-            }
+    <div className='w-64 py-1'>
+      {search && (
+        <div className='relative border-b border-border p-1.5'>
+          <Search className='pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
+          <input
+            type='text'
+            autoFocus
+            value={search.value}
+            onChange={e => search.onChange(e.target.value)}
+            placeholder={search.placeholder}
             data-track-category='automations-list'
-            data-track-name={`filter-toggle-${option.value}`}
-            className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors outline-none ${isSelected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted'}`}
-          >
-            <span className='truncate'>{option.label}</span>
-            {isSelected && <Check className='size-4 shrink-0 text-muted-foreground' />}
-          </button>
-        );
-      })}
+            data-track-name={`filter-search-${search.name}`}
+            className='w-full rounded bg-transparent py-1 pl-7 pr-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+          />
+        </div>
+      )}
+      <div className='max-h-72 overflow-y-auto py-1' role='listbox' aria-multiselectable='true'>
+        {options.length === 0 && (
+          <div className='px-3 py-2.5 text-center text-sm text-muted-foreground'>
+            No results found
+          </div>
+        )}
+        {options.map(option => {
+          const isSelected = selectedValues.includes(option.value);
+          return (
+            <button
+              key={option.value}
+              type='button'
+              onClick={() =>
+                onChange(
+                  isSelected
+                    ? selectedValues.filter(v => v !== option.value)
+                    : [...selectedValues, option.value],
+                )
+              }
+              data-track-category='automations-list'
+              data-track-name={`filter-toggle-${option.value}`}
+              className={cn(
+                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors outline-none',
+                isSelected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted',
+              )}
+            >
+              {option.icon}
+              <span className='min-w-0 flex-1'>
+                <span className={cn('truncate', option.isDeactivated && 'text-muted-foreground')}>
+                  {option.label}
+                  {option.isDeactivated && ' · Deactivated'}
+                </span>
+                {option.subtitle && (
+                  <span className='block truncate text-xs text-muted-foreground'>
+                    {option.subtitle}
+                  </span>
+                )}
+              </span>
+              {isSelected && <Check className='size-4 shrink-0 text-muted-foreground' />}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -121,88 +166,35 @@ function channelIcon(type: string | null | undefined): React.ReactElement {
   );
 }
 
-// Synthetic row for "no channels selected" — never persisted into filter state.
-const ALL_CHANNELS_VALUE = '__all_channels__';
-
-/**
- * Channel multi-picker — same EntityMultiSelector pattern the trigger builder
- * uses to pick `channelIds`. An empty selection means "all channels" (no
- * filter applied), shown as a pinned, checked-by-default "All channels" row;
- * picking any real channel replaces it.
- */
-function ChannelsField({
-  value,
-  onChange,
-}: {
-  value: string[];
-  onChange: (ids: string[]) => void;
-}): React.ReactElement {
-  const [search, setSearch] = useState('');
-  const channels = useAllChannels();
-  const isSearching = search.trim().length > 0;
-
-  const options: SelectorOption[] = useMemo(() => {
-    const lower = search.trim().toLowerCase();
-    const base = channels
-      .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .map(c => ({ value: c.id, label: c.name || '(unnamed channel)', icon: channelIcon(c.type) }));
-    const present = new Set(base.map(o => o.value));
-    const selectedExtra: SelectorOption[] = value
-      .filter(id => !present.has(id))
-      .map(id => {
-        const c = channels.find(ch => ch.id === id);
-        return { value: id, label: c?.name || id, icon: channelIcon(c?.type) };
-      });
-    const allOption: SelectorOption = {
-      value: ALL_CHANNELS_VALUE,
-      label: 'All channels',
-      icon: <Hash className='size-4 text-muted-foreground' />,
-    };
-    return isSearching ? [...selectedExtra, ...base] : [allOption, ...selectedExtra, ...base];
-  }, [channels, search, value, isSearching]);
-
-  // "All channels" is implicitly checked whenever nothing specific is picked.
-  const selectedValues = value.length === 0 ? [ALL_CHANNELS_VALUE] : value;
-
-  const handleMultiSelect = (next: string[]): void => {
-    const wasAllChecked = selectedValues.includes(ALL_CHANNELS_VALUE);
-    if (next.includes(ALL_CHANNELS_VALUE) && !wasAllChecked) {
-      onChange([]); // user just picked "All channels" — clear any specific picks
-      return;
-    }
-    onChange(next.filter(id => id !== ALL_CHANNELS_VALUE));
-  };
-
-  return (
-    <EntityMultiSelector
-      options={options}
-      selectedValues={selectedValues}
-      onMultiSelect={handleMultiSelect}
-      placeholder='Channel'
-      searchPlaceholder='Search channels…'
-      onSearchChange={setSearch}
-      disableClientFiltering
-      showSearch
-      inputIcon={<Hash className='size-3.5' aria-hidden='true' />}
-      collapseSelectedAfter={2}
-      collapsedLabel='channels'
-    />
-  );
+/** Prepends options for `value` ids missing from `base` (e.g. a selected channel/user not in the current search results), via `resolve`. */
+function withMissingSelected<T extends ChecklistOption<string>>(
+  base: T[],
+  value: string[],
+  resolve: (id: string) => T,
+): T[] {
+  const present = new Set(base.map(o => o.value));
+  const missing = value.filter(id => !present.has(id)).map(resolve);
+  return [...missing, ...base];
 }
 
-/** Created-by multi-picker — same assignee-style EntityMultiSelector used for ticket assignment, but searches every workspace user so deactivated creators stay selectable (e.g. in archived history). */
-function CreatedByField({
-  value,
-  onChange,
-}: {
-  value: string[];
-  onChange: (ids: string[]) => void;
-}): React.ReactElement {
-  const [search, setSearch] = useState('');
+function useChannelOptions(search: string, value: string[]): ChecklistOption<string>[] {
+  const channels = useAllChannels();
+  return useMemo(() => {
+    const lower = search.trim().toLowerCase();
+    const base = channels
+      .filter(c => !lower || (c.name ?? '').toLowerCase().includes(lower))
+      .map(c => ({ value: c.id, label: c.name || '(unnamed channel)', icon: channelIcon(c.type) }));
+    return withMissingSelected(base, value, id => {
+      const c = channels.find(ch => ch.id === id);
+      return { value: id, label: c?.name || id, icon: channelIcon(c?.type) };
+    });
+  }, [channels, search, value]);
+}
+
+function useCreatedByOptions(search: string, value: string[]): ChecklistOption<string>[] {
   const users = useUserSearch(search, 30);
   const usersById = useUsersById();
-
-  const options: SelectorOption[] = useMemo(() => {
+  return useMemo(() => {
     const base = users.map(u => ({
       value: u.id,
       label: getUserDisplayName(u),
@@ -210,46 +202,20 @@ function CreatedByField({
       icon: <UserAvatar userId={u.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
       isDeactivated: isUserDeactivated(u),
     }));
-    const present = new Set(base.map(o => o.value));
-    const selectedExtra: SelectorOption[] = value
-      .filter(id => !present.has(id))
-      .map(id => {
-        const u = usersById.get(id);
-        return u
-          ? {
-              value: id,
-              label: getUserDisplayName(u),
-              subtitle: u.email,
-              icon: <UserAvatar userId={id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
-              isDeactivated: isUserDeactivated(u),
-            }
-          : {
-              value: id,
-              label: id,
-              icon: <UserAvatar userId={id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
-            };
-      });
-    return [...selectedExtra, ...base];
+    return withMissingSelected(base, value, id => {
+      const u = usersById.get(id);
+      return {
+        value: id,
+        label: u ? getUserDisplayName(u) : id,
+        subtitle: u?.email ?? null,
+        icon: <UserAvatar userId={id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
+        isDeactivated: u ? isUserDeactivated(u) : false,
+      };
+    });
   }, [users, usersById, value]);
-
-  return (
-    <EntityMultiSelector
-      options={options}
-      selectedValues={value}
-      onMultiSelect={onChange}
-      placeholder='Created by'
-      searchPlaceholder='Search users…'
-      onSearchChange={setSearch}
-      disableClientFiltering
-      showSearch
-      inputIcon={<UserIcon className='size-3.5' aria-hidden='true' />}
-      collapseSelectedAfter={2}
-      collapsedLabel='people'
-    />
-  );
 }
 
-type FilterKey = 'trigger' | 'status';
+type FilterKey = 'trigger' | 'status' | 'channels' | 'createdBy';
 
 export function AutomationFiltersBar({
   query,
@@ -258,7 +224,12 @@ export function AutomationFiltersBar({
   onClearQuery,
 }: AutomationFiltersBarProps): React.ReactElement {
   const [openFilter, setOpenFilter] = useState<FilterKey | null>(null);
+  const [channelSearch, setChannelSearch] = useState('');
+  const [createdBySearch, setCreatedBySearch] = useState('');
   const active = hasActiveFilters(query, filters);
+
+  const channelOptions = useChannelOptions(channelSearch, filters.channelIds);
+  const createdByOptions = useCreatedByOptions(createdBySearch, filters.createdByUserIds);
 
   const popover = (key: FilterKey, trigger: React.ReactNode, children: React.ReactNode) => (
     <Popover
@@ -308,15 +279,49 @@ export function AutomationFiltersBar({
         />,
       )}
 
-      <ChannelsField
-        value={filters.channelIds}
-        onChange={ids => onChange({ ...filters, channelIds: ids })}
-      />
+      {popover(
+        'channels',
+        <FilterTriggerButton
+          icon={<Hash className='size-3.5' aria-hidden='true' />}
+          label='Channel'
+          count={filters.channelIds.length}
+          data-track-category='automations-list'
+          data-track-name='filter-channels'
+        />,
+        <OptionsChecklist
+          options={channelOptions}
+          selectedValues={filters.channelIds}
+          onChange={ids => onChange({ ...filters, channelIds: ids })}
+          search={{
+            value: channelSearch,
+            onChange: setChannelSearch,
+            placeholder: 'Search channels…',
+            name: 'channels',
+          }}
+        />,
+      )}
 
-      <CreatedByField
-        value={filters.createdByUserIds}
-        onChange={ids => onChange({ ...filters, createdByUserIds: ids })}
-      />
+      {popover(
+        'createdBy',
+        <FilterTriggerButton
+          icon={<UserIcon className='size-3.5' aria-hidden='true' />}
+          label='Created by'
+          count={filters.createdByUserIds.length}
+          data-track-category='automations-list'
+          data-track-name='filter-created-by'
+        />,
+        <OptionsChecklist
+          options={createdByOptions}
+          selectedValues={filters.createdByUserIds}
+          onChange={ids => onChange({ ...filters, createdByUserIds: ids })}
+          search={{
+            value: createdBySearch,
+            onChange: setCreatedBySearch,
+            placeholder: 'Search users…',
+            name: 'created-by',
+          }}
+        />,
+      )}
 
       <div className='inline-flex items-center gap-1 rounded-full border border-border px-1'>
         {DATE_FIELD_OPTIONS.map(opt => (
@@ -348,7 +353,7 @@ export function AutomationFiltersBar({
           variant='ghost'
           size='sm'
           onClick={() => {
-            onChange(EMPTY_AUTOMATION_FILTERS);
+            onChange(DEFAULT_AUTOMATION_FILTERS);
             onClearQuery();
           }}
           data-track-category='automations-list'

@@ -18,10 +18,22 @@ export interface AutomationFilters {
   dateRange: DateRangeValue | null;
 }
 
-export const EMPTY_AUTOMATION_FILTERS: AutomationFilters = {
+/**
+ * Live statuses shown by default. Archived/Rejected/Revoked/Auto-Revoked
+ * lineage rows stay out of the list until explicitly selected — but unlike
+ * the old implicit exclusion, this default is an explicit, visible part of
+ * `AutomationFilters` state, so the Status checklist can honestly show
+ * exactly what's checked instead of lying about a "no filter" state.
+ */
+export const DEFAULT_AUTOMATION_FILTERS: AutomationFilters = {
   triggerTypes: [],
   channelIds: [],
-  statuses: [],
+  statuses: [
+    AutomationStatusValues.DRAFT,
+    AutomationStatusValues.PENDING_APPROVAL,
+    AutomationStatusValues.ACTIVE,
+    AutomationStatusValues.DISABLED,
+  ],
   createdByUserIds: [],
   dateField: 'createdAt',
   dateRange: null,
@@ -62,13 +74,6 @@ export const STATUS_OPTIONS: { value: AutomationStatus; label: string }[] = [
   { value: AutomationStatusValues.AUTO_REVOKED, label: 'Auto-Revoked' },
   { value: AutomationStatusValues.ARCHIVED, label: 'Archived' },
 ];
-
-const DEFAULT_EXCLUDED_STATUSES: ReadonlySet<AutomationStatus> = new Set([
-  AutomationStatusValues.ARCHIVED,
-  AutomationStatusValues.REJECTED,
-  AutomationStatusValues.REVOKED,
-  AutomationStatusValues.AUTO_REVOKED,
-]);
 
 /** Terminal/archived-lineage rows — visible to everyone, hidden from the default view. */
 export function isHistoryRow(a: Automation): boolean {
@@ -117,9 +122,7 @@ export function filterAutomations(
       }
     }
 
-    if (filters.statuses.length > 0) {
-      if (!filters.statuses.includes(a.status)) return false;
-    } else if (DEFAULT_EXCLUDED_STATUSES.has(a.status)) {
+    if (filters.statuses.length > 0 && !filters.statuses.includes(a.status)) {
       return false;
     }
 
@@ -143,12 +146,19 @@ export function filterAutomations(
   });
 }
 
+/** Order-independent equality — used to check whether `statuses` still matches the default set. */
+function sameStatusSet(a: AutomationStatus[], b: AutomationStatus[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every(status => bSet.has(status));
+}
+
 export function hasActiveFilters(query: string, filters: AutomationFilters): boolean {
   return (
     !!query.trim() ||
     filters.triggerTypes.length > 0 ||
     filters.channelIds.length > 0 ||
-    filters.statuses.length > 0 ||
+    !sameStatusSet(filters.statuses, DEFAULT_AUTOMATION_FILTERS.statuses) ||
     filters.createdByUserIds.length > 0 ||
     filters.dateRange !== null
   );
