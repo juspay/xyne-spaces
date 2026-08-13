@@ -21,7 +21,7 @@ export const CodeNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
       className='flow-artifact-wide flex w-full flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
       style={node.style}
     >
-      <div className='flex items-center justify-between gap-2 px-4 pb-2 pt-4'>
+      <div className='flex items-center justify-between gap-2 px-4 py-3'>
         <div className='flex items-center gap-2'>
           <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
             Code
@@ -50,7 +50,7 @@ export const CodeNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
         </button>
       </div>
 
-      <div className='max-h-[420px] overflow-auto border-t border-border text-xs'>
+      <div className='max-h-[420px] overflow-auto border-t border-border text-xs [--diffs-gap-inline:16px]'>
         <ArtifactRenderBoundary fallbackText={code}>
           <File
             file={{ name: 'snippet', contents: code, ...(language ? { lang: language } : {}) }}

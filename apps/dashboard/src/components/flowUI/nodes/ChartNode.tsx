@@ -27,13 +27,13 @@ export const ChartNode: React.FC<{ node: FlowComponent; children?: React.ReactNo
       className='flow-artifact-wide flex w-full flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
       style={node.style}
     >
-      <div className='px-4 pb-2 pt-4'>
+      <div className='px-4 py-3'>
         <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
           Chart
         </span>
       </div>
 
-      <div className='border-t border-border px-2 pt-3'>
+      <div className='border-t border-border px-2 py-3'>
         <ArtifactRenderBoundary fallbackText={fallbackText}>
           <Suspense fallback={<div style={{ height: CHART_HEIGHT_PX }} />}>
             <ChartBody props={props} height={CHART_HEIGHT_PX} />
