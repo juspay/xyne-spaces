@@ -646,7 +646,7 @@ const SupportScreen = (): ReactElement => {
   );
   const channelPreference = channelPreferenceList?.[0];
   const deskBoardId = channelPreference?.boardId || channelBoardId;
-  const [channelBoardDetail] = useCachedQuery(
+  const [channelBoardDetail, channelBoardDetailDetails] = useCachedQuery(
     queries.boardDetailById({ boardId: deskBoardId || '' }),
     { enabled: !!deskBoardId },
   );
@@ -781,21 +781,13 @@ const SupportScreen = (): ReactElement => {
     return fromMappings;
   }, [classificationMappings]);
 
-  // deskBoardId (channel preference first) rather than the row-derived
-  // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages, boardStagesDetails] = useCachedQuery(
-    queries.stagesByBoard({ boardId: deskBoardId ?? '' }),
-    {
-      enabled: !!deskBoardId,
-    },
-  );
   const availableStages = useMemo(
     () =>
-      boardStages?.map(s => ({
+      channelBoardDetail?.stages.map(s => ({
         name: s.name,
         status: s.defaultTicketStatusV2,
       })) ?? [],
-    [boardStages],
+    [channelBoardDetail?.stages],
   );
 
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
@@ -2646,7 +2638,9 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('stages', stages)
                                 }
                                 availableStages={availableStages}
-                                isLoading={!!deskBoardId && boardStagesDetails.type !== 'complete'}
+                                isLoading={
+                                  !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
+                                }
                               />
                             </Popover.Content>
                           </Popover.Root>
@@ -3571,7 +3565,7 @@ export const SupportTicketDetail = ({
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
-  const ticketEmailDrafts = useEmailDrafts(detailConversationId);
+  const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
   // then include any merged-ticket conversations once the detail query resolves.
@@ -3628,7 +3622,11 @@ export const SupportTicketDetail = ({
   );
 
   const [allEmails] = useCachedQuery(
-    queries.getEmailsForConversations({ conversationIds: allConversationIds }),
+    queries.getEmailsForConversations({
+      conversationIds: allConversationIds,
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: allConversationIds.length > 0 },
   );
 
@@ -3636,11 +3634,10 @@ export const SupportTicketDetail = ({
   const emailCollapseState = useEmailCollapseState(emails);
 
   const initiator = useMemo(() => {
-    if (emails.length === 0) return null;
-    const first = [...emails].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))[0];
+    const first = emailCollapseState.sortedEmails[0];
     if (!first?.from) return null;
     return parseFromField(first.from);
-  }, [emails]);
+  }, [emailCollapseState.sortedEmails]);
 
   // When arriving via a mail deep-link (`?mail=<id>`), un-collapse the target
   // email so it's visible, then scroll to it with a brief yellow flash.
@@ -3671,21 +3668,9 @@ export const SupportTicketDetail = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMailId, emails]);
 
-  const channelId = ticket?.channelId || '';
+  const channelId = ticket?.channelId || routeChannelId;
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
-  const [threadConversation] = useCachedQuery(
-    queries.threadConversationV2({
-      conversationId: conversationId || '',
-      channelId: channelId || undefined,
-      isMember,
-    }),
-    { enabled: !!conversationId && !!channelId },
-  );
-  const messages = useMemo(
-    () => [...(threadConversation?.messages ?? [])],
-    [threadConversation?.messages],
-  );
   // DB ticket id (not the xyneId) for per-user mailbox actions; router state carries it
   // on list navigation, else it comes from the fetched ticket row.
   const mailboxTicketId = ticket?.id ?? ticketId ?? null;
@@ -4067,23 +4052,6 @@ export const SupportTicketDetail = ({
   );
 
   const targetMessageId = searchParams.get('messageId');
-  useEffect(() => {
-    if (!targetMessageId || !conversationId) return;
-    if (!messages || messages.length === 0) return;
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const target = document.getElementById(
-          `thread-message-${conversationId}-${targetMessageId}`,
-        );
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('bg-yellow-50');
-          setTimeout(() => target.classList.remove('bg-yellow-50'), 2500);
-        }
-      });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [targetMessageId, conversationId, messages]);
 
   // Get channel info and user status
   const channel = useChannel(channelId);

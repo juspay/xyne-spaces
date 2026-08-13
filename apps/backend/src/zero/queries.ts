@@ -1771,7 +1771,11 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
   getEmailsForConversations: defineQuery(
-    z.object({ conversationIds: z.array(z.string()) }),
+    z.object({
+      conversationIds: z.array(z.string()),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { conversationIds } }) => {
       // An empty `IN []` predicate is invalid in Zero/SQL, and this query body
       // runs during hash construction (before the caller's `enabled` flag can
@@ -1789,7 +1793,11 @@ export const queries: AnyQueryRegistry = defineQueries({
   ),
 
   getDraftForConversation: defineQuery(
-    z.object({ conversationId: z.string() }),
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ ctx, args: { conversationId } }) => {
       return zql.email_drafts
         .where('conversationId', conversationId)
