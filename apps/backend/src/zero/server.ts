@@ -48,13 +48,12 @@ const parseDisabledQueries = (raw: string): Set<string> =>
   );
 
 const isQueryDisabled = async (name: string): Promise<boolean> => {
-  const envFallback = process.env['ZERO_DISABLED_QUERIES'] ?? '';
   try {
-    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, envFallback, {});
+    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, '', {});
     return parseDisabledQueries(raw).has(name);
   } catch (error) {
-    logger.error('Failed to read disabled queries from superposition, using env fallback', { error });
-    return parseDisabledQueries(envFallback).has(name);
+    logger.error('Failed to read disabled queries from superposition', { error });
+    return false;
   }
 };
 
