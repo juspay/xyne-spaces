@@ -2,8 +2,9 @@ import { z } from 'zod';
 import type { TriggerType } from './trigger-types';
 import type { StepType } from './step-types';
 import { ControlFlowStepType } from './known-types';
-import { ConditionOperator, ConditionOperatorSchema } from './operators';
+import { compileConditionRegex, ConditionOperator, ConditionOperatorSchema } from './operators';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { isPureRef } from '../util/variable-ref';
 
 function isValidHasTagValue(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -71,6 +72,17 @@ export const LeafConditionSchema: z.ZodType<LeafCondition> = z.object({
       code: z.ZodIssueCode.custom,
       path: ['value'],
       message: 'has_tag value must be "category:any|all:tag1,tag2,..." with valid tag names',
+    });
+  }
+  if (
+    val.operator === ConditionOperator.MATCHES_REGEX &&
+    (typeof val.value !== 'string' ||
+      (!isPureRef(val.value) && compileConditionRegex(val.value) === null))
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['value'],
+      message: 'matches_regex value must be a valid pattern such as "call\\s+now" or "/call/i"',
     });
   }
 });
