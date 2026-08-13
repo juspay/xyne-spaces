@@ -1,14 +1,5 @@
+import { SDLC_TOOL_CAPABILITIES, SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import type { TrustedMcpToolBindings } from "./mcp.js";
-
-const SDLC_WIKI_MCP_TOOLS = [
-  "spaces-sdlc-wiki-list-pages",
-  "spaces-sdlc-wiki-read-page",
-  "spaces-sdlc-wiki-verify-sources",
-  "spaces-sdlc-wiki-begin-checkpoint",
-  "spaces-sdlc-wiki-write-page",
-  "spaces-sdlc-wiki-move-page",
-  "spaces-sdlc-wiki-finalize-commit",
-] as const;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -16,24 +7,71 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export function trustedSdlcWikiToolBindings(
+/** Build server-owned argument bindings from trusted SDLC run context. */
+export function trustedSdlcToolBindings(
   sdlcContext: unknown,
 ): TrustedMcpToolBindings | undefined {
   const context = record(sdlcContext);
-  if (context?.["operation"] !== "wiki") return undefined;
-  const execution = record(context["execution"]);
-  const repository = record(context["repository"]);
-  if (
-    typeof execution?.["workflowExecutionId"] !== "string" ||
-    typeof execution["sessionId"] !== "string" ||
-    typeof repository?.["id"] !== "string"
-  ) {
+  const repository = record(context?.["repository"]);
+  const repoId = repository?.["id"];
+  if (typeof context?.["operation"] !== "string" || typeof repoId !== "string") {
     return undefined;
   }
-  const identity = {
-    executionId: execution["workflowExecutionId"],
-    sessionId: execution["sessionId"],
-    repoId: repository["id"],
-  };
-  return Object.fromEntries(SDLC_WIKI_MCP_TOOLS.map((toolName) => [toolName, identity]));
+
+  const execution = record(context["execution"]);
+  const executionId = execution?.["workflowExecutionId"];
+  const sessionId = execution?.["sessionId"];
+  const hasExecution = typeof executionId === "string" && typeof sessionId === "string";
+  const workspaceId = context["workspaceId"];
+  const actorUserId = context["actorUserId"];
+  const hasRepositoryIdentity =
+    typeof workspaceId === "string" && typeof actorUserId === "string";
+  const bindings: TrustedMcpToolBindings = {};
+
+  for (const capability of SDLC_TOOL_CAPABILITIES) {
+    if (capability.transport !== "direct" || capability.trustedBinding === "none") continue;
+    if (
+      context["operation"] === "wiki" &&
+      hasExecution &&
+      (capability.name === SDLC_TOOL_NAMES.listArtifacts ||
+        capability.name === SDLC_TOOL_NAMES.mutateArtifact)
+    ) {
+      bindings[capability.name] = {
+        executionId,
+        sessionId,
+        repoId,
+        ...(hasRepositoryIdentity ? { workspaceId, actorUserId } : {}),
+      };
+      continue;
+    }
+    if (capability.trustedBinding === "repository" && hasRepositoryIdentity) {
+      bindings[capability.name] = {
+        repoId,
+        workspaceId,
+        actorUserId,
+      };
+      continue;
+    }
+    if (
+      hasExecution &&
+      (capability.trustedBinding === "execution" ||
+        (capability.trustedBinding === "wiki_execution" && context["operation"] === "wiki"))
+    ) {
+      bindings[capability.name] = { executionId, sessionId, repoId };
+    }
+  }
+
+  return Object.keys(bindings).length > 0 ? bindings : undefined;
+}
+
+/** Wiki checkpoint projection retained for callers that only need Wiki bindings. */
+export function trustedSdlcWikiToolBindings(
+  sdlcContext: unknown,
+): TrustedMcpToolBindings | undefined {
+  const bindings = trustedSdlcToolBindings(sdlcContext);
+  if (!bindings) return undefined;
+  const wikiBindings = Object.fromEntries(
+    Object.entries(bindings).filter(([toolName]) => toolName.startsWith("spaces-sdlc-wiki-")),
+  );
+  return Object.keys(wikiBindings).length > 0 ? wikiBindings : undefined;
 }

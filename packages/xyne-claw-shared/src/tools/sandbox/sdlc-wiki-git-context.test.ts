@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionContext } from "../types.js";
 import {
-  sdlcWikiGitContext,
+  sdlcGitContext,
   isStaleSessionError,
   truncateWikiGitOutput,
   WIKI_GIT_COMMAND_TIMEOUT_MS,
@@ -33,13 +33,13 @@ function wikiContext(extra: Record<string, string> = {}): ToolExecutionContext {
 describe("SDLC Wiki Git context guardrails", () => {
   it("rejects use outside a trusted Wiki run", async () => {
     await expect(
-      sdlcWikiGitContext.execute({ operation: "commit_context", commitSha: SHA }, context({})),
+      sdlcGitContext.execute({ operation: "commit_context", commitSha: SHA }, context({})),
     ).resolves.toBe("Error: tool is restricted to SDLC Wiki runs.");
   });
 
   it("rejects arbitrary commit identities before sandbox access", async () => {
     await expect(
-      sdlcWikiGitContext.execute(
+      sdlcGitContext.execute(
         { operation: "commit_context", commitSha: "b".repeat(40) },
         wikiContext(),
       ),
@@ -48,7 +48,7 @@ describe("SDLC Wiki Git context guardrails", () => {
 
   it("rejects an unassigned boundary for aggregate range context", async () => {
     await expect(
-      sdlcWikiGitContext.execute(
+      sdlcGitContext.execute(
         { operation: "range_context", beforeSha: "b".repeat(40), afterSha: SHA },
         wikiContext(),
       ),
@@ -76,13 +76,13 @@ describe("SDLC Wiki Git context guardrails", () => {
 
   it("rejects traversal and invalid patch offsets before sandbox access", async () => {
     await expect(
-      sdlcWikiGitContext.execute(
+      sdlcGitContext.execute(
         { operation: "read_file", commitSha: SHA, path: "../secret" },
         wikiContext(),
       ),
     ).resolves.toBe("Error: invalid repository-relative path.");
     await expect(
-      sdlcWikiGitContext.execute(
+      sdlcGitContext.execute(
         { operation: "read_patch", commitSha: SHA, offset: -1 },
         wikiContext(),
       ),
@@ -104,7 +104,7 @@ describe("SDLC Wiki Git context guardrails", () => {
 
   it("returns the sandbox recreation signal when the reusable session is absent", async () => {
     await expect(
-      sdlcWikiGitContext.execute(
+      sdlcGitContext.execute(
         { operation: "commit_context", commitSha: SHA },
         wikiContext({
           sdlcRepositoryId: "repo-1",

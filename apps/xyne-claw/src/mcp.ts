@@ -293,7 +293,7 @@ export async function loadMcpToolsForUser(
         description:
           (acceptsFiles ? baseDescription + FILE_INPUT_HINT : baseDescription) +
           (trustedBindings
-            ? " Run identity is bound by the server; do not supply executionId, sessionId, or repoId."
+            ? " Trusted SDLC identity is bound by the server; do not supply repository, execution, workspace, or actor identity fields."
             : ""),
         parameters: Type.Unsafe(schemaWithTrustedMcpBindings(mcpTool.inputSchema, trustedBindings)),
         async execute(_toolCallId, params) {

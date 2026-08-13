@@ -9,7 +9,7 @@ import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import type { Citation } from "xyne-claw-shared";
+import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
@@ -1524,7 +1524,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
 
     // Baseline identity is trusted run state, not model memory. Compaction can
     // remove the original task, so force-inject persisted values on every call.
-    if (serverType === "xyne-spaces" && tool === "spaces-sdlc-update-baseline") {
+    if (
+      serverType === "xyne-spaces" &&
+      tool === SDLC_TOOL_NAMES.mutateArtifact &&
+      effectiveParams["artifactType"] === "BASELINE"
+    ) {
       const run = await agentRunRepository.findBySessionId(req.params.sessionId).catch(() => null);
       effectiveParams = injectSdlcBaselineRunContext(effectiveParams, run?.metadata);
     }

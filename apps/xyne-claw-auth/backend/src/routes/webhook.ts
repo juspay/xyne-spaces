@@ -95,11 +95,25 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
+import {
+  buildSdlcAgentToolProfile,
+  buildWriteApprovalFlow,
+  buildTwinApprovalFlow,
+  buildUserQuestionFlow,
+  buildPromoteProviderFlow,
+  buildGoalSuggestionFlow,
+  buildPlanFlow,
+  isTwinDelivery,
+  SDLC_REQUIRED_TOOLS,
+} from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
+import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 
 const clog = createLogger("webhook");
+const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+  xyneSpacesTools.map((tool) => tool.name),
+);
 
 // Feature flag: when Spaces has the XYNE-12145 fix deployed
 // (POST /api/apps/chat/agentProgress with the authenticateApp middleware), flip
@@ -3752,44 +3766,12 @@ export async function handleAutomationWebhook(
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-  const directTools = Array.isArray(baseTools["direct"]) ? (baseTools["direct"] as string[]) : [];
-  const customTools = Array.isArray(baseTools["custom"]) ? (baseTools["custom"] as string[]) : [];
-  const subagents = Array.isArray(baseTools["subagents"]) ? (baseTools["subagents"] as string[]) : [];
-  // Wiki runs use a server-owned, role-specific direct-tool palette. Do not
-  // inherit the interactive SDLC Agent's search/message/ticket tools: they are
-  // unrelated to repository documentation and can make an unattended role
-  // wander into workspace conversations instead of returning its callback.
-  const sdlcBaseDirectTools = payload.sdlcOperation === "wiki" ? [] : directTools;
-  const sdlcBaseCustomTools = payload.sdlcOperation === "wiki" ? [] : customTools;
-  const sdlcSubagents = payload.sdlcOperation === "wiki" ? [] : subagents;
-  const sdlcCustomTools =
-    payload.sdlcOperation === "wiki"
-      ? ["sandbox-repo-setup", "sandbox-sdlc-wiki-git-context"]
-      : [
-          "sandbox-repo-setup",
-          "sandbox-run",
-          "sandbox-run-detached",
-          "sandbox-poll-job",
-          "sandbox-read-file",
-          "sandbox-destroy",
-        ];
   const wikiValidator =
     payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
     payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR" ||
     payload.sdlcWikiRole === "OPERATIONS_VALIDATOR";
-  const wikiCanWrite =
-    payload.sdlcWikiRole === "BOOTSTRAP_PAGE" ||
-    payload.sdlcWikiRole === "GENERATOR" ||
-    payload.sdlcWikiRole === "CORRECTOR";
-  const wikiCanMove =
-    payload.sdlcWikiRole === "GENERATOR" || payload.sdlcWikiRole === "CORRECTOR";
-  const wikiCanFinalize =
-    payload.sdlcWikiRole === "BOOTSTRAP" ||
-    payload.sdlcWikiRole === "GENERATOR" ||
-    payload.sdlcWikiRole === "CORRECTOR";
   const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
   const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
-  const wikiCanReadPages = payload.sdlcOperation === "wiki";
   const sdlcOutputFormat =
     payload.sdlcOperation === "wiki" && wikiSurvey
       ? {
@@ -3822,7 +3804,7 @@ export async function handleAutomationWebhook(
             },
             required: ["repositorySummary", "pages"],
           },
-          requireToolsBeforeSubmit: ["spaces-sdlc-wiki-list-pages", "sandbox-sdlc-wiki-git-context"],
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
         }
       : payload.sdlcOperation === "wiki" && wikiValidator
         ? {
@@ -3847,8 +3829,8 @@ export async function handleAutomationWebhook(
                 required: ["completed"],
               },
           requireToolsBeforeSubmit: wikiPageWriter
-            ? ["spaces-sdlc-wiki-write-page"]
-            : ["spaces-sdlc-wiki-finalize-commit"],
+            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
+            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
             }
     : payload.sdlcOperation === "work"
       ? {
@@ -3863,7 +3845,7 @@ export async function handleAutomationWebhook(
             },
             required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
           },
-          requireToolsBeforeSubmit: ["sandbox-repo-setup", "sandbox-run", "spaces-sdlc-create-pull-request"],
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
         }
       : {
           type: "json",
@@ -3876,11 +3858,10 @@ export async function handleAutomationWebhook(
             },
             required: ["created", "canvasId", "artifactKind"],
           },
-          requireToolsBeforeSubmit: [
+          requireToolsBeforeSubmit:
             payload.sdlcOperation === "baseline"
-              ? "spaces-sdlc-update-baseline"
-              : "spaces-sdlc-create-artifact",
-          ],
+              ? [...SDLC_REQUIRED_TOOLS.baseline]
+              : [...SDLC_REQUIRED_TOOLS.artifact],
         };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
@@ -3891,70 +3872,13 @@ export async function handleAutomationWebhook(
             ? {
                 tools: {
                   ...baseTools,
-                  direct: [
-                    ...new Set([
-                      ...sdlcBaseDirectTools,
-                      ...(payload.sdlcOperation === "wiki" && wikiCanReadPages
-                        ? [
-                            "spaces-sdlc-wiki-list-pages",
-                            "spaces-sdlc-wiki-read-page",
-                            "spaces-sdlc-wiki-verify-sources",
-                            ...(wikiCanWrite || wikiCanFinalize
-                              ? [
-                                  ...(payload.sdlcWikiRole === "GENERATOR"
-                                    ? ["spaces-sdlc-wiki-begin-checkpoint"]
-                                    : []),
-                                  ...(wikiCanWrite ? ["spaces-sdlc-wiki-write-page"] : []),
-                                  ...(wikiCanMove ? ["spaces-sdlc-wiki-move-page"] : []),
-                                  ...(wikiCanFinalize ? ["spaces-sdlc-wiki-finalize-commit"] : []),
-                                ]
-                              : []),
-                          ]
-                        : payload.sdlcOperation === "wiki"
-                          ? []
-                          : [
-                            "spaces-sdlc-create-artifact",
-                            "spaces-sdlc-update-baseline",
-                            "spaces-sdlc-create-pull-request",
-                            ]),
-                    ]),
-                  ],
-                  custom: [...new Set([...sdlcBaseCustomTools, ...sdlcCustomTools])],
-                  subagents: sdlcSubagents,
+                  direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
+                  custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
+                  subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
                 },
                 toolPermissions: {
                   ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
-                  ...(payload.sdlcOperation === "wiki"
-                    ? wikiCanReadPages
-                      ? {
-                        "xyne-spaces__spaces-sdlc-wiki-list-pages": "allow",
-                        "xyne-spaces__spaces-sdlc-wiki-read-page": "allow",
-                        "xyne-spaces__spaces-sdlc-wiki-verify-sources": "allow",
-                        }
-                      : {}
-                    : {
-                        "xyne-spaces__spaces-sdlc-create-artifact": "allow",
-                        "xyne-spaces__spaces-sdlc-update-baseline": "allow",
-                        "xyne-spaces__spaces-sdlc-create-pull-request": "allow",
-                      }),
-                  ...(wikiCanWrite || wikiCanFinalize
-                    ? {
-                        ...(payload.sdlcWikiRole === "GENERATOR"
-                          ? {
-                              "xyne-spaces__spaces-sdlc-wiki-begin-checkpoint": "allow",
-                            }
-                          : {}),
-                        ...(wikiCanWrite
-                          ? { "xyne-spaces__spaces-sdlc-wiki-write-page": "allow" }
-                          : {}),
-                        ...(wikiCanMove
-                          ? { "xyne-spaces__spaces-sdlc-wiki-move-page": "allow" }
-                          : {}),
-                        ...(wikiCanFinalize
-                          ? { "xyne-spaces__spaces-sdlc-wiki-finalize-commit": "allow" }
-                          : {}),
-                      }
-                    : {}),
+                  ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
                 },
                 outputFormat: sdlcOutputFormat,
                 sdlcContext: payload.sdlcContext,
