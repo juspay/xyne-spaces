@@ -2483,13 +2483,30 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   display: none;
 }
 
+.canvas-inline-comment-composer div.rounded-2xl.border {
+  border-width: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.canvas-inline-comment-composer div.pl-3.pr-11 {
+  padding-left: 0;
+  padding-right: 70px;
+}
+
 .canvas-inline-comment-composer button[data-testid="mention-user-btn"] {
   color: hsl(var(--muted-foreground));
+  width: 26px;
+  height: 26px;
 }
 
 .canvas-inline-comment-composer button[data-testid="send-message-button"] {
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
+}
+
+.canvas-inline-comment-composer div.absolute.translate-y-full {
+  display: none;
 }
 
 /* ============================================================
@@ -4472,7 +4489,7 @@ img.inline-emoji,
   background-color: var(--search-result-active-bg, #fb923c);
   color: inherit;
 }
-/* 
+/*
  Virtualized message rows are transformed stacking contexts. Lift only the
    row containing an inline edit composer so a collision-flipped emoji picker
    can render over the following message rows.  */

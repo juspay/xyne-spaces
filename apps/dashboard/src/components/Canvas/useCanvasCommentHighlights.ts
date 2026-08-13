@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { CanvasCommentThreadStatus } from '@xyne/shared';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -38,46 +38,93 @@ const ensureHighlightStyles = (): void => {
   style.id = styleId;
   style.textContent = `
     [data-canvas-comment-thread-id][data-canvas-comment-open="true"] {
-      background-color: rgba(250, 204, 21, 0.42);
-      border-radius: 2px;
-      box-shadow: inset 0 -2px 0 rgba(217, 119, 6, 0.65);
+      background-color: rgba(244, 200, 90, 0.28);
+      box-shadow: inset 0 -1.5px 0 #e5a93d;
+      border-radius: 1px;
       cursor: pointer;
+      transition: background-color 150ms ease, box-shadow 150ms ease;
+    }
+    [data-canvas-comment-thread-id][data-canvas-comment-open="true"]:hover {
+      background-color: rgba(242, 180, 60, 0.36);
     }
     [data-canvas-comment-thread-id][data-canvas-comment-active="true"] {
-      background-color: rgba(245, 158, 11, 0.48);
-      box-shadow:
-        inset 0 -2px 0 rgba(180, 83, 9, 0.75),
-        0 0 0 2px rgba(245, 158, 11, 0.18);
+      background-color: rgba(242, 180, 60, 0.42);
+    }
+    [data-theme="midnight"] [data-canvas-comment-thread-id][data-canvas-comment-open="true"] {
+      background-color: rgba(229, 169, 61, 0.2);
+      box-shadow: inset 0 -1.5px 0 rgba(229, 169, 61, 0.8);
+    }
+    [data-theme="midnight"] [data-canvas-comment-thread-id][data-canvas-comment-open="true"]:hover {
+      background-color: rgba(229, 169, 61, 0.28);
+    }
+    [data-theme="midnight"] [data-canvas-comment-thread-id][data-canvas-comment-active="true"] {
+      background-color: rgba(229, 169, 61, 0.34);
     }
     [data-canvas-comment-thread-badge="true"] {
       position: absolute;
       z-index: 20;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       height: 26px;
-      min-width: 44px;
-      padding: 0 10px;
+      padding: 0 8px;
+      font-variant-numeric: tabular-nums;
       border: 1px solid hsl(var(--border));
-      border-radius: 10px;
+      border-radius: 8px;
       background: hsl(var(--background));
       color: hsl(var(--muted-foreground));
-      box-shadow: 0 1px 4px hsl(var(--foreground) / 0.12);
-      font-size: 13px;
+      box-shadow: 0 1px 2px hsl(var(--foreground) / 0.05);
+      font-size: 11.5px;
       font-weight: 600;
       line-height: 1;
       cursor: pointer;
-      transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+      animation: canvas-comment-badge-in 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+      transition:
+        top 180ms ease,
+        opacity 150ms ease,
+        transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 150ms ease,
+        border-color 150ms ease,
+        color 150ms ease;
+    }
+    /* The pill is 26px tall by design; extend the hit area without changing the visual.
+       Kept within the 34px stacking gap so neighbouring badges never overlap. */
+    [data-canvas-comment-thread-badge="true"]::before {
+      content: "";
+      position: absolute;
+      inset: -4px -8px;
     }
     [data-canvas-comment-thread-badge="true"]:hover {
       background: hsl(var(--accent));
       color: hsl(var(--foreground));
-      border-color: hsl(var(--border));
+      transform: translateX(-2px);
+    }
+    [data-canvas-comment-thread-badge="true"]:active {
+      transform: translateX(-2px) scale(0.96);
+    }
+    [data-canvas-comment-thread-badge="true"][data-canvas-comment-badge-active="true"] {
+      opacity: 0;
+      transform: translateX(8px);
+      pointer-events: none;
     }
     [data-canvas-comment-thread-badge="true"] svg {
-      width: 15px;
-      height: 15px;
+      width: 14px;
+      height: 14px;
       flex-shrink: 0;
+    }
+    @keyframes canvas-comment-badge-in {
+      from { opacity: 0; transform: translateX(8px); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-canvas-comment-thread-badge="true"] {
+        animation: none;
+        transition: top 180ms ease, opacity 150ms ease;
+      }
+      [data-canvas-comment-thread-badge="true"]:hover { transform: none; }
+      [data-canvas-comment-thread-badge="true"][data-canvas-comment-badge-active="true"] {
+        transform: none;
+      }
     }
   `;
   document.head.appendChild(style);
@@ -112,8 +159,8 @@ const getElementStartRect = (element: HTMLElement): DOMRect => {
 
 const getNextBadgeTop = (top: number, usedTops: number[]): number => {
   let nextTop = top;
-  while (usedTops.some(usedTop => Math.abs(usedTop - nextTop) < 30)) {
-    nextTop += 30;
+  while (usedTops.some(usedTop => Math.abs(usedTop - nextTop) < 34)) {
+    nextTop += 34;
   }
   usedTops.push(nextTop);
   return nextTop;
@@ -148,6 +195,27 @@ export const useCanvasCommentHighlights = ({
       })),
     [openThreads],
   );
+
+  const activeThreadIdRef = useRef<string | null | undefined>(activeThreadId);
+  activeThreadIdRef.current = activeThreadId;
+  const badgeDataRef = useRef(threadBadgeData);
+  badgeDataRef.current = threadBadgeData;
+  const onAnchorClickRef = useRef(onAnchorClick);
+  onAnchorClickRef.current = onAnchorClick;
+  const scheduleRenderBadgesRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!enabled || !container) return;
+
+    container.querySelectorAll<HTMLElement>(COMMENT_THREAD_BADGE_SELECTOR).forEach(badge => {
+      if (badge.dataset['canvasCommentBadgeThreadId'] === activeThreadId) {
+        badge.dataset['canvasCommentBadgeActive'] = 'true';
+      } else {
+        delete badge.dataset['canvasCommentBadgeActive'];
+      }
+    });
+  }, [activeThreadId, containerRef, enabled, threadBadgeData]);
 
   useEffect(() => {
     if (!enabled || !canvasId) {
@@ -237,47 +305,84 @@ export const useCanvasCommentHighlights = ({
         .forEach(badge => badge.remove());
     };
 
+    const findAnchorElement = (thread: CanvasCommentHighlightThread): HTMLElement | null =>
+      scrollContainer.querySelector<HTMLElement>(getThreadSelector(thread.id)) ??
+      scrollContainer.querySelector<HTMLElement>(getBlockSelector(thread.blockId));
+
+    /**
+     * Reconciles badges against the current threads, reusing the existing node for a
+     * thread instead of recreating it. Rebuilding would restart the enter animation on
+     * every scroll frame and every time a comment lands, which reads as a flicker.
+     */
     const renderBadges = (): void => {
-      removeBadges();
+      const staleBadges = new Map<string, HTMLButtonElement>();
+      scrollContainer
+        .querySelectorAll<HTMLButtonElement>(COMMENT_THREAD_BADGE_SELECTOR)
+        .forEach(badge => {
+          const badgeThreadId = badge.dataset['canvasCommentBadgeThreadId'];
+          if (badgeThreadId) staleBadges.set(badgeThreadId, badge);
+          else badge.remove();
+        });
+
       const usedTops: number[] = [];
-      threadBadgeData.forEach(({ count, thread }) => {
-        const anchorElement = scrollContainer.querySelector<HTMLElement>(
-          getThreadSelector(thread.id),
-        );
-        const blockElement = scrollContainer.querySelector<HTMLElement>(
-          getBlockSelector(thread.blockId),
-        );
-        const targetElement = anchorElement ?? blockElement;
+      const scrollRect = scrollContainer.getBoundingClientRect();
+
+      badgeDataRef.current.forEach(({ count, thread }) => {
+        const targetElement = findAnchorElement(thread);
         if (!targetElement) return;
 
-        const scrollRect = scrollContainer.getBoundingClientRect();
+        let button = staleBadges.get(thread.id);
+        if (button) {
+          staleBadges.delete(thread.id);
+        } else {
+          button = document.createElement('button');
+          button.type = 'button';
+          button.dataset['canvasCommentThreadBadge'] = 'true';
+          button.dataset['canvasCommentBadgeThreadId'] = thread.id;
+          button.style.right = '24px';
+          button.innerHTML = `
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4.4 3.4h11.2a1.7 1.7 0 0 1 1.7 1.7v6.4a1.7 1.7 0 0 1-1.7 1.7H8.2l-3.3 2.8v-2.8h-.5a1.7 1.7 0 0 1-1.7-1.7V5.1a1.7 1.7 0 0 1 1.7-1.7Z"></path>
+            </svg>
+            <span></span>
+          `;
+          // Resolve the thread at click time — this node outlives the render that made it.
+          button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const clicked = badgeDataRef.current.find(item => item.thread.id === thread.id);
+            if (!clicked) return;
+            const clickedElement = findAnchorElement(clicked.thread);
+            if (!clickedElement) return;
+            onAnchorClickRef.current?.(clicked.thread, clickedElement.getBoundingClientRect());
+          });
+          scrollContainer.appendChild(button);
+        }
+
         const targetRect = targetElement.getBoundingClientRect();
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.dataset['canvasCommentThreadBadge'] = 'true';
-        button.dataset['canvasCommentBadgeThreadId'] = thread.id;
+        const top = getNextBadgeTop(
+          targetRect.top -
+            scrollRect.top +
+            scrollContainer.scrollTop +
+            Math.max(0, targetRect.height / 2 - 13),
+          usedTops,
+        );
+
+        const label = count > 99 ? '99+' : String(count);
+        const countElement = button.querySelector('span');
+        if (countElement && countElement.textContent !== label) countElement.textContent = label;
+
         button.dataset['canvasCommentBlockId'] = thread.blockId;
         button.setAttribute('aria-label', `${count} comments in this thread`);
-        button.innerHTML = `
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
-          </svg>
-          <span>${count > 99 ? '99+' : count}</span>
-        `;
-        const top =
-          targetRect.top -
-          scrollRect.top +
-          scrollContainer.scrollTop +
-          Math.max(0, targetRect.height / 2 - 13);
-        button.style.top = `${getNextBadgeTop(top, usedTops)}px`;
-        button.style.right = '12px';
-        button.addEventListener('click', event => {
-          event.preventDefault();
-          event.stopPropagation();
-          onAnchorClick?.(thread, targetElement.getBoundingClientRect());
-        });
-        scrollContainer.appendChild(button);
+        if (thread.id === activeThreadIdRef.current) {
+          button.dataset['canvasCommentBadgeActive'] = 'true';
+        } else {
+          delete button.dataset['canvasCommentBadgeActive'];
+        }
+        if (button.style.top !== `${top}px`) button.style.top = `${top}px`;
       });
+
+      staleBadges.forEach(badge => badge.remove());
     };
 
     let pendingAnimationFrame: number | null = null;
@@ -289,6 +394,7 @@ export const useCanvasCommentHighlights = ({
       });
     };
 
+    scheduleRenderBadgesRef.current = scheduleRenderBadges;
     scheduleRenderBadges();
     const retryTimeouts = [100, 300, 800].map(delay =>
       window.setTimeout(scheduleRenderBadges, delay),
@@ -315,13 +421,18 @@ export const useCanvasCommentHighlights = ({
       if (pendingAnimationFrame !== null) {
         window.cancelAnimationFrame(pendingAnimationFrame);
       }
+      scheduleRenderBadgesRef.current = null;
       retryTimeouts.forEach(timeout => window.clearTimeout(timeout));
       scrollContainer.removeEventListener('scroll', scheduleRenderBadges);
       window.removeEventListener('resize', scheduleRenderBadges);
       observer?.disconnect();
       removeBadges();
     };
-  }, [canvasId, containerRef, enabled, onAnchorClick, refreshKey, threadBadgeData]);
+  }, [canvasId, containerRef, enabled]);
+
+  useEffect(() => {
+    scheduleRenderBadgesRef.current?.();
+  }, [refreshKey, threadBadgeData]);
 
   useEffect(() => {
     if (!enabled || !onAnchorClick) return;

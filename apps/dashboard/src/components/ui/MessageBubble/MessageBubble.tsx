@@ -1854,7 +1854,7 @@ export const ReactionView = ({
                       setEmojiPickerOpen(false);
                     }}
                     customEmojis={customEmojis || []}
-                    previewConfig={{ showPreview: false }}
+                    previewConfig={{ showPreview: true }}
                   />
                 </Popover.Content>
               </>

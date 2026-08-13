@@ -36,6 +36,7 @@ import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 
 export type ChatListProps = {
@@ -300,8 +301,26 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const topVisibleConvIdRef = useRef<string | undefined>(undefined);
   const { isMobile } = usePlatform();
 
+  // Merge durable pending sends (queued while offline, awaiting server
+  // confirmation, or failed) into the render list. Any conversation whose
+  // initial message is still pending is dropped first so Zero's optimistic row
+  // and the pending row never collide on the same key; the pending rows carry
+  // the newest timestamps, so appending sorts them to the tail.
+  const pendingForChannel = usePendingForChannel(channelId);
+  const conversationsWithPending = useMemo(() => {
+    if (pendingForChannel.length === 0) return conversations;
+    const pendingIds = new Set(pendingForChannel.map(p => p.messageId));
+    const base = conversations.filter(
+      c => !c.initialMessageId || !pendingIds.has(c.initialMessageId),
+    );
+    const pendingRows = pendingForChannel.map(
+      p => buildPendingChannelConversation(p) as unknown as Conversation,
+    );
+    return [...base, ...pendingRows];
+  }, [conversations, pendingForChannel]);
+
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    conversations,
+    conversationsWithPending,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );

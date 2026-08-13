@@ -786,6 +786,19 @@ export const channelTable = table('channels')
   })
   .primaryKey('id');
 
+export const channelBoardMappingTable = table('channel_board_mappings' /* ChannelBoardMapping */)
+  .columns({
+    id: string(),
+    channelId: string(),
+    boardId: string(),
+    workspaceId: string(),
+    isDefault: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const channelStatsTable = table('channel_stats')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -2654,6 +2667,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     destField: ['boardId'],
     destSchema: boardSlaPolicyTable,
   }),
+  channelMappings: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: channelBoardMappingTable,
+  }),
 }));
 
 export const stageTableRelationships = relationships(stageTable, ({ one, many }) => ({
@@ -3243,7 +3261,28 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
   }),
+  boardMappings: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelBoardMappingTable,
+  }),
 }));
+
+export const channelBoardMappingTableRelationships = relationships(
+  channelBoardMappingTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    board: one({
+      sourceField: ['boardId'],
+      destField: ['id'],
+      destSchema: boardTable,
+    }),
+  }),
+);
 
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
@@ -4584,6 +4623,7 @@ export const schema = createSchema({
     invitationTable,
     guestAccessTable,
     channelTable,
+    channelBoardMappingTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -4713,6 +4753,7 @@ export const schema = createSchema({
     conversationTableRelationships,
     conversationParticipantTableRelationships,
     channelTableRelationships,
+    channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
@@ -4847,6 +4888,7 @@ export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizat
 export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

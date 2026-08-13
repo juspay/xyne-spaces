@@ -177,26 +177,44 @@ export function CitationDocsPanel(): ReactElement | null {
 /**
  * Wraps the chat thread. When one or more citation docs are open, it splits the
  * area into a resizable chat column (left) + the citation docs panel (right).
- * With no docs open it renders the chat full-width. Must be rendered inside a
- * `CitationDocsProvider`.
+ * With no docs open the chat panel is alone and fills the width. Must be
+ * rendered inside a `CitationDocsProvider`.
+ *
+ * The group and the chat Panel render UNCONDITIONALLY; only the separator and
+ * docs Panel are appended. That is load-bearing: this used to return a bare
+ * `<>{children}</>` until a doc opened, which moved `children` to a different
+ * position in the element tree — React then remounts the whole subtree, and
+ * AIChatThread keeps the conversation in local state, so opening a citation
+ * wiped every message.
  */
 export function ChatWithCitationDocs({ children }: { children: ReactNode }): ReactElement {
   const ctx = useCitationDocs();
   const hasDocs = !!ctx && ctx.docs.length > 0;
-  if (!hasDocs) return <>{children}</>;
   return (
     <ResizableGroup
       orientation='horizontal'
       autoSaveId='ai-citation-docs'
+      // Which Panels are actually mounted, so the persisted layout restores
+      // against the right set instead of the last one written.
+      panelIds={hasDocs ? ['ai-chat', 'ai-citation-docs'] : ['ai-chat']}
       className='h-full w-full'
     >
-      <Panel id='ai-chat' defaultSize='55%' minSize='30%' className='min-w-0'>
+      <Panel
+        id='ai-chat'
+        defaultSize={hasDocs ? '55%' : '100%'}
+        minSize={hasDocs ? '30%' : '100%'}
+        className='min-w-0'
+      >
         {children}
       </Panel>
-      <Separator className='w-px bg-border transition-colors hover:bg-primary/40 active:bg-primary/60' />
-      <Panel id='ai-citation-docs' defaultSize='45%' minSize='25%' className='min-w-0'>
-        <CitationDocsPanel />
-      </Panel>
+      {hasDocs && (
+        <>
+          <Separator className='w-px bg-border transition-colors hover:bg-primary/40 active:bg-primary/60' />
+          <Panel id='ai-citation-docs' defaultSize='45%' minSize='25%' className='min-w-0'>
+            <CitationDocsPanel />
+          </Panel>
+        </>
+      )}
     </ResizableGroup>
   );
 }

@@ -178,7 +178,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                   theme={emojiPickerTheme}
                   lazyLoadEmojis={true}
                   searchPlaceHolder='Search emoji...'
-                  previewConfig={{ showPreview: false }}
+                  previewConfig={{ showPreview: true }}
                   customEmojis={customEmojis || []}
                 />
               </div>
@@ -460,7 +460,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
                   theme={emojiPickerTheme}
                   lazyLoadEmojis={true}
                   searchPlaceHolder='Search emoji...'
-                  previewConfig={{ showPreview: false }}
+                  previewConfig={{ showPreview: true }}
                   customEmojis={customEmojis || []}
                 />
               </div>
