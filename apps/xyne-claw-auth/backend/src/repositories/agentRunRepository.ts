@@ -631,6 +631,21 @@ export const agentRunRepository = {
     prisma.agentRun.findUnique({ where: { sessionId } }),
 
   /**
+   * Most recent completed run's toolInvocations for a conversation+agent —
+   * used by instant mode's follow-up path (lib/instant-context.ts's
+   * resolvePreviousTurnContext) to reuse the previous turn's cited doc(s)
+   * instead of re-searching the whole KB. Only ever called after classify
+   * has already flagged isFollowUp=true, so this query never runs on the
+   * normal-answer path.
+   */
+  findLatestToolInvocations: (conversationId: string, agentSlug: string) =>
+    prisma.agentRun.findFirst({
+      where: { conversationId, agentSlug, status: "completed" },
+      orderBy: { completedAt: "desc" },
+      select: { toolInvocations: true },
+    }),
+
+  /**
    * The most-recent RUNNING run for a conversation. Used by the Spaces `/stop`
    * command to find the in-flight run's sessionId (so it can be cancelled) when
    * the caller only knows the conversationId. Returns null when nothing is

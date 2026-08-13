@@ -39,6 +39,7 @@ import {
   ArrowSquareOutIcon,
   LinkBreakIcon,
   FileIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
@@ -2534,6 +2535,13 @@ export interface InputAreaProps {
   /** Open / close the ContextPicker popover (parent owns positioning). */
   mentionOpen: boolean;
   onToggleMention: () => void;
+  /** Whether the active agent is configured as an "Instant Agent"
+   *  (agent.config.instantAgent) — every send() to it always runs the
+   *  single-search/single-answer instant path, enforced server-side. This
+   *  is a locked indicator, not a toggle: true renders it, false/omitted
+   *  hides it entirely (e.g. composers, like Xyne Doctor's follow-up panel,
+   *  whose send() doesn't understand instant at all, just never pass it). */
+  instant?: boolean;
   /** The ContextPicker JSX is rendered by the parent (it needs auth/userId);
    *  we slot it in as a render prop so positioning relative to the input
    *  card lives here. */
@@ -2568,6 +2576,7 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     onRemoveContext,
     mentionOpen,
     onToggleMention,
+    instant,
     renderMentionPicker,
   },
   ref,
@@ -2792,6 +2801,24 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               >
                 <AtIcon size={14} />
               </button>
+              {/* Locked indicator, not a toggle — only rendered for agents
+                  configured as "Instant Agent" (agent.config.instantAgent,
+                  see AgentDetailLeftColumn.tsx). Every request to such an
+                  agent always runs instant (enforced server-side in
+                  agent-chat.ts/run-stream.ts regardless of what the client
+                  sends), so there's nothing here for the user to toggle —
+                  regular agents show no instant affordance at all. */}
+              {instant && (
+                <div
+                  data-id="input-btn-instant"
+                  title="This agent always answers instantly from the Knowledge Base"
+                  aria-label="Instant agent"
+                  className="flex h-8 cursor-default items-center justify-center gap-1 rounded-full bg-xyne-brand px-2.5 text-xyne-fg-inverse"
+                >
+                  <LightningIcon size={14} />
+                  <span className="text-xs font-medium">Instant</span>
+                </div>
+              )}
             </div>
 
             {sending ? (
@@ -4788,7 +4815,6 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const [contextQuery, setContextQuery] = useState("");
   const [contextTab, setContextTab] = useState<ContextSearchType>("all");
   const [selectedContext, setSelectedContext] = useState<ContextItem[]>([]);
-
   const handleToggleMention = useCallback(() => setMentionOpen((v) => !v), []);
   const handleAddContext = useCallback((item: ContextItem) => {
     setSelectedContext((prev) => {
@@ -4870,6 +4896,10 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     [agents, activeAgentSlug],
   );
   const activeConv = conversations.find((c) => c.conversationId === conversationId);
+  // Locked, not a toggle — see AgentDetailLeftColumn.tsx's "Instant Agent"
+  // setting and the composer's instant indicator below. Every send() to an
+  // instant agent always runs instant; there's no per-message choice.
+  const instant = activeAgent?.instantAgent === true;
 
   const citationIndex = useMemo(() => {
     const index = new Map<string, CitationLookup>();
@@ -5488,6 +5518,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
+          ...(instant ? { instant: true } : {}),
         });
         if (designSelectionSnapshot) setDesignSelection(null);
         if (manualEditsSnapshot.length > 0) {
@@ -5508,7 +5539,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml, instant]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -5790,6 +5821,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                   onRemoveContext={handleRemoveContext}
                   mentionOpen={mentionOpen}
                   onToggleMention={handleToggleMention}
+                  instant={instant}
                   renderMentionPicker={() => (
                     <ContextPicker
                       slug={activeAgent.slug}

@@ -1029,14 +1029,18 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     //   • be linked to AgentRun.chatMessageId at finalize (so the messages
     //     endpoint can pair runs ↔ assistant messages once branching produces
     //     multiple siblings under the same user parent).
-    const existingMessages = existingConvId
-      ? (await chatMessageRepository.findByConversation(conversationId)).map((m) => ({
-          id: m.id,
-          role: m.role,
-          parentId: (m as { parentId?: string | null }).parentId ?? null,
-          createdAt: m.createdAt,
-        }))
+    // Kept alongside the trimmed `existingMessages` below (content-free, for
+    // PI-branch path resolution) so `existingMessages` can be derived from it
+    // without a redundant round trip.
+    const existingMessageRows = existingConvId
+      ? await chatMessageRepository.findByConversation(conversationId)
       : [];
+    const existingMessages = existingMessageRows.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parentId: (m as { parentId?: string | null }).parentId ?? null,
+      createdAt: m.createdAt,
+    }));
 
     let assistantParentId: string | null = null;
     let createdUserMessageId: string | undefined;
@@ -2500,19 +2504,15 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       };
     };
     if (upstream.status === 404) {
-      // No completed artifacts on claw's PVC yet (run still in flight, or claw's
-      // incremental write hasn't landed). Synthesize an in-progress bundle from
-      // the durable agent_run row(s) so the drawer shows the run's tool calls
-      // (past + live) instead of 404 until completion. Flows through the SAME
-      // per-user ACL/redaction below via each synth run's data.userId.
+      // No completed artifacts on claw's PVC yet — either the run is still in
+      // flight (claw's incremental write hasn't landed) or this conversation
+      // has no runs at all. Synthesize a bundle from the durable agent_run
+      // rows for in-progress runs so the drawer shows tool calls live instead
+      // of 404ing until completion.
       const inProgressRuns = hasElevatedDebugAccess
         ? await agentRunRepository.listByConversation(req.params.convId, requesterId)
         : await agentRunRepository.listByUser(requesterId, { conversationId: req.params.convId, agentSlug: req.params.slug });
       const active = inProgressRuns.filter((r) => !r.completedAt && Array.isArray(r.toolInvocations));
-      if (active.length === 0) {
-        res.status(404).json({ success: false, error: "Debug artifacts not found" });
-        return;
-      }
       body = {
         success: true,
         data: {
@@ -2530,6 +2530,8 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
               userId: r.userId,
               startedAt: r.startedAt,
               task: r.task,
+              events: [],
+              debugEvents: [],
               currentToolLabel: r.currentToolLabel,
               toolInvocations: r.toolInvocations,
               inProgress: true,
@@ -2543,6 +2545,11 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       return;
     } else {
       body = (await upstream.json()) as typeof body;
+    }
+
+    if (!body.data || ((body.data.runs?.length ?? 0) === 0 && !body.data.debugSession)) {
+      res.status(404).json({ success: false, error: "Debug artifacts not found" });
+      return;
     }
 
     // Per-user ACL on debug content. Each run snapshot carries the userId whose
@@ -2559,7 +2566,14 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       body.data = {
         ...d,
         debugSession: ownSession,
-        debugEvents: ownSession ? d.debugEvents ?? [] : [],
+        // `debugSession`-linked events plus each owned run's OWN
+        // `data.debugEvents` — a conversation can hold multiple runs, and
+        // each run's own debug-events.json is merged in alongside the
+        // top-level debugSession.
+        debugEvents: [
+          ...(ownSession ? d.debugEvents ?? [] : []),
+          ...ownRuns.flatMap((r) => (Array.isArray(r.data?.debugEvents) ? (r.data.debugEvents as unknown[]) : [])),
+        ],
         runs: ownRuns,
         subagents: (d.subagents ?? []).filter((s) => ownSessionIds.has(s.data?.parentSessionId ?? "")),
       };
@@ -2589,6 +2603,11 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
       const debugSessionOwned = d.debugSession?.userId === requesterId;
+      const redactedRuns = (d.runs ?? [])
+        .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
+        .map((r) =>
+          r.data?.userId === requesterId ? r : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
+        );
       body.data = {
         ...d,
         debugSession: hideDebugSession
@@ -2596,16 +2615,19 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
           : !d.debugSession || debugSessionOwned
             ? d.debugSession ?? null
             : (redactResultKeysDeep(d.debugSession) as typeof d.debugSession),
-        debugEvents: hideDebugSession
-          ? []
-          : !d.debugSession || debugSessionOwned
-            ? d.debugEvents ?? null
-            : (redactResultKeysDeep(d.debugEvents ?? []) as unknown[]),
-        runs: (d.runs ?? [])
-          .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
-          .map((r) =>
-            r.data?.userId === requesterId ? r : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
-          ),
+        // `debugSession`-linked events plus each (already per-user-redacted,
+        // above) run's OWN `data.debugEvents`. Reusing `redactedRuns` (rather
+        // than the raw pre-ACL `d.debugEvents`) so another user's run gets
+        // the same result-key redaction their `runs` entry already gets.
+        debugEvents: [
+          ...(hideDebugSession
+            ? []
+            : !d.debugSession || debugSessionOwned
+              ? d.debugEvents ?? []
+              : (redactResultKeysDeep(d.debugEvents ?? []) as unknown[])),
+          ...redactedRuns.flatMap((r) => (Array.isArray(r.data?.debugEvents) ? (r.data.debugEvents as unknown[]) : [])),
+        ],
+        runs: redactedRuns,
         subagents: (d.subagents ?? [])
           .filter((s) => !hiddenSessionIds.has(s.data?.parentSessionId ?? ""))
           .map((s) =>

@@ -395,6 +395,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         name: true,
         description: true,
         config: true,
+        systemPrompt: true,
       },
     }).catch(() => null);
     if (!agentRow) {

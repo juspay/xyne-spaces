@@ -68,7 +68,7 @@ interface AuthResponse<T> {
   readonly error?: string;
 }
 
-async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
+export async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
   const url = `${SERVER.authServiceUrl}${path}`;
   const res = await fetch(url, {
     ...init,

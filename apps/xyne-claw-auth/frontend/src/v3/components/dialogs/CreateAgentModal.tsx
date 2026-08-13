@@ -86,6 +86,13 @@ interface State {
   name: string; description: string; color: string; slug: string; slugManual: boolean; repoUrl: string;
   systemPrompt: string; aiIntent: string; generating: boolean;
   availableTools: AvailableTools | null; toolsLoading: boolean;
+  /** Instant agent opt-in (persisted as agent.config.instantAgent). When on,
+   *  this agent ONLY ever answers via the single-search/single-answer
+   *  instant KB path — never the full agentic tool loop, so it never calls
+   *  a tool — for every chat request to it. Mutually exclusive with tool
+   *  selection below: on hides the picker instead of collecting a
+   *  selection that would go unused. */
+  instantAgent: boolean;
   subagents: string[]; direct: string[]; custom: string[]; gateway: string[];
   availableSkills: Skill[]; skillsLoading: boolean; selectedSkillIds: string[];
   selectedKbResources: KbSelection[];
@@ -117,6 +124,7 @@ const INIT: State = {
   name: "", description: "", color: COLORS[0]!, slug: "", slugManual: false, repoUrl: "",
   systemPrompt: "", aiIntent: "", generating: false,
   availableTools: null, toolsLoading: false,
+  instantAgent: false,
   subagents: [], direct: [], custom: [], gateway: [],
   availableSkills: [], skillsLoading: false, selectedSkillIds: [],
   selectedKbResources: [],
@@ -493,12 +501,15 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
           ? {}
           : { knowledgeBase: w.selectedKbResources }),
       });
-      const hasTools = w.subagents.length || w.direct.length || w.custom.length || w.gateway.length;
+      // Instant agents never call tools, so tool selection was hidden and
+      // stays empty regardless of anything picked before the toggle was
+      // switched on.
+      const hasTools = !w.instantAgent && (w.subagents.length || w.direct.length || w.custom.length || w.gateway.length);
       const hasSkills = w.selectedSkillIds.length > 0;
       const trimmedRepoUrl = w.repoUrl.trim();
       const hasRepoUrl = trimmedRepoUrl.length > 0;
-      const hasResearchAgentConfig = w.custom.includes("query-codebase") || w.custom.includes("review-pull-request") || w.researchAgentProductId || w.researchAgentRepositoryId;
-      if (hasTools || hasSkills || hasResearchAgentConfig || hasRepoUrl) {
+      const hasResearchAgentConfig = !w.instantAgent && (w.custom.includes("query-codebase") || w.custom.includes("review-pull-request") || w.researchAgentProductId || w.researchAgentRepositoryId);
+      if (hasTools || hasSkills || hasResearchAgentConfig || hasRepoUrl || w.instantAgent) {
         const { updateAgent } = await import("../../../lib/api");
         const config: Record<string, unknown> = {};
         if (hasTools) config["tools"] = { subagents: w.subagents, direct: w.direct, custom: w.custom, gateway: w.gateway };
@@ -506,6 +517,7 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
           config["product_id"] = w.researchAgentProductId || null;
           config["repository_id"] = w.researchAgentRepositoryId || null;
         }
+        if (w.instantAgent) config["instantAgent"] = true;
         await updateAgent(effectiveSlug, {
           ...(Object.keys(config).length > 0 ? { config } : {}),
           ...(hasSkills ? { skills: w.selectedSkillIds } : {}),
@@ -831,30 +843,68 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
 
         {/* ─── Step 2: Toolbox ──────────────────────────────────────── */}
         {w.step === 2 && (
-          <ToolboxPicker
-            variant="large"
-            availableTools={w.availableTools}
-            loading={w.toolsLoading}
-            value={{ subagents: w.subagents, direct: w.direct, custom: w.custom, gateway: w.gateway }}
-            onChange={(next) => setW((p) => ({
-              ...p,
-              subagents: next.subagents,
-              direct: next.direct,
-              custom: next.custom,
-              gateway: next.gateway ?? [],
-            }))}
-            autoSuggest
-            suggestContext={{ systemPrompt: w.systemPrompt, description: w.description }}
-            researchAgent={{
-              productId: w.researchAgentProductId,
-              onProductIdChange: (v) => u({ researchAgentProductId: v }),
-              products: w.researchAgentProducts,
-              repositoryId: w.researchAgentRepositoryId,
-              onRepositoryIdChange: (v) => u({ researchAgentRepositoryId: v }),
-              repositories: w.researchAgentRepositories,
-              loading: w.researchAgentOptionsLoading,
-            }}
-          />
+          <div className="space-y-4">
+            {/* Instant agent opt-in — see State.instantAgent's doc comment.
+                Sits above the tool picker: on hides it entirely, since an
+                instant agent never calls a tool. Wrapped in its own px-1/pt-2
+                (rather than adding that to the space-y-4 parent above) so
+                ToolboxPicker below keeps rendering as a direct sibling of
+                that parent, unwrapped — it sizes itself via flex-1 against
+                THAT parent, and an extra non-flex wrapper around it here
+                would stop it filling the available height. */}
+            <div className="px-1 pt-2">
+              <label
+                className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2 select-none"
+                title="Every chat request to this agent runs the fast single-search, single-answer KB path instead of the full agentic tool loop — never the other way around. Once on, tools are unused and hidden."
+              >
+                <span className="min-w-0 truncate text-[12px] text-xyne-fg-primary">
+                  <span className="font-medium">Instant Agent</span>
+                  <span className="ml-1.5 text-xyne-fg-tertiary">— answers instantly from the Knowledge Base only, tools select not required for instant</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={w.instantAgent}
+                    onChange={(e) => u({ instantAgent: e.target.checked })}
+                    className="h-4 w-4 cursor-pointer accent-xyne-accent"
+                    aria-label="Enable Instant Agent"
+                  />
+                  <span className="text-[12px] text-xyne-fg-primary">{w.instantAgent ? "On" : "Off"}</span>
+                </span>
+              </label>
+            </div>
+
+            {w.instantAgent ? (
+              <p className="mx-1 rounded-lg border border-dashed border-xyne-border-subtle px-3 py-4 text-center text-[12px] text-xyne-fg-tertiary">
+                Instant Agent is on — tools are not required for this agent, so tool selection is hidden. Turn Instant Agent off above to configure tools.
+              </p>
+            ) : (
+            <ToolboxPicker
+              variant="large"
+              availableTools={w.availableTools}
+              loading={w.toolsLoading}
+              value={{ subagents: w.subagents, direct: w.direct, custom: w.custom, gateway: w.gateway }}
+              onChange={(next) => setW((p) => ({
+                ...p,
+                subagents: next.subagents,
+                direct: next.direct,
+                custom: next.custom,
+                gateway: next.gateway ?? [],
+              }))}
+              autoSuggest
+              suggestContext={{ systemPrompt: w.systemPrompt, description: w.description }}
+              researchAgent={{
+                productId: w.researchAgentProductId,
+                onProductIdChange: (v) => u({ researchAgentProductId: v }),
+                products: w.researchAgentProducts,
+                repositoryId: w.researchAgentRepositoryId,
+                onRepositoryIdChange: (v) => u({ researchAgentRepositoryId: v }),
+                repositories: w.researchAgentRepositories,
+                loading: w.researchAgentOptionsLoading,
+              }}
+            />
+            )}
+          </div>
         )}
 
         {/* ─── Step 3: Knowledge (was "Skills") ─────────────────────── */}
@@ -1035,8 +1085,18 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
               </div>
             )}
 
+            {/* Instant agent summary */}
+            {w.instantAgent && (
+              <div>
+                <SectionCaption friendly="Toolbox" technical="tools" />
+                <p className="text-[12px] text-xyne-fg-secondary">
+                  Instant Agent — answers instantly from the Knowledge Base, tools select not required for instant.
+                </p>
+              </div>
+            )}
+
             {/* Toolbox summary */}
-            {(w.subagents.length > 0 || w.direct.length > 0 || w.custom.length > 0) && (
+            {!w.instantAgent && (w.subagents.length > 0 || w.direct.length > 0 || w.custom.length > 0) && (
               <div>
                 <SectionCaption friendly="Toolbox" technical="tools" />
                 <div className="space-y-2">

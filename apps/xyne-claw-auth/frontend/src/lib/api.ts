@@ -2825,6 +2825,9 @@ export async function sendChatMessage(
     /** Trusted SDLC repository selection. The backend resolves and authorizes
      *  the id; URL/branch values are never accepted from the browser. */
     researchContext?: { type: "repository"; id: string; name?: string };
+    /** Single search + single answer pass instead of the full agentic tool
+     *  loop — see backend routes/agent-chat.ts's instant branch. */
+    instant?: boolean;
   },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
@@ -2871,6 +2874,7 @@ export async function sendChatMessage(
       ...(requestOptions?.designSelection ? { designSelection: requestOptions.designSelection } : {}),
       ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
       ...(requestOptions?.researchContext ? { researchContext: requestOptions.researchContext } : {}),
+      ...(requestOptions?.instant ? { instant: true } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),
   });

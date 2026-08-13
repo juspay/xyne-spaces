@@ -1589,6 +1589,13 @@ interface Props {
   // a plan. Pre-filled with the default; only shown/saved when plan mode is on.
   draftPlanModePrompt: string;
   onDraftPlanModePromptChange: (v: string) => void;
+  // Instant agent opt-in (agent.config.instantAgent). When on, this agent ONLY
+  // ever runs the single-search/single-answer instant KB path — never the full
+  // agentic tool loop — for every chat request, regardless of any per-message
+  // toggle. Backend (agent-chat.ts, run-stream.ts) is the source of truth; this
+  // just persists the flag agents read there.
+  draftInstantAgent: boolean;
+  onDraftInstantAgentChange: (v: boolean) => void;
 
   // Dialog callbacks
   onOpenSkillPicker: () => void;
@@ -1733,6 +1740,8 @@ export function AgentDetailLeftColumn({
   onDraftPlanModeChange,
   draftPlanModePrompt,
   onDraftPlanModePromptChange,
+  draftInstantAgent,
+  onDraftInstantAgentChange,
   draftOutputFormatEnabled,
   onDraftOutputFormatEnabledChange,
   draftOutputType,
@@ -2141,13 +2150,49 @@ export function AgentDetailLeftColumn({
         tech="what it can do"
         subtitle="what it's allowed to do"
         notes={["acts on real systems", "credentials live with each integration"]}
-        summary={availableTools ? `${toolboxSummary.totalEnabled} of ${toolboxSummary.totalAvailable}` : `${totalTools} on`}
+        summary={draftInstantAgent ? "Instant" : availableTools ? `${toolboxSummary.totalEnabled} of ${toolboxSummary.totalAvailable}` : `${totalTools} on`}
         open={activeTab === "toolbox"}
         onToggle={() => toggleSection("toolbox")}
       />
 
       {activeTab === "toolbox" && (
        <div className="border-t border-xyne-border-subtle px-4 py-4">
+        {/* Instant agent opt-in (agent.config.instantAgent). When on, this
+            agent ONLY ever answers via the single-search/single-answer
+            instant KB path — never the full agentic tool loop, so it never
+            calls a tool — for every chat request to it, in both the Claw
+            dashboard and Spaces' askAI. Lives in Toolbox (not Behavior)
+            because it's mutually exclusive with the rest of this tab: once
+            on, tool selection below is moot and hidden. This is a locked
+            mode switch, not a per-message toggle: once on, the chat
+            composer's "Instant" indicator is pre-selected and can't be
+            turned off for this agent. */}
+        <label
+          className={`mb-4 flex items-center justify-between gap-3 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2 select-none ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+          title="Every chat request to this agent runs the fast single-search, single-answer KB path instead of the full agentic tool loop — never the other way around. Once on, tools are unused and hidden."
+        >
+          <span className="min-w-0 truncate text-[12px] text-xyne-fg-primary">
+            <span className="font-medium">Instant Agent</span>
+            <span className="ml-1.5 text-xyne-fg-tertiary">— answers instantly from the Knowledge Base only, tools select not required for instant</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draftInstantAgent}
+              onChange={(e) => onDraftInstantAgentChange(e.target.checked)}
+              disabled={!canEdit}
+              className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Enable Instant Agent"
+            />
+            <span className="text-[12px] text-xyne-fg-primary">{draftInstantAgent ? "On" : "Off"}</span>
+          </span>
+        </label>
+
+        {draftInstantAgent ? (
+          <p className="rounded-lg border border-dashed border-xyne-border-subtle px-3 py-3 text-[12px] leading-relaxed text-xyne-fg-tertiary">
+            Instant Agent is on — tools selection are not required for this agent, so tool selection is hidden. Turn Instant Agent off above to configure tools.
+          </p>
+        ) : (
         <ToolboxPicker
           availableTools={availableTools}
           loading={!availableTools}
@@ -2170,6 +2215,7 @@ export function AgentDetailLeftColumn({
             onRemoveConfigEntry: onRemoveDelegationConfigEntry,
           } : undefined}
         />
+        )}
       </div>
       )}
       </div>

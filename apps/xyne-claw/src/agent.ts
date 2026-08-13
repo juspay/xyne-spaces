@@ -251,7 +251,7 @@ export class QuotaExhaustedError extends Error {
   }
 }
 
-type DebugEventKind =
+export type DebugEventKind =
   | "session_start"
   | "session_tools"
   | "mode_switch"
@@ -292,7 +292,7 @@ interface StreamRateSample {
   streamsCollected: number;
 }
 
-interface DebugSessionSnapshot {
+export interface DebugSessionSnapshot {
   schemaVersion: 1;
   conversationId?: string;
   sessionId?: string;
@@ -324,7 +324,7 @@ interface DebugSessionSnapshot {
   events: DebugEventRecord[];
 }
 
-function cloneForDebug<T>(value: T): T {
+export function cloneForDebug<T>(value: T): T {
   try {
     return JSON.parse(JSON.stringify(value)) as T;
   } catch {
@@ -1096,7 +1096,7 @@ export function pushSandboxPreview(
 
 // Stream raw text fragments (reasoning deltas, assistant text deltas) to the progress endpoint.
 // These are fired on every pi-ai text_delta / thinking_delta event — high-frequency, keep it lean.
-function pushStreamChunk(
+export function pushStreamChunk(
   progressUrl: ProgressDest,
   sessionId: string,
   payload: { reasoningDelta?: string; textDelta?: string },
