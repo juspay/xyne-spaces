@@ -111,6 +111,10 @@ export async function syncUserWorkload(
     db.ticket.count({ where: ticketWhere }),
   ]);
 
+  logger.info(
+    `[AutoAssignment] syncUserWorkload userId=${userId} userGroupId=${userGroupId} boardId=${boardId} projectId=${board.projectId} workloadRoleIds=${JSON.stringify(workloadRoleIds)} roleMatchedTicketCount=${roleMatchedTicketIds.length} activeTasks=${activeTasks} totalTasks=${totalTasks}`,
+  );
+
   // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
   await withWorkspaceScope(() =>
     repositories.userWorkloadMapping.upsert({
