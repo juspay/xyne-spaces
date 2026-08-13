@@ -189,7 +189,7 @@ export class ExternalSourceRepository {
    * List all external sources
    */
   async findAll(filter?: {
-    sourceType?: string;
+    sourceType?: string | { in: string[] };
     isActive?: boolean;
   }) {
     return await this.db.externalSource.findMany({
