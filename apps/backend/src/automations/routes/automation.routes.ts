@@ -56,6 +56,7 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.EQ]: { label: 'equals', valueType: 'string' },
   [ConditionOperator.NEQ]: { label: 'does not equal', valueType: 'string' },
   [ConditionOperator.CONTAINS]: { label: 'contains', valueType: 'string' },
+  [ConditionOperator.MATCHES_REGEX]: { label: 'matches regex', valueType: 'string' },
   [ConditionOperator.GT]: { label: 'is greater than', valueType: 'number' },
   [ConditionOperator.GTE]: { label: 'is greater than or equal to', valueType: 'number' },
   [ConditionOperator.LT]: { label: 'is less than', valueType: 'number' },

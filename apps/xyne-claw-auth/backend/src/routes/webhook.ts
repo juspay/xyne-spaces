@@ -725,6 +725,65 @@ async function pendingActionTargetValidation(
   }
 }
 
+async function postPendingWriteApprovalCards(
+  pendingActions: Array<Record<string, unknown>> | undefined,
+  ctx: SessionContext,
+  appToken: string,
+): Promise<number> {
+  if (!pendingActions?.length) return 0;
+  if (!ctx.channelId || !ctx.conversationId) {
+    clog.warn(
+      `[webhook/result] cannot post ${pendingActions.length} write approval card(s): originating thread context is missing`,
+    );
+    return 0;
+  }
+
+  let approvalCardsSent = 0;
+  for (const action of pendingActions) {
+    const targetValidation = await pendingActionTargetValidation(action, ctx, appToken);
+    if (targetValidation.error) {
+      clog.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+      continue;
+    }
+
+    const params = recordParam(action["params"]);
+    const actionDesc = formatActionDescription(String(action["tool"] ?? ""), params, targetValidation);
+    const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+      serverType: String(action["serverType"] ?? ""),
+      tool: String(action["tool"] ?? ""),
+      params,
+      userId: String(action["userId"] ?? ""),
+      signature: String(action["signature"] ?? ""),
+      agentSlug: ctx.agentSlug ?? "",
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+    }), ctx.spacesAppId);
+
+    if (action["tool"] === "spaces-memory-create" && params["content"]) {
+      const memContent = String(params["content"]);
+      const memDocType = typeof params["docType"] === "string" ? params["docType"] : "fact";
+      const form = new FormData();
+      const blob = new Blob([memContent], { type: "text/markdown" });
+      form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
+      form.append("channelId", ctx.channelId);
+      form.append("conversationId", ctx.conversationId);
+      form.append("userId", ctx.spacesAppUserId);
+      form.append("flow", JSON.stringify(writeFlow));
+      await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
+    } else {
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        flow: writeFlow,
+        userId: ctx.spacesAppUserId,
+      }, appToken);
+    }
+    approvalCardsSent += 1;
+  }
+
+  return approvalCardsSent;
+}
+
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
  * agent's result as an approve/decline flow — with attachments when present.
@@ -3572,6 +3631,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     };
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     pendingResponses?: Array<{ responseId: string; message: string }>;
+    pendingActions?: Array<Record<string, unknown>>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
     // one-click button below the agent's reply so the user can promote the
     // remaining work to a /goal autonomous loop. See start-goal handling in
@@ -4448,6 +4508,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // self-heals instead of its caller receiving a blank and nobody retrying.
     if (payload.emptyReason === "provider_capacity" && !forwardText.trim()) {
       await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
+    }
+    if (payload.pendingActions?.length) {
+      try {
+        const approvalCardsSent = await postPendingWriteApprovalCards(payload.pendingActions, ctx, ctx.appToken);
+        log.info(`Automation: posted ${approvalCardsSent}/${payload.pendingActions.length} write action approval(s) in thread ${ctx.conversationId}`);
+      } catch (err) {
+        // Keep forwarding the automation result if Spaces temporarily rejects a
+        // card post. The pending action remains unexecuted and fail-closed.
+        log.warn("Automation: failed to post write action approval card", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     await forwardResult(ctx.resultForwardUrl, payload, forwardText);
     return;
