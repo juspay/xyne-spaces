@@ -50,7 +50,7 @@ export function FilterSelect({
           </span>
         </SelectValue>
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent align='end'>
         {options.map(option => (
           <SelectItem key={option.value || 'all'} value={option.value || 'all'}>
             <span className='flex min-w-0 items-center gap-2'>

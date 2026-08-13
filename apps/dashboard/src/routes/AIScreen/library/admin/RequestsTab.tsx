@@ -49,6 +49,7 @@ import { orgLabel } from './orgLabel';
 import { PersonPill } from '../shared/primitives/PersonPill';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 type RequestKindTag = 'agent' | 'skill' | 'mcp' | 'workflow';
@@ -454,11 +455,11 @@ export function RequestsTab({
                       data-track-category='Claw Admin'
                       data-track-name='Open requested item'
                     >
-                      {row.title}
+                      <HighlightMatch text={row.title} query={query} />
                     </button>
                   ) : (
                     <span className='truncate text-sm font-medium text-foreground'>
-                      {row.title}
+                      <HighlightMatch text={row.title} query={query} />
                     </span>
                   )}
                   {showOrgLabels && row.orgName && <OrgBadge orgName={row.orgName} />}

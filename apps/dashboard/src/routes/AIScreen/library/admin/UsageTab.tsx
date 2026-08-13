@@ -11,6 +11,7 @@ import { AdminTable, OrgBadge } from './components/AdminTable';
 import { orgLabel } from './orgLabel';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
 
 const fmt = (n: number): string => n.toLocaleString();
 
@@ -124,7 +125,9 @@ export function UsageTab({
                 key={`${stat.orgId ?? 'org'}:${stat.agentSlug}`}
                 className='border-b border-border hover:bg-muted/40'
               >
-                <td className='whitespace-nowrap px-4 py-3 text-foreground'>{stat.agentSlug}</td>
+                <td className='whitespace-nowrap px-4 py-3 text-foreground'>
+                  <HighlightMatch text={stat.agentSlug} query={query} />
+                </td>
                 {showOrgLabels && (
                   <td className='whitespace-nowrap px-4 py-3'>
                     <OrgBadge orgName={orgLabel(stat.orgId, stat.orgName, orgNamesById)} />

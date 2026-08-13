@@ -19,6 +19,7 @@ import { orgLabel } from './orgLabel';
 import { PersonPill } from '../shared/primitives/PersonPill';
 import { AdminFooterPortal, AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
 
 const PAGE_SIZE = 50;
 
@@ -221,7 +222,7 @@ export function ScheduledTab({
             )}
             <td className='max-w-[14rem] px-4 py-3 align-top leading-5'>
               <Badge variant='secondary' className='-ml-2 max-w-full truncate font-mono'>
-                {job.agentSlug}
+                <HighlightMatch text={job.agentSlug} query={query} />
               </Badge>
             </td>
             <td className='px-4 py-3 align-top leading-5'>
@@ -231,7 +232,11 @@ export function ScheduledTab({
             </td>
             <td className='max-w-[18rem] px-4 py-3 align-top text-xs leading-5 text-muted-foreground'>
               <div className='flex flex-col gap-1'>
-                {job.label && <span className='break-words text-foreground'>{job.label}</span>}
+                {job.label && (
+                  <span className='break-words text-foreground'>
+                    <HighlightMatch text={job.label} query={query} />
+                  </span>
+                )}
                 {job.type === 'cron' && job.cronExpression && (
                   <span className='break-words font-mono'>{job.cronExpression}</span>
                 )}

@@ -2,11 +2,11 @@ import { useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  PluginAddonDefault,
   ChevronDown,
   DeleteDustbin01,
   MultipleCrossCancelCircle,
   PhotoImagePlus,
-  PluginAddonDefault,
   Slack,
   UserArrowDown,
   UserArrowUp,
@@ -39,6 +39,8 @@ import { SlackCommandDialog } from './components/SlackCommandDialog';
 import { orgLabel } from './orgLabel';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
+import { SurfaceLogo } from './components/SurfaceLogo';
 import { PersonPill } from '../shared/primitives/PersonPill';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
@@ -62,6 +64,7 @@ const slackBadgeLabel = (status: SlackAgentStatus): string => {
 function AgentRow({
   agent,
   actions,
+  query,
   showRegistration,
   showOrgLabels,
   orgNamesById,
@@ -69,6 +72,7 @@ function AgentRow({
 }: {
   agent: Agent;
   actions: ReactElement;
+  query: string;
   showRegistration: boolean;
   showOrgLabels: boolean;
   orgNamesById: Record<string, string>;
@@ -78,43 +82,46 @@ function AgentRow({
   const ownerLabel = agent.owner?.name ?? agent.owner?.email ?? 'Unknown owner';
 
   return (
-    <li className='flex items-center justify-between gap-3 border-b border-border px-1 py-4'>
-      <div className='flex min-w-0 items-center gap-3'>
-        <div className='flex min-w-0 flex-wrap items-center gap-2'>
-          <span className='truncate text-sm font-medium text-foreground'>{agent.name}</span>
+    <li className='flex flex-col gap-1 border-b border-border px-1 py-4'>
+      <div className='flex items-center justify-between gap-3'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <span className='truncate text-sm font-medium text-foreground'>
+            <HighlightMatch text={agent.name} query={query} />
+          </span>
           {showOrgLabels && visibleOrgName && <OrgBadge orgName={visibleOrgName} />}
-          {slackStatus?.manifestStale && <Pill tone='warning'>Slack app update required</Pill>}
-          {showRegistration ? (
-            <Pill tone={isRegistered(agent) ? 'success' : 'neutral'}>
-              <span className='flex items-center gap-1'>
-                {isRegistered(agent) ? 'Registered' : 'Not registered'}
-                {isRegistered(agent) && (
-                  <Tooltip content='Registered on Spaces' side='top'>
-                    <span className='inline-flex'>
-                      <PluginAddonDefault className='size-3 shrink-0' aria-label='Spaces' />
-                    </span>
-                  </Tooltip>
-                )}
-                {slackStatus?.status === 'installed' && (
-                  <Tooltip content={slackBadgeLabel(slackStatus)} side='top'>
-                    <span className='inline-flex'>
-                      <Slack className='size-3 shrink-0' aria-label='Slack' />
-                    </span>
-                  </Tooltip>
-                )}
-              </span>
-            </Pill>
-          ) : (
-            agent.ownerUserId && (
-              <span className='flex min-w-0 items-center gap-1 text-xs text-muted-foreground'>
-                owner:
-                <PersonPill userId={agent.ownerUserId} name={ownerLabel} className='truncate' />
-              </span>
-            )
-          )}
         </div>
+        <div className='flex shrink-0 items-center gap-2'>{actions}</div>
       </div>
-      <div className='flex shrink-0 items-center gap-2'>{actions}</div>
+
+      {showRegistration ? (
+        <div className='flex min-w-0 flex-wrap items-center gap-2'>
+          <Pill tone={isRegistered(agent) ? 'success' : 'neutral'}>
+            {isRegistered(agent) ? 'Registered' : 'Not registered'}
+          </Pill>
+          {isRegistered(agent) && (
+            <Tooltip content='Registered on Spaces' side='top'>
+              <span className='inline-flex'>
+                <SurfaceLogo surface='spaces' label='Spaces' />
+              </span>
+            </Tooltip>
+          )}
+          {slackStatus?.status === 'installed' && (
+            <Tooltip content={slackBadgeLabel(slackStatus)} side='top'>
+              <span className='inline-flex'>
+                <SurfaceLogo surface='slack' label='Slack' />
+              </span>
+            </Tooltip>
+          )}
+          {slackStatus?.manifestStale && <Pill tone='warning'>Slack app update required</Pill>}
+        </div>
+      ) : (
+        agent.ownerUserId && (
+          <span className='flex min-w-0 items-center gap-1 text-xs text-muted-foreground'>
+            owner:
+            <PersonPill userId={agent.ownerUserId} name={ownerLabel} className='truncate' />
+          </span>
+        )
+      )}
     </li>
   );
 }
@@ -123,6 +130,7 @@ function AgentSection({
   heading,
   agents,
   emptyText,
+  query,
   renderActions,
   showRegistration,
   showOrgLabels,
@@ -132,6 +140,7 @@ function AgentSection({
   heading: string;
   agents: Agent[];
   emptyText: string;
+  query: string;
   renderActions: (agent: Agent) => ReactElement;
   showRegistration: boolean;
   showOrgLabels: boolean;
@@ -140,7 +149,7 @@ function AgentSection({
 }): ReactElement {
   return (
     <section className='flex flex-col gap-3 pt-4'>
-      <h3 className='text-sm font-semibold text-foreground'>
+      <h3 className='text-md font-semibold text-foreground'>
         {heading} ({agents.length})
       </h3>
       {agents.length === 0 ? (
@@ -152,6 +161,7 @@ function AgentSection({
               key={agent.id}
               agent={agent}
               actions={renderActions(agent)}
+              query={query}
               showRegistration={showRegistration}
               showOrgLabels={showOrgLabels}
               orgNamesById={orgNamesById}
@@ -354,7 +364,7 @@ export function AgentsTab({
             onSelect={() => registration.start(agent)}
             className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
           >
-            <PluginAddonDefault className='mr-2 size-4' />
+            <SurfaceLogo surface='spaces' label='' className='mr-2 size-4' />
             {hasApp && !registered ? 'Spaces (resume setup)' : 'Spaces'}
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -362,7 +372,7 @@ export function AgentsTab({
             onSelect={() => onSlackConnect(agent)}
             className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
           >
-            <Slack className='mr-2 size-4' />
+            <SurfaceLogo surface='slack' label='' className='mr-2 size-4' />
             {slackLabel(slack.byAgentId[agent.id], slack.isReady)}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -385,6 +395,7 @@ export function AgentsTab({
       )}
 
       <AgentSection
+        query={query}
         heading='Global Agents'
         agents={globalAgents}
         emptyText='No global agents.'
@@ -430,6 +441,7 @@ export function AgentsTab({
       />
 
       <AgentSection
+        query={query}
         heading='Personal Agents'
         agents={personalAgents}
         emptyText='No personal agents.'

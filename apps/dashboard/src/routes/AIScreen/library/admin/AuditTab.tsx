@@ -19,6 +19,7 @@ import { adminAuditKey, auditAgentOptionsKey } from './hooks/adminQueryKeys';
 import { orgLabel } from './orgLabel';
 import { AdminFooterPortal, AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
 
 const PAGE_SIZE = 50;
 
@@ -193,7 +194,7 @@ export function AuditTab({
               </td>
             )}
             <td className='px-4 py-3 text-muted-foreground'>
-              {auditDescription(entry.description)}
+              <HighlightMatch text={auditDescription(entry.description)} query={query} />
             </td>
           </tr>
         ))}

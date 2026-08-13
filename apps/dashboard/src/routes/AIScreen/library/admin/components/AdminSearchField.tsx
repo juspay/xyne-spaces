@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { SearchDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault, SearchDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 
 export function AdminSearchField({
@@ -8,6 +8,7 @@ export function AdminSearchField({
   placeholder,
   ariaLabel,
   trackName,
+  trackCategory = 'Claw Admin',
   className,
 }: {
   value: string;
@@ -15,6 +16,7 @@ export function AdminSearchField({
   placeholder: string;
   ariaLabel: string;
   trackName: string;
+  trackCategory?: string;
   className?: string;
 }): ReactElement {
   return (
@@ -40,10 +42,22 @@ export function AdminSearchField({
         data-1p-ignore
         data-lpignore='true'
         data-bwignore='true'
-        data-track-category='Claw Admin'
+        data-track-category={trackCategory}
         data-track-name={trackName}
         className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground'
       />
+      {value && (
+        <button
+          type='button'
+          onClick={() => onChange('')}
+          aria-label={`Clear ${ariaLabel.toLowerCase()}`}
+          data-track-category={trackCategory}
+          data-track-name={`${trackName}: clear`}
+          className='flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground'
+        >
+          <MultipleCrossCancelDefault className='size-3.5' aria-hidden />
+        </button>
+      )}
     </div>
   );
 }

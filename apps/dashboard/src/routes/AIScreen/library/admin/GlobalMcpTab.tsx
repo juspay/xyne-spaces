@@ -21,6 +21,7 @@ import type { AdminMcpServerSummary, CredentialField } from '@/services/claw/cla
 import { TabMessage } from './components/TabMessage';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
 import { credentialFieldsKey, globalMcpKey } from './hooks/adminQueryKeys';
 
 function CredentialsForm({
@@ -231,7 +232,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                   <div className='flex min-w-0 flex-1 items-center gap-3'>
                     <div className='flex min-w-0 flex-wrap items-center gap-2'>
                       <span className='truncate text-sm font-medium text-foreground'>
-                        {server.name}
+                        <HighlightMatch text={server.name} query={query} />
                       </span>
                       <Pill tone={server.hasGlobalCredentials ? 'success' : 'neutral'}>
                         {server.hasGlobalCredentials ? 'Creds set' : 'No creds'}

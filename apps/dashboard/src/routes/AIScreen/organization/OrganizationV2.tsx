@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Crown, Loader2, ShieldCheck, UserRound } from 'lucide-react';
-import { DeleteDustbin01, PlusDefault, SearchDefault, BuildingApartmentTwo } from '@xyne/icons';
+import { DeleteDustbin01, PlusDefault, BuildingApartmentTwo } from '@xyne/icons';
 import Avatar from '@/components/ui/Avatar/Avatar';
 import { Button } from '@/components/ui/Button/index';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -23,6 +23,7 @@ import type { AddableOrgRole, OrgMemberRow, OrgRole } from '@/services/claw/claw
 import { Pill } from '../library/shared/primitives/Pill';
 import { BehaviourSelect } from '../library/agents/detail/behaviour/BehaviourRows';
 import { AdminPager } from '../library/admin/components/AdminTable';
+import { AdminSearchField } from '../library/admin/components/AdminSearchField';
 import { DetailCard, DetailEmptyState } from '../library/shared/primitives/DetailPrimitives';
 import { PersonPill } from '../library/shared/primitives/PersonPill';
 import { AddOrgMemberDialog } from './AddOrgMemberDialog';
@@ -242,22 +243,15 @@ const OrganizationV2 = (): ReactElement => {
             trackPrefix='Organization tab'
           />
           {activeTab === 'members' && (
-            <div className='flex items-center gap-2 border-b border-border pb-1 pt-1 focus-within:border-foreground'>
-              <SearchDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-              <input
-                type='text'
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Escape') setQuery('');
-                }}
-                placeholder='Search members'
-                aria-label='Search members'
-                data-track-category='Claw Organization'
-                data-track-name='Organization: search members'
-                className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground'
-              />
-            </div>
+            <AdminSearchField
+              value={query}
+              onChange={setQuery}
+              placeholder='Search members'
+              ariaLabel='Search members'
+              trackCategory='Claw Organization'
+              trackName='Organization: search members'
+              className='w-full'
+            />
           )}
         </div>
       </div>

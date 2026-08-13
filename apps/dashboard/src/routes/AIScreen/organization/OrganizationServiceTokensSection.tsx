@@ -247,6 +247,7 @@ export function OrganizationServiceTokensSection({
 
       <TitledDialogV2
         open={createOpen}
+        className='p-4'
         onOpenChange={open => {
           if (!open) closeCreate();
           else setCreateOpen(true);
@@ -302,7 +303,7 @@ export function OrganizationServiceTokensSection({
           </div>
         ) : (
           <div className='flex flex-col gap-4'>
-            <label className='flex flex-col gap-1.5 text-xs font-medium text-foreground'>
+            <label className='flex flex-col gap-2 text-xs font-medium text-foreground'>
               Name
               <input
                 value={name}
@@ -316,7 +317,7 @@ export function OrganizationServiceTokensSection({
               <span className='font-normal text-muted-foreground'>{name.length}/60 characters</span>
             </label>
 
-            <div className='flex flex-col gap-1.5 text-xs font-medium text-foreground'>
+            <div className='flex flex-col gap-2 text-xs font-medium text-foreground'>
               <span>Run as member</span>
               {boundMember ? (
                 <div className='flex items-center gap-2 rounded-[10px] border border-border px-3 py-2'>
@@ -387,7 +388,7 @@ export function OrganizationServiceTokensSection({
               )}
             </div>
 
-            <div className='flex flex-col gap-1.5 text-xs font-medium text-foreground'>
+            <div className='flex flex-col gap-2 text-xs font-medium text-foreground'>
               <span>Allowed agents</span>
               {allowedAgentSlugs.length > 0 && (
                 <div className='flex flex-wrap gap-1.5'>
@@ -457,7 +458,7 @@ export function OrganizationServiceTokensSection({
               </span>
             </div>
 
-            <label className='flex flex-col gap-1.5 text-xs font-medium text-foreground'>
+            <label className='flex flex-col gap-2 text-xs font-medium text-foreground'>
               Expiry (optional)
               <input
                 type='datetime-local'
