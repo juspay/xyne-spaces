@@ -1,46 +1,67 @@
 #!/usr/bin/env node
 /**
- * Generate local dev secrets in backend/.env.local.
- *
- * Only replaces placeholder/empty values so a developer's real secrets are never
- * overwritten. Called by scripts/start-services.sh after .env.local is created
- * from .env.example.
+ * Generate missing local development secrets without replacing user values.
+ * Generate backend development secrets without replacing user values.
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-// The backend moved to apps/backend in the pnpm-workspace restructure. Both are
-// accepted so this works on branches either side of that change.
+const defaultRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = process.env.XYNE_REPO_ROOT || defaultRoot;
 const backendDir = existsSync(join(repoRoot, "apps", "backend"))
   ? join(repoRoot, "apps", "backend")
   : join(repoRoot, "backend");
-const envPath = join(backendDir, ".env.local");
+const backendPath = join(backendDir, ".env.local");
 const webPushPath = join(backendDir, "node_modules", "web-push", "src", "index.js");
 
-if (!existsSync(envPath)) {
-  console.error(`${envPath} not found`);
-  process.exit(1);
+for (const envPath of [backendPath]) {
+  if (!existsSync(envPath)) {
+    console.error(`${envPath} not found`);
+    process.exit(1);
+  }
 }
 
-let env = readFileSync(envPath, "utf8");
+const files = new Map([
+  [backendPath, readFileSync(backendPath, "utf8")],
+]);
+const PLACEHOLDER_PATTERNS = /^(set-me|change-?me.*|placeholder|replace-with-.*|REPLACE_WITH.*|YOUR_.*|.*example\.com.*)$/i;
 
-function setIfPlaceholder(key, newValue, isPlaceholder) {
-  const regex = new RegExp(`^(${key}=).*?$`, "gm");
-  let replaced = false;
-  env = env.replace(regex, (match, prefix) => {
-    const currentValue = match.slice(prefix.length);
-    if (isPlaceholder(currentValue)) {
-      replaced = true;
-      console.log(`Generated ${key}`);
-      return `${prefix}${newValue}`;
-    }
-    return match;
-  });
-  return replaced;
+function isPlaceholder(value) {
+  const normalized = (value ?? "").trim();
+  return normalized.length === 0 || PLACEHOLDER_PATTERNS.test(normalized);
 }
+
+function readValue(envPath, key) {
+  const match = [...files.get(envPath).matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].at(-1);
+  return match?.[1]?.trim() ?? "";
+}
+
+function setValue(envPath, key, value, onlyPlaceholder = true) {
+  let contents = files.get(envPath);
+  const regex = new RegExp(`^${key}=.*$`, "gm");
+  const current = readValue(envPath, key);
+  if (onlyPlaceholder && !isPlaceholder(current)) return false;
+
+  if (regex.test(contents)) {
+    contents = contents.replace(regex, `${key}=${value}`);
+  } else {
+    contents = `${contents.replace(/\n?$/, "\n")}${key}=${value}\n`;
+  }
+  files.set(envPath, contents);
+  console.log(`Generated ${key} in backend env`);
+  return true;
+}
+
+function randomHex(bytes) {
+  return randomBytes(bytes).toString("hex");
+}
+
+setValue(backendPath, "JWT_SECRET", randomHex(48));
+
+setValue(backendPath, "ZERO_AUTH_SECRET", randomHex(48));
+setValue(backendPath, "ENCRYPTION_KEY", randomHex(32));
 
 let vapidKeys = null;
 try {
@@ -51,23 +72,11 @@ try {
   console.warn(`Could not generate VAPID keys: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-const PLACEHOLDER_PATTERNS = /^(set-me|changeme|placeholder|REPLACE_WITH.*|YOUR_.*|.*example\.com.*)$/i;
-
-function isPlaceholder(value) {
-  const v = (value ?? "").trim();
-  return v.length === 0 || PLACEHOLDER_PATTERNS.test(v);
-}
-
-// JWT-style secrets: 48 random bytes → 96 hex chars (well above 32-char minimum)
-setIfPlaceholder("JWT_SECRET", randomBytes(48).toString("hex"), isPlaceholder);
-setIfPlaceholder("ZERO_AUTH_SECRET", randomBytes(48).toString("hex"), isPlaceholder);
-
-// AES-256-GCM: 32 bytes → 64 hex chars
-setIfPlaceholder("ENCRYPTION_KEY", randomBytes(32).toString("hex"), isPlaceholder);
-
 if (vapidKeys) {
-  setIfPlaceholder("VAPID_PUBLIC_KEY", vapidKeys.publicKey, isPlaceholder);
-  setIfPlaceholder("VAPID_PRIVATE_KEY", vapidKeys.privateKey, isPlaceholder);
+  setValue(backendPath, "VAPID_PUBLIC_KEY", vapidKeys.publicKey);
+  setValue(backendPath, "VAPID_PRIVATE_KEY", vapidKeys.privateKey);
 }
 
-writeFileSync(envPath, env);
+for (const [envPath, contents] of files) {
+  writeFileSync(envPath, contents);
+}

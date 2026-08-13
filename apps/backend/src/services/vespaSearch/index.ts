@@ -498,16 +498,18 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
             return '';
           };
           const snippetForIdx = (chunkIndex: number): string => {
+            // `chunks` on a hit is pruned by `select-elements-by: best_chunks`,
+            // so it holds the top-scoring chunks RE-NUMBERED from 0.
+            // `chunks_pos_summary` is `chunks_pos` pruned by the same selector,
+            // so it maps a document chunk index to its slot in that array.
+            // Indexing `chunks` by the document index instead served one chunk's
+            // text under another chunk's page — the reason every citation came
+            // back as chunk 0. Unplaceable text is dropped, not guessed at.
             const at = chunksPosSummary.indexOf(chunkIndex);
-            const fromSummary =
-              at >= 0 ? chunksSummary[at] : chunksSummary[chunkIndex];
-            const fromSummaryText = pickToText(fromSummary);
-            if (fromSummaryText) return fromSummaryText;
+            if (at < 0) return '';
             // Strip the [Page N] ingestion prefix to match kb-get-chunks output.
-            return pickToText(chunksFull[chunkIndex]).replace(
-              /^\[Page \d+(-\d+)?\]\s*/,
-              '',
-            );
+            return (pickToText(chunksSummary[at]) || pickToText(chunksFull[at]))
+              .replace(/^\[Page \d+(-\d+)?\]\s*/, '');
           };
           for (const r of ranked) {
             if (hits.length >= limitParsed) break;

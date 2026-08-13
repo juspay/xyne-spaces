@@ -28,6 +28,7 @@ type FlowComponentType =
   | 'image'
   | 'link'
   | 'plan'
+  | 'agent'
   | 'pr';
 
 interface FlowComponentStyle {

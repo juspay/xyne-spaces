@@ -51,6 +51,12 @@ export const flowActionSchema = z.discriminatedUnion('type', [
     type: z.literal('navigate'),
     target: z.string(),
   }),
+  // Client-only: writes `value` to the clipboard. No network call, no app backend.
+  z.object({
+    type: z.literal('copy'),
+    value: z.string(),
+    successMessage: z.string().optional(),
+  }),
 ]);
 
 // ============================================================================
@@ -520,6 +526,128 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+// ── Agent artifact ────────────────────────────────────────────────────────────
+// ONE node renders every agent surface. The identity block (name / slug /
+// description / model / capabilities / system prompt) is INVARIANT across
+// variants — that identity IS the artifact. `variant` discriminates only the
+// chrome: which header chip, which footer affordances, and whether the
+// capability chips are interactive.
+//
+//   draft   → the agent does NOT exist yet. `phase` walks pending → created |
+//             rejected on the SAME message (post once, then updateMessage the
+//             same screenId), exactly like the plan card.
+//   profile → a live agent, read-only ("tell me about this agent").
+//
+// Extension rule: a new surface is a NEW UNION BRANCH, never a new field on an
+// existing one — existing emitters keep validating unchanged. Presentational
+// key/value rows (model settings, limits, quotas) go in `agent.details` and need
+// no schema change at all; only making a field EDITABLE earns a new branch.
+//
+// INVARIANT: props are PRESENTATION ONLY. Every identifier the server acts on
+// (requestId, agentSlug, the acting userId, routing) lives in flowJSON.data —
+// the whole flowJSON round-trips through the client, so props are untrusted.
+export const agentCapabilitySchema = z
+  .object({
+    /** Subagent name or custom tool slug — the identifier config.tools stores. */
+    id: z.string().min(1),
+    label: z.string().min(1),
+    kind: z.enum(['subagent', 'tool']),
+    /**
+     * MCP serverType whose brand icon represents this capability, e.g. "github".
+     * Set server-side (the subagent name and the icon key differ — "spaces" is
+     * served by "xyne-spaces"), so the renderer never has to guess a filename.
+     */
+    iconKey: z.string().optional(),
+    /** serverType whose account/credentials this capability needs, when unconnected. */
+    requiresConnection: z.string().optional(),
+  })
+  .strict();
+
+/** Presentational label/value row (model, thinking level, limits, …). */
+export const agentDetailRowSchema = z
+  .object({
+    label: z.string().min(1),
+    value: z.string(),
+  })
+  .strict();
+
+export const agentIdentitySchema = z
+  .object({
+    name: z.string().min(1),
+    slug: z.string().min(1),
+    /** Handle credited under the name ("Built by @fractal-agent") — who authored it. */
+    builtBy: z.string().optional(),
+    description: z.string().optional(),
+    /** Full system prompt — revealed in the expanded view, never the card body. */
+    systemPrompt: z.string().optional(),
+    modelId: z.string().optional(),
+    /**
+     * Hex tint the agent is created with, e.g. '#6366f1'. Carried so the card
+     * reflects what gets persisted; no current surface paints with it (the cards
+     * render no avatar).
+     */
+    color: z.string().optional(),
+    capabilities: z.array(agentCapabilitySchema).optional(),
+    details: z.array(agentDetailRowSchema).optional(),
+    connectLinks: z
+      .array(
+        z
+          .object({
+            serverType: z.string().min(1),
+            displayName: z.string().min(1),
+            authUrl: z.string().url(),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+
+export const agentDraftPhaseSchema = z.enum(['pending', 'created', 'rejected']);
+
+export const agentPropsSchema = z.discriminatedUnion('variant', [
+  z
+    .object({
+      variant: z.literal('draft'),
+      phase: agentDraftPhaseSchema,
+      agent: agentIdentitySchema,
+      // Seeds state.values[node.id] — the capability ids kept by the user. The
+      // live selection then lives in flow state (the plan card's pattern), so
+      // `capabilities` stays byte-identical across variants.
+      selected: z.array(z.string()).optional(),
+      // Muted footnote, e.g. "skipped unknown tools: foo, bar".
+      note: z.string().optional(),
+      // Audit for the decided phases.
+      decidedBy: z.string().optional(),
+      /** User id of the decider — renders their avatar beside the audit line. */
+      decidedById: z.string().optional(),
+      decidedAt: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      variant: z.literal('profile'),
+      agent: agentIdentitySchema,
+      note: z.string().optional(),
+    })
+    .strict(),
+]);
+
+export const agentComponentSchema = baseComponentSchema.extend({
+  type: z.literal('agent'),
+  props: agentPropsSchema,
+});
+
+// TS mirrors inferred from the schema so the two can't drift.
+export type AgentCapability = z.infer<typeof agentCapabilitySchema>;
+export type AgentDetailRow = z.infer<typeof agentDetailRowSchema>;
+export type AgentIdentity = z.infer<typeof agentIdentitySchema>;
+export type AgentProps = z.infer<typeof agentPropsSchema>;
+export type AgentVariant = AgentProps['variant'];
+export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
+export type AgentDraftPhase = AgentDraftProps['phase'];
+export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -540,6 +668,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    agentComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),

@@ -20,7 +20,18 @@ import {
   chatMessageRepository,
   agentChainWorkflowRepository,
   activeGoalRepository,
+  agentRequestRepository,
 } from "../repositories/index.js";
+import { buildAvailableToolsCatalog } from "./tools.js";
+import {
+  identityFromAgentRow,
+  identityFromDraftSpec,
+  isValidAgentSlug,
+  resolveAgentCapabilities,
+  toolIdsFromConfig,
+  unknownToolsNote,
+  type DraftAgentSpec,
+} from "../lib/agent-card.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
@@ -88,7 +99,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
@@ -3229,6 +3240,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // Turn 1 finishes. Renders the plan card in the thread (proposed → Approve
     // gate, or trivial → auto-execute Turn 2). Wire contract, never for twin.
     pendingPlan?: { title: string; desc?: string; document?: string; todos: Array<{ id: string; title: string }>; trivial: boolean };
+    // Agent authoring: set by claw's propose-agent terminal tool. Renders the
+    // `agent` artifact card (variant "draft", phase "pending") and awaits the
+    // user's approval — nothing is created until they approve. A union because
+    // the same card serves other agent surfaces (a read-only profile next).
+    pendingAgentCard?:
+      | { variant: "draft"; agent: DraftAgentSpec }
+      | { variant: "profile"; slug?: string };
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -4268,8 +4286,248 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
-  // Notify user if result is empty (but not if copilot has pendingResponses)
-  if (!resultWithCitations.trim() && !payload.pendingResponses?.length) {
+  // ── Agent authoring: propose-agent drafted an agent ────────────────────────
+  // Handled HERE — before the empty-result notice below (propose-agent ships
+  // result: "" because the CARD is the deliverable) and before the normal
+  // text-posting path. Conversation mode only: a draft needs a human to approve
+  // it, and the twin flow has its own approval surface.
+  //
+  // Nothing is created here. The draft is persisted as an AgentRequest row and
+  // the card carries only its requestId, so the spec the user approves is the
+  // spec that gets created — it never round-trips through the browser.
+  const pendingAgentCard = payload.pendingAgentCard;
+  const agentCardDeliverable =
+    ctx.responseMode === "conversation" && !!ctx.agentSlug && !!ctx.agentOrgId;
+  if (pendingAgentCard && !agentCardDeliverable) {
+    // The card can't be posted without a thread and an org. Falling through
+    // lands on the empty-result notice ("Sorry…"), which is honest but says
+    // nothing about why — log the real reason so this is one grep away instead
+    // of a mystery.
+    log.warn(
+      `[agent-card] dropping ${pendingAgentCard.variant} card — responseMode=${ctx.responseMode} agentSlug=${ctx.agentSlug ?? "(none)"} orgId=${ctx.agentOrgId ?? "(none)"}`,
+    );
+  }
+
+  // ── Capability card: the agent describing itself ───────────────────────────
+  // Emitted by describe-agent ("what can you do?"). Unlike the draft, this does
+  // NOT short-circuit: the card accompanies the reply, so we post it and let the
+  // normal text path run. `postedAgentProfileCard` then stops the empty-result
+  // notice from firing when the card WAS the whole answer.
+  //
+  // Authority: the identity is read from the target agent's own row. The pod
+  // only names a slug — nothing the model wrote reaches this card, so an agent
+  // cannot advertise a capability it was never granted.
+  let postedAgentProfileCard = false;
+  if (pendingAgentCard?.variant === "profile" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const targetSlug = pendingAgentCard.slug?.trim() || ctx.agentSlug!;
+      const row = await agentRepository.findBySlug(targetSlug, ctx.agentOrgId);
+      if (!row) {
+        log.info(`[agent-card] profile card skipped — no agent "${targetSlug}" in org ${ctx.agentOrgId}`);
+      } else {
+        const catalog = await buildAvailableToolsCatalog(undefined, ctx.agentOrgId);
+        const resolved = await resolveAgentCapabilities(
+          toolIdsFromConfig(row.config),
+          catalog,
+          ctx.senderId,
+        );
+        const flow = withSpacesAppId(
+          buildAgentCardFlow(
+            { variant: "profile", agent: identityFromAgentRow(row, resolved) },
+            {
+              agentSlug: ctx.agentSlug!,
+              targetSlug,
+              userId: ctx.senderId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+            },
+          ),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted profile card for ${targetSlug} conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      // Non-fatal: the reply itself still posts below.
+      log.warn("Failed to post agent profile card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (
+    pendingAgentCard?.variant === "draft" &&
+    ctx.responseMode === "conversation" &&
+    ctx.agentSlug &&
+    ctx.agentOrgId
+  ) {
+    const token = ctx.appToken;
+    const spec = pendingAgentCard.agent;
+    try {
+      const orgId = ctx.agentOrgId;
+      const requesterId = ctx.senderId;
+
+      // Fail loudly on the card rather than silently creating a mis-slugged
+      // agent: the pod normalizes, so an invalid slug here means drift.
+      if (!isValidAgentSlug(spec.slug)) {
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: `⚠️ I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
+          userId: ctx.spacesAppUserId,
+          metadata: { contentFormat: "markdown" },
+        }, token);
+        log.warn(`[agent-card] rejected draft with invalid slug "${spec.slug}" conv=${ctx.conversationId}`);
+        await deleteSession(sessionId).catch(() => {});
+        return;
+      }
+
+      // Duplicate slug: catch it NOW, while the agent can still be re-asked,
+      // instead of at approval time when the user has already committed.
+      const existing = await agentRepository.findBySlug(spec.slug, orgId);
+      if (existing) {
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: `⚠️ An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
+          userId: ctx.spacesAppUserId,
+          metadata: { contentFormat: "markdown" },
+        }, token);
+        log.info(`[agent-card] draft dropped — slug ${spec.slug} already exists in org ${orgId}`);
+        await deleteSession(sessionId).catch(() => {});
+        return;
+      }
+
+      // Resolve the requested tools against THIS org's catalog. Unmatched
+      // tokens are reported on the card and never persisted.
+      const catalog = await buildAvailableToolsCatalog(undefined, orgId);
+      const resolved = await resolveAgentCapabilities(spec.tools ?? [], catalog, requesterId);
+      const note = unknownToolsNote(resolved.unknown);
+      if (resolved.unknown.length > 0) {
+        log.info(`[agent-card] draft ${spec.slug}: unmatched tools [${resolved.unknown.join(", ")}]`);
+      }
+
+      // The draft itself lives server-side. proposedContent is what the approve
+      // path re-reads and creates — the card is display only.
+      const proposedContent = JSON.stringify(spec);
+      const outcome = await agentRequestRepository.supersedeAndCreateAgentCreate({
+        agentSlug: spec.slug,
+        requesterId,
+        orgId,
+        proposedContent,
+        proposedContentHash: hashSkillContent(proposedContent),
+      });
+      if (outcome.supersededCount > 0) {
+        log.info(`[agent-card] superseded ${outcome.supersededCount} stale draft(s) for ${spec.slug} by ${requesterId}`);
+      }
+
+      // A lead-in line so the card isn't dropped into the thread wordlessly. The
+      // agent's own `summary` (why it made these calls) when it wrote one;
+      // otherwise a neutral line — never a restatement of the card, which would
+      // just be the same content twice.
+      const leadIn =
+        spec.summary?.trim() ||
+        `I've drafted an agent for this — have a look and approve it below if it's right.`;
+      try {
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: leadIn,
+          userId: ctx.spacesAppUserId,
+          metadata: { contentFormat: "markdown" },
+        }, token);
+      } catch (e) {
+        // Non-fatal: the card is the deliverable and still posts below.
+        log.warn("Failed to post agent-draft lead-in (non-fatal)", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug);
+      const flow = withSpacesAppId(
+        buildAgentCardFlow(
+          {
+            variant: "draft",
+            phase: "pending",
+            agent: identity,
+            ...(note ? { note } : {}),
+          },
+          {
+            requestId: outcome.request.id,
+            agentSlug: ctx.agentSlug,
+            userId: requesterId,
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+          },
+        ),
+        ctx.spacesAppId,
+      );
+
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        flow,
+        userId: ctx.spacesAppUserId,
+      }, token);
+      log.info(`[agent-card] posted draft card slug=${spec.slug} request=${outcome.request.id} conv=${ctx.conversationId}`);
+
+      // Persist an assistant transcript row: the interactive card exists only in
+      // Spaces, so without this the claw chat shows nothing for this turn and the
+      // next user message groups as a sibling branch. Same reasoning as the plan
+      // card's transcript row above.
+      try {
+        const capabilityLine = identity.capabilities?.length
+          ? `\n\n**Capabilities:** ${identity.capabilities.map((c) => c.label).join(", ")}`
+          : "";
+        const parentId = await chatMessageRepository
+          .latestMessageId(ctx.conversationId, ctx.agentSlug)
+          .catch(() => null);
+        await chatMessageRepository.create({
+          conversationId: ctx.conversationId,
+          agentSlug: ctx.agentSlug,
+          userId: runOwnerId,
+          orgId,
+          ...(parentId ? { parentId } : {}),
+          role: "assistant",
+          content: `**🤖 Drafted an agent — ${identity.name}** (\`${identity.slug}\`)\n\n${identity.description ?? ""}${capabilityLine}\n\n_Approve the card to create it._`,
+          status: "completed",
+          ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+        });
+      } catch (e) {
+        log.warn("Failed to persist agent-draft assistant transcript row (non-fatal)", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    } catch (err) {
+      log.error("Failed to post agent draft card", {
+        error: err instanceof Error ? err.message : String(err),
+        slug: spec.slug,
+      });
+      try {
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: "⚠️ I drafted the agent but couldn't post it for approval. Please try again.",
+          userId: ctx.spacesAppUserId,
+          metadata: { contentFormat: "markdown" },
+        }, token);
+      } catch {
+        // The user already lost this turn; don't compound it with a throw.
+      }
+    }
+    await deleteSession(sessionId).catch(() => {});
+    return;
+  }
+
+  // Notify user if result is empty (but not if copilot has pendingResponses, and
+  // not when a capability card was just posted — there the card IS the answer
+  // and an apology under it would be nonsense).
+  if (!resultWithCitations.trim() && !payload.pendingResponses?.length && !postedAgentProfileCard) {
     if (ctx.responseMode === "approval") {
       log.warn("Empty result in approval mode — skipping (no thread message)");
       await deleteSession(sessionId);

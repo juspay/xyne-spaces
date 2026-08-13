@@ -271,11 +271,52 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3333
+      # VictoriaLogs datasource isn't bundled with core Grafana.
+      - GF_INSTALL_PLUGINS=victoriametrics-logs-datasource
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=victoriametrics-logs-datasource
     volumes:
       - grafana_data:/var/lib/grafana
       - ./docker/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - victoriametrics
+      - victorialogs-errors
+    # Lets webhook contact points (e.g. the Desk alert integration) reach the
+    # backend running on the host, same as zero-cache's ZERO_MUTATE_URL below.
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+
+  # VictoriaLogs - error-only log instance (fed by Fluent Bit below)
+  victorialogs-errors:
+    image: victoriametrics/victoria-logs:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-victorialogs-errors
+    command:
+      - '--storageDataPath=/storage'
+      - '--httpListenAddr=:9428'
+      - '--retentionPeriod=1' # Month; this instance only holds deduped errors
+    ports:
+      - "${VICTORIALOGS_ERRORS_BIND_PORT:-9428}:9428"
+    volumes:
+      - victorialogs_errors_data:/storage
+    restart: unless-stopped
+
+  # Fluent Bit - receives backend error logs over the Fluentd forward
+  # protocol (streamed directly from Winston, see apps/backend/src/utils/logger.ts),
+  # normalizes + hashes them via the Lua filter, and forwards them to the
+  # victorialogs-errors instance above.
+  fluent-bit:
+    image: fluent/fluent-bit:3.1
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-fluent-bit
+    volumes:
+      - ./docker/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
+      - ./docker/fluent-bit/normalize_hash.lua:/fluent-bit/etc/normalize_hash.lua
+    ports:
+      - "${FLUENT_BIT_HTTP_BIND_PORT:-2020}:2020" # Fluent Bit metrics/health
+      # Backend runs on the host in local dev, so it connects to this forward
+      # input over localhost (LOG_FLUENT_HOST/LOG_FLUENT_PORT in .env.local).
+      - "${FLUENT_BIT_FORWARD_BIND_PORT:-24224}:24224"
+    depends_on:
+      - victorialogs-errors
     restart: unless-stopped
 
   # Superposition - Feature Flag & Configuration Management
@@ -330,6 +371,8 @@ volumes:
   fake_gcs_data:
     driver: local
   victoriametrics_data:
+    driver: local
+  victorialogs_errors_data:
     driver: local
   grafana_data:
     driver: local

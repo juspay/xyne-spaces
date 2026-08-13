@@ -298,7 +298,6 @@ export function setupRequestInterceptor(): void {
     }
   );
 
-  // Handle responses for auth-related actions
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: [`${config.BACKEND_URL}/*`] },
     (details, callback) => {
@@ -318,7 +317,8 @@ export function setupRequestInterceptor(): void {
     }
   );
   
-  // Start with native OS picker by default — matches the CAC default (customPickerEnabled: false).
+  // Start with native OS picker by default — mat
+  // Handle responses for auth-related actionsches the CAC default (customPickerEnabled: false).
   // CustomLiveKitRoom will call setCustomScreenPickerEnabled(true) if CAC enables the custom picker.
   setCustomScreenPickerEnabled(false);
 

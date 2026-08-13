@@ -164,6 +164,7 @@ import {
   onFlowTicketStatusChanged,
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
+import { getEncryptionProvider } from '@/services/encryption';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -246,6 +247,7 @@ export type AuthData = {
   name: string;
   displayName?: string | null;
   workspaceId: string;
+  orgId: string;
   role: string;
   orgRole: string;
   memberId: string;
@@ -1086,7 +1088,7 @@ export function createMutators(
 
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
-          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
+          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", orgId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
@@ -14166,6 +14168,8 @@ export function createMutators(
               .one(),
           );
           if (existing) throw new Error('Organization name already exists');
+
+          await getEncryptionProvider().initializeOrg(orgId);
 
           await tx.mutate.organizations.insert({
             orgId,
