@@ -7,6 +7,7 @@ import React, {
   useEffect,
 } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
@@ -175,6 +176,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         commands: true,
         fileAttachments: true,
         emojiPicker: true,
+        selectionToolbar: true,
       },
       blockedExtensions,
       maxFiles = 10,
@@ -1452,6 +1454,35 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             {features.richText && !isMobile && showFormatToolbar && (
               <EditorToolbar editor={editor} />
             )}
+
+            {/*
+              Desktop: floating formatting toolbar on text selection (Slack-style).
+              Reuses the same EditorToolbar in a TipTap BubbleMenu — mirrors the
+              pattern already shipping in EmailEditorToolbar. Suppressed while the
+              docked toolbar is open (to avoid two toolbars), inside a code block,
+              or when the composer is disabled.
+            */}
+            {features.richText &&
+              !isMobile &&
+              features.selectionToolbar !== false &&
+              editor && (
+                <BubbleMenu
+                  editor={editor}
+                  pluginKey='composerFormattingBubble'
+                  shouldShow={({ editor: e, from, to }) =>
+                    from !== to &&
+                    !disabled &&
+                    !showFormatToolbar &&
+                    !e.isActive('codeBlock')
+                  }
+                  options={{ placement: 'top', offset: 8, flip: true, shift: { padding: 8 } }}
+                  className='z-50'
+                >
+                  <div className='overflow-hidden rounded-[10px] border border-border bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-md'>
+                    <EditorToolbar editor={editor} variant='compact' />
+                  </div>
+                </BubbleMenu>
+              )}
 
             {/* Conditionally render mobile or desktop layout */}
             {isMobile ? (
