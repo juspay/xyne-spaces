@@ -39,6 +39,7 @@ import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
+import { trustedSdlcWikiToolBindings } from "../sdlc-wiki-tool-bindings.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, type ExperimentContext } from "../experiment.js";
@@ -1715,6 +1716,7 @@ async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
+    const trustedWikiToolBindings = trustedSdlcWikiToolBindings(agentConfig?.["sdlcContext"]);
     const {
       groups: mcpGroups,
       cleanup,
@@ -1728,6 +1730,7 @@ async function processTask(
       agentSlug,
       mcpOutputDir,
       (att) => pushAttachment(progressUrl, sessionId, att),
+      trustedWikiToolBindings,
     );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
@@ -1813,6 +1816,14 @@ async function processTask(
       !Array.isArray(trustedSdlcContext["execution"])
         ? (trustedSdlcContext["execution"] as Record<string, unknown>)
         : undefined;
+    const trustedSdlcWiki =
+      trustedSdlcContext?.["wiki"] &&
+      typeof trustedSdlcContext["wiki"] === "object" &&
+      !Array.isArray(trustedSdlcContext["wiki"])
+        ? (trustedSdlcContext["wiki"] as Record<string, unknown>)
+        : undefined;
+    const isTrustedSdlcWikiRun =
+      trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki !== undefined;
     if (trustedSdlcRepository) {
       if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
       if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
@@ -1836,6 +1847,23 @@ async function processTask(
       ) {
         meta["sdlcRuntimeCredentialOperation"] =
           trustedSdlcPermissions?.["writeRequested"] === true ? "PUSH" : "CLONE";
+      }
+    }
+    if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
+      meta["sdlcWikiRun"] = "true";
+      if (typeof trustedSdlcWiki["role"] === "string") {
+        meta["sdlcWikiRole"] = trustedSdlcWiki["role"];
+      }
+      if (Array.isArray(trustedSdlcWiki["assignedCommitShas"])) {
+        meta["sdlcWikiAssignedCommitShas"] = JSON.stringify(
+          trustedSdlcWiki["assignedCommitShas"].filter(value => typeof value === "string"),
+        );
+      }
+      if (typeof trustedSdlcWiki["bootstrapRef"] === "string") {
+        meta["sdlcWikiBootstrapRef"] = trustedSdlcWiki["bootstrapRef"];
+      }
+      if (typeof trustedSdlcWiki["targetHeadSha"] === "string") {
+        meta["sdlcWikiTargetHeadSha"] = trustedSdlcWiki["targetHeadSha"];
       }
     }
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
@@ -3575,6 +3603,10 @@ async function processTask(
         userName,
         userEmail,
         customTools: tools,
+        // Wiki source is isolated in the Kata repository sandbox. Removing the
+        // local Claw cwd tools prevents the model from guessing host workspace
+        // paths; historical reads must use sandbox-sdlc-wiki-git-context.
+        localFileTools: !isTrustedSdlcWikiRun,
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,

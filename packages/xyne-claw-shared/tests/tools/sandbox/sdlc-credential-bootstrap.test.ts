@@ -108,6 +108,21 @@ describe("SDLC sandbox credential bootstrap", () => {
     );
   });
 
+  it("selects anonymous read-only Git without installing credential material", async () => {
+    process.env.SPACES_BACKEND_URL = "https://spaces.example";
+    process.env.XYNE_CLAW_S2S_KEY = "s2s-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ anonymous: true }) }),
+    );
+    const session = mockSession("sandbox-public");
+
+    await expect(
+      installSdlcGitCredentialBootstrap(session, { ...binding, operation: "CLONE" }),
+    ).resolves.toBe("anonymous");
+    expect(session.files.write).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps PAT identity discovery and commit attribution inside the sandbox script", async () => {
     process.env.SPACES_BACKEND_URL = "https://spaces.example";
     process.env.XYNE_CLAW_S2S_KEY = "s2s-key";

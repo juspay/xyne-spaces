@@ -296,3 +296,48 @@ register("xyne-spaces", "spaces-sdlc-create-pull-request", async (params) => {
   if (params["head"] === params["base"]) return "head must differ from base";
   return null;
 });
+
+for (const tool of [
+  "spaces-sdlc-wiki-list-pages",
+  "spaces-sdlc-wiki-read-page",
+  "spaces-sdlc-wiki-begin-checkpoint",
+  "spaces-sdlc-wiki-write-page",
+  "spaces-sdlc-wiki-move-page",
+  "spaces-sdlc-wiki-finalize-commit",
+]) {
+  register("xyne-spaces", tool, async (params) => {
+    for (const key of ["executionId", "sessionId", "repoId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (tool === "spaces-sdlc-wiki-read-page" && !String(params["path"] ?? "").trim()) {
+      return "path is required";
+    }
+    if (
+      tool === "spaces-sdlc-wiki-begin-checkpoint" ||
+      tool === "spaces-sdlc-wiki-write-page" ||
+      tool === "spaces-sdlc-wiki-move-page" ||
+      tool === "spaces-sdlc-wiki-finalize-commit"
+    ) {
+      if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
+        return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
+      }
+    }
+    if (tool === "spaces-sdlc-wiki-write-page") {
+      if (!params["page"] || typeof params["page"] !== "object" || Array.isArray(params["page"])) {
+        return "page must be one Wiki page action";
+      }
+    }
+    if (tool === "spaces-sdlc-wiki-move-page") {
+      for (const key of ["sourcePath", "destinationPath", "expectedContentHash"]) {
+        if (!String(params[key] ?? "").trim()) return `${key} is required`;
+      }
+    }
+    if (tool === "spaces-sdlc-wiki-finalize-commit") {
+      if (!String(params["summary"] ?? "").trim()) return "summary is required";
+      if (!['changes', 'noop'].includes(String(params["outcome"] ?? ''))) {
+        return "outcome must be changes or noop";
+      }
+    }
+    return null;
+  });
+}

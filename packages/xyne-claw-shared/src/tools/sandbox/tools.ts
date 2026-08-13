@@ -12,6 +12,7 @@ import {
   installSdlcGitCredentialBootstrap,
   type SdlcRuntimeCredentialBinding,
 } from "./sdlc-credential-bootstrap.js";
+import { classifyWikiCommitRelevance, parseWikiNameStatus } from "./sdlc-wiki-policy.js";
 
 const sandboxLog = createLogger("sandbox-tools");
 
@@ -162,14 +163,18 @@ export function buildSandboxStoreKey(userId: string | undefined, conversationId:
   return slug ? `${cidSeg}_${slug}` : cidSeg;
 }
 
-function isStaleSessionError(err: unknown): boolean {
+export function isStaleSessionError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
 function ownerFromContext(context: { meta?: Record<string, string> } | undefined): SessionOwner | undefined {
   const userId = context?.meta?.["userId"]?.trim();
-  const conversationId = context?.meta?.["conversationId"]?.trim();
+  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
+  const conversationId =
+    context?.meta?.["sdlcWikiRun"] === "true" && executionId
+      ? `chat-sdlc-wiki-${executionId}`
+      : context?.meta?.["conversationId"]?.trim();
   if (!userId || !conversationId) return undefined;
   return {
     userId,
@@ -179,9 +184,14 @@ function ownerFromContext(context: { meta?: Record<string, string> } | undefined
 }
 
 function storeKeyFromContext(context: { meta?: Record<string, string> } | undefined): string | undefined {
+  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
+  const conversationId =
+    context?.meta?.["sdlcWikiRun"] === "true" && executionId
+      ? `chat-sdlc-wiki-${executionId}`
+      : context?.meta?.["conversationId"];
   return buildSandboxStoreKey(
     context?.meta?.["userId"],
-    context?.meta?.["conversationId"],
+    conversationId,
     context?.meta?.["agentSlug"],
   );
 }
@@ -442,6 +452,11 @@ export interface RepoSetupConfig {
   repoUrl?: string;
   defaultBranch: string;
   cloneDepth?: number;
+  /** Git partial-clone filter. Wiki sandboxes use blobless history so old
+   *  source is fetched lazily instead of cloning every historical blob. */
+  cloneFilter?: "blob:none" | "tree:0";
+  cloneSingleBranch?: boolean;
+  cloneTimeoutMs?: number;
   workDir: string;
   template: string;
   sessionTimeoutMs?: number;
@@ -476,6 +491,27 @@ export interface RepoSetupConfig {
   skipBakedCloneWait?: boolean;
   /** Durable binding used to mint a fresh one-use envelope for each sandbox bootstrap. */
   runtimeCredentialBinding?: SdlcRuntimeCredentialBinding;
+}
+
+export function buildRepoCloneCommand(
+  config: RepoSetupConfig,
+  baseBranch: string,
+): string {
+  if (!config.repoUrl) {
+    throw new Error("Repository URL is required for clone");
+  }
+
+  return [
+    "git clone",
+    config.cloneDepth ? `--depth ${config.cloneDepth}` : "",
+    config.cloneFilter ? `--filter=${config.cloneFilter}` : "",
+    config.cloneSingleBranch ? "--single-branch" : "",
+    `--branch ${baseBranch}`,
+    config.repoUrl,
+    config.workDir,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export const SANDBOX_CONFIG_SCHEMA = {
@@ -1509,8 +1545,15 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             log.push(`Reusing existing sandbox session ${cached.id}`);
             if (config.runtimeCredentialBinding) {
               await cleanupSdlcGitCredentialMaterial(cached).catch(() => undefined);
-              await installSdlcGitCredentialBootstrap(cached, config.runtimeCredentialBinding);
-              log.push("SDLC bootstrap refreshed: PAT helper and PAT-account commit identity installed.");
+              const credentialMode = await installSdlcGitCredentialBootstrap(
+                cached,
+                config.runtimeCredentialBinding,
+              );
+              log.push(
+                credentialMode === "credential"
+                  ? "SDLC bootstrap refreshed: PAT helper and PAT-account commit identity installed."
+                  : "SDLC bootstrap refreshed: anonymous read-only Git access selected.",
+              );
             }
             try {
               // The pod prebakes a shallow clone of the default branch.
@@ -1545,7 +1588,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
             if (config.runtimeCredentialBinding) {
-              log.push("Git author and committer are bound to the sandbox-fetched PAT account.");
+              log.push("SDLC Git access binding refreshed for this run.");
             } else {
               await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
             }
@@ -1585,13 +1628,20 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       log.push(`Session created: ${session.id}`);
       if (config.runtimeCredentialBinding) {
         try {
-          await installSdlcGitCredentialBootstrap(session, config.runtimeCredentialBinding);
+          const credentialMode = await installSdlcGitCredentialBootstrap(
+            session,
+            config.runtimeCredentialBinding,
+          );
+          log.push(
+            credentialMode === "credential"
+              ? "SDLC bootstrap completed: PAT helper and PAT-account commit identity installed."
+              : "SDLC bootstrap completed: anonymous read-only Git access selected.",
+          );
         } catch (error) {
           await session.destroy().catch(() => undefined);
           evictSession(session, storeKey);
           throw error;
         }
-        log.push("SDLC bootstrap completed: PAT helper and PAT-account commit identity installed.");
       }
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
@@ -1760,10 +1810,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // Should never happen with the agent-workspace image (entrypoint
         // prebakes the clone), but kept as a safety net for older / bare
         // sandbox templates that haven't been migrated.
-        const cloneCmd = `git clone ${config.cloneDepth ? `--depth ${config.cloneDepth}` : ""} --branch ${baseBranch} ${config.repoUrl} ${config.workDir}`;
+        const cloneCmd = buildRepoCloneCommand(config, baseBranch);
         log.push(`No baked clone — cloning ${config.repoUrl} (${baseBranch})...`);
         const cloneJobId = await session.commands.runDetached(cloneCmd);
-        await pollUntilDone(cloneJobId, "git clone", 5 * 60_000);
+        await pollUntilDone(cloneJobId, "git clone", config.cloneTimeoutMs ?? 5 * 60_000);
         log.push("Cutting branch: " + branchName);
         const branchJobId = await session.commands.runDetached(
           `cd ${config.workDir} && (git checkout ${branchName} 2>/dev/null || git checkout -b ${branchName})`,
@@ -1780,7 +1830,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
       if (config.runtimeCredentialBinding) {
-        log.push("Git author and committer are bound to the sandbox-fetched PAT account.");
+        log.push("SDLC Git access binding configured for this run.");
       } else {
         await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
       }
@@ -1999,6 +2049,389 @@ export const gitRead: ToolDefinition = {
         return "Error: sandbox session died (pod replaced). Call sandbox-repo-setup to re-provision.";
       }
       return sandboxErr(err);
+    }
+  },
+};
+
+const WIKI_GIT_SHA = /^[0-9a-f]{40}$/i;
+const WIKI_GIT_REF = /^[0-9a-f]{9,40}$/i;
+const WIKI_GIT_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[^\0\r\n]+$/;
+const WIKI_GIT_CUMULATIVE_OUTPUT_LIMIT = 5_000_000;
+export const WIKI_GIT_COMMAND_TIMEOUT_MS = 120_000;
+export const WIKI_GIT_METADATA_TIMEOUT_MS = 30_000;
+const WIKI_GIT_OUTPUT_BYTES = new Map<string, number>();
+
+class WikiGitCommandTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Wiki Git sandbox command exceeded the ${timeoutMs}ms wall-clock deadline`);
+    this.name = "WikiGitCommandTimeoutError";
+  }
+}
+
+/**
+ * The sandbox SDK receives its own timeout, but a disconnected command stream
+ * can fail to settle that promise. Keep the agent run bounded independently.
+ */
+export async function withWikiGitWallClockTimeout<T>(
+  startOperation: () => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new WikiGitCommandTimeoutError(timeoutMs)), timeoutMs);
+      timer.unref?.();
+    });
+    // Defer the SDK invocation by one microtask so the deadline is armed even
+    // when the SDK does synchronous work before returning its command promise.
+    const operation = Promise.resolve().then(startOperation);
+    return await Promise.race([operation, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function runWikiGitCommand(session: Session, command: string, timeoutMs: number) {
+  return withWikiGitWallClockTimeout(() => session.commands.run(command, timeoutMs), timeoutMs);
+}
+
+function wikiGitSandboxFailure(
+  error: unknown,
+  session: Session,
+  storeKey: string,
+): string | null {
+  if (error instanceof WikiGitCommandTimeoutError) {
+    evictSession(session, storeKey);
+    void session.destroy().catch(() => undefined);
+    return "Error: sandbox command timed out; sandbox was evicted — call sandbox-repo-setup to recreate it.";
+  }
+  if (isStaleSessionError(error)) {
+    evictSession(session, storeKey);
+    return "Error: sandbox session died; call sandbox-repo-setup to recreate it.";
+  }
+  return null;
+}
+
+export function wikiGitOutputBudgetKey(
+  context: ToolExecutionContext,
+  sandboxStoreKey: string,
+): string {
+  const agentSessionId = context.meta?.["sdlcSessionId"]?.trim();
+  return agentSessionId ? `${sandboxStoreKey}:${agentSessionId}` : sandboxStoreKey;
+}
+
+function recordWikiGitOutput(key: string, bytes: number): void {
+  if (!WIKI_GIT_OUTPUT_BYTES.has(key) && WIKI_GIT_OUTPUT_BYTES.size >= 1_000) {
+    const oldest = WIKI_GIT_OUTPUT_BYTES.keys().next().value;
+    if (typeof oldest === "string") WIKI_GIT_OUTPUT_BYTES.delete(oldest);
+  }
+  WIKI_GIT_OUTPUT_BYTES.set(key, bytes);
+}
+
+export function truncateWikiGitOutput(value: string, maxBytes: number): {
+  value: string;
+  totalBytes: number;
+  truncated: boolean;
+} {
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maxBytes) return { value, totalBytes: buffer.length, truncated: false };
+  return {
+    value: buffer.subarray(0, maxBytes).toString("utf8"),
+    totalBytes: buffer.length,
+    truncated: true,
+  };
+}
+
+function wikiGitArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function wikiAllowedRefs(context: ToolExecutionContext): Set<string> {
+  const refs = new Set<string>();
+  const raw = context.meta?.["sdlcWikiAssignedCommitShas"];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const value of parsed) if (typeof value === "string" && WIKI_GIT_SHA.test(value)) refs.add(value);
+      }
+    } catch { /* invalid trusted context is rejected by the empty set */ }
+  }
+  for (const key of ["sdlcWikiBootstrapRef", "sdlcWikiTargetHeadSha"]) {
+    const value = context.meta?.[key];
+    if (value && WIKI_GIT_SHA.test(value)) refs.add(value);
+  }
+  return refs;
+}
+
+export function resolveWikiGitCommitRef(
+  requestedRef: string,
+  allowedRefs: ReadonlySet<string>,
+): string | null {
+  const requested = requestedRef.trim().toLowerCase();
+  if (!WIKI_GIT_REF.test(requested)) return null;
+  const matches = [...allowedRefs]
+    .map((ref) => ref.toLowerCase())
+    .filter((ref) => ref.startsWith(requested));
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+function wikiGitDisplayRef(ref: string, allowedRefs: ReadonlySet<string>): string {
+  for (let length = 9; length < ref.length; length += 1) {
+    const prefix = ref.slice(0, length);
+    if ([...allowedRefs].filter((candidate) => candidate.startsWith(prefix)).length === 1) {
+      return prefix;
+    }
+  }
+  return ref;
+}
+
+export function sanitizeWikiGitCommitOutput(
+  value: string,
+  canonicalRef: string,
+  displayRef: string,
+): string {
+  return value.replaceAll(canonicalRef, displayRef);
+}
+
+/** Historical Git reader dedicated to backend-supervised SDLC Wiki runs. */
+export const sdlcWikiGitContext: ToolDefinition = {
+  slug: "sandbox-sdlc-wiki-git-context",
+  name: "SDLC Wiki Git Context",
+  description:
+    "Read bounded historical code for the trusted SDLC Wiki run. " +
+    "No checkout, branch, commit, push, reset, clean, interpreter, or arbitrary shell input.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: ["commit_context", "range_context", "read_patch", "read_file", "list_tree", "search", "path_history"],
+      },
+      commitSha: { type: "string" },
+      beforeSha: { type: "string", description: "Trusted history-window boundary ref." },
+      afterSha: { type: "string", description: "Trusted history-window endpoint ref." },
+      path: { type: "string" },
+      pattern: { type: "string" },
+      maxBytes: { type: "number", description: "Maximum returned bytes; capped at 500000." },
+      offset: {
+        type: "number",
+        description: "Byte offset for read_patch continuation; defaults to 0.",
+      },
+    },
+    required: ["operation"],
+  },
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    if (context.meta?.["sdlcWikiRun"] !== "true") return "Error: tool is restricted to SDLC Wiki runs.";
+    const operation = String(params["operation"] ?? "");
+    const requestedCommitRef =
+      typeof params["commitSha"] === "string" ? params["commitSha"].trim() : "";
+    const requestedPath = typeof params["path"] === "string" ? params["path"].trim() : "";
+    const requestedBeforeRef = typeof params["beforeSha"] === "string" ? params["beforeSha"].trim() : "";
+    const requestedAfterRef = typeof params["afterSha"] === "string" ? params["afterSha"].trim() : "";
+    const pattern = typeof params["pattern"] === "string" ? params["pattern"] : "";
+    const maximumBytes = 500_000;
+    const requestedMax = Number(params["maxBytes"] ?? maximumBytes);
+    const requestedOffset = Number(params["offset"] ?? 0);
+    const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0 ? requestedOffset : -1;
+    const maxBytes = Math.max(
+      1_000,
+      Math.min(maximumBytes, Number.isFinite(requestedMax) ? requestedMax : maximumBytes),
+    );
+
+    const allowedRefs = wikiAllowedRefs(context);
+    const isRangeRequest =
+      operation === "range_context" ||
+      (operation === "read_patch" && Boolean(requestedBeforeRef || requestedAfterRef));
+    const rangeBeforeIsRoot =
+      isRangeRequest &&
+      requestedBeforeRef === "ROOT_BOOTSTRAP" &&
+      context.meta?.["sdlcWikiBootstrapRef"] === "ROOT_BOOTSTRAP";
+    const rangeBeforeSha = rangeBeforeIsRoot
+      ? null
+      : resolveWikiGitCommitRef(requestedBeforeRef, allowedRefs);
+    const rangeAfterSha = resolveWikiGitCommitRef(requestedAfterRef, allowedRefs);
+    if (isRangeRequest && ((!rangeBeforeIsRoot && !rangeBeforeSha) || !rangeAfterSha)) {
+      return "Error: range boundary is not assigned to this Wiki run.";
+    }
+    const commitSha =
+      isRangeRequest ? rangeAfterSha! : resolveWikiGitCommitRef(requestedCommitRef, allowedRefs);
+    if (!commitSha) {
+      return "Error: commit is not assigned to this Wiki run.";
+    }
+    const displayCommitRef = wikiGitDisplayRef(commitSha, allowedRefs);
+    if (requestedPath && !WIKI_GIT_PATH.test(requestedPath)) return "Error: invalid repository-relative path.";
+    if (pattern && (pattern.length > 500 || /[\0\r\n]/.test(pattern))) return "Error: invalid search pattern.";
+    if (operation === "read_patch" && offset < 0) {
+      return "Error: offset must be a non-negative integer.";
+    }
+
+    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
+    if (!dynamicRepo) return "Error: trusted SDLC repository context is required.";
+    const storeKey = storeKeyFromContext(context);
+    if (!storeKey) return "Error: trusted Wiki execution identity is required.";
+    const session = SESSION_STORE.get(storeKey);
+    if (!session) return "Error: no sandbox session — call sandbox-repo-setup first.";
+    if (!isSessionOwnedByContext(session, storeKey, context)) return unauthorizedSessionMessage(session.id);
+    const outputBudgetKey = wikiGitOutputBudgetKey(context, storeKey);
+    const usedOutputBytes = WIKI_GIT_OUTPUT_BYTES.get(outputBudgetKey) ?? 0;
+    const remainingOutputBytes = WIKI_GIT_CUMULATIVE_OUTPUT_LIMIT - usedOutputBytes;
+    if (remainingOutputBytes <= 0) {
+      return "Error: Wiki Git cumulative output limit reached for this run.";
+    }
+    const boundedMaxBytes = Math.min(maxBytes, remainingOutputBytes);
+    const repoPath = dynamicRepo.config.workDir;
+    const git = `git -C ${wikiGitArg(repoPath)}`;
+    const patchPath =
+      isRangeRequest
+        ? `/tmp/sdlc-wiki-range-${(rangeBeforeSha ?? "root").slice(0, 12)}-${commitSha.slice(0, 12)}.patch`
+        : `/tmp/sdlc-wiki-${commitSha.toLowerCase()}.patch`;
+    if (operation === "commit_context" || operation === "range_context" || operation === "read_patch") {
+      try {
+        if (operation === "commit_context" || operation === "range_context") {
+          const diffBase = rangeBeforeSha ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+          const writeCommand =
+            operation === "range_context"
+              ? `${git} diff --find-renames --stat --patch --binary ${wikiGitArg(diffBase)} ${wikiGitArg(commitSha)} > ${wikiGitArg(patchPath)}`
+              : `${git} show --find-renames --format=fuller --stat --patch ${wikiGitArg(commitSha)} > ${wikiGitArg(patchPath)}`;
+          const written = await runWikiGitCommand(session, writeCommand, WIKI_GIT_COMMAND_TIMEOUT_MS);
+          if (written.exitCode !== 0) {
+            return redactAndStringify({ operation, stderr: written.stderr.slice(0, 20_000), exitCode: written.exitCode });
+          }
+        }
+        const readCommand = `dd if=${wikiGitArg(patchPath)} bs=1 skip=${offset} count=${boundedMaxBytes} 2>/dev/null`;
+        const result = await runWikiGitCommand(session, readCommand, WIKI_GIT_COMMAND_TIMEOUT_MS);
+        const sizeResult = await runWikiGitCommand(
+          session,
+          `wc -c < ${wikiGitArg(patchPath)}`,
+          WIKI_GIT_METADATA_TIMEOUT_MS,
+        );
+        const totalBytes = Number.parseInt(sizeResult.stdout.trim(), 10);
+        const returnedBytes = Buffer.byteLength(result.stdout, "utf8");
+        const consumedBytes = Number.isFinite(totalBytes)
+          ? Math.max(0, Math.min(boundedMaxBytes, totalBytes - offset))
+          : returnedBytes;
+        const nextOffset = offset + consumedBytes;
+        recordWikiGitOutput(outputBudgetKey, usedOutputBytes + consumedBytes);
+        let changedFiles;
+        let relevance;
+        let commits;
+        if (operation === "commit_context" || operation === "range_context") {
+          const diffBase = rangeBeforeSha ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+          const namesResult = await runWikiGitCommand(
+            session,
+            operation === "range_context"
+              ? `${git} diff --name-status --find-renames ${wikiGitArg(diffBase)} ${wikiGitArg(commitSha)}`
+              : `${git} show --first-parent --format= --name-status --find-renames ${wikiGitArg(commitSha)}`,
+            WIKI_GIT_METADATA_TIMEOUT_MS,
+          );
+          if (namesResult.exitCode !== 0) {
+            return redactAndStringify({
+              operation,
+              stderr: namesResult.stderr.slice(0, 20_000),
+              exitCode: namesResult.exitCode,
+            });
+          }
+          changedFiles = parseWikiNameStatus(namesResult.stdout);
+          relevance = classifyWikiCommitRelevance(changedFiles);
+          if (operation === "range_context") {
+            const logRange = rangeBeforeSha ? `${rangeBeforeSha}..${commitSha}` : commitSha;
+            const logResult = await runWikiGitCommand(
+              session,
+              `${git} log --first-parent --reverse --abbrev=9 --format=%h%x09%p%x09%aI%x09%s ${wikiGitArg(logRange)}`,
+              WIKI_GIT_METADATA_TIMEOUT_MS,
+            );
+            if (logResult.exitCode !== 0) {
+              return redactAndStringify({
+                operation,
+                stderr: logResult.stderr.slice(0, 20_000),
+                exitCode: logResult.exitCode,
+              });
+            }
+            commits = logResult.stdout
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => {
+                const [sha, parents, authoredAt, ...subject] = line.split("\t");
+                return { sha, parents: parents?.split(" ").filter(Boolean) ?? [], authoredAt, subject: subject.join("\t") };
+              });
+          }
+        }
+        return redactAndStringify({
+          operation,
+          stdout: sanitizeWikiGitCommitOutput(result.stdout, commitSha, displayCommitRef),
+          ...(operation === "commit_context" || operation === "range_context"
+            ? {
+                changedFiles,
+                relevance,
+                ...(commits ? { commits } : {}),
+                ...(operation === "range_context"
+                  ? {
+                      beforeRef: rangeBeforeSha
+                        ? wikiGitDisplayRef(rangeBeforeSha, allowedRefs)
+                        : "ROOT_BOOTSTRAP",
+                      afterRef: displayCommitRef,
+                    }
+                  : {}),
+              }
+            : {}),
+          patchPath,
+          offset,
+          nextOffset,
+          truncated: Number.isFinite(totalBytes) && nextOffset < totalBytes,
+          totalBytes: Number.isFinite(totalBytes) ? totalBytes : null,
+          stderr: result.stderr.slice(0, 20_000),
+          exitCode: result.exitCode,
+        });
+      } catch (error) {
+        const failure = wikiGitSandboxFailure(error, session, storeKey);
+        if (failure) return failure;
+        return sandboxErr(error);
+      }
+    }
+    let args: string[];
+    switch (operation) {
+      case "read_file":
+        if (!requestedPath) return "Error: path is required.";
+        args = ["show", `${commitSha}:${requestedPath}`];
+        break;
+      case "list_tree":
+        args = ["ls-tree", "-r", "--name-only", commitSha, ...(requestedPath ? ["--", requestedPath] : [])];
+        break;
+      case "search":
+        if (!pattern) return "Error: pattern is required.";
+        args = ["grep", "-n", "-I", "-e", pattern, commitSha, ...(requestedPath ? ["--", requestedPath] : [])];
+        break;
+      case "path_history":
+        if (!requestedPath) return "Error: path is required.";
+        args = ["log", "--follow", "--abbrev=9", "--format=%h%x09%aI%x09%s", commitSha, "--", requestedPath];
+        break;
+      default:
+        return "Error: unsupported Wiki Git operation.";
+    }
+    try {
+      const command = `${git} ${args.map(wikiGitArg).join(" ")}`;
+      const result = await runWikiGitCommand(session, command, WIKI_GIT_COMMAND_TIMEOUT_MS);
+      const bounded = truncateWikiGitOutput(result.stdout, boundedMaxBytes);
+      recordWikiGitOutput(
+        outputBudgetKey,
+        usedOutputBytes + Buffer.byteLength(bounded.value, "utf8"),
+      );
+      return redactAndStringify({
+        operation,
+        stdout: bounded.value,
+        truncated: bounded.truncated,
+        totalBytes: bounded.totalBytes,
+        stderr: result.stderr.slice(0, 20_000),
+        exitCode: result.exitCode,
+      });
+    } catch (error) {
+      const failure = wikiGitSandboxFailure(error, session, storeKey);
+      if (failure) return failure;
+      return sandboxErr(error);
     }
   },
 };
@@ -2365,7 +2798,13 @@ export function resolveDynamicSdlcRepositoryConfig(
       description: "Run-scoped public GitHub repository attached to an SDLC hub.",
       repoUrl,
       defaultBranch: baseBranch,
-      cloneDepth: 1,
+      ...(context.meta?.["sdlcWikiRun"] === "true"
+        ? {
+            cloneFilter: "blob:none" as const,
+            cloneSingleBranch: true,
+            cloneTimeoutMs: 30 * 60 * 1000,
+          }
+        : { cloneDepth: 1 }),
       workDir: `/workspace/${name}`,
       template: "kata-workspace-template",
       sessionTimeoutMs: 60 * 60 * 1000,

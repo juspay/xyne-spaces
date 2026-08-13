@@ -23,6 +23,30 @@ async function fetchAttachmentTool() {
   return tool;
 }
 
+async function wikiWriteTool() {
+  const mod = await import("./xyne-spaces-tools.js");
+  const tool = mod.tools.find((t) => t.name === "spaces-sdlc-wiki-write-page");
+  if (!tool) throw new Error("spaces-sdlc-wiki-write-page tool not found");
+  return tool;
+}
+
+describe("spaces-sdlc-wiki-write-page schema", () => {
+  it("declares action-specific required fields", async () => {
+    const tool = await wikiWriteTool();
+    const page = (tool.inputSchema.properties as Record<string, Record<string, unknown>>)["page"];
+    const branches = page?.["oneOf"] as Array<{ required?: string[] }>;
+
+    expect(branches).toHaveLength(5);
+    expect(branches.map(branch => branch.required)).toEqual(expect.arrayContaining([
+      expect.arrayContaining(["title", "markdown"]),
+      expect.arrayContaining(["expectedContentHash", "title", "markdown"]),
+      expect.arrayContaining(["expectedContentHash"]),
+      expect.arrayContaining(["expectedContentHash", "heading", "markdown"]),
+      expect.arrayContaining(["expectedContentHash", "heading"]),
+    ]));
+  });
+});
+
 function mockMeta(overrides: Partial<{
   id: string;
   originalFilename: string;

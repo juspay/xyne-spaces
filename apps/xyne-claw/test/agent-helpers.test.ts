@@ -1,5 +1,15 @@
 import { test, expect } from "vitest";
-import { contextWindowFor, capCustomToolOutput, isQuotaExhaustedError } from "../src/agent.js";
+import {
+  contextWindowFor,
+  capCustomToolOutput,
+  isQuotaExhaustedError,
+  localFileToolNames,
+} from "../src/agent.js";
+
+test("SDLC Wiki runs can remove every local filesystem tool from the agent palette", () => {
+  expect(localFileToolNames(false)).toEqual([]);
+  expect(localFileToolNames(true)).toEqual(["read", "write", "grep", "find", "ls"]);
+});
 
 test("isQuotaExhaustedError catches copilot/openrouter quota 429 variants", () => {
   // The copilot-proxy now emits this canonical body on a 429.

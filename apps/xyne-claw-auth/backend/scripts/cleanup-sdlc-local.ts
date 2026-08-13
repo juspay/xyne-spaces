@@ -1,7 +1,32 @@
 import { PrismaClient } from "@prisma/client";
+import { readFile } from "node:fs/promises";
 
 const prisma = new PrismaClient();
-const confirmed = process.argv.slice(2).includes("--yes");
+
+function parseArgs(): { confirmed: boolean; repoSelector?: string; clawScopeFile?: string } {
+  const args = process.argv.slice(2);
+  let confirmed = false;
+  let repoSelector: string | undefined;
+  let clawScopeFile: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      continue;
+    } else if (arg === "--yes") {
+      confirmed = true;
+    } else if (arg === "--repo" || arg.startsWith("--repo=")) {
+      if (repoSelector) throw new Error("--repo may only be supplied once");
+      repoSelector = arg === "--repo" ? args[++index] : arg.slice("--repo=".length);
+      if (!repoSelector) throw new Error("--repo requires a repository ID, name, or URL");
+    } else if (arg === "--claw-scope-file") {
+      clawScopeFile = args[++index];
+      if (!clawScopeFile) throw new Error("--claw-scope-file requires a path");
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+  return { confirmed, repoSelector, clawScopeFile };
+}
 
 function requireLocalDatabase(rawUrl: string | undefined): void {
   if (!rawUrl) throw new Error("DATABASE_URL is missing");
@@ -13,15 +38,43 @@ function requireLocalDatabase(rawUrl: string | undefined): void {
 
 async function main(): Promise<void> {
   requireLocalDatabase(process.env.DATABASE_URL);
-  const conversations = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT DISTINCT "conversationId" AS id
-      FROM agent_runs
-     WHERE "conversationId" LIKE 'chat-sdlc-%'
-    UNION
-    SELECT DISTINCT "conversationId" AS id
-      FROM chat_messages
-     WHERE "conversationId" LIKE 'chat-sdlc-%'
-  `;
+  const { confirmed, repoSelector, clawScopeFile } = parseArgs();
+  const scope = clawScopeFile
+    ? (JSON.parse(await readFile(clawScopeFile, "utf8")) as {
+        executionIds: string[];
+        conversationIds: string[];
+      })
+    : null;
+  if (repoSelector && !scope) {
+    throw new Error("Scoped Claw cleanup requires Spaces scope data; run pnpm sdlc:cleanup from repo root");
+  }
+  const conversations = repoSelector
+    ? await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+        `SELECT DISTINCT candidate.id
+           FROM (
+             SELECT "conversationId" AS id FROM agent_runs WHERE "conversationId" LIKE 'chat-sdlc-%'
+             UNION
+             SELECT "conversationId" AS id FROM chat_messages WHERE "conversationId" LIKE 'chat-sdlc-%'
+           ) candidate
+          WHERE candidate.id = ANY($1::text[])
+             OR EXISTS (
+               SELECT 1 FROM unnest($2::text[]) execution(id)
+                WHERE candidate.id = 'chat-sdlc-work-' || execution.id
+                   OR candidate.id LIKE 'chat-sdlc-setup-' || execution.id || '-%'
+                   OR candidate.id LIKE 'chat-sdlc-wiki-' || execution.id || '-%'
+             )`,
+        scope?.conversationIds ?? [],
+        scope?.executionIds ?? [],
+      )
+    : await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT DISTINCT "conversationId" AS id
+          FROM agent_runs
+         WHERE "conversationId" LIKE 'chat-sdlc-%'
+        UNION
+        SELECT DISTINCT "conversationId" AS id
+          FROM chat_messages
+         WHERE "conversationId" LIKE 'chat-sdlc-%'
+      `;
   const conversationIds = conversations.map((row) => row.id);
   const sessionIds = conversationIds.length
     ? (
