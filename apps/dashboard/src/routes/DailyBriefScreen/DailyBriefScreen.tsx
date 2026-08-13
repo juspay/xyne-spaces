@@ -1,11 +1,15 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Settings01 } from '@xyne/icons';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
-import { BriefHistoryMenu } from './BriefHistoryMenu';
+import { BriefHistoryMenu, HEADER_ICON_CLASS } from './BriefHistoryMenu';
+import { BriefSettingsDialog } from './BriefSettingsDialog';
 import { BriefLine, useBriefRenderContext, type BriefRenderContext } from './briefText';
 import { RawBriefView } from './RawBriefView';
 import { BriefSkeleton } from './BriefSkeleton';
@@ -171,7 +175,11 @@ const DailyBriefScreen = (): ReactElement => {
   const [regenerating, setRegenerating] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const mountedRef = useRef(true);
+  const navigate = useNavigate();
+  const { workspaceId } = useParams();
+  const briefPath = workspaceId ? `/${workspaceId}/ai/daily-brief` : '/ai/daily-brief';
   // Read on unmount, where component state is already stale.
   const regenerateStartedAtRef = useRef<number | null>(null);
   const isInPanelWebview = useIsInPanelWebview();
@@ -237,6 +245,8 @@ const DailyBriefScreen = (): ReactElement => {
   }, [selectedDate, history, latest]);
 
   const briefStatus = selected?.status;
+  const briefGenerating = briefStatus === 'generating';
+  const generationInFlight = regenerating || briefGenerating;
 
   useEffect(() => {
     if (!regenerating && briefStatus !== 'generating') return undefined;
@@ -253,7 +263,7 @@ const DailyBriefScreen = (): ReactElement => {
   }, [load]);
 
   const handleRegenerate = useCallback(async () => {
-    if (regenerating) return;
+    if (generationInFlight) return;
     setRegenerating(true);
     setProgress('Starting…');
     setError(null);
@@ -261,25 +271,43 @@ const DailyBriefScreen = (): ReactElement => {
       if (mountedRef.current) fn();
     };
     regenerateStartedAtRef.current = Date.now();
+    let failureMessage: string | null = null;
     try {
       await dailyBriefApi.regenerate({
         onStart: () => update(() => setProgress('Generating…')),
         onProgress: label => update(() => setProgress(label || 'Generating…')),
         onComplete: () => update(() => setProgress('Done')),
-        onError: message => update(() => setError(message)),
+        onError: message => {
+          failureMessage = message || 'Brief generation failed.';
+          update(() => setError(message));
+        },
       });
-      await load();
-      update(() => setSelectedDate(null));
+      if (failureMessage === null) {
+        await load();
+        update(() => setSelectedDate(null));
+        if (!mountedRef.current || document.hidden) {
+          toast.success('Your daily brief is ready', {
+            action: {
+              label: 'View',
+              onClick: () => {
+                void navigate(briefPath);
+              },
+            },
+          });
+        }
+      }
     } catch {
+      failureMessage = 'Regeneration failed.';
       update(() => setError('Regeneration failed.'));
     } finally {
+      if (failureMessage !== null) toast.error(failureMessage);
       regenerateStartedAtRef.current = null;
       update(() => {
         setRegenerating(false);
         setProgress(null);
       });
     }
-  }, [regenerating, load]);
+  }, [generationInFlight, load, navigate, briefPath]);
 
   const currentDate = selected?.date ?? null;
   const handleSelectDate = useCallback(
@@ -308,7 +336,6 @@ const DailyBriefScreen = (): ReactElement => {
   }, [selected]);
 
   const hasBrief = selected !== null;
-  const briefGenerating = briefStatus === 'generating';
   const isBusy = (loading && !selected) || regenerating || (!showRaw && briefGenerating);
 
   const actionLabel = ((): string => {
@@ -426,6 +453,17 @@ const DailyBriefScreen = (): ReactElement => {
           >
             {actionLabel}
           </button>
+          <button
+            type='button'
+            aria-label='Brief settings'
+            onClick={() => setSettingsOpen(true)}
+            style={APP_NO_DRAG_STYLE}
+            data-track-category='DailyBrief'
+            data-track-name='daily-brief-open-settings'
+            className={cn(HEADER_ICON_CLASS, settingsOpen && 'bg-accent text-foreground')}
+          >
+            <Settings01 size={18} />
+          </button>
           <BriefHistoryMenu
             history={history}
             selectedDate={currentDate}
@@ -458,6 +496,13 @@ const DailyBriefScreen = (): ReactElement => {
           {renderBody()}
         </article>
       </main>
+
+      <BriefSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onRegenerate={() => void handleRegenerate()}
+        busy={generationInFlight}
+      />
     </div>
   );
 };

@@ -68,7 +68,40 @@ export interface RegenerateHandlers {
   onError?: (message: string) => void;
 }
 
+/** Per-user brief config: the enable flag + custom instructions (GET/PUT /config). */
+export interface DailyBriefConfig {
+  enabled: boolean;
+  instructions: string;
+  updatedAt?: string | null;
+}
+
+/** Server-side cap on the instructions field (claw-auth MAX_INSTRUCTIONS). */
+export const DAILY_BRIEF_INSTRUCTIONS_LIMIT = 8000;
+
 export const dailyBriefApi = {
+  /** The user's brief enable flag + custom instructions. */
+  getConfig: async (): Promise<DailyBriefConfig> => {
+    const res = await apiInstance.get<DailyBriefConfig>('/daily-brief/config');
+    return {
+      enabled: Boolean(res.data?.enabled),
+      instructions: res.data?.instructions ?? '',
+      updatedAt: res.data?.updatedAt ?? null,
+    };
+  },
+
+  /** Save the enable flag and/or the custom instructions. */
+  saveConfig: async (payload: {
+    enabled?: boolean;
+    instructions?: string;
+  }): Promise<DailyBriefConfig> => {
+    const res = await apiInstance.put<DailyBriefConfig>('/daily-brief/config', payload);
+    return {
+      enabled: Boolean(res.data?.enabled),
+      instructions: res.data?.instructions ?? '',
+      updatedAt: res.data?.updatedAt ?? null,
+    };
+  },
+
   /** Today's stored brief (falls back to the most recent one). */
   getLatest: async (): Promise<DailyBriefLatest> => {
     const res = await apiInstance.get<DailyBriefLatest>('/daily-brief/latest');
