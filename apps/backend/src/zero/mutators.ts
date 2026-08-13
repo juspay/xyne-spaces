@@ -2243,11 +2243,6 @@ export function createMutators(
             id: userStatus.id,
             sectionId,
             sectionPosition: sectionId ? position : null,
-            // A channel assigned to a custom section must not also be starred:
-            // the sidebar renders Starred with absolute priority (a starred channel
-            // is skipped from every other bucket), so leaving isStarred set would
-            // keep the channel pinned in Starred and hidden from its new section.
-            // Clearing it here enforces the invariant for every caller (dialogs + DnD).
             ...(sectionId ? { isStarred: false } : {}),
             updatedAt: timestamp,
           });
