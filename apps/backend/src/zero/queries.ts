@@ -1807,8 +1807,26 @@ export const queries: AnyQueryRegistry = defineQueries({
       return zql.emails.where('conversationId', conversationId);
     }
   ),
+  // @deprecated Use getEmailsForConversationsV2 when channel membership is known.
   getEmailsForConversations: defineQuery(
     z.object({ conversationIds: z.array(z.string()) }),
+    ({ args: { conversationIds } }) => {
+      if (conversationIds.length === 0) {
+        return zql.emails
+          .where('conversationId', '__no_match__')
+          .related('attachments');
+      }
+      return zql.emails
+        .where('conversationId', 'IN', conversationIds)
+        .related('attachments');
+    }
+  ),
+  getEmailsForConversationsV2: defineQuery(
+    z.object({
+      conversationIds: z.array(z.string()),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ args: { conversationIds } }) => {
       // An empty `IN []` predicate is invalid in Zero/SQL, and this query body
       // runs during hash construction (before the caller's `enabled` flag can
@@ -1825,8 +1843,24 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  // @deprecated Use getDraftForConversationV2 when channel membership is known.
   getDraftForConversation: defineQuery(
     z.object({ conversationId: z.string() }),
+    ({ ctx, args: { conversationId } }) => {
+      return zql.email_drafts
+        .where('conversationId', conversationId)
+        .where(({ or, cmp }) =>
+          or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+        )
+        .orderBy('updatedAt', 'desc');
+    }
+  ),
+  getDraftForConversationV2: defineQuery(
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
     ({ ctx, args: { conversationId } }) => {
       return zql.email_drafts
         .where('conversationId', conversationId)
