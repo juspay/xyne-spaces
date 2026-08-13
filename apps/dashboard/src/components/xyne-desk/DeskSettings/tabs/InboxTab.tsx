@@ -39,6 +39,46 @@ function filterUsersByQuery(
   return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
 }
 
+/**
+ * Only mounted while the owner picker is open, so `useUsers()` (and the org-wide
+ * re-renders it brings on every presence/status change) isn't subscribed to at all
+ * until the user actually opens the dropdown.
+ */
+function OwnerOptions({ search }: { search: string }) {
+  const allUsers = useUsers();
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allUsers;
+    return allUsers.filter(
+      u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
+    );
+  }, [allUsers, search]);
+
+  if (filtered.length === 0) {
+    return (
+      <div className='px-3 py-4 text-center text-sm text-muted-foreground'>No users found</div>
+    );
+  }
+
+  return (
+    <>
+      {filtered.map(user => (
+        <SelectItem key={user.id} value={user.id} className='rounded-[8px]'>
+          <div className='flex items-center gap-2'>
+            <Avatar
+              userId={user.id}
+              size='sm'
+              showActiveStatus={false}
+              className='!size-5 !text-[10px]'
+            />
+            <span>{user.name}</span>
+          </div>
+        </SelectItem>
+      ))}
+    </>
+  );
+}
+
 interface InboxTabProps {
   channelId: string;
   form: DeskSettingsForm;
@@ -73,22 +113,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const [ownerPickerOpen, setOwnerPickerOpen] = useState(false);
   const selectedOwner = useUser(ownerId);
   const ownerSearchInputRef = useRef<HTMLInputElement>(null);
-  const filteredOwnerUsers = useMemo(() => {
-    if (!ownerPickerOpen) return selectedOwner ? [selectedOwner] : [];
-
-    const q = ownerSearch.trim().toLowerCase();
-    const all = allUsers ?? [];
-    const matches = q
-      ? all.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
-      : all;
-    // Always include the currently selected user so the trigger keeps showing
-    // its name/avatar even when the search filters it out of the list.
-    if (ownerId && !matches.some(u => u.id === ownerId)) {
-      const selected = all.find(u => u.id === ownerId);
-      if (selected) return [selected, ...matches];
-    }
-    return matches;
-  }, [allUsers, ownerSearch, ownerId, ownerPickerOpen, selectedOwner]);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
   const [signatureAutoAppendEnabled, setSignatureAutoAppendEnabled] = useState(
@@ -139,7 +163,19 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           }}
         >
           <SelectTrigger className='w-full max-w-[300px] p-[8px] h-[36px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
-            <SelectValue placeholder='Select owner' />
+            <SelectValue placeholder='Select owner'>
+              {selectedOwner && (
+                <div className='flex items-center gap-2'>
+                  <Avatar
+                    userId={selectedOwner.id}
+                    size='sm'
+                    showActiveStatus={false}
+                    className='!size-5 !text-[10px]'
+                  />
+                  <span>{selectedOwner.name}</span>
+                </div>
+              )}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent
             className='rounded-[10px]'
@@ -165,25 +201,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               </div>
             }
           >
-            {filteredOwnerUsers.length === 0 ? (
-              <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                No users found
-              </div>
-            ) : (
-              filteredOwnerUsers.map(user => (
-                <SelectItem key={user.id} value={user.id} className='rounded-[8px]'>
-                  <div className='flex items-center gap-2'>
-                    <Avatar
-                      userId={user.id}
-                      size='sm'
-                      showActiveStatus={false}
-                      className='!size-5 !text-[10px]'
-                    />
-                    <span>{user.name}</span>
-                  </div>
-                </SelectItem>
-              ))
-            )}
+            {ownerPickerOpen && <OwnerOptions search={ownerSearch} />}
           </SelectContent>
         </Select>
       </div>
