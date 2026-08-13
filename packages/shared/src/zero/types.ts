@@ -473,6 +473,8 @@ export enum AppIncomingWebhookType {
   SLACK = 'SLACK',
   SENTINELONE = 'SENTINELONE',
   AMAZON_SNS = 'AMAZON_SNS',
+  PINGDOM = 'PINGDOM',
+  GCP = 'GCP',
 }
 
 // @ts-ignore TS1294
