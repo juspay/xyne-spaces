@@ -82,7 +82,7 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 }
 
 const MAX_FILTER_VALUES = 50;
-const MAX_VESPA_RESULT_WINDOW = 1000;
+const MAX_VESPA_HITS = 400;
 
 /**
  * Keep every non-mail hit, but only the highest-ranked mail hit for each Desk
@@ -880,16 +880,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     const isMailOnlySearch =
       searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
-    const effectiveGroupBy =
-      options.groupBy === undefined ? 'docType' : options.groupBy;
-    const isFlatMultiAppMailSearch =
-      effectiveGroupBy === '' &&
-      searchApps.length > 1 &&
-      searchApps.some(app => app.trim().toLowerCase() === 'mail');
     const mailGroupOffset = isMailOnlySearch
-      ? Math.max(Number(offset) || 0, 0)
-      : 0;
-    const flatSearchOffset = isFlatMultiAppMailSearch
       ? Math.max(Number(offset) || 0, 0)
       : 0;
 
@@ -898,19 +889,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // slice the requested page after parsing the grouping response.
     if (isMailOnlySearch && mailGroupOffset > 0) {
       options.offset = 0;
-      options.limit = mailGroupOffset + effectiveLimit;
-    }
-
-    // For flat All-tab searches, fetch from the start so mail threads can be
-    // deduplicated consistently across pages. Over-fetch to compensate for
-    // conversations that have several matching mail documents.
-    if (isFlatMultiAppMailSearch) {
-      const requestedUniquePrefix = flatSearchOffset + effectiveLimit;
-      options.offset = 0;
-      options.limit = Math.min(
-        MAX_VESPA_RESULT_WINDOW,
-        requestedUniquePrefix * 4,
-      );
+      options.limit = Math.min(MAX_VESPA_HITS, mailGroupOffset + effectiveLimit);
     }
 
     // Call vespa search
@@ -984,19 +963,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Return flat results (backward compatible)
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
-      const transformedResults = dedupeMailResults(
-        await transformVespaResults(
-          dedupeMailHits(parsedResults.hits || []),
-          db,
-          wantDebugInfo,
-        ),
+      const pageResults = await transformVespaResults(
+        parsedResults.hits || [],
+        db,
+        wantDebugInfo,
       );
-      const pageResults = isFlatMultiAppMailSearch
-        ? transformedResults.slice(
-            flatSearchOffset,
-            flatSearchOffset + effectiveLimit,
-          )
-        : transformedResults;
 
       res.json({
         success: true,
