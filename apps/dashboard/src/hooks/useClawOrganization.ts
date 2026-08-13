@@ -1,5 +1,4 @@
 import {
-  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -12,7 +11,6 @@ import {
   getClawOrganization,
   listClawOrganizationServiceTokens,
   listClawOrganizationSurfaces,
-  listClawOrganizationMembers,
   listClawOrganizations,
   removeClawOrganizationMember,
   mintClawOrganizationServiceToken,
@@ -26,6 +24,7 @@ import type {
   ConnectedSurface,
   MintedServiceAccessToken,
   MintServiceAccessTokenInput,
+  OrgMemberRow,
   OrgMembersPage,
   OrgMembersQuery,
   OrgRole,
@@ -48,15 +47,10 @@ export const clawOrganizationServiceTokensKey = (
   userId: string | undefined,
 ): readonly unknown[] => ['claw-organization-service-tokens', orgId, userId];
 
-export const clawOrganizationMembersPrefix = (orgId: string): readonly unknown[] => [
-  'claw-organization-members',
+export const clawOrganizationDetailKey = (orgId: string): readonly unknown[] => [
+  'claw-organization-detail',
   orgId,
 ];
-
-export const clawOrganizationMembersKey = (
-  orgId: string,
-  { q = '', limit, offset = 0 }: OrgMembersQuery,
-): readonly unknown[] => [...clawOrganizationMembersPrefix(orgId), q, limit, offset];
 
 export const useClawOrganization = (): UseQueryResult<ClawOrganization | null, Error> => {
   const { user } = useAuth();
@@ -175,6 +169,17 @@ export const useClawOrgManageAccess = (): { canManage: boolean; isLoading: boole
   return { canManage: role === 'OWNER' || role === 'ADMIN', isLoading: isPending };
 };
 
+const pageMembers = (members: OrgMemberRow[], { q, limit, offset = 0 }: OrgMembersQuery) => {
+  const needle = q?.trim().toLowerCase() ?? '';
+  const matched = needle
+    ? members.filter(member => `${member.name} ${member.email}`.toLowerCase().includes(needle))
+    : members;
+  return {
+    rows: limit === undefined ? matched.slice(offset) : matched.slice(offset, offset + limit),
+    total: matched.length,
+  };
+};
+
 export const useClawOrganizationMembers = (
   orgId: string,
   query: OrgMembersQuery,
@@ -184,10 +189,10 @@ export const useClawOrganizationMembers = (
   const userId = user?.id;
 
   return useQuery({
-    queryKey: clawOrganizationMembersKey(orgId, query),
-    queryFn: () => listClawOrganizationMembers(orgId, userId!, query),
+    queryKey: clawOrganizationDetailKey(orgId),
+    queryFn: () => getClawOrganization(orgId, userId!),
+    select: detail => pageMembers(detail.members, query),
     enabled: enabled && !!userId && !!orgId,
-    placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
   });
 };
@@ -198,7 +203,7 @@ const useInvalidateClawOrganization = (orgId: string) => {
   return async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: clawOrganizationKey(user?.id) });
     await queryClient.invalidateQueries({ queryKey: clawOrganizationSummaryKey(user?.id) });
-    await queryClient.invalidateQueries({ queryKey: clawOrganizationMembersPrefix(orgId) });
+    await queryClient.invalidateQueries({ queryKey: clawOrganizationDetailKey(orgId) });
   };
 };
 

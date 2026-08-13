@@ -1,26 +1,24 @@
-import type { ReactElement, ReactNode } from 'react';
-import { MATCH_CLASS } from '@/components/FileViewer/search/htmlHighlight';
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+import { useMemo, type ReactElement } from 'react';
+import { HighlightedText } from '@/components/FileViewer/search/HighlightedText';
+import { buildMatcher, findMatchesInText } from '@/components/FileViewer/search/searchEngine';
+import {
+  DEFAULT_SEARCH_OPTIONS,
+  MAX_MATCHES,
+  type HighlightRange,
+} from '@/components/FileViewer/search/types';
 
 export function HighlightMatch({ text, query }: { text: string; query: string }): ReactElement {
-  const needle = query.trim();
-  if (!needle) return <>{text}</>;
+  const ranges = useMemo<HighlightRange[]>(() => {
+    const matcher = buildMatcher(query.trim(), DEFAULT_SEARCH_OPTIONS);
+    if (!matcher) return [];
 
-  const parts = text.split(new RegExp(`(${escapeRegExp(needle)})`, 'gi'));
+    const found: HighlightRange[] = [];
+    findMatchesInText(text, matcher, (start, end) => {
+      found.push({ start, end, isActive: false });
+      return found.length < MAX_MATCHES;
+    });
+    return found;
+  }, [text, query]);
 
-  return (
-    <>
-      {parts.map(
-        (part, index): ReactNode =>
-          part.toLowerCase() === needle.toLowerCase() ? (
-            <mark key={index} className={MATCH_CLASS}>
-              {part}
-            </mark>
-          ) : (
-            part
-          ),
-      )}
-    </>
-  );
+  return <HighlightedText text={text} ranges={ranges} />;
 }

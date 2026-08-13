@@ -5,8 +5,6 @@ import type {
   MintedServiceAccessToken,
   MintServiceAccessTokenInput,
   OrgDetail,
-  OrgMembersPage,
-  OrgMembersQuery,
   OrgRole,
   OrgSummary,
   ServiceAccessToken,
@@ -71,23 +69,6 @@ export const revokeClawOrganizationServiceToken = async (
   await clawApiRequest<unknown>(
     `/organizations/${encodeURIComponent(orgId)}/service-tokens/${encodeURIComponent(tokenId)}`,
     { method: 'DELETE', userId },
-  );
-};
-
-export const listClawOrganizationMembers = (
-  orgId: string,
-  userId: string,
-  { q, limit, offset }: OrgMembersQuery = {},
-): Promise<OrgMembersPage> => {
-  const params = new URLSearchParams();
-  if (q) params.set('q', q);
-  if (limit !== undefined) params.set('limit', String(limit));
-  if (offset) params.set('offset', String(offset));
-  const search = params.toString();
-
-  return clawApiRequest<OrgMembersPage>(
-    `/organizations/${encodeURIComponent(orgId)}/members${search ? `?${search}` : ''}`,
-    { userId },
   );
 };
 
