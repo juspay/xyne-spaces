@@ -47,6 +47,8 @@ export type ChatListProps = {
   linkedConversationId?: string | null;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
 };
 
 type Anchor = {
@@ -200,6 +202,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  unreadsOnly,
+  onThreadClick,
 }) => {
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
@@ -300,8 +304,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const topVisibleConvIdRef = useRef<string | undefined>(undefined);
   const { isMobile } = usePlatform();
 
+  const filteredConversations = useMemo(() => {
+    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversations;
+    return conversations.filter(conv => conv.createdAt > channelParticipation.lastViewedAt);
+  }, [conversations, unreadsOnly, channelParticipation?.lastViewedAt]);
+
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    conversations,
+    filteredConversations,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
@@ -442,16 +451,18 @@ const ChatListV4: React.FC<ChatListProps> = ({
     }
 
     Promise.all([
-      zero.run(
-        queries.channelConversationsPaginatedV3({
-          channelId,
-          isMember,
-          start: oldConversationsAnchorRef.current,
-          direction: 'forward',
-          limit: PAGE_SIZE,
-        }),
-        { type: 'complete' },
-      ),
+      !unreadsOnly
+        ? zero.run(
+            queries.channelConversationsPaginatedV3({
+              channelId,
+              isMember,
+              start: oldConversationsAnchorRef.current,
+              direction: 'forward',
+              limit: PAGE_SIZE,
+            }),
+            { type: 'complete' },
+          )
+        : Promise.resolve([]),
       newConversationsAnchor &&
         zero.run(
           queries.channelConversationsPaginatedV3({
@@ -570,7 +581,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const fetchOlderMessages = useCallback(() => {
     // isFetchingOlder=true → suppressed (previous fetch in flight).
-    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current) return;
+    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current || unreadsOnly) return;
     isFetchingOlderRef.current = true;
     zero
       .run(
@@ -1048,6 +1059,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const handleOpenThread = useCallback(
     (conversationId: string, e?: React.MouseEvent): void => {
+      if (onThreadClick) {
+        onThreadClick(channelId, conversationId);
+        return;
+      }
       const conversation = conversations.find(c => c.conversationId === conversationId);
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
       const initMsg = conversation ? getInitialMessageFromConversation(conversation) : null;

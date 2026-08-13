@@ -1,4 +1,4 @@
-import { ReactElement, useMemo, useState } from 'react';
+import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useAllVisibleChannels, useUserChannelStatuses } from '../../../hooks/useChannels';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelSort } from '../../../hooks/useChannelSort';
@@ -13,6 +13,8 @@ import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import Button from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
+import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
+import { ThreadMessages } from '../ThreadPannel';
 
 const UnreadsInbox = (): ReactElement => {
   const channelData = useAllVisibleChannels();
@@ -26,8 +28,85 @@ const UnreadsInbox = (): ReactElement => {
   );
 
   const unreadCounts = useAllUnreadCount();
-  const [openChannelId, setOpenChannelId] = useState<string | null>(null);
   const zero = useZero();
+
+  const [openChannelIds, setOpenChannelIds] = useState<Set<string>>(new Set());
+  const [activeThread, setActiveThread] = useState<{
+    channelId: string;
+    conversationId: string;
+  } | null>(null);
+
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const elementsRef = useRef<Map<string, Element>>(new Map());
+  const visibleChannelsRef = useRef<Set<string>>(new Set());
+  const manualTogglesRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!scrollContainer) return;
+
+    const observer = new IntersectionObserver(
+      entries => {
+        let changed = false;
+        entries.forEach(entry => {
+          const id = entry.target.getAttribute('data-channel-id');
+          if (!id) return;
+
+          if (entry.isIntersecting) {
+            if (!visibleChannelsRef.current.has(id)) {
+              visibleChannelsRef.current.add(id);
+              changed = true;
+            }
+          } else {
+            if (visibleChannelsRef.current.has(id)) {
+              visibleChannelsRef.current.delete(id);
+              changed = true;
+            }
+          }
+        });
+
+        if (changed) {
+          setOpenChannelIds(
+            new Set([
+              ...Array.from(visibleChannelsRef.current).filter(
+                id => manualTogglesRef.current[id] !== false,
+              ),
+              ...Object.keys(manualTogglesRef.current).filter(
+                id => manualTogglesRef.current[id] === true,
+              ),
+            ]),
+          );
+        }
+      },
+      {
+        root: scrollContainer,
+        threshold: 0,
+        rootMargin: '150% 0px 150% 0px',
+      },
+    );
+
+    observerRef.current = observer;
+
+    // Observe any elements that mounted before the observer was created
+    elementsRef.current.forEach(el => observer.observe(el));
+
+    return () => {
+      observer.disconnect();
+      observerRef.current = null;
+    };
+  }, [scrollContainer]);
+
+  const channelRef = useCallback((el: HTMLDivElement | null) => {
+    if (el) {
+      const id = el.getAttribute('data-channel-id');
+      if (id) {
+        elementsRef.current.set(id, el);
+        if (observerRef.current) {
+          observerRef.current.observe(el);
+        }
+      }
+    }
+  }, []);
 
   const handleMarkAsRead = (channelId: string) => {
     const draft = getDraft(channelId, null);
@@ -38,13 +117,13 @@ const UnreadsInbox = (): ReactElement => {
       draftMessage: draft || '',
     };
     void zero.mutate(mutators.channel.markChannelAsViewed(payload));
-    if (openChannelId === channelId) {
-      setOpenChannelId(null);
-    }
   };
 
+  const handleThreadClick = useCallback((channelId: string, conversationId: string) => {
+    setActiveThread({ channelId, conversationId });
+  }, []);
+
   const unreadItems = useMemo(() => {
-    // DMs first since we surface their unread count prominently, then starred, then channels.
     const allOrdered = [...directMessages, ...starred, ...channels];
     return allOrdered.filter(c => {
       const status = allChannelsUserStatus.find(
@@ -62,31 +141,31 @@ const UnreadsInbox = (): ReactElement => {
         isUnread = hasUnreadCount || hasNewActivity;
       }
 
-      // Keep the currently open channel visible even if it becomes read
-      if (openChannelId === c.id) {
-        isUnread = true;
-      }
-
       return isUnread && !isDeskChannelType(c.type) && c.type !== ChannelType.SUPPORT;
     });
-  }, [
-    starred,
-    channels,
-    directMessages,
-    unreadCounts,
-    allChannelsUserStatus,
-    context.userID,
-    openChannelId,
-  ]);
+  }, [starred, channels, directMessages, unreadCounts, allChannelsUserStatus, context.userID]);
 
   const handleItemClick = (e: React.MouseEvent | React.KeyboardEvent, channelId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    setOpenChannelId((prev: string | null) => (prev === channelId ? null : channelId));
+
+    setOpenChannelIds(prev => {
+      const next = new Set(prev);
+      const isCurrentlyOpen = next.has(channelId);
+
+      if (isCurrentlyOpen) {
+        next.delete(channelId);
+        manualTogglesRef.current[channelId] = false;
+      } else {
+        next.add(channelId);
+        manualTogglesRef.current[channelId] = true;
+      }
+      return next;
+    });
   };
 
-  return (
-    <div className='flex-1 h-full w-full bg-background flex flex-col pt-14 [@media(min-width:500px)]:pt-0'>
+  const inboxContent = (
+    <div className='flex-1 h-full w-full bg-background flex flex-col pt-14 [@media(min-width:500px)]:pt-0 min-h-0'>
       <div className='relative z-30 shrink-0 px-6 py-4 border-b border-border/50 bg-background flex items-center justify-between'>
         <div className='flex items-center gap-2 text-foreground'>
           <MessageSquareDot className='w-5 h-5 text-primary' />
@@ -94,7 +173,10 @@ const UnreadsInbox = (): ReactElement => {
         </div>
       </div>
 
-      <div className='relative z-0 flex-1 isolate overflow-y-auto overflow-x-hidden px-4 pb-4 pt-0'>
+      <div
+        ref={setScrollContainer}
+        className='relative z-0 flex-1 isolate overflow-y-auto overflow-x-hidden px-4 pb-4 pt-0'
+      >
         {unreadItems.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-center'>
             <MessageSquareDot className='text-muted-foreground mb-4' size={64} />
@@ -104,9 +186,9 @@ const UnreadsInbox = (): ReactElement => {
             <p className='text-muted-foreground'>No unread channels or direct messages.</p>
           </div>
         ) : (
-          <div className='space-y-2'>
+          <div className='space-y-4'>
             {unreadItems.map(channel => {
-              const isOpen = openChannelId === channel.id;
+              const isOpen = openChannelIds.has(channel.id);
 
               const status = allChannelsUserStatus.find(
                 s => s.channelId === channel.id && s.userId === context.userID,
@@ -115,6 +197,8 @@ const UnreadsInbox = (): ReactElement => {
               return (
                 <div
                   key={channel.id}
+                  ref={channelRef}
+                  data-channel-id={channel.id}
                   className={`border rounded-lg bg-card transition-colors shadow-sm relative ${isOpen ? 'isolate overflow-visible border-border/50' : 'overflow-hidden border-border/30 hover:bg-accent'}`}
                 >
                   <div
@@ -126,7 +210,7 @@ const UnreadsInbox = (): ReactElement => {
                         handleItemClick(e, channel.id);
                       }
                     }}
-                    className={`p-1 cursor-pointer flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 rounded-t-lg bg-background border-b border-border/20' : ''}`}
+                    className={`p-2 cursor-pointer flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 rounded-t-lg bg-background border-b border-border/20' : ''}`}
                     data-track-category='UNREADS_INBOX'
                     data-track-name='TOGGLE_CHANNEL_ACCORDION'
                   >
@@ -156,7 +240,7 @@ const UnreadsInbox = (): ReactElement => {
 
                   {isOpen && (
                     <div className='overflow-hidden rounded-b-lg'>
-                      <div className='animate-in slide-in-from-top-2 fade-in duration-200 h-[calc(100vh-200px)] flex flex-col relative z-0'>
+                      <div className='animate-in slide-in-from-top-2 fade-in duration-200 h-[calc(60vh)] flex flex-col relative z-0'>
                         <ConversationPanelV2
                           channelId={channel.id}
                           previousChannelId={null}
@@ -164,6 +248,8 @@ const UnreadsInbox = (): ReactElement => {
                           showHeader={false}
                           hideComposer
                           skipMarkAsRead={true}
+                          unreadsOnly={true}
+                          onThreadClick={handleThreadClick}
                         />
                       </div>
                     </div>
@@ -175,6 +261,29 @@ const UnreadsInbox = (): ReactElement => {
         )}
       </div>
     </div>
+  );
+
+  return (
+    <ResizableGroup orientation='horizontal' className='w-full h-full'>
+      <Panel id='inbox' defaultSize={activeThread ? 60 : 100} minSize={30}>
+        {inboxContent}
+      </Panel>
+
+      {activeThread && (
+        <>
+          <Separator className='w-1 bg-border/50 hover:bg-border transition-colors' />
+          <Panel id='thread' defaultSize={40} minSize={25} className='relative flex flex-col'>
+            <div className='flex-1 relative min-h-0'>
+              <ThreadMessages
+                channelId={activeThread.channelId}
+                conversationId={activeThread.conversationId}
+                onClose={() => setActiveThread(null)}
+              />
+            </div>
+          </Panel>
+        </>
+      )}
+    </ResizableGroup>
   );
 };
 
