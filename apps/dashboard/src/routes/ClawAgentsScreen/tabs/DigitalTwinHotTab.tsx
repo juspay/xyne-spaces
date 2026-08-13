@@ -44,8 +44,8 @@ const DigitalTwinHotTab = (): ReactElement => {
               data-track-name='Digital Twin change recall range'
               className={
                 range === option.value
-                  ? 'dt-control dt-transition rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
-                  : 'dt-control dt-transition rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
+                  ? 'dt-control dt-selectable rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
+                  : 'dt-control dt-selectable rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
               }
             >
               {option.label}

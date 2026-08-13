@@ -1,10 +1,11 @@
 import { ReactElement, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check, ChevronDown, Loader2, Pencil, Save, X } from './icons';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { usePatchDigitalTwinCandidate } from '@/hooks/useClawDigitalTwin';
 import type { DigitalTwinCandidate } from '@/services/claw/digitalTwinTypes';
+import { DIGITAL_TWIN_EASE_IN, DIGITAL_TWIN_EASE_OUT, DIGITAL_TWIN_MOTION } from './motion';
 
 const proposalTitle = (value: string): string => {
   const firstClause = value.split(/[.!?:;]/, 1)[0]?.trim() ?? '';
@@ -12,8 +13,6 @@ const proposalTitle = (value: string): string => {
   if (words.length <= 7) return firstClause || 'Untitled proposal';
   return `${words.slice(0, 7).join(' ')}…`;
 };
-
-const MOTION_EASE = [0.22, 1, 0.36, 1] as const;
 
 export const CandidateRow = ({
   candidate,
@@ -125,7 +124,10 @@ export const CandidateRow = ({
         <motion.span
           className='inline-flex shrink-0 text-muted-foreground'
           animate={{ rotate: expanded ? 180 : 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.18, ease: MOTION_EASE }}
+          transition={{
+            duration: reduceMotion ? 0 : DIGITAL_TWIN_MOTION.feedback,
+            ease: DIGITAL_TWIN_EASE_OUT,
+          }}
           aria-hidden='true'
         >
           <ChevronDown className='size-4' />
@@ -133,27 +135,40 @@ export const CandidateRow = ({
       </button>
 
       <div id={detailsId} className='dt-review-proposal-content'>
-        {editing ? (
-          <label className='block'>
-            <span className='sr-only'>Edit proposed memory</span>
-            <textarea
-              value={text}
-              onChange={event => setText(event.target.value)}
-              disabled={busy}
-              rows={5}
-              autoFocus
-              className='w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/10 disabled:opacity-60'
-              data-track-category='Claw Agents'
-              data-track-name='Digital Twin edit candidate text'
-            />
-          </label>
-        ) : (
-          <p
-            className={`dt-review-proposal-copy${expanded ? '' : ' dt-review-proposal-copy-clamped'}`}
+        <AnimatePresence initial={false} mode='wait'>
+          <motion.div
+            key={editing ? 'editor' : 'copy'}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -2 }}
+            transition={{
+              duration: reduceMotion ? DIGITAL_TWIN_MOTION.press : DIGITAL_TWIN_MOTION.feedback,
+              ease: reduceMotion ? DIGITAL_TWIN_EASE_IN : DIGITAL_TWIN_EASE_OUT,
+            }}
           >
-            {committed}
-          </p>
-        )}
+            {editing ? (
+              <label className='block'>
+                <span className='sr-only'>Edit proposed memory</span>
+                <textarea
+                  value={text}
+                  onChange={event => setText(event.target.value)}
+                  disabled={busy}
+                  rows={5}
+                  autoFocus
+                  className='w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/10 disabled:opacity-60'
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin edit candidate text'
+                />
+              </label>
+            ) : (
+              <p
+                className={`dt-review-proposal-copy${expanded ? '' : ' dt-review-proposal-copy-clamped'}`}
+              >
+                {committed}
+              </p>
+            )}
+          </motion.div>
+        </AnimatePresence>
 
         <div
           className='dt-review-proposal-actions-reveal'
@@ -168,7 +183,10 @@ export const CandidateRow = ({
                   ? { opacity: 1, y: 0 }
                   : { opacity: expanded ? 1 : 0, y: expanded ? 0 : -4 }
               }
-              transition={{ duration: reduceMotion ? 0 : 0.18, ease: MOTION_EASE }}
+              transition={{
+                duration: reduceMotion ? 0 : DIGITAL_TWIN_MOTION.feedback,
+                ease: DIGITAL_TWIN_EASE_OUT,
+              }}
             >
               {editing ? (
                 <>

@@ -1,10 +1,12 @@
 import { ReactElement } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, BookOpenCheck, Check, LockKeyhole, MessageSquareText } from './icons';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useEnableDigitalTwin } from '@/hooks/useClawDigitalTwin';
 import { isoDate, QUICK_DAYS, useDigitalTwinRange } from './useDigitalTwinRange';
+import { DIGITAL_TWIN_EASE_OUT, DIGITAL_TWIN_MOTION, digitalTwinStaggerDelay } from './motion';
 
 const PRINCIPLES = [
   {
@@ -29,6 +31,7 @@ const PRINCIPLES = [
 
 export const DigitalTwinEnablePanel = (): ReactElement => {
   const range = useDigitalTwinRange('enable', true);
+  const reduceMotion = useReducedMotion();
   const enable = useEnableDigitalTwin();
   const customInvalid =
     range.selection === 'custom' &&
@@ -47,11 +50,18 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
         </p>
 
         <ol className='mt-6 flex flex-col gap-2'>
-          {PRINCIPLES.map(principle => {
+          {PRINCIPLES.map((principle, index) => {
             const Icon = principle.icon;
             return (
-              <li
+              <motion.li
                 key={principle.number}
+                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: DIGITAL_TWIN_MOTION.state,
+                  delay: reduceMotion ? 0 : digitalTwinStaggerDelay(index),
+                  ease: DIGITAL_TWIN_EASE_OUT,
+                }}
                 className='flex gap-3 rounded-lg border border-border bg-muted/20 p-3'
               >
                 <div className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background'>
@@ -63,7 +73,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                     {principle.body}
                   </p>
                 </div>
-              </li>
+              </motion.li>
             );
           })}
         </ol>
@@ -95,8 +105,8 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                   aria-pressed={selected}
                   className={
                     selected
-                      ? 'flex min-h-20 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
-                      : 'flex min-h-20 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent'
+                      ? 'dt-selectable flex min-h-20 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
+                      : 'dt-selectable flex min-h-20 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left hover:bg-accent'
                   }
                   data-track-category='Claw Agents'
                   data-track-name='Digital Twin enable range preset'
@@ -104,8 +114,8 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                   <span
                     className={
                       selected
-                        ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
-                        : 'flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
+                        ? 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
+                        : 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
                     }
                   >
                     {selected && <Check className='size-4' />}
@@ -127,8 +137,8 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
               aria-pressed={range.selection === 'custom'}
               className={
                 range.selection === 'custom'
-                  ? 'flex min-h-20 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
-                  : 'flex min-h-20 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent'
+                  ? 'dt-selectable flex min-h-20 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
+                  : 'dt-selectable flex min-h-20 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left hover:bg-accent'
               }
               data-track-category='Claw Agents'
               data-track-name='Digital Twin enable range custom'
@@ -136,8 +146,8 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
               <span
                 className={
                   range.selection === 'custom'
-                    ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
-                    : 'flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
+                    ? 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
+                    : 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
                 }
               >
                 {range.selection === 'custom' && <Check className='size-4' />}
@@ -150,51 +160,59 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
           </div>
         </fieldset>
 
-        {range.selection === 'custom' && (
-          <div className='mt-5'>
-            <div className='grid gap-3 sm:grid-cols-2'>
-              <label htmlFor='digital-twin-enable-from'>
-                <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
-                <Input
-                  id='digital-twin-enable-from'
-                  type='date'
-                  value={range.customFrom}
-                  max={range.customTo}
-                  onChange={event => range.setCustomFrom(event.target.value)}
-                  data-track-category='Claw Agents'
-                  data-track-name='Digital Twin enable custom start date'
-                />
-              </label>
-              <label htmlFor='digital-twin-enable-to'>
-                <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
-                <Input
-                  id='digital-twin-enable-to'
-                  type='date'
-                  value={range.customTo}
-                  min={range.customFrom}
-                  max={isoDate(new Date())}
-                  onChange={event => range.setCustomTo(event.target.value)}
-                  data-track-category='Claw Agents'
-                  data-track-name='Digital Twin enable custom end date'
-                />
-              </label>
-            </div>
-            <div className='mt-3 flex flex-wrap gap-2'>
-              {QUICK_DAYS.map(days => (
-                <Button
-                  key={days}
-                  variant='outline'
-                  size='sm'
-                  onClick={() => range.applyQuickDays(days)}
-                  data-track-category='Claw Agents'
-                  data-track-name='Digital Twin enable quick date range'
-                >
-                  Last {days} days
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {range.selection === 'custom' && (
+            <motion.div
+              className='mt-5'
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+              transition={{ duration: DIGITAL_TWIN_MOTION.state, ease: DIGITAL_TWIN_EASE_OUT }}
+            >
+              <div className='grid gap-3 sm:grid-cols-2'>
+                <label htmlFor='digital-twin-enable-from'>
+                  <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
+                  <Input
+                    id='digital-twin-enable-from'
+                    type='date'
+                    value={range.customFrom}
+                    max={range.customTo}
+                    onChange={event => range.setCustomFrom(event.target.value)}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin enable custom start date'
+                  />
+                </label>
+                <label htmlFor='digital-twin-enable-to'>
+                  <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
+                  <Input
+                    id='digital-twin-enable-to'
+                    type='date'
+                    value={range.customTo}
+                    min={range.customFrom}
+                    max={isoDate(new Date())}
+                    onChange={event => range.setCustomTo(event.target.value)}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin enable custom end date'
+                  />
+                </label>
+              </div>
+              <div className='mt-3 flex flex-wrap gap-2'>
+                {QUICK_DAYS.map(days => (
+                  <Button
+                    key={days}
+                    variant='outline'
+                    size='sm'
+                    onClick={() => range.applyQuickDays(days)}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin enable quick date range'
+                  >
+                    Last {days} days
+                  </Button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className='mt-5 rounded-lg border border-border bg-muted/20 p-3' aria-live='polite'>
           {range.estimateLoading ? (

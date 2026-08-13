@@ -74,13 +74,19 @@ export interface DigitalTwinProposalResult {
 export interface DigitalTwinMemoryQuery {
   limit?: number;
   offset?: number;
+  /** @deprecated Prefer `subsystems` for multi-select filtering. */
   subsystem?: string;
+  subsystems?: string[];
   search?: string;
 }
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 
 const dataMode = (): 'demo' | 'live' => (isDigitalTwinDemoMode() ? 'demo' : 'live');
+const subsystemFilterKey = (opts: Pick<DigitalTwinMemoryQuery, 'subsystem' | 'subsystems'>) => {
+  if (opts.subsystems?.length) return [...opts.subsystems].sort().join(',');
+  return opts.subsystem ?? null;
+};
 const statusKey = (userId?: string) => ['claw-dt-status', userId, dataMode()] as const;
 const memoriesKey = (userId?: string, opts: DigitalTwinMemoryQuery = {}) =>
   [
@@ -88,7 +94,7 @@ const memoriesKey = (userId?: string, opts: DigitalTwinMemoryQuery = {}) =>
     userId,
     opts.limit ?? null,
     opts.offset ?? null,
-    opts.subsystem ?? null,
+    subsystemFilterKey(opts),
     opts.search ?? '',
     dataMode(),
   ] as const;
@@ -98,7 +104,7 @@ const infiniteMemoriesKey = (userId?: string, opts: Omit<DigitalTwinMemoryQuery,
     userId,
     'infinite',
     opts.limit ?? null,
-    opts.subsystem ?? null,
+    subsystemFilterKey(opts),
     opts.search ?? '',
     dataMode(),
   ] as const;

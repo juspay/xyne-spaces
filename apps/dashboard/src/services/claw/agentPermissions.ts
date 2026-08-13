@@ -30,6 +30,17 @@ export function getAgentPermissions(
   shares: AgentShare[],
   isAdmin: boolean,
 ): AgentPermissions {
+  // Digital Twin is a shared platform agent, but each user configures *their*
+  // twin. Treat every authenticated viewer as an editor — not a share manager.
+  if (agent.slug === 'digital-twin' && userId) {
+    return {
+      role: 'editor',
+      canEdit: true,
+      canShare: isAdmin || agent.ownerUserId === userId,
+      canViewPage: true,
+    };
+  }
+
   let role: AgentRole = 'none';
 
   if (agent.ownerUserId === userId || isAdmin) {

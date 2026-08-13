@@ -32,7 +32,8 @@ export const DigitalTwinModal = ({
     }}
     title={title}
     description={description}
-    className={cn('max-w-lg', className)}
+    className={cn('max-w-lg motion-reduce:animate-none motion-reduce:duration-0', className)}
+    overlayClassName='motion-reduce:animate-none motion-reduce:duration-0'
   >
     <div className='flex max-h-[85vh] flex-col gap-5 overflow-y-auto p-6'>
       <div className='flex flex-col gap-2'>

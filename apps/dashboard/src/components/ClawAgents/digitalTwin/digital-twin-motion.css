@@ -1,0 +1,138 @@
+.digital-twin-ledger {
+  --dt-duration-press: 120ms;
+  --dt-duration-feedback: 180ms;
+  --dt-duration-state: 240ms;
+  --dt-duration-layout: 300ms;
+  --dt-duration-route: 340ms;
+  --dt-duration-entrance: 420ms;
+  --dt-motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dt-motion-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --dt-motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.digital-twin-ledger .dt-shell-header {
+  animation: dt-motion-enter var(--dt-duration-entrance) var(--dt-motion-ease-out) both;
+}
+
+.digital-twin-ledger .dt-route-stage {
+  min-width: 0;
+  transform-origin: top center;
+}
+
+.digital-twin-ledger .dt-pressable,
+.digital-twin-ledger .dt-selectable {
+  transition:
+    color var(--dt-duration-feedback) var(--dt-motion-ease-out),
+    background-color var(--dt-duration-state) var(--dt-motion-ease-out),
+    border-color var(--dt-duration-state) var(--dt-motion-ease-out),
+    box-shadow var(--dt-duration-feedback) var(--dt-motion-ease-out),
+    opacity var(--dt-duration-feedback) var(--dt-motion-ease-out),
+    transform var(--dt-duration-press) var(--dt-motion-ease-out);
+}
+
+.digital-twin-ledger .dt-pressable:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.digital-twin-ledger .dt-selectable:active:not(:disabled) {
+  transform: scale(0.992);
+}
+
+.digital-twin-ledger .dt-choice-indicator {
+  transition:
+    color var(--dt-duration-feedback) var(--dt-motion-ease-out),
+    background-color var(--dt-duration-state) var(--dt-motion-ease-out),
+    border-color var(--dt-duration-state) var(--dt-motion-ease-out),
+    transform var(--dt-duration-press) var(--dt-motion-ease-out);
+}
+
+.digital-twin-ledger :where([aria-pressed="true"], label:has(input:checked)) .dt-choice-indicator {
+  transform: scale(1.06);
+}
+
+.digital-twin-ledger .dt-details-chevron {
+  transition: transform var(--dt-duration-state) var(--dt-motion-ease-out);
+}
+
+.digital-twin-ledger details[open] > summary .dt-details-chevron {
+  transform: rotate(180deg);
+}
+
+.digital-twin-ledger .dt-result-bar-segment {
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: dt-motion-scale-in var(--dt-duration-layout) var(--dt-motion-ease-out) forwards;
+}
+
+/* Radix portals live outside `.digital-twin-ledger`, so they need an explicit
+   motion contract rather than relying on inherited page tokens. */
+.dt-menu-content.dt-menu-content,
+.dt-filter-menu-content.dt-filter-menu-content,
+.dt-select-content.dt-select-content {
+  animation-duration: 180ms !important;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .digital-twin-ledger .dt-pressable-lift:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .digital-twin-ledger .dt-pressable-lift:active:not(:disabled) {
+    transform: translateY(0) scale(0.985);
+  }
+}
+
+@keyframes dt-motion-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dt-motion-scale-in {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .digital-twin-ledger,
+  .digital-twin-ledger *,
+  .digital-twin-ledger *::before,
+  .digital-twin-ledger *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .digital-twin-ledger .dt-shell-header,
+  .digital-twin-ledger .dt-result-bar-segment {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .dt-menu-content.dt-menu-content,
+  .dt-filter-menu-content.dt-filter-menu-content,
+  .dt-select-content.dt-select-content,
+  :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content) *,
+  :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content)::before,
+  :where(.dt-menu-content, .dt-filter-menu-content, .dt-select-content)::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .dt-menu-content.dt-menu-content,
+  .dt-filter-menu-content.dt-filter-menu-content,
+  .dt-select-content.dt-select-content {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

@@ -31,8 +31,20 @@ export const ConfirmDialog = ({
   danger = false,
   loading = false,
   onConfirm,
+  surface = 'default',
 }: ConfirmDialogProps): ReactElement => (
-  <Dialog open={open} onOpenChange={onOpenChange} title={title} description={description}>
+  <Dialog
+    open={open}
+    onOpenChange={onOpenChange}
+    title={title}
+    description={description}
+    className={
+      surface === 'digital-twin' ? 'motion-reduce:animate-none motion-reduce:duration-0' : ''
+    }
+    overlayClassName={
+      surface === 'digital-twin' ? 'motion-reduce:animate-none motion-reduce:duration-0' : ''
+    }
+  >
     <div className='flex flex-col gap-4 p-6'>
       <div className='flex flex-col gap-1.5'>
         <h2 className='text-base font-semibold text-foreground'>{title}</h2>

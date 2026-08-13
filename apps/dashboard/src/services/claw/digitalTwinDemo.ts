@@ -476,6 +476,66 @@ const additionalMemorySeeds: AdditionalMemorySeed[] = [
     recallHits7d: 4,
     tags: ['acceptance', 'quality-assurance'],
   },
+  {
+    title: 'Weekly synthesis habit',
+    subsystem: 'preferences',
+    category: 'preferences',
+    content:
+      'Run a short weekly synthesis of open decisions and people updates so the Twin stays current without waiting for a large backfill.',
+    daysAgo: 210,
+    recallHits7d: 6,
+    tags: ['habits', 'synthesis'],
+  },
+  {
+    title: 'Incident postmortems are durable memory',
+    subsystem: 'expertise',
+    category: 'expertise',
+    content:
+      'Capture incident postmortems as durable context: trigger, blast radius, mitigation, and the follow-up owner. Prefer facts that will still matter in six months.',
+    daysAgo: 240,
+    recallHits7d: 5,
+    tags: ['incidents', 'postmortems'],
+  },
+  {
+    title: 'Release notes voice',
+    subsystem: 'style',
+    category: 'communication',
+    content:
+      'Release notes should name the user-visible change first, then rollout timing, then known limitations. Avoid internal ticket IDs in customer-facing copy.',
+    daysAgo: 270,
+    recallHits7d: 8,
+    tags: ['releases', 'writing-style'],
+  },
+  {
+    title: 'Spaces onboarding cohort',
+    subsystem: 'projects',
+    category: 'projects',
+    content:
+      'The Spaces onboarding cohort for new hires focuses on channels, boards, calls, and Ask AI in the first two weeks, with a buddy check-in on day 10.',
+    daysAgo: 300,
+    recallHits7d: 3,
+    tags: ['onboarding', 'enablement'],
+  },
+  {
+    title: 'Twin enablement anniversary',
+    subsystem: 'context',
+    category: 'world',
+    content:
+      'Digital Twin was enabled for this workspace nearly a year ago; treat early memories as historical context and prefer fresher evidence when guidance conflicts.',
+    daysAgo: 330,
+    recallHits7d: 2,
+    tags: ['history', 'enablement'],
+  },
+  {
+    title: 'Cross-team design critiques',
+    subsystem: 'people',
+    category: 'people',
+    content:
+      'Invite design, product, and eng leads to critiques when a change affects navigation or shared components; document the decision owner in the canvas.',
+    daysAgo: 350,
+    recallHits7d: 4,
+    tags: ['critiques', 'collaboration'],
+  },
 ];
 
 const initialMemories = (): MemoryBankMemory[] => [
@@ -663,6 +723,35 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     createdAt: isoAgo(2),
   },
   {
+    id: 'candidate-17',
+    subsystem: 'style',
+    title: 'Keep source trails visible',
+    text: 'When summarizing retained knowledge, keep the original source trail visible so reviewers can verify why it was kept.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'message', id: 'message-562', channelId: 'digital-twin', ts: isoAgo(1, 6) },
+      { type: 'call', id: 'call-104', ts: isoAgo(2, 1) },
+    ],
+    signalScore: 0.91,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(1, 5),
+  },
+  {
+    id: 'candidate-18',
+    subsystem: 'style',
+    title: 'Reuse established patterns',
+    text: 'Prefer existing Agent Hub components and wording whenever the product already has an established pattern.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'message', id: 'message-563', channelId: 'product-design', ts: isoAgo(2, 3) },
+    ],
+    signalScore: 0.86,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(2, 2),
+  },
+  {
     id: 'candidate-3',
     subsystem: 'expertise',
     title: 'UI review checklist',
@@ -690,6 +779,21 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     status: 'pending',
     source: 'daily',
     createdAt: isoAgo(3),
+  },
+  {
+    id: 'candidate-19',
+    subsystem: 'expertise',
+    title: 'Motion review criteria',
+    text: 'Motion reviews should check duration, easing, reduced-motion fallbacks, and whether animation clarifies hierarchy instead of adding noise.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'call', id: 'call-105', ts: isoAgo(3, 2) },
+      { type: 'canvas', id: 'canvas-41', ts: isoAgo(3, 6) },
+    ],
+    signalScore: 0.89,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(3, 1),
   },
   {
     id: 'candidate-5',
@@ -722,6 +826,36 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     createdAt: isoAgo(4),
   },
   {
+    id: 'candidate-20',
+    subsystem: 'projects',
+    title: 'Review queue scope',
+    text: 'The Review tab should stay focused on pending proposals; diagnostics belong under Inspect rather than competing for primary navigation space.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'message', id: 'message-570', channelId: 'digital-twin', ts: isoAgo(4, 5) },
+      { type: 'canvas', id: 'canvas-42', ts: isoAgo(5) },
+    ],
+    signalScore: 0.9,
+    status: 'pending',
+    source: 'backfill',
+    createdAt: isoAgo(4, 4),
+  },
+  {
+    id: 'candidate-21',
+    subsystem: 'projects',
+    title: 'Details-first twin profile',
+    text: 'Profile and persona editing should lead the Digital Twin experience so users understand how the Twin represents them before managing memories.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'call', id: 'call-106', ts: isoAgo(5, 2) },
+      { type: 'message', id: 'message-571', channelId: 'product-design', ts: isoAgo(5, 4) },
+    ],
+    signalScore: 0.87,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(5, 1),
+  },
+  {
     id: 'candidate-7',
     subsystem: 'relationships',
     title: 'Memory pipeline reviewer',
@@ -748,6 +882,21 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     createdAt: isoAgo(5),
   },
   {
+    id: 'candidate-22',
+    subsystem: 'relationships',
+    title: 'Agent Hub product partner',
+    text: 'Nina is the product partner for Agent Hub and Digital Twin journeys and should be looped in on navigation or labeling changes.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'message', id: 'message-572', channelId: 'agent-hub', ts: isoAgo(6, 1) },
+      { type: 'call', id: 'call-107', ts: isoAgo(6, 3) },
+    ],
+    signalScore: 0.88,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(6),
+  },
+  {
     id: 'candidate-9',
     subsystem: 'preferences',
     title: 'Preserve focused changes',
@@ -772,6 +921,35 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     status: 'pending',
     source: 'daily',
     createdAt: isoAgo(7),
+  },
+  {
+    id: 'candidate-23',
+    subsystem: 'preferences',
+    title: 'Confirm before bulk writes',
+    text: 'Prefer an explicit confirmation step before bulk-writing memories so users can verify the exact set being approved.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'canvas', id: 'canvas-43', ts: isoAgo(7, 2) },
+      { type: 'message', id: 'message-573', channelId: 'digital-twin', ts: isoAgo(7, 4) },
+    ],
+    signalScore: 0.93,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(7, 1),
+  },
+  {
+    id: 'candidate-24',
+    subsystem: 'preferences',
+    title: 'Active filter indicators',
+    text: 'When a list filter is active, show a small primary indicator on the control so the narrowed state remains obvious at a glance.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'message', id: 'message-574', channelId: 'product-design', ts: isoAgo(8, 1) },
+    ],
+    signalScore: 0.85,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(8),
   },
   {
     id: 'candidate-11',
@@ -801,6 +979,21 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     createdAt: isoAgo(9),
   },
   {
+    id: 'candidate-25',
+    subsystem: 'decisions',
+    title: 'Disable stays in Settings',
+    text: 'Disabling the Twin belongs in Settings data controls, not in everyday header actions where it can be triggered accidentally.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'message', id: 'message-575', channelId: 'digital-twin', ts: isoAgo(9, 2) },
+      { type: 'canvas', id: 'canvas-44', ts: isoAgo(10) },
+    ],
+    signalScore: 0.91,
+    status: 'pending',
+    source: 'backfill',
+    createdAt: isoAgo(9, 1),
+  },
+  {
     id: 'candidate-13',
     subsystem: 'docs',
     title: 'Working notes structure',
@@ -826,6 +1019,21 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     status: 'pending',
     source: 'upload',
     createdAt: isoAgo(11),
+  },
+  {
+    id: 'candidate-26',
+    subsystem: 'docs',
+    title: 'Reviewer handoff notes',
+    text: 'Handoff notes for reviewers should include the intended outcome, known risks, and the exact surfaces that changed.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'canvas', id: 'canvas-45', ts: isoAgo(11, 3) },
+      { type: 'message', id: 'message-576', channelId: 'engineering', ts: isoAgo(11, 5) },
+    ],
+    signalScore: 0.88,
+    status: 'pending',
+    source: 'upload',
+    createdAt: isoAgo(11, 2),
   },
   {
     id: 'candidate-15',
@@ -854,6 +1062,36 @@ const initialCandidates = (): DigitalTwinCandidate[] => [
     source: 'backfill',
     createdAt: isoAgo(13),
   },
+  {
+    id: 'candidate-27',
+    subsystem: 'context',
+    title: 'Permission-aware learning',
+    text: 'Learning should only use work the user is already allowed to see, and private DMs remain excluded from Twin memory intake.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'call', id: 'call-108', ts: isoAgo(13, 2) },
+      { type: 'message', id: 'message-577', channelId: 'digital-twin', ts: isoAgo(14) },
+    ],
+    signalScore: 0.95,
+    status: 'pending',
+    source: 'backfill',
+    createdAt: isoAgo(13, 1),
+  },
+  {
+    id: 'candidate-28',
+    subsystem: 'context',
+    title: 'Everyday vs diagnostic tools',
+    text: 'Everyday Twin tasks belong in primary tabs; diagnostics such as recall labs and knowledge maps stay under Inspect.',
+    editedText: null,
+    sourceRefs: [
+      { type: 'canvas', id: 'canvas-46', ts: isoAgo(14, 2) },
+      { type: 'message', id: 'message-578', channelId: 'product-design', ts: isoAgo(14, 4) },
+    ],
+    signalScore: 0.89,
+    status: 'pending',
+    source: 'daily',
+    createdAt: isoAgo(14),
+  },
 ];
 
 const initialFiles = (): DigitalTwinMemoryFile[] => [
@@ -881,7 +1119,7 @@ const initialFiles = (): DigitalTwinMemoryFile[] => [
     id: 'file-projects',
     name: 'projects.md',
     content:
-      '# Active projects\n\n## Digital Twin revamp\nMake personal intelligence understandable, reviewable, and native to Xyne Spaces. Current focus: shell parity, memory provenance, and self-service persona and activity views.',
+      '# Active projects\n\n## Digital Twin revamp\nMake personal intelligence understandable, reviewable, and native to Xyne Spaces. Current focus: shell parity, memory provenance, and self-service persona and activity views.\n\n## Platform reliability\nOngoing work on channel pagination, call recording, and board performance. Mature usage patterns from ~10 months of Spaces adoption guide prioritization.\n\n## Customer Ops intake\nSeparate intake board for escalations; keep product work on Platform Delivery.',
     loadInPrompt: true,
     sortOrder: 3,
     updatedBy: 'persona-synthesis',
@@ -891,7 +1129,7 @@ const initialFiles = (): DigitalTwinMemoryFile[] => [
     id: 'file-playbook',
     name: 'playbook.md',
     content:
-      '# Working style\n\n1. Start from the user journey and existing system patterns.\n2. Build a real prototype early.\n3. Validate the result in context across themes and target widths.\n4. Preserve unrelated work and call out uncertainty explicitly.',
+      '# Working style\n\n1. Start from the user journey and existing system patterns.\n2. Build a real prototype early.\n3. Validate the result in context across themes and target widths.\n4. Preserve unrelated work and call out uncertainty explicitly.\n5. After ~a year in Spaces, prefer searching existing channels and canvases before recreating context.',
     loadInPrompt: false,
     sortOrder: 4,
     updatedBy: 'persona-synthesis',
@@ -901,7 +1139,7 @@ const initialFiles = (): DigitalTwinMemoryFile[] => [
     id: 'file-expertise',
     name: 'expertise.md',
     content:
-      '# Expertise\n\n- Product UI architecture\n- Interaction and information design\n- Accessibility review\n- Frontend implementation and system parity\n- Agentic product workflows',
+      '# Expertise\n\n- Product UI architecture\n- Interaction and information design\n- Accessibility review\n- Frontend implementation and system parity\n- Agentic product workflows\n- Spaces collaboration patterns accumulated over the last year (channels, boards, calls, Twin review)',
     loadInPrompt: false,
     sortOrder: 5,
     updatedBy: 'persona-synthesis',
@@ -983,6 +1221,63 @@ const initialEvents = (): PipelineEventSummary[] => [
     candidatesCreated: 0,
     durationMs: 620,
   }),
+  event('event-daily-30', 'daily', 'messages', isoAgo(30), {
+    recordCount: 58,
+    candidatesCreated: 4,
+    keptCount: 3,
+    durationMs: 9_120,
+  }),
+  event('event-call-45', 'daily', 'calls', isoAgo(45), {
+    recordCount: 6,
+    emittedCount: 3,
+    keptCount: 2,
+    candidatesCreated: 2,
+    durationMs: 5_640,
+  }),
+  event('event-synth-60', 'synthesize', null, isoAgo(60), {
+    recordCount: 22,
+    emittedCount: 9,
+    keptCount: 7,
+    candidatesCreated: 0,
+    durationMs: 18_400,
+  }),
+  event('event-daily-90', 'daily', 'messages', isoAgo(90), {
+    recordCount: 71,
+    candidatesCreated: 5,
+    keptCount: 4,
+    durationMs: 10_880,
+  }),
+  event('event-canvas-120', 'backfill', 'canvases', isoAgo(120), {
+    recordCount: 41,
+    emittedCount: 12,
+    keptCount: 8,
+    candidatesCreated: 5,
+    durationMs: 16_220,
+  }),
+  event('event-daily-180', 'daily', 'messages', isoAgo(180), {
+    recordCount: 64,
+    candidatesCreated: 3,
+    keptCount: 3,
+    durationMs: 8_960,
+  }),
+  event('event-backfill-270', 'backfill', 'messages', isoAgo(270), {
+    recordCount: 1_842,
+    existingMemoryCount: 12,
+    emittedCount: 64,
+    keptCount: 39,
+    candidatesCreated: 28,
+    autoApproved: 9,
+    durationMs: 128_400,
+  }),
+  event('event-enable-320', 'backfill', 'messages', isoAgo(320), {
+    recordCount: 920,
+    existingMemoryCount: 0,
+    emittedCount: 48,
+    keptCount: 31,
+    candidatesCreated: 22,
+    autoApproved: 6,
+    durationMs: 96_200,
+  }),
 ];
 
 let memories = initialMemories();
@@ -1005,24 +1300,24 @@ let enabled = true;
 export const demoGetStatus = (): Promise<DigitalTwinStatus> =>
   wait({
     enabled,
-    enabledAt: isoAgo(35),
+    enabledAt: isoAgo(320),
     backfillState: null,
     backfill: {
       overall: {
         running: false,
         paused: false,
         stalled: false,
-        windowsDone: 12,
-        windowsTotal: 12,
-        recordsSeen: 1_284,
-        candidatesMade: 31,
+        windowsDone: 48,
+        windowsTotal: 48,
+        recordsSeen: 18_640,
+        candidatesMade: 312,
         pctByWindows: 100,
         updatedAt: isoAgo(0, 2),
       },
       sources: {},
     },
     pendingCandidates: candidates.filter(candidate => candidate.status === 'pending').length,
-    totalCandidates: 31,
+    totalCandidates: candidates.length + memories.length + 180,
     approvedCandidates: memories.length,
     memoryCount: memories.length,
     memoryDeleteInProgress: false,
@@ -1034,12 +1329,19 @@ export const demoListMemories = async (opts: {
   limit?: number;
   offset?: number;
   subsystem?: string;
+  subsystems?: string[];
   search?: string;
 }): Promise<{ memories: MemoryBankMemory[]; total: number }> => {
   const search = opts.search?.trim().toLowerCase();
+  const subsystemFilters = opts.subsystems?.length
+    ? opts.subsystems
+    : opts.subsystem
+      ? [opts.subsystem]
+      : [];
   const filtered = memories.filter(memory => {
     const matchesSubsystem =
-      !opts.subsystem || memory.tags?.includes(`subsystem:${opts.subsystem}`) === true;
+      subsystemFilters.length === 0 ||
+      subsystemFilters.some(subsystem => memory.tags?.includes(`subsystem:${subsystem}`) === true);
     const matchesSearch =
       !search ||
       memory.title?.toLowerCase().includes(search) === true ||
@@ -1145,12 +1447,12 @@ export const demoGetGraph = (): Promise<{
 
 export const demoGetEstimate = (): Promise<DigitalTwinEstimate> =>
   wait({
-    messages: 1_146,
-    calls: 28,
-    canvases: 17,
-    totalRecords: 1_191,
-    estCandidates: 29,
-    estCostUSD: 0.84,
+    messages: 15_682,
+    calls: 55,
+    canvases: 24,
+    totalRecords: 15_761,
+    estCandidates: 186,
+    estCostUSD: 4.72,
   });
 
 export const demoListClusters = (): Promise<{
@@ -1218,31 +1520,33 @@ export const demoPatchCandidate = async (
 
 export const demoGetMetrics = (): Promise<DigitalTwinMetrics> =>
   wait({
-    total: 31,
-    approvedClean: 18,
-    approvedEdited: 5,
-    totalApproved: 23,
-    rejected: 3,
+    total: 268,
+    approvedClean: 176,
+    approvedEdited: 41,
+    totalApproved: 217,
+    rejected: 28,
     pending: candidates.filter(candidate => candidate.status === 'pending').length,
-    approvalRate: 0.88,
-    editRate: 0.22,
-    previousApprovalRate: 0.81,
-    previousEditRate: 0.27,
+    approvalRate: 0.89,
+    editRate: 0.19,
+    previousApprovalRate: 0.84,
+    previousEditRate: 0.24,
     bySubsystem: [
-      { subsystem: 'communication', approved: 7, rejected: 1, pending: 2 },
-      { subsystem: 'projects', approved: 6, rejected: 1, pending: 1 },
-      { subsystem: 'people', approved: 4, rejected: 1, pending: 1 },
-      { subsystem: 'working-style', approved: 6, rejected: 0, pending: 1 },
+      { subsystem: 'communication', approved: 48, rejected: 6, pending: 8 },
+      { subsystem: 'projects', approved: 52, rejected: 7, pending: 9 },
+      { subsystem: 'people', approved: 31, rejected: 4, pending: 5 },
+      { subsystem: 'working-style', approved: 36, rejected: 3, pending: 6 },
+      { subsystem: 'expertise', approved: 28, rejected: 5, pending: 4 },
+      { subsystem: 'docs', approved: 22, rejected: 3, pending: 3 },
     ],
     bySource: [
-      { source: 'messages', approved: 15, rejected: 2 },
-      { source: 'calls', approved: 5, rejected: 1 },
-      { source: 'canvases', approved: 3, rejected: 0 },
+      { source: 'messages', approved: 148, rejected: 18 },
+      { source: 'calls', approved: 41, rejected: 6 },
+      { source: 'canvases', approved: 28, rejected: 4 },
     ],
-    oldestPendingDays: 6,
-    addedSinceYesterday: 3,
-    recallPrecision: 0.91,
-    recallRatedCount: 42,
+    oldestPendingDays: 11,
+    addedSinceYesterday: 5,
+    recallPrecision: 0.9,
+    recallRatedCount: 186,
   });
 
 export const demoListFiles = (): Promise<DigitalTwinMemoryFilesResponse> =>

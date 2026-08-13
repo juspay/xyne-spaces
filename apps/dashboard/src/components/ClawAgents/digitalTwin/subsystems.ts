@@ -4,13 +4,13 @@
 
 import {
   ChatChatting,
-  Contact,
   FileText,
   FolderOpen,
   GitBranch,
+  GitCompare,
+  GitFork01,
   GraduationCap,
   SlidersHorizontal,
-  Users,
   type DigitalTwinIcon,
 } from './icons';
 
@@ -59,10 +59,10 @@ export const SUBSYSTEM_ICONS: Record<string, DigitalTwinIcon> = {
   style: ChatChatting,
   expertise: GraduationCap,
   projects: FolderOpen,
-  relationships: Users,
+  relationships: GitCompare,
   preferences: SlidersHorizontal,
   decisions: GitBranch,
-  context: Contact,
+  context: GitFork01,
   docs: FileText,
 };
 

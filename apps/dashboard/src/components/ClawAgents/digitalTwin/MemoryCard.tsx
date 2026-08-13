@@ -36,6 +36,7 @@ import type { MemoryBankMemory, PipelineRecordPreview } from '@/services/claw/di
 import { activitySummary, recordTypeLabel } from './activityLanguage';
 import { fmtDate } from './format';
 import { normalizeSubsystem, SUBSYSTEM_ICONS, SUBSYSTEM_LABELS } from './subsystems';
+import { DIGITAL_TWIN_EASE_OUT, DIGITAL_TWIN_MOTION } from './motion';
 
 interface MemoryKind {
   label: string;
@@ -51,7 +52,6 @@ interface EvidenceGroup {
   records: PipelineRecordPreview[];
 }
 
-const MOTION_EASE = [0.22, 1, 0.36, 1] as const;
 const EXPAND_ANCHOR_DURATION_MS = 280;
 const COLLAPSE_ANCHOR_DURATION_MS = 220;
 
@@ -176,7 +176,7 @@ export const MemoryCard = ({
 
   useLayoutEffect(() => {
     const summaryCopy = summaryCopyRef.current;
-    if (!summaryCopy) return;
+    if (!summaryCopy || summaryExpanded) return;
 
     const measureOverflow = (): void => {
       const lineHeight = Number.parseFloat(window.getComputedStyle(summaryCopy).lineHeight);
@@ -290,9 +290,9 @@ export const MemoryCard = ({
                 <MoreHorizontal size={16} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='min-w-44'>
+            <DropdownMenuContent align='end' className='dt-menu-content min-w-44'>
               <DropdownMenuItem
-                className='min-h-10 text-destructive focus:text-destructive'
+                className='dt-menu-item text-destructive focus:text-destructive'
                 onSelect={() => onDelete(memory.hindsightMemoryId)}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin delete memory'
@@ -309,7 +309,10 @@ export const MemoryCard = ({
             type='button'
             onClick={toggleHistory}
             {...(!reduceMotion && { whileTap: { scale: 0.9 } })}
-            transition={{ duration: reduceMotion ? 0 : 0.14, ease: MOTION_EASE }}
+            transition={{
+              duration: reduceMotion ? 0 : DIGITAL_TWIN_MOTION.press,
+              ease: DIGITAL_TWIN_EASE_OUT,
+            }}
             aria-expanded={expanded}
             aria-busy={pendingExpand}
             aria-controls={historyId}
@@ -328,7 +331,10 @@ export const MemoryCard = ({
               <motion.span
                 className='absolute inset-0 inline-flex'
                 animate={{ opacity: pendingExpand ? 0 : 1, rotate: expanded ? 90 : -90 }}
-                transition={{ duration: reduceMotion ? 0 : 0.18, ease: MOTION_EASE }}
+                transition={{
+                  duration: reduceMotion ? 0 : DIGITAL_TWIN_MOTION.feedback,
+                  ease: DIGITAL_TWIN_EASE_OUT,
+                }}
               >
                 <ChevronRight size={16} />
               </motion.span>
@@ -372,13 +378,6 @@ export const MemoryCard = ({
                 className='dt-memory-history'
                 aria-label='Memory source history'
               >
-                <div className='dt-memory-why'>
-                  <p>
-                    {memory.curatorReasoning ??
-                      'The source detail did not include a written retention reason.'}
-                  </p>
-                </div>
-
                 {!memory.pipelineEventId ? (
                   <p className='dt-memory-history-empty'>
                     Source detail was not recorded for this earlier memory. It was approved before
@@ -471,28 +470,37 @@ export const MemoryCard = ({
             </>
           )}
         </div>
-        <p
-          ref={summaryCopyRef}
-          id={summaryId}
-          className={
-            summaryExpanded ? 'dt-memory-summary-copy' : 'dt-memory-summary-copy line-clamp-2'
-          }
-        >
-          {memory.content}
-        </p>
-        {summaryOverflowing && (
-          <button
-            type='button'
-            className='dt-memory-summary-toggle'
-            aria-expanded={summaryExpanded}
-            aria-controls={summaryId}
-            onClick={() => setSummaryExpanded(previous => !previous)}
-            data-track-category='Claw Agents'
-            data-track-name='Digital Twin toggle memory summary'
+        <div className='dt-memory-summary-copy-wrap' data-expanded={summaryExpanded}>
+          <p
+            ref={summaryCopyRef}
+            id={summaryId}
+            className={
+              summaryExpanded ? 'dt-memory-summary-copy' : 'dt-memory-summary-copy line-clamp-2'
+            }
           >
-            {summaryExpanded ? 'Show less' : 'Show more'}
-          </button>
-        )}
+            {memory.content}
+          </p>
+          {summaryOverflowing && (
+            <button
+              type='button'
+              className='dt-memory-summary-toggle'
+              aria-expanded={summaryExpanded}
+              aria-controls={summaryId}
+              onClick={() => setSummaryExpanded(previous => !previous)}
+              data-track-category='Claw Agents'
+              data-track-name='Digital Twin toggle memory summary'
+            >
+              {!summaryExpanded && (
+                <span className='dt-memory-summary-ellipsis' aria-hidden='true'>
+                  …
+                </span>
+              )}
+              <span className='dt-memory-summary-toggle-label'>
+                {summaryExpanded ? 'Show less' : 'Show more'}
+              </span>
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );

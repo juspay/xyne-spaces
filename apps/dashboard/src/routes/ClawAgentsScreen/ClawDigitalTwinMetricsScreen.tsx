@@ -42,8 +42,8 @@ const ClawDigitalTwinMetricsScreen = (): ReactElement => {
               aria-pressed={days === option.value}
               className={
                 days === option.value
-                  ? 'dt-control dt-transition rounded-md bg-[var(--dt-ink)] px-3 text-sm font-semibold text-[var(--dt-paper)]'
-                  : 'dt-control dt-transition rounded-md px-3 text-sm font-semibold text-[var(--dt-muted)] hover:text-[var(--dt-ink)]'
+                  ? 'dt-control dt-selectable rounded-md bg-[var(--dt-ink)] px-3 text-sm font-semibold text-[var(--dt-paper)]'
+                  : 'dt-control dt-selectable rounded-md px-3 text-sm font-semibold text-[var(--dt-muted)] hover:text-[var(--dt-ink)]'
               }
               data-track-category='Claw Agents'
               data-track-name='Digital Twin metrics range'

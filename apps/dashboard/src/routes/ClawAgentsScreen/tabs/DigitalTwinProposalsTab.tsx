@@ -22,7 +22,12 @@ import {
   subsystemIcon,
   subsystemLabel,
   subsystemRank,
+  SUBSYSTEM_ORDER,
 } from '@/components/ClawAgents/digitalTwin/subsystems';
+import {
+  DIGITAL_TWIN_EASE_OUT,
+  DIGITAL_TWIN_MOTION,
+} from '@/components/ClawAgents/digitalTwin/motion';
 
 interface GroupConfirmation {
   subsystem: string;
@@ -40,13 +45,19 @@ const MOTION_EASE = [0.22, 1, 0.36, 1] as const;
 const reviewSubsystemLabel = (subsystem: string): string =>
   normalizeSubsystem(subsystem) === 'style' ? 'Communication' : subsystemLabel(subsystem);
 
+/** Collapse every category except Communication (first in SUBSYSTEM_ORDER). */
+const initiallyCollapsedSubsystems = (): Set<string> =>
+  new Set(SUBSYSTEM_ORDER.filter(subsystem => subsystem !== 'style'));
+
 const DigitalTwinProposalsTab = (): ReactElement => {
   const proposalQuery = useClawDigitalTwinProposals();
   const approveCluster = useApproveDigitalTwinCluster();
   const reduceMotion = useReducedMotion();
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [removedSubsystems, setRemovedSubsystems] = useState<Set<string>>(new Set());
-  const [collapsedSubsystems, setCollapsedSubsystems] = useState<Set<string>>(new Set());
+  const [collapsedSubsystems, setCollapsedSubsystems] = useState<Set<string>>(
+    initiallyCollapsedSubsystems,
+  );
   const [bulkActing, setBulkActing] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<GroupConfirmation | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -115,7 +126,7 @@ const DigitalTwinProposalsTab = (): ReactElement => {
 
   if (proposalQuery.isLoading) {
     return (
-      <div className='flex flex-col gap-4'>
+      <div className='flex flex-col gap-6'>
         <Skeleton className='h-5 w-2/3' />
         {Array.from({ length: 5 }, (_, index) => (
           <Skeleton key={index} className='h-11 w-full rounded-2xl' />
@@ -125,11 +136,7 @@ const DigitalTwinProposalsTab = (): ReactElement => {
   }
 
   return (
-    <div className='flex flex-col gap-4'>
-      <p className='max-w-[68ch] pl-3 text-sm font-[450] leading-[1.3] text-muted-foreground'>
-        Review one suggestion at a time. Nothing becomes memory until you approve it.
-      </p>
-
+    <div className='flex flex-col gap-6'>
       {outcome && (
         <div
           role={outcome.error ? 'alert' : 'status'}
@@ -252,9 +259,9 @@ const DigitalTwinProposalsTab = (): ReactElement => {
                           {count} Proposal{count === 1 ? '' : 's'} Pending
                         </p>
                         <Button
-                          variant='ghost'
+                          variant='default'
                           size='sm'
-                          className='h-7 rounded-[10px] px-2 font-[450] text-primary hover:bg-primary/10 hover:text-primary'
+                          className='h-7 w-[114px] gap-2 rounded-[10px] bg-[var(--sidebar-primary)] px-2 text-sm font-[450] leading-5 tracking-[-0.02em] has-[>svg]:px-2'
                           disabled={bulkActing !== null}
                           onClick={() =>
                             setConfirmation({
@@ -271,23 +278,42 @@ const DigitalTwinProposalsTab = (): ReactElement => {
                           ) : (
                             <CheckDouble className='size-4' />
                           )}
-                          Approve all
+                          Approve All
                         </Button>
                       </div>
 
-                      <div className='dt-review-proposal-list'>
-                        {group.candidates.map(candidate => (
-                          <CandidateRow
-                            key={candidate.id}
-                            candidate={candidate}
-                            total={totalPending}
-                            onApproved={remove}
-                            onRejected={remove}
-                            onRestore={restore}
-                            onOutcome={showOutcome}
-                          />
-                        ))}
-                      </div>
+                      <motion.div layout className='dt-review-proposal-list'>
+                        <AnimatePresence initial={false} mode='popLayout'>
+                          {group.candidates.map(candidate => (
+                            <motion.div
+                              layout='position'
+                              key={candidate.id}
+                              initial={false}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={
+                                reduceMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.985 }
+                              }
+                              transition={{
+                                duration: DIGITAL_TWIN_MOTION.state,
+                                ease: DIGITAL_TWIN_EASE_OUT,
+                                layout: {
+                                  duration: DIGITAL_TWIN_MOTION.layout,
+                                  ease: DIGITAL_TWIN_EASE_OUT,
+                                },
+                              }}
+                            >
+                              <CandidateRow
+                                candidate={candidate}
+                                total={totalPending}
+                                onApproved={remove}
+                                onRejected={remove}
+                                onRestore={restore}
+                                onOutcome={showOutcome}
+                              />
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </motion.div>
                     </motion.div>
                   )}
                 </AnimatePresence>

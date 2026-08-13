@@ -113,7 +113,14 @@
   isolation: isolate;
   border-radius: 1rem;
   background: var(--dt-memory-fill);
-  contain: paint;
+  contain: none;
+  box-shadow:
+    0 15px 2px rgb(0 0 0 / 0%),
+    0 10px 2px rgb(0 0 0 / 0%),
+    0 5px 1.5px rgb(0 0 0 / 2%),
+    0 2px 1px rgb(0 0 0 / 3%),
+    0 1px 0.5px rgb(0 0 0 / 3%);
+  transition: box-shadow 180ms var(--dt-ease);
 }
 
 .digital-twin-ledger .dt-memory-record-expanded {
@@ -248,19 +255,48 @@
   min-width: 0;
   color: hsl(var(--foreground));
   font-size: 0.875rem;
-  font-weight: 450;
+  font-weight: 400;
   line-height: 1.25rem;
   letter-spacing: -0.0175rem;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
+.digital-twin-ledger .dt-memory-summary-copy-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.digital-twin-ledger .dt-memory-summary-copy-wrap[data-expanded="true"] .dt-memory-summary-copy {
+  display: inline;
+}
+
 .digital-twin-ledger .dt-memory-summary-toggle {
-  align-self: flex-start;
   color: #717170;
   font-size: 0.75rem;
-  font-weight: 550;
+  font-weight: 400;
   line-height: 1.25rem;
+}
+
+.digital-twin-ledger .dt-memory-summary-copy-wrap[data-expanded="false"] .dt-memory-summary-toggle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  padding-left: 1rem;
+  background: linear-gradient(to right, transparent, var(--dt-memory-card) 0.75rem);
+}
+
+.digital-twin-ledger .dt-memory-summary-copy-wrap[data-expanded="true"] .dt-memory-summary-toggle {
+  margin-left: 0.375rem;
+}
+
+.digital-twin-ledger .dt-memory-summary-ellipsis {
+  margin-right: 0.25rem;
+  color: hsl(var(--foreground));
+}
+
+.digital-twin-ledger .dt-memory-summary-toggle-label {
+  font-size: 12px;
   text-decoration: underline;
   text-underline-offset: 0.1875rem;
 }
@@ -275,14 +311,8 @@
   padding: 1rem 0.75rem;
 }
 
-.digital-twin-ledger .dt-memory-why {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  color: hsl(var(--foreground));
-  font-size: 0.75rem;
-  font-weight: 450;
-  line-height: 1.25rem;
+.digital-twin-ledger .dt-memory-history > :first-child {
+  margin-top: 0;
 }
 
 .digital-twin-ledger .dt-memory-run-summary,
@@ -528,9 +558,9 @@
 
 .digital-twin-ledger .dt-review-confidence {
   flex: 0 0 auto;
-  color: hsl(var(--primary));
+  color: #717170;
   font-size: 0.75rem;
-  font-weight: 550;
+  font-weight: 500;
   line-height: 1.25rem;
 }
 
@@ -603,6 +633,74 @@
   color: var(--dt-ink);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+/* The filter menu is portaled outside .digital-twin-ledger. Keep these styles
+   component-specific so other application menus retain their own properties. */
+.dt-filter-menu-content.dt-filter-menu-content {
+  width: 200px;
+  overflow: hidden;
+  padding: 0.25rem;
+  border: 0.8px solid hsl(var(--foreground) / 0.1);
+  border-radius: 1rem;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  box-shadow:
+    0 123px 34px rgb(0 0 0 / 0%),
+    0 79px 31px rgb(0 0 0 / 1%),
+    0 44px 27px rgb(0 0 0 / 2%),
+    0 20px 20px rgb(0 0 0 / 3%),
+    0 5px 11px rgb(0 0 0 / 4%);
+}
+
+.dt-filter-menu-item.dt-filter-menu-item {
+  min-height: 2.25rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.625rem;
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.dt-filter-menu-item.dt-filter-menu-item:focus,
+.dt-filter-menu-item.dt-filter-menu-item[data-highlighted],
+.dt-filter-menu-item.dt-filter-menu-item[data-selected="true"] {
+  background: hsl(var(--foreground) / 0.06);
+  color: hsl(var(--foreground));
+}
+
+.dt-filter-menu-item-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dt-filter-menu-item.dt-filter-menu-item .dt-filter-menu-item-label > svg {
+  width: 1rem;
+  height: 1rem;
+  color: currentColor;
+}
+
+.dt-filter-menu-check {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+}
+
+.dt-filter-menu-item.dt-filter-menu-item:hover .dt-filter-menu-check,
+.dt-filter-menu-item.dt-filter-menu-item:focus .dt-filter-menu-check,
+.dt-filter-menu-item.dt-filter-menu-item[data-highlighted] .dt-filter-menu-check,
+.dt-filter-menu-item.dt-filter-menu-item[data-selected="true"] .dt-filter-menu-check {
+  opacity: 1;
 }
 
 @container (max-width: 780px) {

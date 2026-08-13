@@ -581,7 +581,11 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
       const share = await agentShareRepository.findByAgentAndUser(existing.id, requesterId);
       const isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
 
-      if (existing.scope === "global" && !admin && !isOwner && !isContributor) {
+      // digital-twin is a shared platform agent that every user configures as
+      // their personal twin — allow authenticated edits outside the usual
+      // global-agent ACL.
+      const isPersonalTwin = existing.slug === "digital-twin";
+      if (existing.scope === "global" && !admin && !isOwner && !isContributor && !isPersonalTwin) {
         res.status(403).json({ success: false, error: "Only admins, the original owner, or contributors can edit global agents" });
         return;
       }

@@ -20,19 +20,22 @@ const OutcomeBar = ({
     >
       {approved > 0 && (
         <span
-          className='h-full bg-[var(--dt-sage)]'
+          key={`approved-${approved}`}
+          className='dt-result-bar-segment h-full bg-[var(--dt-sage)]'
           style={{ width: `${(approved / total) * 100}%` }}
         />
       )}
       {rejected > 0 && (
         <span
-          className='h-full bg-[var(--dt-danger)]'
+          key={`rejected-${rejected}`}
+          className='dt-result-bar-segment h-full bg-[var(--dt-danger)]'
           style={{ width: `${(rejected / total) * 100}%` }}
         />
       )}
       {pending > 0 && (
         <span
-          className='h-full bg-[var(--dt-amber)]'
+          key={`pending-${pending}`}
+          className='dt-result-bar-segment h-full bg-[var(--dt-amber)]'
           style={{ width: `${(pending / total) * 100}%` }}
         />
       )}

@@ -292,8 +292,9 @@
 
   /* Midnight theme - dark theme variant */
   [data-theme="midnight"] {
-    --root-bg: #22232a;
-    --background: 232 11% 15%; /* #22232A */
+    --root-bg: transparent;
+    --wallpaper-image: url("/images/wallpaper-midnight.png");
+    --background: 232 9% 11%; /* #1A1A1F */
     --foreground: 220 18% 90%;
     --card: 233 11% 15%; /* #22232A */
     --card-foreground: 210 8% 93%;
@@ -323,8 +324,9 @@
     --sidebar: transparent;
     --sidebar-background-blur: 12.5px;
     /* Sidebar item states matched to Figma "Agent Hub" midnight frames.
-       Translucent white over --root-bg: default text = white @ 60%,
-       selected bg = white @ 12%, selected border = white @ 20%, selected text = white. */
+       Over the wallpaper these are translucent white so the backdrop shows
+       through: default text = white @ 60%, selected bg = white @ 12%,
+       selected border = white @ 20%, selected text = white. */
     --sidebar-foreground: rgba(255, 255, 255, 0.6);
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
@@ -488,6 +490,12 @@
     cursor: pointer;
     opacity: 1;
     filter: brightness(0) saturate(100%);
+  }
+
+  /* Only Midnight defines --wallpaper-image. Light themes retain their opaque
+     radial --root-bg and therefore never render an image. */
+  .app-wallpaper-image {
+    background-image: var(--wallpaper-image, none);
   }
 
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {

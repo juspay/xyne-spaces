@@ -579,9 +579,19 @@ memoryRouter.post("/banks/:agentSlug/retention-sweep", requireClawAdmin, async (
 memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const { scope, search, subsystem, userTag, limit = "50", offset = "0" } = req.query as Record<string, string>;
+    const { scope, search, subsystem, subsystems, userTag, limit = "50", offset = "0" } =
+      req.query as Record<string, string>;
     const take = Math.min(Number(limit) || 50, 200);
     const skip = Math.max(Number(offset) || 0, 0);
+    const subsystemFilters = [
+      ...(subsystems
+        ? subsystems
+            .split(',')
+            .map(entry => entry.trim())
+            .filter(Boolean)
+        : []),
+      ...(subsystem?.trim() ? [subsystem.trim()] : []),
+    ].filter((value, index, all) => all.indexOf(value) === index);
 
     // Privacy gate: the `digital-twin` bank is shared by every user who has
     // opted in. A list call MUST be restricted to the requester's own
@@ -628,9 +638,13 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
       // AUTHORITATIVE user-scope filter — JS, not provider.
       let scoped = widePage.memories.filter((m) => (m.tags ?? []).includes(userTag));
       // Optional subsystem narrowing inside the user's scope.
-      if (subsystem && subsystem.trim().length > 0) {
-        const subsystemTag = `subsystem:${subsystem.trim()}`;
-        scoped = scoped.filter((m) => (m.tags ?? []).includes(subsystemTag));
+      if (subsystemFilters.length > 0) {
+        scoped = scoped.filter(memory => {
+          const tags = memory.tags ?? [];
+          return subsystemFilters.some(filter =>
+            tags.includes(`subsystem:${filter}`),
+          );
+        });
       }
 
       const total = scoped.length;

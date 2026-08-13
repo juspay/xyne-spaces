@@ -24,13 +24,25 @@ const userHeaders = (userId: string): Record<string, string> => ({ [USER_ID_HEAD
 
 export async function listDigitalTwinMemories(
   userId: string,
-  opts: { limit?: number; offset?: number; subsystem?: string; search?: string } = {},
+  opts: {
+    limit?: number;
+    offset?: number;
+    subsystem?: string;
+    subsystems?: string[];
+    search?: string;
+  } = {},
 ): Promise<{ memories: MemoryBankMemory[]; total: number }> {
   if (demo.isDigitalTwinDemoMode()) return demo.demoListMemories(opts);
   const params = new URLSearchParams({ userTag: userTag(userId) });
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.offset !== undefined) params.set('offset', String(opts.offset));
-  if (opts.subsystem) params.set('subsystem', opts.subsystem);
+  const subsystems = opts.subsystems?.length
+    ? opts.subsystems
+    : opts.subsystem
+      ? [opts.subsystem]
+      : [];
+  if (subsystems.length === 1) params.set('subsystem', subsystems[0]!);
+  else if (subsystems.length > 1) params.set('subsystems', subsystems.join(','));
   if (opts.search?.trim()) params.set('search', opts.search.trim());
   const body = await clawRequest<{ success: boolean; data: MemoryBankMemory[]; total?: number }>(
     `${BANK}/memories?${params.toString()}`,

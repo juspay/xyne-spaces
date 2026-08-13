@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Background, Controls, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { List, Network, RefreshCw } from '@/components/ClawAgents/digitalTwin/icons';
@@ -12,8 +13,14 @@ import {
 import { SubsystemMemoriesPanel } from '@/components/ClawAgents/digitalTwin/SubsystemMemoriesPanel';
 import { fmtDate } from '@/components/ClawAgents/digitalTwin/format';
 import { subsystemLabel } from '@/components/ClawAgents/digitalTwin/subsystems';
+import {
+  DIGITAL_TWIN_EASE_IN,
+  DIGITAL_TWIN_EASE_OUT,
+  DIGITAL_TWIN_MOTION,
+} from '@/components/ClawAgents/digitalTwin/motion';
 
 const DigitalTwinGraphTab = (): ReactElement => {
+  const reduceMotion = useReducedMotion();
   const graphQuery = useClawDigitalTwinGraph();
   const [view, setView] = useState<'list' | 'graph'>('list');
   const [selectedSubsystem, setSelectedSubsystem] = useState<string | null>(null);
@@ -59,8 +66,8 @@ const DigitalTwinGraphTab = (): ReactElement => {
             data-track-name='Digital Twin show knowledge list'
             className={
               view === 'list'
-                ? 'dt-control dt-transition inline-flex items-center gap-2 rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
-                : 'dt-control dt-transition inline-flex items-center gap-2 rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
+                ? 'dt-control dt-selectable inline-flex items-center gap-2 rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
+                : 'dt-control dt-selectable inline-flex items-center gap-2 rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
             }
           >
             <List className='size-4' />
@@ -74,8 +81,8 @@ const DigitalTwinGraphTab = (): ReactElement => {
             data-track-name='Digital Twin show visual knowledge map'
             className={
               view === 'graph'
-                ? 'dt-control dt-transition inline-flex items-center gap-2 rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
-                : 'dt-control dt-transition inline-flex items-center gap-2 rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
+                ? 'dt-control dt-selectable inline-flex items-center gap-2 rounded-md bg-[var(--dt-ink)] px-4 text-sm font-semibold text-[var(--dt-paper)]'
+                : 'dt-control dt-selectable inline-flex items-center gap-2 rounded-md px-4 text-sm font-semibold text-[var(--dt-muted)]'
             }
           >
             <Network className='size-4' />
@@ -116,90 +123,126 @@ const DigitalTwinGraphTab = (): ReactElement => {
         </div>
       ) : (
         !graphQuery.isError && (
-          <div className={selectedSubsystem ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]' : ''}>
-            {view === 'list' ? (
-              <div className='overflow-x-auto border-y dt-rule'>
-                <table className='w-full min-w-[720px] border-collapse text-left'>
-                  <thead>
-                    <tr className='dt-paper-raised text-sm text-[var(--dt-muted)]'>
-                      <th scope='col' className='px-4 py-3 font-semibold'>
-                        Knowledge area
-                      </th>
-                      <th scope='col' className='px-4 py-3 text-right font-semibold'>
-                        Memories
-                      </th>
-                      <th scope='col' className='px-4 py-3 text-right font-semibold'>
-                        Sessions
-                      </th>
-                      <th scope='col' className='px-4 py-3 font-semibold'>
-                        Last updated
-                      </th>
-                      <th scope='col' className='px-4 py-3 font-semibold'>
-                        Sample
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subsystems.map(subsystem => (
-                      <tr
-                        key={subsystem.name}
-                        className='dt-transition border-t dt-rule hover:bg-[var(--dt-paper-raised)]'
-                      >
-                        <th scope='row' className='px-4 py-4 font-semibold text-[var(--dt-ink)]'>
-                          <button
-                            type='button'
-                            className='dt-control text-left hover:underline'
-                            onClick={() => setSelectedSubsystem(subsystem.name)}
-                            data-track-category='Claw Agents'
-                            data-track-name='Digital Twin inspect knowledge area'
-                          >
-                            {subsystemLabel(subsystem.name)}
-                          </button>
-                        </th>
-                        <td className='px-4 py-4 text-right tabular-nums text-[var(--dt-ink)]'>
-                          {subsystem.memoryCount.toLocaleString()}
-                        </td>
-                        <td className='px-4 py-4 text-right tabular-nums text-[var(--dt-ink)]'>
-                          {subsystem.sessionCount.toLocaleString()}
-                        </td>
-                        <td className='dt-muted px-4 py-4'>{fmtDate(subsystem.lastUpdated)}</td>
-                        <td className='dt-muted max-w-sm px-4 py-4 text-sm'>
-                          <span className='line-clamp-2'>{subsystem.sampleContent}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div
-                className='h-[540px] overflow-hidden border-y dt-rule bg-[var(--dt-paper-raised)]'
-                aria-label='Interactive visual map. An equivalent ranked table is available.'
-              >
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
-                  fitView
-                  nodesDraggable={false}
-                  nodesConnectable={false}
-                  elementsSelectable
-                  onNodeClick={(_, node) => setSelectedSubsystem(node.id)}
+          <motion.div
+            layout
+            className={selectedSubsystem ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]' : ''}
+          >
+            <AnimatePresence mode='popLayout' initial={false}>
+              {view === 'list' ? (
+                <motion.div
+                  key='list'
+                  className='overflow-x-auto border-y dt-rule'
+                  initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 6 }}
+                  transition={{
+                    duration: DIGITAL_TWIN_MOTION.state,
+                    ease: reduceMotion ? DIGITAL_TWIN_EASE_IN : DIGITAL_TWIN_EASE_OUT,
+                  }}
                 >
-                  <Background color='var(--dt-rule)' />
-                  <Controls />
-                </ReactFlow>
-              </div>
-            )}
+                  <table className='w-full min-w-[720px] border-collapse text-left'>
+                    <thead>
+                      <tr className='dt-paper-raised text-sm text-[var(--dt-muted)]'>
+                        <th scope='col' className='px-4 py-3 font-semibold'>
+                          Knowledge area
+                        </th>
+                        <th scope='col' className='px-4 py-3 text-right font-semibold'>
+                          Memories
+                        </th>
+                        <th scope='col' className='px-4 py-3 text-right font-semibold'>
+                          Sessions
+                        </th>
+                        <th scope='col' className='px-4 py-3 font-semibold'>
+                          Last updated
+                        </th>
+                        <th scope='col' className='px-4 py-3 font-semibold'>
+                          Sample
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subsystems.map(subsystem => (
+                        <tr
+                          key={subsystem.name}
+                          className='dt-transition border-t dt-rule hover:bg-[var(--dt-paper-raised)]'
+                        >
+                          <th scope='row' className='px-4 py-4 font-semibold text-[var(--dt-ink)]'>
+                            <button
+                              type='button'
+                              className='dt-control text-left hover:underline'
+                              onClick={() => setSelectedSubsystem(subsystem.name)}
+                              data-track-category='Claw Agents'
+                              data-track-name='Digital Twin inspect knowledge area'
+                            >
+                              {subsystemLabel(subsystem.name)}
+                            </button>
+                          </th>
+                          <td className='px-4 py-4 text-right tabular-nums text-[var(--dt-ink)]'>
+                            {subsystem.memoryCount.toLocaleString()}
+                          </td>
+                          <td className='px-4 py-4 text-right tabular-nums text-[var(--dt-ink)]'>
+                            {subsystem.sessionCount.toLocaleString()}
+                          </td>
+                          <td className='dt-muted px-4 py-4'>{fmtDate(subsystem.lastUpdated)}</td>
+                          <td className='dt-muted max-w-sm px-4 py-4 text-sm'>
+                            <span className='line-clamp-2'>{subsystem.sampleContent}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key='graph'
+                  className='h-[540px] overflow-hidden border-y dt-rule bg-[var(--dt-paper-raised)]'
+                  aria-label='Interactive visual map. An equivalent ranked table is available.'
+                  initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -6 }}
+                  transition={{
+                    duration: DIGITAL_TWIN_MOTION.state,
+                    ease: reduceMotion ? DIGITAL_TWIN_EASE_IN : DIGITAL_TWIN_EASE_OUT,
+                  }}
+                >
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    fitView
+                    nodesDraggable={false}
+                    nodesConnectable={false}
+                    elementsSelectable
+                    onNodeClick={(_, node) => setSelectedSubsystem(node.id)}
+                  >
+                    <Background color='var(--dt-rule)' />
+                    <Controls />
+                  </ReactFlow>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-            {selectedSubsystem && (
-              <div className='min-h-[540px]'>
-                <SubsystemMemoriesPanel
-                  subsystem={selectedSubsystem}
-                  onClose={() => setSelectedSubsystem(null)}
-                />
-              </div>
-            )}
-          </div>
+            <AnimatePresence initial={false}>
+              {selectedSubsystem && (
+                <motion.div
+                  key={selectedSubsystem}
+                  layout='position'
+                  className='min-h-[540px]'
+                  initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 10 }}
+                  transition={{
+                    duration: DIGITAL_TWIN_MOTION.state,
+                    ease: reduceMotion ? DIGITAL_TWIN_EASE_IN : DIGITAL_TWIN_EASE_OUT,
+                  }}
+                >
+                  <SubsystemMemoriesPanel
+                    subsystem={selectedSubsystem}
+                    onClose={() => setSelectedSubsystem(null)}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
         )
       )}
 

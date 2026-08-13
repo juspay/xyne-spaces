@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   AlertTriangle,
   CalendarRange,
@@ -18,6 +19,10 @@ import {
   useDeleteDigitalTwinMemories,
   useUpdateDigitalTwinSettings,
 } from '@/hooks/useClawDigitalTwin';
+import {
+  DIGITAL_TWIN_EASE_OUT,
+  DIGITAL_TWIN_MOTION,
+} from '@/components/ClawAgents/digitalTwin/motion';
 
 const MAX_SUFFIX_LEN = 500;
 const MIN_SCORE = 0.7;
@@ -25,6 +30,7 @@ const MAX_SCORE = 1;
 const SCORE_STEP = 0.05;
 
 const DigitalTwinSettingsTab = (): ReactElement => {
+  const reduceMotion = useReducedMotion();
   const { data: status, isLoading } = useClawDigitalTwinStatus();
   const update = useUpdateDigitalTwinSettings();
   const deleteMemories = useDeleteDigitalTwinMemories();
@@ -172,16 +178,24 @@ const DigitalTwinSettingsTab = (): ReactElement => {
             </span>
           </label>
 
-          {suffix.trim() && (
-            <div className='rounded-lg border border-border bg-muted/20 px-4 py-4'>
-              <p className='text-sm font-medium text-foreground'>Reply preview</p>
-              <p className='mt-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground'>
-                [A memory-grounded reply from your Twin]
-                {'\n\n'}
-                <span className='text-primary'>{suffix.trim()}</span>
-              </p>
-            </div>
-          )}
+          <AnimatePresence initial={false}>
+            {suffix.trim() && (
+              <motion.div
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                transition={{ duration: DIGITAL_TWIN_MOTION.state, ease: DIGITAL_TWIN_EASE_OUT }}
+                className='rounded-lg border border-border bg-muted/20 px-4 py-4'
+              >
+                <p className='text-sm font-medium text-foreground'>Reply preview</p>
+                <p className='mt-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground'>
+                  [A memory-grounded reply from your Twin]
+                  {'\n\n'}
+                  <span className='text-primary'>{suffix.trim()}</span>
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </section>
 
@@ -287,16 +301,22 @@ const DigitalTwinSettingsTab = (): ReactElement => {
         </div>
 
         <div className='flex flex-col gap-6'>
-          {status?.memoryDeleteInProgress && (
-            <div
-              className='flex items-start gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-foreground'
-              aria-live='polite'
-            >
-              <AlertTriangle className='mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-300' />
-              Memory deletion is in progress. You may leave this page; the status will remain
-              visible in the Digital Twin header.
-            </div>
-          )}
+          <AnimatePresence initial={false}>
+            {status?.memoryDeleteInProgress && (
+              <motion.div
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                transition={{ duration: DIGITAL_TWIN_MOTION.state, ease: DIGITAL_TWIN_EASE_OUT }}
+                className='flex items-start gap-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-foreground'
+                aria-live='polite'
+              >
+                <AlertTriangle className='mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-300' />
+                Memory deletion is in progress. You may leave this page; the status will remain
+                visible in the Digital Twin header.
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <fieldset disabled={status?.memoryDeleteInProgress}>
             <legend className='text-sm font-medium text-foreground'>Delete memories</legend>
@@ -327,34 +347,42 @@ const DigitalTwinSettingsTab = (): ReactElement => {
               </label>
             </div>
 
-            {deleteMode === 'range' && (
-              <div className='mt-4 grid gap-3 sm:grid-cols-2'>
-                <label htmlFor='digital-twin-delete-from'>
-                  <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
-                  <Input
-                    id='digital-twin-delete-from'
-                    type='date'
-                    value={deleteFrom}
-                    max={deleteTo || undefined}
-                    onChange={event => setDeleteFrom(event.target.value)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin set delete from date'
-                  />
-                </label>
-                <label htmlFor='digital-twin-delete-to'>
-                  <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
-                  <Input
-                    id='digital-twin-delete-to'
-                    type='date'
-                    value={deleteTo}
-                    min={deleteFrom || undefined}
-                    onChange={event => setDeleteTo(event.target.value)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin set delete to date'
-                  />
-                </label>
-              </div>
-            )}
+            <AnimatePresence initial={false}>
+              {deleteMode === 'range' && (
+                <motion.div
+                  className='mt-4 grid gap-3 sm:grid-cols-2'
+                  initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                  transition={{ duration: DIGITAL_TWIN_MOTION.state, ease: DIGITAL_TWIN_EASE_OUT }}
+                >
+                  <label htmlFor='digital-twin-delete-from'>
+                    <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
+                    <Input
+                      id='digital-twin-delete-from'
+                      type='date'
+                      value={deleteFrom}
+                      max={deleteTo || undefined}
+                      onChange={event => setDeleteFrom(event.target.value)}
+                      data-track-category='Claw Agents'
+                      data-track-name='Digital Twin set delete from date'
+                    />
+                  </label>
+                  <label htmlFor='digital-twin-delete-to'>
+                    <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
+                    <Input
+                      id='digital-twin-delete-to'
+                      type='date'
+                      value={deleteTo}
+                      min={deleteFrom || undefined}
+                      onChange={event => setDeleteTo(event.target.value)}
+                      data-track-category='Claw Agents'
+                      data-track-name='Digital Twin set delete to date'
+                    />
+                  </label>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <Button
               variant='outline'

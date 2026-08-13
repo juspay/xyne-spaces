@@ -1,0 +1,33 @@
+---
+description: Digital Twin implement/merge reference — read and keep Digital Twin Changes.md current
+globs: Digital Twin Changes.md, apps/dashboard/docs/DIGITAL_TWIN*.md, apps/dashboard/src/**/digitalTwin/**, apps/dashboard/src/**/*DigitalTwin*, apps/dashboard/src/hooks/useClawDigitalTwin.ts, apps/dashboard/src/services/claw/digitalTwin*
+alwaysApply: false
+---
+
+# Digital Twin: shipped → current mapping
+
+Before implementing, reviewing, or merging Digital Twin UI/UX changes, read and treat as source of truth:
+
+**`Digital Twin Changes.md`** (repo root)
+
+That file maps shipped baseline (`HEAD`) destinations, controls, and labels to the current branch experience under `/claw-agents/digital-twin`. Use it so nothing is dropped, misnamed, or double-counted as “new” when it already existed under another name/location.
+
+## When working in this area
+
+1. **Read the doc first** for navigation, header controls, Memories/Review/Settings/Inspect mappings, taxonomy warnings, and “unchanged foundations.”
+2. **Preserve route contracts** listed there unless the change intentionally updates them — then update the doc in the same change.
+3. **Do not describe curator knowledge areas as renames of Hindsight categories** — see the taxonomy warning in the doc.
+4. **Motion** follows `apps/dashboard/docs/DIGITAL_TWIN_MOTION.md` and `digitalTwin/motion.ts`; product placement/naming still goes in `Digital Twin Changes.md`.
+5. **Dev-only** demo mode / auth bypass stay out of the product mapping tables.
+
+## Keep the doc updated (same PR / same session)
+
+Update `Digital Twin Changes.md` whenever you change any of:
+
+- Primary tabs, Inspect menu items, header actions, or routes
+- Renames or relocation of shipped controls (backfill, upload, disable, review, etc.)
+- Memories / Review / Settings / Inspect UX that alters the mapping tables
+- New screens or capabilities with no shipped equivalent (add to that section)
+- Stakeholder-summary bullets that would otherwise become wrong
+
+Edit only the affected tables/sections. Keep the tone: mapping for implementers and mergers, not a changelog dump.

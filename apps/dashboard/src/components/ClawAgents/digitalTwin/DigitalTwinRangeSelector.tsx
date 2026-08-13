@@ -1,4 +1,5 @@
 import { ReactElement, useEffect } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check, Loader2 } from './icons';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -8,6 +9,7 @@ import {
   useDigitalTwinRange,
   type DigitalTwinRange,
 } from './useDigitalTwinRange';
+import { DIGITAL_TWIN_EASE_OUT, DIGITAL_TWIN_MOTION } from './motion';
 
 export type { DigitalTwinRange } from './useDigitalTwinRange';
 
@@ -21,6 +23,7 @@ export const DigitalTwinRangeSelector = ({
   onRangeChange: (range: DigitalTwinRange) => void;
 }): ReactElement => {
   const range = useDigitalTwinRange(mode, active);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     onRangeChange(range.range);
@@ -43,8 +46,8 @@ export const DigitalTwinRangeSelector = ({
                 aria-pressed={selected}
                 className={
                   selected
-                    ? 'flex min-h-16 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
-                    : 'flex min-h-16 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent'
+                    ? 'dt-selectable flex min-h-16 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
+                    : 'dt-selectable flex min-h-16 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left hover:bg-accent'
                 }
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin backfill preset'
@@ -52,8 +55,8 @@ export const DigitalTwinRangeSelector = ({
                 <span
                   className={
                     selected
-                      ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
-                      : 'flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
+                      ? 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
+                      : 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
                   }
                 >
                   {selected && <Check className='size-4' />}
@@ -75,15 +78,15 @@ export const DigitalTwinRangeSelector = ({
             aria-pressed={range.selection === 'custom'}
             className={
               range.selection === 'custom'
-                ? 'flex min-h-16 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
-                : 'flex min-h-16 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent'
+                ? 'dt-selectable flex min-h-16 items-center gap-3 rounded-lg border border-primary bg-primary/5 px-4 py-3 text-left'
+                : 'dt-selectable flex min-h-16 items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left hover:bg-accent'
             }
           >
             <span
               className={
                 range.selection === 'custom'
-                  ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
-                  : 'flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
+                  ? 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground'
+                  : 'dt-choice-indicator flex size-5 shrink-0 items-center justify-center rounded-full border border-border'
               }
             >
               {range.selection === 'custom' && <Check className='size-4' />}
@@ -96,51 +99,58 @@ export const DigitalTwinRangeSelector = ({
         </div>
       </fieldset>
 
-      {range.selection === 'custom' && (
-        <div>
-          <div className='grid gap-3 sm:grid-cols-2'>
-            <label htmlFor='digital-twin-backfill-from'>
-              <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
-              <Input
-                id='digital-twin-backfill-from'
-                type='date'
-                value={range.customFrom}
-                max={range.customTo}
-                onChange={event => range.setCustomFrom(event.target.value)}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin backfill custom start date'
-              />
-            </label>
-            <label htmlFor='digital-twin-backfill-to'>
-              <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
-              <Input
-                id='digital-twin-backfill-to'
-                type='date'
-                value={range.customTo}
-                min={range.customFrom}
-                max={isoDate(new Date())}
-                onChange={event => range.setCustomTo(event.target.value)}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin backfill custom end date'
-              />
-            </label>
-          </div>
-          <div className='mt-3 flex flex-wrap gap-2'>
-            {QUICK_DAYS.map(days => (
-              <Button
-                key={days}
-                variant='outline'
-                size='sm'
-                onClick={() => range.applyQuickDays(days)}
-                data-track-category='Claw Agents'
-                data-track-name='Digital Twin backfill quick date range'
-              >
-                Last {days} days
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {range.selection === 'custom' && (
+          <motion.div
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+            transition={{ duration: DIGITAL_TWIN_MOTION.state, ease: DIGITAL_TWIN_EASE_OUT }}
+          >
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <label htmlFor='digital-twin-backfill-from'>
+                <span className='mb-1.5 block text-xs font-medium text-foreground'>From</span>
+                <Input
+                  id='digital-twin-backfill-from'
+                  type='date'
+                  value={range.customFrom}
+                  max={range.customTo}
+                  onChange={event => range.setCustomFrom(event.target.value)}
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin backfill custom start date'
+                />
+              </label>
+              <label htmlFor='digital-twin-backfill-to'>
+                <span className='mb-1.5 block text-xs font-medium text-foreground'>To</span>
+                <Input
+                  id='digital-twin-backfill-to'
+                  type='date'
+                  value={range.customTo}
+                  min={range.customFrom}
+                  max={isoDate(new Date())}
+                  onChange={event => range.setCustomTo(event.target.value)}
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin backfill custom end date'
+                />
+              </label>
+            </div>
+            <div className='mt-3 flex flex-wrap gap-2'>
+              {QUICK_DAYS.map(days => (
+                <Button
+                  key={days}
+                  variant='outline'
+                  size='sm'
+                  onClick={() => range.applyQuickDays(days)}
+                  data-track-category='Claw Agents'
+                  data-track-name='Digital Twin backfill quick date range'
+                >
+                  Last {days} days
+                </Button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className='rounded-lg border border-border bg-muted/20 p-3' aria-live='polite'>
         {range.estimateLoading ? (

@@ -102,11 +102,15 @@ export async function getAgentEditAccess(
     isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
   }
 
+  // Digital Twin is one shared agent row, but each signed-in user configures
+  // their own twin experience — treat any authenticated caller as an editor.
+  const isPersonalTwin = agent.slug === "digital-twin";
+
   return {
     agent,
     isOwner,
     isContributor,
-    canEdit: isOwner || isContributor,
+    canEdit: isOwner || isContributor || isPersonalTwin,
   };
 }
 
@@ -187,8 +191,11 @@ export async function requireAgentOwnerOrAdmin(
 
   const admin = await isClawAdmin(requesterId);
   const isOwner = agent.ownerUserId === requesterId;
+  // Digital Twin keys are personal to the signed-in user even though the
+  // agent row is a shared platform slug.
+  const isPersonalTwin = agent.slug === "digital-twin";
 
-  if (!admin && !isOwner) {
+  if (!admin && !isOwner && !isPersonalTwin) {
     res.status(403).json({
       success: false,
       error: "Only the agent owner or a CLAW_ADMIN can perform this action",
@@ -199,7 +206,7 @@ export async function requireAgentOwnerOrAdmin(
   (req as Request & { agentContext: AgentContext }).agentContext = {
     agent,
     isAdmin: admin,
-    isOwner,
+    isOwner: isOwner || isPersonalTwin,
     isContributor: false,
   };
 
