@@ -19,10 +19,10 @@ import {
 } from 'recharts';
 import type { ChartProps } from '@xyne/shared';
 import { ChartTooltip } from '../../DynamicDashboard/ComponentGrid/renderers/ChartTooltip';
-import {
-  CHART_GRID_DASH,
-  CHART_MARGIN,
-} from '../../DynamicDashboard/ComponentGrid/renderers/constants';
+import { CHART_GRID_DASH } from '../../DynamicDashboard/ComponentGrid/renderers/constants';
+
+const CHART_MARGIN = { top: 8, right: 8, left: 0, bottom: 0 } as const;
+const Y_AXIS_WIDTH = 32;
 
 const AXIS_TEXT_COLOR = 'hsl(var(--muted-foreground))';
 const GRID_STROKE_COLOR = 'hsl(var(--border))';
@@ -86,7 +86,7 @@ const ChartBody: React.FC<{ props: ChartProps; height: number }> = ({ props, hei
           <LineChart data={data} margin={CHART_MARGIN}>
             <CartesianGrid {...gridProps} />
             <XAxis dataKey='x' {...axisProps} />
-            <YAxis {...axisProps} width={40} tickFormatter={compactValue} />
+            <YAxis {...axisProps} width={Y_AXIS_WIDTH} tickFormatter={compactValue} />
             <Tooltip content={<ChartTooltip />} />
             {multi && <Legend wrapperStyle={LEGEND_STYLE} />}
             {names.map((name, index) => (
@@ -105,7 +105,7 @@ const ChartBody: React.FC<{ props: ChartProps; height: number }> = ({ props, hei
           <AreaChart data={data} margin={CHART_MARGIN}>
             <CartesianGrid {...gridProps} />
             <XAxis dataKey='x' {...axisProps} />
-            <YAxis {...axisProps} width={40} tickFormatter={compactValue} />
+            <YAxis {...axisProps} width={Y_AXIS_WIDTH} tickFormatter={compactValue} />
             <Tooltip content={<ChartTooltip />} />
             {multi && <Legend wrapperStyle={LEGEND_STYLE} />}
             {names.map((name, index) => (
