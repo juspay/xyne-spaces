@@ -18,6 +18,9 @@ export interface ErrorReportRecordingInfo {
 }
 
 export interface ElectronAPI {
+  getTheme?: (fallbackTheme?: string) => 'classic' | 'midnight' | 'summer_breeze';
+  setTheme?: (theme: 'classic' | 'midnight' | 'summer_breeze') => void;
+  signalDashboardReady?: () => void;
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
   // Only exposed by the webview preload (`electron/src/webview-preload.js`),

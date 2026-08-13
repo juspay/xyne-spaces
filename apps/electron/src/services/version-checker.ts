@@ -1,7 +1,7 @@
 import { net } from 'electron';
 import log from 'electron-log/main';
 import { config } from '../app/config';
-import { getMainWindow } from '../window/manager';
+import { getMainWindow, showLoadingOverlay } from '../window/manager';
 
 interface VersionInfo {
   version: string;
@@ -134,6 +134,7 @@ export async function performHardReload(): Promise<void> {
     // Clear network cache (where bundles and assets are cached)
     await session.clearCache();
     log.info('[VersionChecker] Network cache cleared');
+    await showLoadingOverlay(mainWindow);
     
     // Reload ignoring any remaining cache
     mainWindow.webContents.reloadIgnoringCache();

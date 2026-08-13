@@ -57,6 +57,18 @@ interface ElectronAuthData {
 }
 
 const electronAPI = {
+  getTheme: (fallbackTheme?: string): string => {
+    return ipcRenderer.sendSync('app:get-theme', fallbackTheme);
+  },
+
+  setTheme: (theme: string) => {
+    ipcRenderer.send('app:set-theme', theme);
+  },
+
+  signalDashboardReady: () => {
+    ipcRenderer.send('dashboard:app-ready');
+  },
+
   openExternal: (url: string) => {
     ipcRenderer.send('open-external', url);
   },
@@ -275,7 +287,6 @@ const electronAPI = {
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
     const allowed = [
-      'app:theme-changed',
       'meeting-popup:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',

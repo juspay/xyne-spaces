@@ -37,6 +37,18 @@ const App = (): ReactElement => {
   // Initialize theme on app load
   const { theme } = useTheme();
 
+  useEffect(() => {
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => window.electronAPI?.signalDashboardReady?.());
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, []);
+
   // Listen for Electron logs
   useEffect(() => {
     if (window.electronAPI?.onLog) {

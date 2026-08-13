@@ -529,8 +529,7 @@ export const openSearchResult = async (
     let panelUrl = url;
     if (isXyneOrigin(url)) {
       try {
-        const currentTheme =
-          typeof localStorage !== 'undefined' ? localStorage.getItem('xyne-theme') : null;
+        const currentTheme = window.electronAPI?.getTheme?.();
         if (currentTheme) {
           const withTheme = new URL(url);
           withTheme.searchParams.set('theme', currentTheme);

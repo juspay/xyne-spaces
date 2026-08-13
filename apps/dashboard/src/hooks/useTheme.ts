@@ -16,17 +16,38 @@ const readThemeFromUrl = (): Theme | null => {
   return isValidTheme(urlTheme) ? urlTheme : null;
 };
 
+const readStoredTheme = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const clearStoredTheme = (): void => {
+  try {
+    localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+};
+
 export const useTheme = (): { theme: Theme; changeTheme: (newTheme: Theme) => void } => {
   const [theme, setTheme] = useState<Theme>(() => {
-    // Prefer ?theme=… from the URL — this is how the main app hands its
-    // theme off to a Xyne URL opened in the browser-panel webview (it has a
-    // separate localStorage, so we can't share directly). Falls back to
-    // localStorage, then to the default.
     if (typeof window !== 'undefined') {
+      const storedTheme = readStoredTheme();
+
+      if (window.electronAPI?.getTheme) {
+        const electronTheme = window.electronAPI.getTheme(storedTheme ?? undefined);
+        clearStoredTheme();
+        return electronTheme;
+      }
+
+      // Browser-panel webviews use the URL because they have separate storage.
       const urlTheme = readThemeFromUrl();
       if (urlTheme) return urlTheme;
-      const stored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-      if (isValidTheme(stored)) return stored;
+      if (isValidTheme(storedTheme)) return storedTheme;
     }
     return DEFAULT_THEME;
   });
@@ -43,11 +64,12 @@ export const useTheme = (): { theme: Theme; changeTheme: (newTheme: Theme) => vo
   }, []);
 
   useEffect(() => {
-    // Apply theme to HTML element
     document.documentElement.setAttribute('data-theme', theme);
-    // Persist to localStorage
+    if (window.electronAPI?.setTheme) {
+      window.electronAPI.setTheme(theme);
+      return;
+    }
     localStorage.setItem(THEME_STORAGE_KEY, theme);
-    window.electronAPI?.ipcSend?.('app:theme-changed', theme === 'midnight' ? 'dark' : 'light');
   }, [theme]);
 
   const changeTheme = (newTheme: Theme): void => {

@@ -1,6 +1,7 @@
 import { BrowserWindow, screen, session, ipcMain } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
+import { getAppTheme } from './app-theme';
 
 let popupWindow: BrowserWindow | null = null;
 let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,7 +72,7 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
   });
 
   const popupHtml = path.join(__dirname, '..', '..', 'assets', 'meeting-popup.html');
-  void popupWindow.loadFile(popupHtml);
+  void popupWindow.loadFile(popupHtml, { query: { theme: getAppTheme() } });
 
   // Original center X — kept constant so the popup never shifts horizontally
   const centerX = x + Math.round(POPUP_WIDTH / 2);
