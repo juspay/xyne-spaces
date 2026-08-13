@@ -1,0 +1,1 @@
+export { DocumentTitleSync } from './DocumentTitleSync';

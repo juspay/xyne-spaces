@@ -30,6 +30,8 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { useDocumentTitleContribution } from '../../../hooks/useDocumentTitleContribution';
+import { DOCUMENT_TITLE_PRIORITIES } from '../../../machines/documentTitleMachine';
 import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
 
 interface ChatScreenContext {
@@ -75,20 +77,26 @@ const ChatView = (): ReactElement => {
   );
   const bounds = useMeasure({ ref: chatViewContainerRef, observeResize: true });
 
-  // When rendered inside the browser-panel webview, reflect the current
-  // channel/DM name in `document.title`. The webview's host listens for
-  // `page-title-updated` (see BrowserTabsScreen.tsx:196) and uses it as the
-  // tab label. Scoped to the webview so the main Electron window's title
-  // isn't touched.
-  useEffect(() => {
-    if (!isInPanelWebview) return;
-    if (!channelDisplayName) return;
-    const previous = document.title;
-    document.title = channelDisplayName;
-    return () => {
-      document.title = previous;
-    };
-  }, [isInPanelWebview, channelDisplayName]);
+  // Keep the browser tab / panel-webview title aligned with the active
+  // channel or DM. A central title actor arbitrates this against higher-priority
+  // surfaces such as ticket detail and special pages.
+  useDocumentTitleContribution(
+    channelDisplayName
+      ? {
+          id: 'chat.active-channel',
+          priority: DOCUMENT_TITLE_PRIORITIES.entity,
+          scope: isInPanelWebview ? 'panel-webview' : 'main',
+          entity: {
+            type:
+              channel?.scopeType === ChannelScopeType.DM ||
+              channel?.scopeType === ChannelScopeType.GROUP_DM
+                ? 'dm'
+                : 'channel',
+            label: channelDisplayName,
+          },
+        }
+      : null,
+  );
 
   // Check for group panel from URL params
   const { groupId } = useParams<{ groupId?: string }>();
