@@ -69,7 +69,8 @@ export type FlowAction =
   | { type: 'inputChange'; actionId: string; debounceMs?: number }
   | { type: 'update_state'; stateUpdates: Record<string, unknown>; successMessage?: string }
   | { type: 'close_screen'; finalMessage?: string }
-  | { type: 'navigate'; target: string };
+  | { type: 'navigate'; target: string }
+  | { type: 'copy'; value: string; successMessage?: string };
 
 // ============================================================================
 // VALIDATION RULES
