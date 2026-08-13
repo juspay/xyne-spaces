@@ -1,7 +1,10 @@
 import { memo, type ReactElement } from 'react';
 import { format } from 'date-fns';
+import { ChatDefault, Hashtag, Lock02Close } from '@xyne/icons';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
+import type { XyneCalendarChannelPresentation } from './xyneCalendarSidebar.utils';
 
 export type XyneCalendarCallPillVariant =
   | 'joinable'
@@ -17,7 +20,7 @@ export interface XyneCalendarCallPillProps {
   variant: XyneCalendarCallPillVariant;
   startsAt?: CalendarCallTime | null;
   endsAt?: CalendarCallTime | null;
-  channelName?: string;
+  channel?: XyneCalendarChannelPresentation;
   metadata?: string;
   onSelect: () => void;
   onJoin?: () => void;
@@ -52,7 +55,7 @@ const XyneCalendarCallPillComponent = ({
   variant,
   startsAt,
   endsAt,
-  channelName,
+  channel,
   metadata,
   onSelect,
   onJoin,
@@ -65,7 +68,7 @@ const XyneCalendarCallPillComponent = ({
   className,
 }: XyneCalendarCallPillProps): ReactElement => {
   const timeRange = getTimeRange(startsAt, endsAt);
-  const accessibleMetadata = [timeRange, channelName ? `#${channelName}` : '', metadata]
+  const accessibleMetadata = [timeRange, channel?.label ?? '', metadata]
     .filter(Boolean)
     .join(' · ');
   const isPast = past || variant === 'past';
@@ -74,8 +77,7 @@ const XyneCalendarCallPillComponent = ({
     .join(', ');
   const showSecondaryInformation = !compact || showCompactMetadata;
   const hasSecondaryInformation =
-    (showSecondaryInformation && Boolean(timeRange || channelName)) ||
-    (!compact && Boolean(metadata));
+    (showSecondaryInformation && Boolean(timeRange || channel)) || (!compact && Boolean(metadata));
   const secondaryTextClass =
     variant === 'highlighted' ? 'text-primary-foreground/90' : 'text-muted-foreground';
 
@@ -157,14 +159,22 @@ const XyneCalendarCallPillComponent = ({
                 </span>
               )}
 
-              {showSecondaryInformation && channelName && (
+              {showSecondaryInformation && channel && (
                 <span
                   className={cn(
-                    'min-w-0 shrink truncate text-xs font-normal leading-tight',
+                    'flex min-w-0 shrink items-center gap-1 text-xs font-normal leading-tight',
                     secondaryTextClass,
                   )}
                 >
-                  #{channelName}
+                  {channel.scopeType === ChannelScopeType.DM ||
+                  channel.scopeType === ChannelScopeType.GROUP_DM ? (
+                    <ChatDefault className='size-3 shrink-0' aria-hidden='true' />
+                  ) : channel.visibility === ChannelVisibility.PRIVATE ? (
+                    <Lock02Close className='size-3 shrink-0' aria-hidden='true' />
+                  ) : (
+                    <Hashtag className='size-3 shrink-0' aria-hidden='true' />
+                  )}
+                  <span className='truncate'>{channel.label}</span>
                 </span>
               )}
 
