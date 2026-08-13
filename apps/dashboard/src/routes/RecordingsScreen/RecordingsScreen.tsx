@@ -11,6 +11,7 @@ import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { v4 as uuidv4 } from 'uuid';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
 import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
@@ -506,6 +507,12 @@ export default function RecordingsScreen(): ReactElement {
       data-testid='recordings-page'
       className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
     >
+      {/* Floated rather than in-flow so the list keeps the full viewport height.
+          `w-fit` gives the shrink-to-fit box a definite width for the navigator's
+          own `w-full`. */}
+      <div className='absolute left-0 top-0 z-30 h-[52px] w-fit'>
+        <AppNavigator />
+      </div>
       {/* ─── Main Area (list + workspace overlay) ───── */}
       <div className='flex-1 relative overflow-hidden'>
         {/* List View — always rendered, stays behind the workspace overlay */}

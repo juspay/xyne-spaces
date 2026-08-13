@@ -5,6 +5,7 @@ import { Spinner } from '@xyne/icons';
 import { CallStatus } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { PanelsTopLeft } from 'lucide-react';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
@@ -279,6 +280,13 @@ const RecordingsV2Screen = (): ReactElement => {
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
       aria-labelledby='xyne-scribe-heading'
     >
+      {/* Floated rather than in-flow so the list keeps the full viewport height.
+          `w-fit` gives the shrink-to-fit box a definite width for the navigator's
+          own `w-full`; z-30 keeps it above the sticky header (z-20), which
+          otherwise covers it once the centred column reaches the left edge. */}
+      <div className='absolute left-0 top-0 z-30 h-[52px] w-fit'>
+        <AppNavigator />
+      </div>
       <div ref={setScrollContainer} className='h-full w-full overflow-y-scroll'>
         <div className='flex min-h-full w-full flex-col items-center px-4'>
           <header className='max-w-[860px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
