@@ -63,10 +63,6 @@ jobs:
   dashboard:
     name: Dashboard lint + typecheck + build
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Type-aware lint, tsc and vite build all exceed Node's ~2GB default heap on
-    # the runner, so the bump is set for every step rather than per step.
-    env:
-      NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
       - uses: actions/checkout@v5
 
@@ -86,14 +82,19 @@ jobs:
       - name: Format check
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
-      # errors-only (warnings ignored)
+      # errors-only (warnings ignored); heap bump avoids OOM on type-aware lint.
       - name: Lint (errors only)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
 
       - name: Typecheck
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
+        # Matches apps/dashboard/Dockerfile — vite build needs a larger V8 heap.
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run build
 
   # Framework lint — self-contained (no workspace deps).
