@@ -211,8 +211,8 @@ router.get('/context', ...authenticateAdmin, async (req: Request, res: Response)
   }
 });
 
-const DATASET_PATH = path.join(__dirname, '..', 'dataset', 'documents.jsonl');
-const DATASET_QUESTIONS_PATH = path.join(__dirname, '..', 'dataset', 'questions.jsonl');
+const DATASET_PATH = path.join(__dirname, '..', '..', 'src', 'dataset', 'documents.jsonl');
+const DATASET_QUESTIONS_PATH = path.join(__dirname, '..', '..', 'src', 'dataset', 'questions.jsonl');
 
 const ingestDatasetSchema = z.object({
   sourceType: z.enum(ENTERPRISE_RAG_SOURCE_TYPES).optional(),
