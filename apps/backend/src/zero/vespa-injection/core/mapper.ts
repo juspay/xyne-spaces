@@ -634,7 +634,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     }),
     db.project.findUnique({
       where: { id: args.projectId },
-      select: { name: true }
+      select: { name: true, code: true }
     }),
     db.user.findUnique({
       where: { id: args.createdBy },
@@ -732,6 +732,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     assignedToName: assignedToUser?.name || '',
     closedByName: closedByUser?.name || '',
     projectName: project?.name || '',
+    projectCode: project?.code || '',
     ticketMentions: descriptionMentions?.map(v => v.username) || [],
     threadMentions: threadMentions,
     threadSenders: threadSenders,
@@ -1499,19 +1500,11 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
   const plainBody = extractPlainTextFromHtml(email.body || '') || email.subject;
   const chunks = chunkPlainText(plainBody);
 
-  //checking if the mail is parent mail or not
-  const parentMail = await db.email.findFirst({
-    where: { conversationId: email.conversationId },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    select: { id: true },
-  });
-
   return {
     docId: email.id,
     docType: VespaDocType.MAIL,
     threadId: email.conversationId,
     parentThreadId: email.externalThreadId || undefined,
-    isParentMail: parentMail ? parentMail.id === email.id : true,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
     ticketFormFields,
