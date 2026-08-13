@@ -96,7 +96,6 @@ const NON_MEETING_BUNDLE_IDS = new Set([
  * recording — do NOT include background daemons that run permanently.
  */
 const SCREEN_RECORDING_PROCESSES = new Set([
-  'screencaptureui',       // macOS Cmd+Shift+5 toolbar UI
   'screencaptured',        // macOS screen recording daemon (only runs during active recording)
   'QuickTime Player',      // QuickTime recording (only runs when user opens it)
   'OBS',                   // OBS Studio
