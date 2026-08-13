@@ -1,7 +1,7 @@
 import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useSelector } from '@xstate/react';
-import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault } from '@xyne/icons';
+import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { addDays, format, isSameDay, isToday, startOfDay } from 'date-fns';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import {
@@ -21,11 +21,16 @@ import {
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import {
   computeEventPositions,
+  createSlotClickHandler,
+  getCalendarCreateSlot,
   getCurrentUserMeetingStatus,
+  minutesFromTopPx,
 } from '../../../routes/CallHistoryScreen/CalenderViewUtils';
+import { useDragCreate } from '../../../routes/CallHistoryScreen/useDragCreate';
 import { XyneCalendarCallPill, type XyneCalendarCallPillVariant } from './XyneCalendarCallPill';
 import CallDetailSidebarView from './CallDetailSidebarView';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
+import { getDefaultScheduledCallTitle } from '../../Call/ScheduleCallModal/defaults';
 import { DeleteCallModal } from '../../Call/DeleteCallModal';
 import { roomActor } from '../../../machines/roomMachine';
 
@@ -36,6 +41,8 @@ const MINIMUM_CALL_PILL_HEIGHT = 20;
 const CALL_PILL_VERTICAL_INSET = 2;
 const ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE = 75;
 const COMPACT_METADATA_MIN_WIDTH_PERCENTAGE = 75;
+const CREATE_SLOT_DURATION_MINUTES = 30;
+const CREATE_SLOT_SNAP_MINUTES = 15;
 
 interface XyneCalendarSidebarProps {
   open: boolean;
@@ -122,7 +129,9 @@ const XyneCalendarSidebarHeader = memo(
     return (
       <header className='shrink-0'>
         <div className='flex h-12 items-center gap-1.5 px-2.5'>
-          <h2 className='min-w-0 flex-1 truncate text-sm font-bold text-foreground pl-1 select-none'>Calendar</h2>
+          <h2 className='min-w-0 flex-1 truncate text-sm font-bold text-foreground pl-1 select-none'>
+            Calendar
+          </h2>
           <Button
             variant='ghost'
             size='iconSm'
@@ -133,11 +142,7 @@ const XyneCalendarSidebarHeader = memo(
             data-track-name='CLOSE_CALENDAR_SIDEBAR'
             className='size-7 rounded-lg text-muted-foreground'
           >
-            <MultipleCrossCancelDefault
-              className='size-4'
-              strokeWidth={2}
-              aria-hidden='true'
-            />
+            <MultipleCrossCancelDefault className='size-4' strokeWidth={2} aria-hidden='true' />
           </Button>
         </div>
 
@@ -337,11 +342,97 @@ const XyneCalendarSidebarTimeline = memo(
         state.matches('joining') || state.matches('connecting') || state.matches('connected'),
     );
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const timelineSurfaceRef = useRef<HTMLDivElement>(null);
     const focusedDateRef = useRef<number | null>(null);
     const selectedCallSnapshotRef = useRef<Call | null>(null);
     const [now, setNow] = useState(() => new Date());
+    const [hoverCreateSlot, setHoverCreateSlot] = useState<{
+      startMins: number;
+      endMins: number;
+    } | null>(null);
+    const [scheduleInitialTime, setScheduleInitialTime] = useState<{
+      startsAt: Date;
+      endsAt: Date;
+    } | null>(null);
 
     const isCallDetailOpen = selectedCallId !== null;
+    const defaultCallTitle = getDefaultScheduledCallTitle(user);
+
+    const handleCreateCallAtSlot = useCallback((startsAt: Date, endsAt: Date): void => {
+      setHoverCreateSlot(null);
+      setScheduleInitialTime({ startsAt, endsAt });
+    }, []);
+
+    const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
+      scrollContainerRef,
+      handleCreateCallAtSlot,
+      {
+        coordinateRef: timelineSurfaceRef,
+        hourHeight: TIMELINE_HOUR_HEIGHT,
+        minimumDurationMins: CREATE_SLOT_DURATION_MINUTES,
+        snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+      },
+    );
+
+    const handleTimelinePointerMove = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>): void => {
+        if (scheduleInitialTime || (event.target as HTMLElement).closest('button')) {
+          setHoverCreateSlot(null);
+          return;
+        }
+
+        const rawMins = minutesFromTopPx(
+          event.clientY - event.currentTarget.getBoundingClientRect().top,
+          TIMELINE_HOUR_HEIGHT,
+        );
+        const { startMins, endMins } = getCalendarCreateSlot(selectedDate, rawMins, {
+          clampToDay: true,
+          durationMins: CREATE_SLOT_DURATION_MINUTES,
+          snapMode: 'nearest',
+          snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+        });
+
+        setHoverCreateSlot(currentSlot =>
+          currentSlot?.startMins === startMins ? currentSlot : { startMins, endMins },
+        );
+      },
+      [scheduleInitialTime, selectedDate],
+    );
+
+    const handleTimelineClick = createSlotClickHandler(
+      selectedDate,
+      scheduleInitialTime !== null,
+      consumeDragEnd,
+      handleCreateCallAtSlot,
+      {
+        clampToDay: true,
+        durationMins: CREATE_SLOT_DURATION_MINUTES,
+        hourHeight: TIMELINE_HOUR_HEIGHT,
+        snapMode: 'nearest',
+        snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+      },
+    );
+
+    const handleTimelineKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLDivElement>): void => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+
+        const rawStartMins =
+          hoverCreateSlot?.startMins ??
+          (isToday(selectedDate) ? getMinutesSinceMidnight(now) : 8 * 60);
+        const { startsAt, endsAt } = getCalendarCreateSlot(selectedDate, rawStartMins, {
+          clampToDay: true,
+          durationMins: CREATE_SLOT_DURATION_MINUTES,
+          snapMode: 'nearest',
+          snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+        });
+        handleCreateCallAtSlot(startsAt, endsAt);
+      },
+      [handleCreateCallAtSlot, hoverCreateSlot?.startMins, now, selectedDate],
+    );
+
+    useEffect(() => setHoverCreateSlot(null), [selectedDate]);
 
     useEffect(() => {
       const intervalId = window.setInterval(() => setNow(new Date()), 12_000);
@@ -432,6 +523,16 @@ const XyneCalendarSidebarTimeline = memo(
     const selectedCall =
       queriedSelectedCall ?? (isMatchingRoomSession ? selectedCallSnapshot : null);
 
+    const visibleCreatePreview = dragCreatePreview ?? hoverCreateSlot;
+    const visibleCreateDates = visibleCreatePreview
+      ? getCalendarCreateSlot(selectedDate, visibleCreatePreview.startMins, {
+          clampToDay: true,
+          durationMins: visibleCreatePreview.endMins - visibleCreatePreview.startMins,
+          snapMode: 'nearest',
+          snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+        })
+      : null;
+
     // A selected call can vanish (cancelled, hidden, rescheduled off this day) —
     // fall back once queries settle, except during its scheduled-to-active transition.
     useEffect(() => {
@@ -457,9 +558,7 @@ const XyneCalendarSidebarTimeline = memo(
             onBack={onClearSelectedCall}
             onClose={closeXyneCalendarSidebar}
             onJoinCall={() => handleCallRowClick(selectedCall)}
-            onOpenCallThread={
-              hasThreadAccess ? getGotoTranscriptHandler(selectedCall) : undefined
-            }
+            onOpenCallThread={hasThreadAccess ? getGotoTranscriptHandler(selectedCall) : undefined}
             onDownloadTranscript={() => handleDownloadTranscript(selectedCall)}
             onEditCall={() => handleEditClick(selectedCall)}
             onDeleteCall={() => handleDeleteClick(selectedCall)}
@@ -499,98 +598,161 @@ const XyneCalendarSidebarTimeline = memo(
     }
 
     return (
-      <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7 pt-1'>
-        <div
-          className='relative min-w-0'
-          style={{ height: TIMELINE_HOUR_HEIGHT * 24 }}
-          aria-label='Calendar day timeline'
-        >
-          {TIMELINE_HOURS.map(hour => (
-            <div
-              key={hour}
-              className='absolute left-0 right-0 flex items-center gap-4'
-              style={{ top: hour * TIMELINE_HOUR_HEIGHT }}
-            >
-              <span className='w-16 shrink-0 text-right text-xs font-mono leading-none text-muted-foreground/80'>
-                {formatTimelineHour(hour)}
-              </span>
-              <span className='h-px flex-1 bg-muted-foreground/15 rounded' aria-hidden='true' />
-            </div>
-          ))}
-
-          <div className='absolute bottom-0 left-20 right-0 top-0'>
-            {isToday(selectedDate) && (
+      <>
+        <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7 pt-1'>
+          <div
+            className='relative min-w-0'
+            style={{ height: TIMELINE_HOUR_HEIGHT * 24 }}
+            aria-label='Calendar day timeline'
+          >
+            {TIMELINE_HOURS.map(hour => (
               <div
-                className='pointer-events-none absolute left-0 right-0 z-0 flex -translate-y-1/2 items-center'
-                style={{
-                  top: getTimelineOffset(getMinutesSinceMidnight(now)),
-                }}
-                aria-label={`Current time ${format(now, 'h:mm a')}`}
+                key={hour}
+                className='absolute left-0 right-0 flex items-center gap-4'
+                style={{ top: hour * TIMELINE_HOUR_HEIGHT }}
               >
-                {shouldShowCurrentTimeLabel(now) && (
-                  <span className='absolute right-full mr-3 inline-flex whitespace-nowrap rounded-md bg-primary px-1 py-0.5 font-mono text-xs font-semibold leading-none text-primary-foreground shadow-sm'>
-                    {format(now, 'h:mm a')}
-                  </span>
-                )}
-                <span className='z-10 -ml-1 size-2 shrink-0 rounded-full bg-primary ring-2 ring-background' />
-                <span className='h-0.5 flex-1 rounded bg-primary ring-1 ring-background' />
+                <span className='w-10 shrink-0 text-right text-xs font-mono leading-none text-muted-foreground/80'>
+                  {formatTimelineHour(hour)}
+                </span>
+                <span className='h-px flex-1 bg-muted-foreground/15 rounded' aria-hidden='true' />
               </div>
-            )}
+            ))}
 
-            {dailyCalls.map(call => {
-              const position = callPositions.get(call.id);
-              if (!position || !call.startsAt) return null;
-
-              const callHasEnded = hasCallEnded(call, now);
-              const variant = getCallPillVariant(call, user?.id, now);
-              const joinable =
-                !callHasEnded &&
-                (variant === 'joinable' ||
-                  (variant === 'highlighted' && isScheduledCallJoinable(call, now.getTime())));
-
-              const top = getTimelineOffset(position.startMins) + CALL_PILL_VERTICAL_INSET;
-              const height = Math.max(
-                MINIMUM_CALL_PILL_HEIGHT,
-                getTimelineOffset(position.endMins - position.startMins) -
-                  CALL_PILL_VERTICAL_INSET * 2,
-              );
-              const channel = call.channelId
-                ? channelPresentationsById.get(call.channelId)
-                : undefined;
-              return (
+            <div
+              ref={timelineSurfaceRef}
+              role='gridcell'
+              tabIndex={0}
+              className='absolute bottom-0 left-16 right-0 top-0 cursor-crosshair'
+              onClick={handleTimelineClick}
+              onKeyDown={handleTimelineKeyDown}
+              onPointerDown={event => onDragCreatePointerDown(event, selectedDate)}
+              onPointerMove={handleTimelinePointerMove}
+              onPointerLeave={() => setHoverCreateSlot(null)}
+              data-track-category='Calendar'
+              data-track-name='CREATE_SCHEDULE_FROM_SIDEBAR'
+            >
+              {isToday(selectedDate) && (
                 <div
-                  key={call.id}
-                  className='absolute z-10 pr-1'
+                  className='pointer-events-none absolute left-0 right-0 z-0 flex -translate-y-1/2 items-center'
                   style={{
-                    top,
-                    height,
-                    left: `${position.leftPct}%`,
-                    width: `${position.widthPct}%`,
+                    top: getTimelineOffset(getMinutesSinceMidnight(now)),
                   }}
+                  aria-label={`Current time ${format(now, 'h:mm a')}`}
                 >
-                  <XyneCalendarCallPill
-                    title={call.title ?? 'Call'}
-                    variant={variant}
-                    startsAt={call.startsAt}
-                    endsAt={call.endsAt}
-                    {...(channel && { channel })}
-                    onSelect={() => onSelectCall(call.id)}
-                    onJoin={() => handleCallRowClick(call)}
-                    joinable={joinable}
-                    showJoinByDefault={
-                      position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE
-                    }
-                    past={callHasEnded}
-                    compact={height < 40}
-                    showCompactMetadata={position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE}
-                    className='h-full'
-                  />
+                  {shouldShowCurrentTimeLabel(now) && (
+                    <span className='absolute right-full mr-3 inline-flex whitespace-nowrap rounded-md bg-primary px-1 py-0.5 font-mono text-xs font-semibold leading-none text-primary-foreground shadow-sm'>
+                      {format(now, 'h:mm a')}
+                    </span>
+                  )}
+                  <span className='z-10 -ml-1 size-2 shrink-0 rounded-full bg-primary ring-2 ring-background' />
+                  <span className='h-0.5 flex-1 rounded bg-primary ring-1 ring-background' />
                 </div>
-              );
-            })}
+              )}
+
+              {visibleCreatePreview && visibleCreateDates && (
+                <div
+                  className={
+                    dragCreatePreview
+                      ? 'pointer-events-none absolute left-1 right-1  overflow-hidden rounded-lg border border-primary/70 bg-primary px-3 py-1 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--destructive)/0.65)]'
+                      : 'pointer-events-none absolute left-1 right-1 flex items-center rounded-lg border border-primary/60 bg-background px-3 text-primary shadow-sm'
+                  }
+                  style={{
+                    top:
+                      getTimelineOffset(visibleCreatePreview.startMins) + CALL_PILL_VERTICAL_INSET,
+                    height: Math.max(
+                      MINIMUM_CALL_PILL_HEIGHT,
+                      getTimelineOffset(
+                        visibleCreatePreview.endMins - visibleCreatePreview.startMins,
+                      ) -
+                        CALL_PILL_VERTICAL_INSET * 2,
+                    ),
+                  }}
+                  aria-hidden='true'
+                >
+                  {dragCreatePreview ? (
+                    <div className='flex h-full min-w-0 flex-col justify-start overflow-hidden'>
+                      <span className='truncate text-sm font-semibold leading-4'>
+                        {defaultCallTitle}
+                      </span>
+                      <span className='truncate text-xs leading-4'>
+                        {format(visibleCreateDates.startsAt, 'h:mm a')} –{' '}
+                        {format(visibleCreateDates.endsAt, 'h:mm a')}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className='truncate text-xs font-semibold flex gap-1.5 items-center'>
+                      <PlusDefault className='size-3 shrink-0' strokeWidth={3} aria-hidden='true' />
+                      New call · {format(visibleCreateDates.startsAt, 'h:mm a')} –{' '}
+                      {format(visibleCreateDates.endsAt, 'h:mm a')}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {dailyCalls.map(call => {
+                const position = callPositions.get(call.id);
+                if (!position || !call.startsAt) return null;
+
+                const callHasEnded = hasCallEnded(call, now);
+                const variant = getCallPillVariant(call, user?.id, now);
+                const joinable =
+                  !callHasEnded &&
+                  (variant === 'joinable' ||
+                    (variant === 'highlighted' && isScheduledCallJoinable(call, now.getTime())));
+
+                const top = getTimelineOffset(position.startMins) + CALL_PILL_VERTICAL_INSET;
+                const height = Math.max(
+                  MINIMUM_CALL_PILL_HEIGHT,
+                  getTimelineOffset(position.endMins - position.startMins) -
+                    CALL_PILL_VERTICAL_INSET * 2,
+                );
+                const channel = call.channelId
+                  ? channelPresentationsById.get(call.channelId)
+                  : undefined;
+                return (
+                  <div
+                    key={call.id}
+                    className='absolute z-10 pr-1'
+                    style={{
+                      top,
+                      height,
+                      left: `${position.leftPct}%`,
+                      width: `${position.widthPct}%`,
+                    }}
+                  >
+                    <XyneCalendarCallPill
+                      title={call.title ?? 'Call'}
+                      variant={variant}
+                      startsAt={call.startsAt}
+                      endsAt={call.endsAt}
+                      {...(channel && { channel })}
+                      onSelect={() => onSelectCall(call.id)}
+                      onJoin={() => handleCallRowClick(call)}
+                      joinable={joinable}
+                      showJoinByDefault={
+                        position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE
+                      }
+                      past={callHasEnded}
+                      compact={height < 40}
+                      showCompactMetadata={
+                        position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE
+                      }
+                      className='h-full'
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+
+        <ScheduleCallModal
+          isOpen={scheduleInitialTime !== null}
+          onClose={() => setScheduleInitialTime(null)}
+          initialStartsAt={scheduleInitialTime?.startsAt ?? null}
+          initialEndsAt={scheduleInitialTime?.endsAt ?? null}
+        />
+      </>
     );
   },
 );
