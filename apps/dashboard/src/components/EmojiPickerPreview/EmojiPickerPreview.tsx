@@ -52,7 +52,9 @@ export function EmojiPickerPreview({
       const name = custom ? custom.names[0] : findUnicodeEmojiNameByUnified(unified);
       if (!name) return;
 
-      setHovered(custom ? { imgUrl: custom.imgUrl, name } : { char: unifiedToEmoji(unified), name });
+      setHovered(
+        custom ? { imgUrl: custom.imgUrl, name } : { char: unifiedToEmoji(unified), name },
+      );
     };
     const handleLeave = () => setHovered(null);
 
