@@ -710,7 +710,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           variant='outline'
           size='sm'
           disabled={isDisconnecting}
-          onClick={handleDisconnectCalendar}
+          onClick={() => void handleDisconnectCalendar()}
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
