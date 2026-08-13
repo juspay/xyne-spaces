@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { authMiddleware } from '@/middleware/auth';
@@ -210,6 +211,9 @@ router.get('/context', ...authenticateAdmin, async (req: Request, res: Response)
     });
   }
 });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DATASET_PATH = path.join(__dirname, '..', '..', 'src', 'dataset', 'documents.jsonl');
 const DATASET_QUESTIONS_PATH = path.join(__dirname, '..', '..', 'src', 'dataset', 'questions.jsonl');
