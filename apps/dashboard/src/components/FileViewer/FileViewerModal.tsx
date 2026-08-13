@@ -688,11 +688,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               data-track-name='COPY_IMAGE_FROM_MODAL'
               title='Copy Image'
             >
-              {copied ? (
-                <CopyCopied className='h-4 w-4' />
-              ) : (
-                <CopyDefault className='h-4 w-4' />
-              )}
+              {copied ? <CopyCopied className='h-4 w-4' /> : <CopyDefault className='h-4 w-4' />}
             </button>
           )}
           <button
