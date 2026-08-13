@@ -603,8 +603,8 @@ const AppRoot = (): ReactElement => {
                       <Outlet />
                     </main>
                   ) : (
-                  <XyneCalendarSidebarHost isAskAIOpen={isXyneAIDrawerOpen}>
-                    {isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
+                    <XyneCalendarSidebarHost isAskAIOpen={isXyneAIDrawerOpen}>
+                      {isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                         // XyneAI is open on desktop - show panel layout with XyneAI
                         <div className='flex flex-col h-screen'>
                           <ResizableGroup
@@ -618,10 +618,8 @@ const AppRoot = (): ReactElement => {
                               defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
                             >
                               <div
-                           
-                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          
-                            >
+                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                              >
                                 <AppSidebar />
                                 <main className='flex-1 no-scrollbar overflow-auto'>
                                   <EditWarningModal />
@@ -674,7 +672,8 @@ const AppRoot = (): ReactElement => {
                             className='flex-1 no-scrollbar overflow-auto'
                             autoSaveId='app-root-browser'
                             panelIds={
-                              browserPanelState === 'open' && !location.pathname.endsWith('/browser')
+                              browserPanelState === 'open' &&
+                              !location.pathname.endsWith('/browser')
                                 ? ['app-root-left', 'app-root-browser']
                                 : ['app-root-left']
                             }
@@ -684,16 +683,14 @@ const AppRoot = (): ReactElement => {
                               panelRef={browserPanelLeftRef}
                               defaultSize={
                                 browserPanelState === 'open' &&
-                              !location.pathname.endsWith('/browser')
+                                !location.pathname.endsWith('/browser')
                                   ? '65%'
                                   : '100%'
                               }
                             >
                               <div
-                           
-                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          
-                            >
+                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                              >
                                 <AppSidebar />
                                 <main className='flex-1 no-scrollbar overflow-auto'>
                                   <EditWarningModal />
@@ -702,24 +699,23 @@ const AppRoot = (): ReactElement => {
                               </div>
                             </Panel>
                             {browserPanelState === 'open' &&
-                         
-                            !location.pathname.endsWith('/browser') && (
-                                  <>
-                                    <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                      <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                                    </Separator>
-                                    <Panel
-                                      id='app-root-browser'
-                                      panelRef={browserPanelRightRef}
-                                      defaultSize='35%'
-                                      maxSize='50%'
-                                    >
-                                      <div className='h-full'>
-                                        <BrowserPanel />
-                                      </div>
-                                    </Panel>
-                                  </>
-                                )}
+                              !location.pathname.endsWith('/browser') && (
+                                <>
+                                  <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                  </Separator>
+                                  <Panel
+                                    id='app-root-browser'
+                                    panelRef={browserPanelRightRef}
+                                    defaultSize='35%'
+                                    maxSize='50%'
+                                  >
+                                    <div className='h-full'>
+                                      <BrowserPanel />
+                                    </div>
+                                  </Panel>
+                                </>
+                              )}
                           </ResizableGroup>
                         </div>
                       ) : (
@@ -732,10 +728,8 @@ const AppRoot = (): ReactElement => {
                           >
                             <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
                               <div
-                           
-                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          
-                            >
+                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                              >
                                 <AppSidebar />
                                 <main className='flex-1 no-scrollbar overflow-auto'>
                                   <EditWarningModal />
@@ -752,8 +746,8 @@ const AppRoot = (): ReactElement => {
                           </ResizableGroup>
                         </div>
                       )}
-                  </XyneCalendarSidebarHost>
-                )}
+                    </XyneCalendarSidebarHost>
+                  )}
                   {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,
                     duplicated call UIs, etc. inside the embedded view).
