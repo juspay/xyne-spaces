@@ -265,6 +265,13 @@ class MeetingDetectorService {
     const active = event.active ?? false;
 
     if (active && !this.currentMeeting) {
+      log.info('[MeetingDetector] Mic became active — identifying meeting app');
+      Logger.info(
+        ElectronEvent.MEETING_MIC_ACTIVE,
+        { deviceId: event.deviceId, hadPendingEndTimer: this.meetingEndTimer !== null },
+        'MeetingDetector',
+      );
+
       if (this.meetingEndTimer) {
         clearTimeout(this.meetingEndTimer);
         this.meetingEndTimer = null;
@@ -274,6 +281,11 @@ class MeetingDetectorService {
         .then((meetingApp) => {
           if (meetingApp === 'unknown') {
             log.info('[MeetingDetector] Mic active but no supported meeting app detected');
+            Logger.info(
+              ElectronEvent.MEETING_APP_UNIDENTIFIED,
+              { lastFrontApp: this.lastFrontApp },
+              'MeetingDetector',
+            );
             return;
           }
 
@@ -289,9 +301,17 @@ class MeetingDetectorService {
         })
         .catch((err) => {
           log.error('[MeetingDetector] Failed to identify meeting app:', err);
+          Logger.logError(ElectronEvent.MEETING_DETECTOR_ERROR, err, { phase: 'identifyMeetingApp' }, 'MeetingDetector');
         });
     } else if (!active && this.currentMeeting) {
       if (this.meetingEndTimer) return;
+
+      log.info('[MeetingDetector] Mic became inactive — debouncing meeting end');
+      Logger.info(
+        ElectronEvent.MEETING_MIC_INACTIVE,
+        { app: this.currentMeeting.app, debounceMs: MEETING_END_DEBOUNCE_MS },
+        'MeetingDetector',
+      );
 
       this.meetingEndTimer = setTimeout(() => {
         this.meetingEndTimer = null;
@@ -321,14 +341,25 @@ class MeetingDetectorService {
     const { meetingApp, isScreenRecording } = await this.checkProcesses();
     if (isScreenRecording) {
       log.info('[MeetingDetector] Screen recording process detected, ignoring mic activation');
+      Logger.info(ElectronEvent.MEETING_SCREEN_RECORDING_IGNORED, {}, 'MeetingDetector');
       return 'unknown';
     }
-    if (meetingApp !== 'unknown') return meetingApp;
+    if (meetingApp !== 'unknown') {
+      Logger.info(ElectronEvent.MEETING_APP_IDENTIFIED, { app: meetingApp, via: 'process' }, 'MeetingDetector');
+      return meetingApp;
+    }
 
     // 2. Check frontmost app — use cached value or query live
     const frontApp = this.lastFrontApp ?? await this.queryFrontmostApp();
     const frontmostMatch = this.classifyApp(frontApp);
-    if (frontmostMatch !== 'unknown') return frontmostMatch;
+    if (frontmostMatch !== 'unknown') {
+      Logger.info(
+        ElectronEvent.MEETING_APP_IDENTIFIED,
+        { app: frontmostMatch, via: 'frontmost', bundleId: frontApp?.bundleId },
+        'MeetingDetector',
+      );
+      return frontmostMatch;
+    }
 
     return 'unknown';
   }
@@ -420,6 +451,7 @@ class MeetingDetectorService {
 
     if (NON_MEETING_BUNDLE_IDS.has(bundleId)) {
       log.info('[MeetingDetector] Non-meeting app is frontmost, ignoring:', bundleId);
+      Logger.info(ElectronEvent.MEETING_NON_MEETING_APP_IGNORED, { bundleId }, 'MeetingDetector');
       return 'unknown';
     }
 
