@@ -878,11 +878,13 @@ const CallHistoryScreen = (): ReactElement => {
           pins it to the top-left instead while contributing no layout height, so
           the list still starts where it did. z-[60] clears the sticky header's
           z-50 for the widths where the centred column reaches the left edge. */}
-      <div className='sticky left-0 top-0 z-[60] h-0 w-fit'>
-        <div className='h-[52px] w-fit'>
-          <AppNavigator />
+      {!isMobile && (
+        <div className='sticky left-0 top-0 z-[60] hidden h-0 w-fit md:block'>
+          <div className='h-[52px] w-fit'>
+            <AppNavigator />
+          </div>
         </div>
-      </div>
+      )}
       <div
         className={cn(
           'w-full flex flex-col items-center px-4',
