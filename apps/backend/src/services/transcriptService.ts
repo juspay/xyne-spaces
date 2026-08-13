@@ -1448,15 +1448,13 @@ Output ONLY the processed transcript, nothing else.`;
    * @param conversationId - The conversation ID of the call message
    * @param callId - The external call ID
    * @param markdownSummary - The AI-generated Markdown summary
-   * @param _createdByUserId - The user who initiated the call (no longer used as sender)
    * @param ticketSuggestions - Optional array of ticket suggestions to append as markdown
    */
   async postSummaryAsReply(
     conversationId: string,
     callId: string,
-    markdownSummary: string,
-    _createdByUserId: string,
-    ticketSuggestions?: TicketSuggestion[]
+    markdownSummary: string | null,
+    ticketSuggestions?: TicketSuggestion[],
   ) {
     logger.info(
       `[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`
@@ -1493,9 +1491,10 @@ Output ONLY the processed transcript, nothing else.`;
     );
 
     // ── 1. Post / update the AI summary as its own standalone message ──────────
-    const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
+    if (markdownSummary) {
+      const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
 
-    if (existingSummary) {
+      if (existingSummary) {
       const existingMetadata = existingSummary.metadata as any;
       const currentVersion = existingMetadata?.version || 1;
 
@@ -1515,7 +1514,7 @@ Output ONLY the processed transcript, nothing else.`;
       logger.info(
         `[postSummaryAsReply] Updated existing summary message ${existingSummary.messageId} to version ${currentVersion + 1}`
       );
-    } else {
+      } else {
       const summaryMessage = await repositories.messages.create({
         conversationId,
         senderId: xyneAutomaticBot.id,
@@ -1537,6 +1536,7 @@ Output ONLY the processed transcript, nothing else.`;
       logger.info(
         `[postSummaryAsReply] Summary message created: ${summaryMessage.messageId} in conversation ${conversationId}`
       );
+    }
     }
 
     // ── 3. Post ticket suggestions as batched separate messages ──────────────
@@ -1906,23 +1906,107 @@ Output ONLY the processed transcript, nothing else.`;
         return [];
       });
 
-      // Preserve the existing requirement that the short summary succeeds, but
-      // do not wait for title/ticket generation before starting the detailed
-      // summary stream. This keeps peak LLM concurrency at three: the detailed
-      // request takes the short-summary slot as soon as that request finishes.
-      const summary = await summaryPromise;
-      pendingDetailedSummary = summary
-        ? callDocumentService.generateAndPostDetailedSummary(
-            callId,
-            formattedTranscript,
-            callMessage.conversationId,
-            undefined,
-            { callTitlePromise },
-          )
-        : null;
-      const [title, ticketSuggestions] = await Promise.all([
-        callTitlePromise,
-        ticketSuggestionsPromise,
+      // Start all four post-call LLM operations immediately. Detailed-summary
+      // streaming remains unchanged; title, summary, and tickets persist their
+      // own result as soon as it is ready rather than waiting on one another.
+      pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
+        callId,
+        formattedTranscript,
+        callMessage.conversationId,
+        undefined,
+        { callTitlePromise },
+      ).catch((error) => {
+        logger.error(`[${callId}] detailed_summary_failed`, {
+          stage: 'detailed_summary_generation',
+          error,
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      });
+
+      const summaryUiPromise = summaryPromise.then(async (summary) => {
+        if (!summary) return null;
+        try {
+          await repositories.calls.update(call.id, { aiSummary: summary });
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
+        } catch (updateError) {
+          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
+            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
+            return null;
+          }
+          logger.error(`[${callId}] call_record_update_failed`, {
+            stage: 'call_record_update', error: updateError,
+            stack: updateError instanceof Error ? updateError.stack : undefined,
+          });
+        }
+
+        try {
+          await this.postSummaryAsReply(callMessage.conversationId, callId, summary);
+        } catch (replyError) {
+          logger.error(`[${callId}] post_summary_reply_failed`, {
+            stage: 'post_summary_reply', error: replyError,
+            stack: replyError instanceof Error ? replyError.stack : undefined,
+          });
+        }
+        return summary;
+      });
+
+      const titleUiPromise = callTitlePromise.then(async (title) => {
+        if (!title) return null;
+        try {
+          if (!call.title) {
+            await repositories.calls.update(call.id, { title });
+            void callRecordingService.updateRecordingFilename(callId, title);
+          }
+
+          // Serialize with first-chunk Canvas URL attachment: both merge the
+          // call-message metadata, so neither can discard the other's fields.
+          await db.$transaction(async (tx) => {
+            const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
+              SELECT "content", "metadata" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
+            `;
+            if (!message) {
+              logger.warn(`Call message ${messageId} not found for title update`);
+              return;
+            }
+            await tx.message.update({
+              where: { messageId },
+              data: {
+                content: title,
+                metadata: {
+                  ...(message.metadata as any),
+                  callTitle: title,
+                  callEndedText: message.content,
+                },
+              },
+            });
+          });
+          logger.info(`[${callId}] call_title_updated`);
+        } catch (error) {
+          logger.error(`[${callId}] call_title_update_failed`, { error });
+        }
+        return title;
+      });
+
+      const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
+        if (ticketSuggestions.length === 0) return ticketSuggestions;
+        try {
+          await this.postSummaryAsReply(
+            callMessage.conversationId, callId, null, ticketSuggestions,
+          );
+        } catch (ticketError) {
+          logger.error(`[${callId}] post_ticket_suggestions_failed`, {
+            error: ticketError,
+            stack: ticketError instanceof Error ? ticketError.stack : undefined,
+          });
+        }
+        return ticketSuggestions;
+      });
+
+      const [summary, title, ticketSuggestions] = await Promise.all([
+        summaryUiPromise,
+        titleUiPromise,
+        ticketsUiPromise,
       ]);
 
       const duration = Date.now() - startTime;
@@ -1938,85 +2022,6 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       if (summary) {
-        // Save summary and title to call record.
-        // Skip title update for HEADLESS recordings to preserve user-provided title.
-        // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
-        const effectiveTitle = (title && !call.title) ? title : (call.title ?? null);
-        // Wrap individually so a DB failure here is distinguishable from a transcript
-        // post failure or a summary-post failure in the outer catch.
-        try {
-          await repositories.calls.update(call.id, {
-            aiSummary: summary,
-            ...(title && !call.title ? { title } : {}),
-          });
-          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
-        } catch (updateError) {
-          // P2025: call was deleted while summary was being generated — ignore gracefully
-          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
-            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-            return;
-          }
-          logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError, stack: updateError instanceof Error ? updateError.stack : undefined });
-        }
-
-        // Update recording attachment filename to use call title
-        if (effectiveTitle) {
-          void callRecordingService.updateRecordingFilename(callId, effectiveTitle);
-        }
-
-        // Update the call system message with the title (if generated)
-        if (title) {
-          try {
-            // Serialize with first-chunk Canvas URL attachment. Both operations
-            // merge message metadata, so the row lock prevents either concurrent
-            // writer from replacing the other's newly-added keys.
-            await db.$transaction(async (tx) => {
-              const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
-                SELECT "content", "metadata"
-                FROM "messages"
-                WHERE "messageId" = ${messageId}
-                FOR UPDATE
-              `;
-
-              if (message) {
-                // Swap storage: message.content = AI description, metadata.callEndedText = original call text
-                await tx.message.update({
-                  where: { messageId },
-                  data: {
-                    content: title,
-                    metadata: {
-                      ...(message.metadata as any),
-                      callTitle: title,
-                      callEndedText: message.content,
-                    },
-                  },
-                });
-
-                logger.info(`Updated call message ${messageId} with AI description as content, original text stored in metadata`);
-              } else {
-                logger.warn(`Call message ${messageId} not found for title update`);
-              }
-            });
-          } catch (error) {
-            logger.error(`Failed to update call message with title:`, error);
-            // Don't fail the whole process if message update fails
-          }
-        }
-
-        // Wrap individually — a bot-user-not-found or DB error here produces
-        // post_summary_reply_failed rather than the generic process_call_with_summary_failed.
-        try {
-          await this.postSummaryAsReply(
-            callMessage.conversationId,
-            callId,
-            summary,
-            call.createdByUserId,
-            ticketSuggestions
-          );
-        } catch (replyError) {
-          logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', error: replyError, stack: replyError instanceof Error ? replyError.stack : undefined });
-        }
-
         // Pulse block — completely separate from Xyne tickets.
         // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
         if (config.pulse.enabledChannels.length > 0) {
