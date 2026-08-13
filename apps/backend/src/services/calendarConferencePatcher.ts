@@ -112,6 +112,31 @@ function buildPatchBody(event: GCalEvent, options: ReconcileConferenceOptions) {
   return body;
 }
 
+/** Whether Google already contains the exact managed state this PATCH would establish. */
+export function isEventReconciledWithOptions(
+  event: GCalEvent,
+  options: ReconcileConferenceOptions
+): boolean {
+  const privateProperties = event.extendedProperties?.private;
+  if (
+    privateProperties?.xyneManaged !== 'true' ||
+    privateProperties.xyneCallId !== options.xyneCallId ||
+    privateProperties.xyneRoomLink !== options.roomLink ||
+    privateProperties.xyneChannelId !== options.channelId
+  ) {
+    return false;
+  }
+
+  const description = event.description ?? '';
+  const hasRoomLink =
+    description.includes(options.roomLink) ||
+    description.includes(escapeHtmlAttribute(options.roomLink));
+  if (!hasRoomLink) return false;
+
+  if (!options.replaceConference) return true;
+  return (event.conferenceData?.entryPoints ?? []).length === 0;
+}
+
 /**
  * PATCH the organizer's Calendar event with the managed description (and,
  * for internal-only events, the replaced conference entry). Retries exactly
@@ -143,6 +168,10 @@ export async function reconcileEventConference(
 
     logger.warn(`${TAG} Patch conflict, re-evaluating once`, { eventId: event.id });
     const fresh = await getGoogleEventById(accessToken, event.id);
+    if (isEventReconciledWithOptions(fresh, options)) {
+      logger.info(`${TAG} Fresh event already reconciled after conflict`, { eventId: event.id });
+      return fresh;
+    }
     return attemptPatch(fresh);
   }
 }

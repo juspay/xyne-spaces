@@ -18,10 +18,7 @@ export class GoogleCalendarPatchConflictError extends Error {
   }
 }
 
-export async function getGoogleEventById(
-  accessToken: string,
-  eventId: string
-): Promise<GCalEvent> {
+export async function getGoogleEventById(accessToken: string, eventId: string): Promise<GCalEvent> {
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
     {
@@ -52,7 +49,9 @@ export async function patchGoogleEvent(
   body: Record<string, unknown>,
   options?: { conferenceDataVersion?: boolean; etag?: string }
 ): Promise<GCalEvent> {
-  const params = new URLSearchParams({ sendUpdates: 'all' });
+  // This is a background reconciliation, not an organizer-authored update.
+  // Suppress attendee emails; webhook delivery is unaffected by sendUpdates.
+  const params = new URLSearchParams({ sendUpdates: 'none' });
   if (options?.conferenceDataVersion) {
     params.set('conferenceDataVersion', '1');
   }

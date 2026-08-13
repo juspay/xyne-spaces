@@ -48,6 +48,11 @@ export interface GCalEvent {
   location?: string;
   status?: string;
   eventType?: string;
+  /**
+   * Present on expanded recurring instances. Because all fetches use
+   * singleEvents=true, each occurrence intentionally keeps its own event.id,
+   * Call row, and Xyne room rather than mutating the series master.
+   */
   recurringEventId?: string;
   htmlLink?: string;
   organizer?: { email?: string; displayName?: string; self?: boolean };

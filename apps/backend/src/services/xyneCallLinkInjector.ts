@@ -30,7 +30,10 @@ import { type GCalEvent } from '@/services/googleCalendarCallStore';
 import { type CalendarCredentials } from '@/services/calendarTokenRefresh';
 import { isTeamEligible } from '@/services/calendarSyncConfig';
 import { resolveXyneCallForEvent, resolveXyneChannelForUser } from '@/services/xyneCallService';
-import { reconcileEventConference, escapeHtmlAttribute } from '@/services/calendarConferencePatcher';
+import {
+  reconcileEventConference,
+  escapeHtmlAttribute,
+} from '@/services/calendarConferencePatcher';
 import { buildCalendarExternalId } from '@/services/calendarCallStore.utils';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -74,18 +77,24 @@ function isEligibleShape(event: GCalEvent): SkipReason | null {
 }
 
 /** Every organizer + attendee email must resolve to the internal domain. */
-function isInternalOnly(event: GCalEvent): boolean {
+export function isInternalOnly(event: GCalEvent): boolean {
   const emails = [event.organizer?.email, ...(event.attendees ?? []).map((a) => a.email)];
   return emails.every((email) => emailDomain(email) === INTERNAL_PARTICIPANT_DOMAIN);
 }
 
 /** FR-7: is this event already correctly reconciled, so no patch is needed? */
-function isAlreadyReconciled(event: GCalEvent, internalOnly: boolean): boolean {
+function isAlreadyReconciled(
+  event: GCalEvent,
+  internalOnly: boolean,
+  expectedCallId: string
+): boolean {
   const priv = event.extendedProperties?.private;
   const roomLink = priv?.xyneRoomLink;
-  if (priv?.xyneManaged !== 'true' || !roomLink) return false;
+  if (priv?.xyneManaged !== 'true' || priv.xyneCallId !== expectedCallId || !roomLink) return false;
 
-  const descriptionHasLink = (event.description ?? '').includes(escapeHtmlAttribute(roomLink));
+  const description = event.description ?? '';
+  const descriptionHasLink =
+    description.includes(roomLink) || description.includes(escapeHtmlAttribute(roomLink));
   if (!descriptionHasLink) return false;
 
   if (!internalOnly) return true; // conference entry is intentionally left untouched
@@ -101,10 +110,8 @@ async function reconcileOne(
   event: GCalEvent,
   credentials: CalendarCredentials,
   userEmail: string,
-  workspaceId: string
+  resolveChannelId: () => Promise<string>
 ): Promise<GCalEvent> {
-
-
   const shapeSkipReason = isEligibleShape(event);
   if (shapeSkipReason) {
     logger.info(`${TAG} Skipped`, { eventId: event.id, reason: shapeSkipReason });
@@ -112,33 +119,29 @@ async function reconcileOne(
   }
 
   if (normalizeEmail(event.organizer?.email) !== normalizeEmail(userEmail)) {
-    logger.info(`${TAG} Skipped`, { eventId: event.id, reason: 'not_organizer' satisfies SkipReason });
-    return event;
-  }
-
-  const team = await getUserTeam(credentials.userId);
-  const eligible = await isTeamEligible({ email: userEmail, team });
-  if (!eligible) {
-    logger.info(`${TAG} Skipped`, { eventId: event.id, reason: 'not_eligible' satisfies SkipReason });
+    logger.info(`${TAG} Skipped`, {
+      eventId: event.id,
+      reason: 'not_organizer' satisfies SkipReason,
+    });
     return event;
   }
 
   const internalOnly = isInternalOnly(event);
+  const xyneCallId = buildCalendarExternalId('google', credentials.userId, event.id!);
 
-  if (isAlreadyReconciled(event, internalOnly)) {
+  if (isAlreadyReconciled(event, internalOnly, xyneCallId)) {
     logger.info(`${TAG} Already reconciled, no patch needed`, { eventId: event.id, internalOnly });
     return event;
   }
 
   try {
     const { roomLink, isNew } = await resolveXyneCallForEvent(credentials.userId, event.id!);
-    const channelId = await resolveXyneChannelForUser(credentials.userId, workspaceId);
+    const channelId = await resolveChannelId();
     logger.info(`${TAG} ${isNew ? 'call_created' : 'call_recovered'}`, {
       eventId: event.id,
       internalOnly,
     });
 
-    const xyneCallId = buildCalendarExternalId('google', credentials.userId, event.id!);
     const patched = await reconcileEventConference(credentials.accessToken, event, {
       roomLink,
       xyneCallId,
@@ -171,10 +174,41 @@ export async function reconcileXyneCallLinks(
   userEmail: string,
   workspaceId: string
 ): Promise<GCalEvent[]> {
+  if (events.length === 0) return events;
+
+  // Team/config eligibility and the backing self-DM channel are constant for
+  // the entire batch. Resolve eligibility once, and lazily memoize the channel
+  // so an already-reconciled batch does not perform any channel work.
+  let eligible: boolean;
+  try {
+    const team = await getUserTeam(credentials.userId);
+    eligible = await isTeamEligible({ email: userEmail, team });
+  } catch (err) {
+    logger.error(`${TAG} Failed to resolve batch eligibility, storing original events`, {
+      eventCount: events.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return events;
+  }
+
+  if (!eligible) {
+    logger.info(`${TAG} Batch skipped`, {
+      eventCount: events.length,
+      reason: 'not_eligible' satisfies SkipReason,
+    });
+    return events;
+  }
+
+  let channelIdPromise: Promise<string> | undefined;
+  const resolveChannelId = (): Promise<string> => {
+    channelIdPromise ??= resolveXyneChannelForUser(credentials.userId, workspaceId);
+    return channelIdPromise;
+  };
+
   const results: GCalEvent[] = [];
   for (const event of events) {
     try {
-      results.push(await reconcileOne(event, credentials, userEmail, workspaceId));
+      results.push(await reconcileOne(event, credentials, userEmail, resolveChannelId));
     } catch (err) {
       logger.error(`${TAG} Unexpected reconciliation error, storing original event`, {
         eventId: event.id,
