@@ -110,6 +110,11 @@
     --pr-badge-danger-bg: #faebeb;
     --pr-badge-danger-fg: #ff0f0f;
 
+    /* Sandbox artifact resource glyphs (SandboxNode). One accent hue for both
+       rows — each icon renders its own tint from this via opacity, so a single
+       token is enough. */
+    --sandbox-icon: #9f4e6f;
+
     /* Workflow status colors - accessible on light bg */
     --status-new: #6b7280;
     --status-pending: #d97706;
@@ -241,6 +246,8 @@
     --pr-badge-merged-fg: #3716a3;
     --pr-badge-danger-bg: #faebeb;
     --pr-badge-danger-fg: #ff0f0f;
+    /* Sandbox artifact glyphs — see classic block. */
+    --sandbox-icon: #9f4e6f;
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
@@ -373,6 +380,9 @@
     --pr-badge-merged-fg: #a78bfa;
     --pr-badge-danger-bg: #2a1414;
     --pr-badge-danger-fg: #f87171;
+
+    /* Lifted mauve — the light-theme #9f4e6f goes muddy against the dark card. */
+    --sandbox-icon: #d491ab;
 
     /* Workflow status colors - accessible on dark bg */
     --status-new: #b0b4ba;
