@@ -16,10 +16,14 @@ jest.mock('../../../src/sdlc/sdlcCanvasAccess', () => ({
   sdlcChannelCanvasParticipant: jest.fn(),
 }));
 jest.mock('../../../src/config/env', () => ({
-  config: { env: 'test', logging: { level: 'error' } },
+  config: {
+    env: 'test',
+    logging: { level: 'error', fluent: { enabled: false, host: 'localhost', port: 24224 } },
+  },
 }));
 
 import { SdlcWikiPageStore } from '../../../src/sdlc/wiki/SdlcWikiPageStore';
+import { SdlcArtifactVersionStore } from '../../../src/sdlc/SdlcArtifactVersionStore';
 import { serializeWikiRunState, type WikiExecutionContext } from '../../../src/sdlc/wiki/wikiRunState';
 import {
   convertBlockNoteToMarkdown,
@@ -334,7 +338,7 @@ describe('SdlcWikiPageStore checkpoint concurrency', () => {
     });
   });
 
-  it('applies a section mutation to live Markdown but stores a full CanvasVersion snapshot', async () => {
+  it('reads prior context, recovers one omitted section, and stores a new full CanvasVersion snapshot', async () => {
     const original = '# API\n\nIntro\n\n## Retries\n\nOld policy\n\n## Errors\n\nError policy\n';
     const expectedHash = createHash('sha256').update(original).digest('hex');
     const fullReplacement = '# API\n\nIntro\n\n## Retries\n\nThree attempts.\n\n## Errors\n\nError policy\n';
@@ -356,8 +360,36 @@ describe('SdlcWikiPageStore checkpoint concurrency', () => {
     dependencies.verifySourcePaths.mockResolvedValue(undefined);
     dependencies.syncCanvas.mockResolvedValue(true);
     dependencies.indexCanvas.mockResolvedValue(undefined);
-    jest.mocked(convertBlockNoteToMarkdown).mockResolvedValueOnce(original).mockResolvedValueOnce(original);
+    jest.mocked(convertBlockNoteToMarkdown)
+      .mockResolvedValueOnce(original)
+      .mockResolvedValueOnce(original)
+      .mockResolvedValueOnce(original);
     jest.mocked(convertMarkdownToBlockNote).mockResolvedValueOnce(content as never);
+
+    const historyStore = new SdlcArtifactVersionStore({
+      repo: { findFirst: jest.fn().mockResolvedValue({
+        id: 'repo-1', channelId: 'channel-1', projectId: 'project-1',
+      }) },
+      canvas: { findMany: jest.fn().mockResolvedValue([{
+        id: 'canvas-api', title: 'API',
+        metadata: {
+          surface: 'SDLC', documentKind: 'WIKI', repoId: 'repo-1',
+          wikiRelativePath: 'interfaces/api.md', wikiSourcePaths: ['src/api.ts'],
+        },
+      }]) },
+      canvasVersion: { findFirst: jest.fn().mockResolvedValue({
+        id: 'version-before-omission', name: 'Before omission', content,
+        contentHash: 'stored-version-hash', createdBy: 'user-1', createdAt: new Date(),
+      }) },
+      sdlcEntityLink: { findMany: jest.fn().mockResolvedValue([]) },
+      workflowExecution: { findMany: jest.fn().mockResolvedValue([]) },
+    } as never);
+    const historical = await historyStore.readVersion({
+      repoId: 'repo-1', workspaceId: 'workspace-1', userId: 'user-1',
+      selector: { type: 'WIKI_PAGE', path: 'interfaces/api.md' },
+      versionId: 'version-before-omission',
+    });
+    expect(historical.version.markdown).toContain('## Errors\n\nError policy');
 
     await store.writePage({
       sessionId: 'session-1',

@@ -527,6 +527,11 @@ export const userPreferenceTable = table("user_preferences")
     userId: string(),
     askai_custom_instruction: string().optional(),
     channelSortOrder: string(),
+    channelFilterMode: string().optional(),
+    starredFilterMode: string().optional(),
+    starredSortOrder: string().optional(),
+    dmFilterMode: string().optional(),
+    dmSortOrder: string().optional(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
@@ -1141,6 +1146,7 @@ export const channelSectionTable = table("channel_sections")
     isCollapsed: boolean(),
     isDeleted: boolean(),
     sortOrder: string().optional(),
+    filterMode: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1671,6 +1677,7 @@ export const summaryTemplateTable = table("summary_templates")
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey("id");
 
@@ -2235,6 +2242,7 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -3978,6 +3986,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: channelBoardMappingTable,
+  }),
+  sdlcRepos: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: repoTable,
   })
 }));
 
@@ -3991,11 +4004,6 @@ export const channelBoardMappingTableRelationships = relationships(channelBoardM
     sourceField: ["boardId"],
     destField: ["id"],
     destSchema: boardTable,
-  }),
-  sdlcRepos: many({
-    sourceField: ["id"],
-    destField: ["channelId"],
-    destSchema: repoTable,
   })
 }));
 

@@ -249,11 +249,19 @@ setup execution may run at a time.
 - never persist the PAT in workflow context, queues, prompts, conversations, debug artifacts, Redis progress, logs, or Zero;
 - never push, create branches, or modify source during setup.
 
-Claw creates each baseline canvas directly through the narrow `spaces-sdlc-create-artifact` tool. The
+Claw creates and checkpoints each baseline canvas through `spaces-sdlc-mutate-artifact` with artifact type
+`BASELINE`. The
 backend derives its folder, visibility, membership, and metadata; the model cannot select arbitrary storage
 or create a placeholder. A durable callback advances the next baseline step only after the expected canvas
 exists. The worker periodically reconciles stale executions against Claw's authoritative run record, so a
 lost callback still reaches a terminal state.
+
+Every `sdlc-agent` trigger receives one canonical tool palette assembled from the live Xyne Spaces MCP export,
+generic repository sandbox tools, todo/web search, and Spaces/GitHub/Bitbucket/Context7 subagents. Trigger-specific
+workflow requirements remain distinct, while trusted repository/execution context authorizes mutations. Host-cwd
+file built-ins are never exposed to this agent. Artifact CRUD uses canonical list/read/mutate/history tools; Wiki
+checkpoint begin, source verification, commit finalization, historical Git context, and pull-request creation stay
+focused workflow tools.
 
 All access-check, setup, artifact, and work dispatches use one `sdlc` Bull queue. Consumption and reconciliation
 run only when `ENABLE_SDLC_WORKER=true`. Redis admission permits cap actual in-flight operations at nine globally
@@ -278,6 +286,9 @@ follow-up.
    - identify when repository has no frontend.
 3. **Code & Lint Standards**
    - formatter, linter, type-system, naming, imports, error handling, and repository conventions;
+   - commit-message conventions and enforcement: accepted format, types/scopes, subject/body rules, examples,
+     commit hooks, commitlint or equivalent configuration, CI checks, and runnable validation commands when
+     repository evidence exists; explicitly state when no commit-message policy is found rather than inventing one;
    - source config paths and runnable commands.
 4. **Run Guide**
    - prerequisites, environment setup, dependencies, services, development commands, and common failure notes;

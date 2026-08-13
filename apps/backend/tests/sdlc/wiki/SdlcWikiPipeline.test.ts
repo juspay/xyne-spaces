@@ -13,7 +13,10 @@ jest.mock('../../../src/sdlc/vcs', () => ({
   sdlcVcs: { requireCapabilities: mockRequireCapabilities },
 }));
 jest.mock('../../../src/config/env', () => ({
-  config: { env: 'test', logging: { level: 'error' } },
+  config: {
+    env: 'test',
+    logging: { level: 'error', fluent: { enabled: false, host: 'localhost', port: 24224 } },
+  },
 }));
 
 import { SdlcWikiPipelineService } from '../../../src/sdlc/wiki/SdlcWikiPipeline';

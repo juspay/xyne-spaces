@@ -1,0 +1,464 @@
+import { createHash } from 'crypto';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { DatabaseClient } from '@/database/client';
+import { AppError } from '@/middleware/errorHandler';
+import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
+import { normalizeWikiRelativePath } from './wiki/wikiPaths';
+import {
+  parseWikiExecutionContext,
+  parseWikiExecutionOutput,
+  type WikiRevisionEvidence,
+} from './wiki/wikiRunState';
+
+export type SdlcArtifactVersionSelector =
+  | { type: 'WIKI_PAGE'; path: string; includeArchived?: boolean }
+  | { type: 'SDLC_CANVAS'; canvasId: string };
+
+type RevisionStatus = 'FINALIZED' | 'PENDING' | 'CURRENT_METADATA';
+
+interface RevisionRecord {
+  revision: WikiRevisionEvidence;
+  status: RevisionStatus;
+}
+
+interface ResolvedArtifact {
+  canvasId: string;
+  title: string;
+  path: string | null;
+  artifactKind: 'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC';
+  archived: boolean;
+  metadata: Record<string, unknown>;
+}
+
+function metadataRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function sourceReferences(value: unknown): NonNullable<WikiRevisionEvidence['sourceReferences']> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.path !== 'string' || typeof candidate.commitSha !== 'string') return [];
+    return [{
+      path: candidate.path,
+      commitSha: candidate.commitSha,
+      ...(typeof candidate.symbol === 'string' ? { symbol: candidate.symbol } : {}),
+      ...(typeof candidate.startLine === 'number' ? { startLine: candidate.startLine } : {}),
+      ...(typeof candidate.endLine === 'number' ? { endLine: candidate.endLine } : {}),
+    }];
+  });
+}
+
+function shortCommitRef(commitSha: string): string {
+  return commitSha === 'ROOT_BOOTSTRAP' ? commitSha : commitSha.slice(0, 12);
+}
+
+function agentRevision(record: RevisionRecord | undefined) {
+  if (!record) return null;
+  return {
+    ...record.revision,
+    commitSha: shortCommitRef(record.revision.commitSha),
+    sourceReferences: record.revision.sourceReferences?.map(reference => ({
+      ...reference,
+      commitSha: shortCommitRef(reference.commitSha),
+    })),
+    status: record.status,
+  };
+}
+
+function versionSummary(
+  version: {
+    id: string;
+    name: string;
+    contentHash: string;
+    createdBy: string | null;
+    createdAt: Date;
+  },
+  record: RevisionRecord | undefined
+) {
+  const revision = record?.revision;
+  const historicalIdentity = revision?.path || revision?.title
+    ? { path: revision.path ?? null, title: revision.title ?? null }
+    : null;
+  const archived = revision?.archived ?? (
+    revision?.action === 'archived' ? true : revision?.action === 'restored' ? false : null
+  );
+  return {
+    versionId: version.id,
+    name: version.name,
+    createdAt: version.createdAt.toISOString(),
+    createdBy: version.createdBy,
+    contentHash: version.contentHash,
+    origin: revision ? 'WIKI_PIPELINE' as const : 'CANVAS' as const,
+    checkpointRef: revision ? shortCommitRef(revision.commitSha) : null,
+    action: revision?.action ?? null,
+    archived,
+    historicalIdentity,
+    metadataStatus:
+      record?.status === 'CURRENT_METADATA'
+        ? 'inferred' as const
+        : historicalIdentity?.path && historicalIdentity.title
+          ? 'exact' as const
+          : 'unavailable' as const,
+    sourceEvidence: revision
+      ? {
+          sourcePathCount: revision.sourcePaths.length,
+          sourceReferenceCount: revision.sourceReferences?.length ?? 0,
+          status: record?.status ?? null,
+        }
+      : null,
+  };
+}
+
+export class SdlcArtifactVersionStore {
+  constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
+
+  async listArtifacts(input: {
+    repoId: string;
+    workspaceId: string;
+    userId: string;
+    kinds?: Array<'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC'>;
+    includeArchived?: boolean;
+  }) {
+    const repo = await this.requireRepository(input);
+    const canvases = await this.prisma.canvas.findMany({
+      where: {
+        channelId: repo.channelId,
+        workspaceId: input.workspaceId,
+        projectId: repo.projectId,
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, title: true, metadata: true, updatedAt: true },
+    });
+    const wanted = new Set(input.kinds ?? []);
+    return canvases.flatMap(canvas => {
+      const metadata = metadataRecord(canvas.metadata);
+      if (metadata.surface !== 'SDLC' || metadata.repoId !== input.repoId) return [];
+      const artifactKind = metadata.documentKind === 'WIKI'
+        ? 'WIKI'
+        : String(metadata.artifactKind ?? '');
+      if (!['WIKI', 'BASELINE', 'PRD', 'TECH_DOC'].includes(artifactKind)) return [];
+      if (wanted.size > 0 && !wanted.has(artifactKind as ResolvedArtifact['artifactKind'])) return [];
+      const archived = artifactKind === 'WIKI' && typeof metadata.wikiArchivedAt === 'string';
+      if (archived && !input.includeArchived) return [];
+      return [{
+        canvasId: canvas.id,
+        title: canvas.title,
+        artifactKind,
+        path: artifactKind === 'WIKI' ? String(metadata.wikiRelativePath ?? '') : null,
+        archived,
+        updatedAt: canvas.updatedAt.toISOString(),
+      }];
+    });
+  }
+
+  async readArtifact(input: {
+    repoId: string;
+    workspaceId: string;
+    userId: string;
+    selector: SdlcArtifactVersionSelector;
+  }) {
+    const artifact = await this.resolveArtifact(input);
+    const canvas = await this.prisma.canvas.findUnique({
+      where: { id: artifact.canvasId },
+      select: { content: true },
+    });
+    if (!canvas) throw new AppError('SDLC artifact not found', 404);
+    const blocks = Array.isArray(canvas.content)
+      ? canvas.content as unknown as BlockNoteBlock[]
+      : [];
+    const markdown = await convertBlockNoteToMarkdown(blocks);
+    return {
+      artifact: this.publicArtifact(artifact),
+      markdown,
+      contentHash: createHash('sha256').update(markdown).digest('hex'),
+    };
+  }
+
+  async listVersions(input: {
+    repoId: string;
+    workspaceId: string;
+    userId: string;
+    selector: SdlcArtifactVersionSelector;
+    cursor?: string;
+    limit: number;
+  }) {
+    const artifact = await this.resolveArtifact(input);
+    if (input.cursor) {
+      const cursor = await this.prisma.canvasVersion.findFirst({
+        where: { id: input.cursor, canvasId: artifact.canvasId },
+        select: { id: true },
+      });
+      if (!cursor) throw new AppError('Invalid artifact version cursor', 400);
+    }
+    const rows = await this.prisma.canvasVersion.findMany({
+      where: { canvasId: artifact.canvasId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit + 1,
+      ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        name: true,
+        contentHash: true,
+        createdBy: true,
+        createdAt: true,
+      },
+    });
+    const hasMore = rows.length > input.limit;
+    const page = hasMore ? rows.slice(0, input.limit) : rows;
+    const evidence = artifact.artifactKind === 'WIKI'
+      ? await this.loadWikiEvidence(input.repoId, artifact)
+      : new Map<string, RevisionRecord>();
+    return {
+      artifact: this.publicArtifact(artifact),
+      versions: page.map(version => versionSummary(version, evidence.get(version.id))),
+      hasMore,
+      nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
+    };
+  }
+
+  async readVersion(input: {
+    repoId: string;
+    workspaceId: string;
+    userId: string;
+    selector: SdlcArtifactVersionSelector;
+    versionId: string;
+  }) {
+    const artifact = await this.resolveArtifact(input);
+    const version = await this.prisma.canvasVersion.findFirst({
+      where: { id: input.versionId, canvasId: artifact.canvasId },
+      select: {
+        id: true,
+        name: true,
+        content: true,
+        contentHash: true,
+        createdBy: true,
+        createdAt: true,
+      },
+    });
+    if (!version) throw new AppError('SDLC artifact version not found', 404);
+    const evidence = artifact.artifactKind === 'WIKI'
+      ? await this.loadWikiEvidence(input.repoId, artifact)
+      : new Map<string, RevisionRecord>();
+    const record = evidence.get(version.id);
+    const blocks = Array.isArray(version.content)
+      ? version.content as unknown as BlockNoteBlock[]
+      : [];
+    const markdown = await convertBlockNoteToMarkdown(blocks);
+    return {
+      artifact: this.publicArtifact(artifact),
+      version: {
+        ...versionSummary(version, record),
+        markdown,
+        markdownHash: createHash('sha256').update(markdown).digest('hex'),
+        revisionEvidence: agentRevision(record),
+      },
+    };
+  }
+
+  private publicArtifact(artifact: ResolvedArtifact) {
+    return {
+      canvasId: artifact.canvasId,
+      title: artifact.title,
+      path: artifact.path,
+      artifactKind: artifact.artifactKind,
+      archived: artifact.archived,
+    };
+  }
+
+  private async resolveArtifact(input: {
+    repoId: string;
+    workspaceId: string;
+    userId: string;
+    selector: SdlcArtifactVersionSelector;
+  }): Promise<ResolvedArtifact> {
+    const repo = await this.requireRepository(input);
+
+    let wikiPath: string | null = null;
+    if (input.selector.type === 'WIKI_PAGE') {
+      try {
+        wikiPath = normalizeWikiRelativePath(input.selector.path);
+      } catch (error) {
+        throw new AppError(
+          error instanceof Error ? error.message : 'Invalid Wiki path',
+          400
+        );
+      }
+    }
+    const selectedCanvasId = input.selector.type === 'SDLC_CANVAS'
+      ? input.selector.canvasId
+      : null;
+    const pages = wikiPath
+      ? await this.prisma.canvas.findMany({
+          where: {
+            channelId: repo.channelId,
+            workspaceId: input.workspaceId,
+            projectId: repo.projectId,
+          },
+          select: { id: true, title: true, metadata: true },
+        })
+      : [];
+    const canvas = wikiPath
+      ? pages.find(page => {
+          const metadata = metadataRecord(page.metadata);
+          return metadata.surface === 'SDLC' && metadata.documentKind === 'WIKI' &&
+            metadata.repoId === repo.id &&
+            metadata.wikiRelativePath === wikiPath;
+        }) ?? null
+      : await this.prisma.canvas.findFirst({
+          where: {
+            id: selectedCanvasId!,
+            channelId: repo.channelId,
+            workspaceId: input.workspaceId,
+            projectId: repo.projectId,
+          },
+          select: { id: true, title: true, metadata: true },
+        });
+    if (!canvas) throw new AppError('SDLC artifact not found', 404);
+    const metadata = metadataRecord(canvas.metadata);
+    if (metadata.surface !== 'SDLC' || metadata.repoId !== repo.id) {
+      throw new AppError('SDLC artifact not found', 404);
+    }
+
+    if (input.selector.type === 'WIKI_PAGE') {
+      if (metadata.documentKind !== 'WIKI') throw new AppError('SDLC artifact not found', 404);
+      const archived = typeof metadata.wikiArchivedAt === 'string';
+      if (archived && !input.selector.includeArchived) {
+        throw new AppError('SDLC artifact not found', 404);
+      }
+      return {
+        canvasId: canvas.id,
+        title: canvas.title,
+        path: String(metadata.wikiRelativePath),
+        artifactKind: 'WIKI',
+        archived,
+        metadata,
+      };
+    }
+
+    const artifactKind = metadata.artifactKind;
+    if (!['BASELINE', 'PRD', 'TECH_DOC'].includes(String(artifactKind))) {
+      throw new AppError('SDLC artifact not found', 404);
+    }
+    return {
+      canvasId: canvas.id,
+      title: canvas.title,
+      path: null,
+      artifactKind: artifactKind as ResolvedArtifact['artifactKind'],
+      archived: false,
+      metadata,
+    };
+  }
+
+  private async requireRepository(input: {
+    repoId: string;
+    workspaceId: string;
+    userId: string;
+  }) {
+    const repo = await this.prisma.repo.findFirst({
+      where: {
+        id: input.repoId,
+        workspaceId: input.workspaceId,
+        projectId: { not: null },
+        channelId: { not: null },
+        channel: { participants: { some: { userId: input.userId } } },
+      },
+      select: { id: true, channelId: true, projectId: true },
+    });
+    if (!repo?.channelId || !repo.projectId) throw new AppError('SDLC artifact not found', 404);
+    return { ...repo, channelId: repo.channelId, projectId: repo.projectId };
+  }
+
+  private async loadWikiEvidence(
+    repoId: string,
+    artifact: ResolvedArtifact
+  ): Promise<Map<string, RevisionRecord>> {
+    const links = await this.prisma.sdlcEntityLink.findMany({
+      where: {
+        repoId,
+        sourceType: 'REPOSITORY',
+        sourceId: repoId,
+        targetType: 'WORKFLOW_EXECUTION',
+        relationType: 'WIKI_RUN',
+      },
+      select: { targetId: true },
+    });
+    const executions = links.length === 0 ? [] : await this.prisma.workflowExecution.findMany({
+      where: { id: { in: links.map(link => link.targetId) }, workflowType: 'SDLC_WIKI' },
+      select: { context: true, output: true },
+    });
+    const evidence = new Map<string, RevisionRecord>();
+    for (const execution of executions) {
+      try {
+        const output = parseWikiExecutionOutput(execution.output);
+        for (const outcome of output.outcomes) {
+          for (const revision of outcome.revisions) {
+            if (revision.canvasId === artifact.canvasId) {
+              evidence.set(revision.canvasVersionId, { revision, status: 'FINALIZED' });
+            }
+          }
+        }
+      } catch {
+        // Legacy or partially written output is ignored; pending/current
+        // evidence below can still make the durable snapshot readable.
+      }
+      try {
+        if (!execution.context) continue;
+        const context = parseWikiExecutionContext(execution.context);
+        for (const pending of context.pendingCommit?.pages ?? []) {
+          if (pending.revision.canvasId === artifact.canvasId && !evidence.has(pending.revision.canvasVersionId)) {
+            evidence.set(pending.revision.canvasVersionId, {
+              revision: pending.revision,
+              status: 'PENDING',
+            });
+          }
+        }
+      } catch {
+        // See output handling above.
+      }
+    }
+
+    const metadata = artifact.metadata;
+    const currentVersionId = metadata.wikiCanvasVersionId;
+    const action = metadata.wikiRevisionKind;
+    const commitSha = metadata.wikiLastCommitSha;
+    const contentHash = metadata.wikiContentHash;
+    if (
+      typeof currentVersionId === 'string' && !evidence.has(currentVersionId) &&
+      typeof action === 'string' &&
+      ['created', 'updated', 'archived', 'restored', 'refined', 'moved'].includes(action) &&
+      typeof commitSha === 'string' && typeof contentHash === 'string'
+    ) {
+      const paths = Array.isArray(metadata.wikiSourcePaths)
+        ? metadata.wikiSourcePaths.filter((path): path is string => typeof path === 'string')
+        : [];
+      const archivedPaths = Array.isArray(metadata.wikiArchivedSourcePaths)
+        ? metadata.wikiArchivedSourcePaths.filter((path): path is string => typeof path === 'string')
+        : [];
+      evidence.set(currentVersionId, {
+        status: 'CURRENT_METADATA',
+        revision: {
+          action: action as WikiRevisionEvidence['action'],
+          commitSha,
+          canvasId: artifact.canvasId,
+          canvasVersionId: currentVersionId,
+          contentHash,
+          sourcePaths: paths.length > 0 ? paths : archivedPaths,
+          path: artifact.path ?? undefined,
+          title: artifact.title,
+          archived: artifact.archived,
+          sourceReferences: sourceReferences(
+            artifact.archived
+              ? metadata.wikiArchivedSourceReferences
+              : metadata.wikiSourceReferences
+          ),
+        },
+      });
+    }
+    return evidence;
+  }
+}

@@ -273,10 +273,11 @@ Validators have Git read plus Wiki list/read, never apply. Correction has apply 
 
 ## 7. Narrow tool contracts
 
-Use five narrow tools: one historical Git reader, Wiki list/read, one-page write, and commit finalization. Split only
-when real output/error differences require it.
+Wiki pipeline uses canonical SDLC artifact list/read/mutate tools plus focused Git context, checkpoint, source
+verification, and finalization tools. Same tools remain visible at every SDLC trigger; trusted execution context
+enforces Wiki role and repository scope.
 
-### 7.1 `sandbox-sdlc-wiki-git-context`
+### 7.1 `sandbox-sdlc-git-context`
 
 Read-only historical Git access bound by trusted execution metadata. Operations:
 
@@ -291,7 +292,7 @@ timeouts and a cumulative run budget. Fetch is internal setup behavior. Small di
 saved as a bounded sandbox patch and continued through the controlled `read_patch` operation. It cannot checkout,
 branch, commit, push, clean, reset, or invoke interpreters.
 
-### 7.2 `spaces-sdlc-wiki-list-pages`
+### 7.2 `spaces-sdlc-list-artifacts`
 
 Returns active and optionally archived page summaries for the bound repository:
 
@@ -309,39 +310,27 @@ interface WikiPageSummary {
 
 Supports changed-source overlap filtering so the generator need not load every page.
 
-### 7.3 `spaces-sdlc-wiki-read-page`
+### 7.3 `spaces-sdlc-read-artifact`
 
 Returns one bound Wiki Canvas as Markdown plus current live Y-Sweet content hash and metadata. Archived pages
 require explicit inclusion. It cannot read arbitrary Canvas IDs outside the repository Wiki.
 
-### 7.4 `spaces-sdlc-wiki-write-page`
+### 7.4 `spaces-sdlc-mutate-artifact`
 
 ```ts
-interface WriteWikiPageInput {
+interface MutateWikiArtifactInput {
+  artifactType: 'WIKI';
   executionId: string;
   commitSha: string;
-  page:
-    | {
-        action: 'create';
-        path: string;
-        title: string;
-        markdown: string;
-        sourcePaths: string[];
-      }
-    | {
-        action: 'update' | 'restore';
-        path: string;
-        expectedContentHash: string;
-        title: string;
-        markdown: string;
-        sourcePaths: string[];
-      }
-    | {
-        action: 'archive';
-        path: string;
-        expectedContentHash: string;
-        sourcePaths: string[];
-      };
+  action: 'create' | 'update' | 'replace_section' | 'insert_section'
+    | 'remove_section' | 'move' | 'archive' | 'restore';
+  path: string;
+  destinationPath?: string;
+  expectedContentHash?: string;
+  title?: string;
+  heading?: string;
+  markdown?: string;
+  sourcePaths: string[];
 }
 ```
 

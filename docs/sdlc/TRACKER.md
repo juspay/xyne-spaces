@@ -1246,6 +1246,184 @@ passes. No replacement Wiki run or stress test was started.
       keyboard focus. Keep the shared Chat Mermaid toolbar behavior unchanged.
 - [x] Dashboard typecheck, targeted lint (no errors), and `git diff --check` pass.
 
+### T27.11.17 — Agent-readable Wiki page version history
+
+- [x] Add trusted-repository `spaces-sdlc-list-artifact-versions` for one typed Wiki-path or SDLC-Canvas selector,
+      covering Wiki, Repo Knowledge, PRD, and Tech Doc history. List bounded Canvas versions newest first and return
+      version identity, creation time/actor, content hash, Wiki
+      checkpoint/commit ref, action, archive state, and source-evidence summary without returning every historical
+      Markdown body. Support cursor/limit pagination so a long-running repository cannot fill model context.
+- [x] Add `spaces-sdlc-read-artifact-version` to read exactly one listed historical version by opaque version ID.
+      Return its full Markdown, historical title/path when known, stored and Markdown content hashes, checkpoint/commit
+      identity, structured source references, and revision evidence. Do not accept an arbitrary Canvas ID or permit
+      access outside the trusted repository's SDLC artifacts.
+- [x] Keep current-state and archive semantics explicit: `spaces-sdlc-wiki-list-pages` with `includeArchived` lists
+      current active/archived page identities; the new tools list and read immutable historical snapshots of one
+      page. Reading history must never restore, mutate, advance, or satisfy a Wiki checkpoint.
+- [x] Expose these tools to the interactive SDLC Agent and Wiki page/editor/validator/generator/corrector roles that
+      need historical comparison or context-loss analysis, while excluding survey/finalizer-only roles and one-shot
+      non-Wiki automation. Instruct agents to read current code/current artifacts first, retrieve only relevant prior
+      versions, and never treat old text as more authoritative than current repository evidence.
+- [x] Preserve Canvas identity across move/archive/restore. A version lookup by the page's current path retains
+      access to versions created under earlier paths and reports the path recorded at each version. Define a stable
+      response when the requested page/version was removed, belongs to another repository, or is inaccessible.
+- [x] Add authorization, pagination, version-ordering, moved-page, archived-page, source-evidence, compaction-ID,
+      and cross-repository isolation tests. Add a focused recovery test proving an agent can compare current content
+      with a prior version and recover omitted context through the normal section mutation tool while preserving a
+      new full CanvasVersion snapshot.
+- [x] Implementation stop gate: run only focused automated tests/typechecks and one small synthetic history-read
+      smoke if needed. Do not start or resume a configured/large Wiki run; the human owns the subsequent manual
+      stress test.
+
+Verification (2026-08-13): 32 focused backend history/page-store/prompt tests pass; 6 focused Claw trusted-binding
+tests and 6 Claw Auth MCP schema/dispatch tests pass. Backend, Claw, and Claw Auth typechecks plus the shared build
+and `git diff --check` pass. No configured Wiki run or live synthetic smoke was started.
+
+### T27.11.18 — Canonical SDLC agent tool-capability registry
+
+- [x] Add one typed canonical registry consumed by seed/provisioning, trusted bindings, automation dispatch,
+      permissions, and required-submit gates. Fail construction when a registered direct SDLC tool is absent from
+      the live Xyne Spaces MCP export.
+- [x] Give every `sdlc-agent` trigger the same visible palette: all live Xyne Spaces MCP tools (including bulk
+      ticket/message/Canvas tools and feature-gated Vespa tools), all generic sandbox tools, SDLC Git context,
+      todo/web search, and Spaces/GitHub/Bitbucket/Context7 subagents. Keep role/operation authorization in trusted
+      server context and process gates, not by hiding tools per trigger.
+- [x] Remove local-cwd `read`, `write`, `grep`, `find`, and `ls` built-ins from every `sdlc-agent` run. Repository
+      access goes through sandbox tools only.
+- [x] Consolidate artifact/Wiki CRUD into `spaces-sdlc-list-artifacts`, `spaces-sdlc-read-artifact`,
+      `spaces-sdlc-mutate-artifact`, `spaces-sdlc-list-artifact-versions`, and
+      `spaces-sdlc-read-artifact-version`. Retain checkpoint begin/source verify/finalize and PR creation as focused
+      SDLC workflow tools; rename historical Git context to `sandbox-sdlc-git-context`.
+- [x] Remove retired MCP exports and raw role-specific webhook arrays. Make repository/execution binding metadata-
+      driven, including optional Wiki execution identity on canonical list/mutate calls.
+- [x] Add focused registry, schema hard-cutover, trusted-binding, history, and prompt tests. Run typechecks and
+      focused tests only; do not start/resume a configured Wiki run. Human owns local cleanup/reseed and stress test.
+
+Verification (2026-08-13): backend, shared, Claw, and Claw Auth typechecks pass. Canonical MCP/schema tests, trusted-binding
+tests, and shared sandbox tests pass. Full package test commands also ran unrelated suites and exposed pre-existing
+network/timing/mention-test failures; focused SDLC test files themselves pass. No database mutation or Wiki run was
+started.
+
+## T28 — Round 2 proper code review and cleanup
+
+This is the next deliberate cleanup pass after the current Wiki implementation and human stress evidence. It is
+not limited to cosmetic cleanup. First review the complete feature diff, runtime findings, and tracker/PRD; agree
+on findings and priorities; then implement the accepted fixes in small, reviewable groups. T27.11.17 and T27.11.18
+are mandatory inputs to this round rather than isolated follow-ups.
+
+- [~] T28.0 **Pre-change preservation and resumability gate.** Before Round 2 implementation changes any Wiki
+      persistence, orchestration, tool, or prompt contract, export the selected repository's current Wiki into a
+      versioned portable snapshot and verify it can be read back. The snapshot must include repository identity and
+      base branch; active and archived page paths/titles; current full Markdown/content hashes/Canvas identities;
+      complete Canvas version history; Wiki revisions and create/update/move/archive/restore actions; checkpoint/
+      commit provenance; structured source references and active source mappings; derived Wiki Map inputs; completed
+      history-window outcomes; latest durably finalized cursor/checkpoint; target head/range and generation settings;
+      and any terminal/recovery diagnostics needed to explain an unfinished run. Never export credentials, sandbox
+      contents, hidden prompts, raw debugger traces, or unrelated workspace data.
+      Define one small server-owned snapshot interface (`export`, `validate`, `restore`) with a schema version,
+      creation timestamp, repository binding, counts, and archive checksum. Store the resulting archive in a
+      human-owned location outside the disposable worktree and record its path/name, checksum, repository, cursor,
+      page/version/revision counts, and validation result in the Round 2 handoff notes. The implementation agent
+      must stop if this verified snapshot is missing.
+      Restore is an explicit admin/operator action, never automatic startup behavior. It must preview and validate
+      repository identity, schema compatibility, commit reachability, paths, hashes, sources, and collisions before
+      writing; be transactional/idempotent; preserve or deterministically remap Canvas/version identities; rebuild
+      Wiki Map/search; and produce a restore report. It must not resurrect an in-flight Claw/session/queue job.
+      Resume starts a fresh Wiki Refresh from the snapshot's **latest durably finalized checkpoint**, compares it
+      with the current selected base-branch head, and processes only the remaining range. If that checkpoint is no
+      longer reachable, stop for human selection rather than guessing. Keep this snapshot restore separate from
+      T28.7 Upload Wiki, which imports documentation without trusted Git cursor, source, or execution provenance.
+      Cover export→validate→restore round-trip, active/archived/moved pages, all versions/sources/revisions, partial
+      execution, advanced branch head, corrupt/tampered archive, wrong repository/workspace, collision preview,
+      idempotent retry, and resume-without-reprocessing tests. After automated proof, the human performs the actual
+      pre-change export and owns the archive; do not delete or replace the existing Wiki during verification.
+
+      Preservation evidence (2026-08-13): added the local operator command
+      `pnpm sdlc:wiki-snapshot <export|validate|preview|restore>` with an overwrite-safe export, checksummed/versioned
+      archive, explicit read-only restore preview, and `restore --yes` mutation gate. Export reads live Y-Sweet
+      content with an explicit database-fallback warning, preserves BlockNote snapshots for exact replay, and keeps
+      Wiki pages/folders/participants, all CanvasVersions, source/revision metadata, and the latest Wiki Workflow/
+      Execution/link state. Restore is target-repository-bound, collision checked, transactional/idempotent for
+      database records, resynchronizes Y-Sweet, and queues Canvas reindexing; it never queues or revives a run.
+      The human-owned Xyne Spaces archive is
+      `/Users/ameer.noufil/Desktop/xyne-spaces-wiki-backups/xyne-spaces-wiki-2026-08-13.json`, checksum
+      `7b9f85659b3c3a0e0693d9fb4a932688db794b9278be998583c55e56176a14d5`. Independent validation and live-content
+      preview pass with zero warnings/collisions/differences: 46 pages, 112 CanvasVersions, 82 revisions, 33 durable
+      outcomes, finalized cursor `f721a4cac6394176707d56addbb2765847bbb70c`, target
+      `989cefd020918132c089f30107e92e637992a595`, and retryable partially-failed execution
+      `cmsqh12f80019qy6yzhblkuo9`. Do not run broad `sdlc:cleanup` for this repository before restore: that command
+      removes the repository shell required by the intentionally scoped restore. T28.0 remains partial until a
+      disposable-database export→restore round-trip test and post-Round-2 replay/Retry are completed; neither should
+      mutate the preserved live Wiki during this pre-change gate.
+- [ ] T28.1 Pin the review fixed point before starting (expected default: the feature branch merge-base with its
+      target branch), record the exact three-dot diff and commit list, and identify the authoritative specification
+      sources: `docs/sdlc/PRD.md`, `docs/sdlc/WIKI_PIPELINE_DESIGN.md`, this tracker, and accepted runtime decisions.
+- [ ] T28.2 Run a two-axis **Standards** and **Spec** review. Keep findings separate: repository-standard violations
+      and code/design smells on one side; missing, partial, incorrect, or unrequested PRD behavior on the other.
+      Include severity, concrete file/behavior evidence, user impact, and a suggested ownership boundary. Do not
+      modify code during the findings pass.
+- [ ] T28.3 Audit the full SDLC Wiki flow end-to-end: start/configuration, queue admission, role dispatch, trusted
+      context, sandbox lifecycle, Git reads, page planning, Wiki mutations, checkpoint/finalization, recovery,
+      callbacks, debugger projection, Canvas versions/sources, and UI progress. Trace state ownership and identify
+      duplicated state machines, scattered invariants, ambiguous terminal states, and restart/compaction gaps.
+- [ ] T28.4 Review the canonical SDLC agent tool-capability registry from T27.11.18. Verify all triggers retain one
+      visible palette while trusted role/operation context still enforces mutations and mandatory tool gates.
+- [ ] T28.5 Complete agent-readable Wiki version history in T27.11.17 so stored Canvas versions are useful for
+      bounded recovery, comparison, and context-loss diagnosis without making old Wiki text authoritative.
+- [ ] T28.6 Extend the **Code & Lint Standards** Repo Knowledge contract and generation prompt to capture evidenced
+      commit-message conventions: accepted format, types/scopes, subject/body rules, examples, commit hooks,
+      commitlint or equivalent configuration, CI enforcement, and runnable local validation commands. Inspect
+      package scripts, hook configuration, commitlint/release tooling, CI workflows, contribution docs, and recent
+      accepted commits. Cite the authoritative config/docs paths, distinguish enforced rules from observed style,
+      and explicitly report when no commit policy is found instead of assuming Conventional Commits. Ensure approved
+      knowledge is supplied to Start Work so the coding agent validates its commit message before committing.
+- [ ] T28.7 Add an admin-only **Upload Wiki** action supporting either one/multiple Markdown files or a recursively
+      selected folder. Preserve safe relative `.md` paths as the simulated Wiki folder/page hierarchy, and present a
+      pre-import tree showing accepted files, rejected files, normalized destinations, conflicts, total file count,
+      and total size before anything is written. Do not accept binaries, symlinks, path traversal, hidden/system
+      files, unsupported extensions, unsafe names, or content beyond bounded per-file/run limits.
+      Display this prominent warning beside the action and again before confirmation: **Upload only Wiki-related
+      documentation. Unrelated files will pollute this repository's Wiki and degrade agent answers. If you are not
+      sure the content belongs here, use Generate Wiki instead.** Require explicit confirmation; drag/drop or file
+      selection alone must never write data.
+      Import each accepted Markdown file as one Wiki Canvas with repository-member visibility, upload provenance,
+      uploader/time metadata, and a full initial CanvasVersion. Preserve nested paths, but never advance the Git
+      history cursor, fabricate commit/source evidence, or mark uploaded content as code-verified. Treat content as
+      untrusted Markdown and apply existing link/Mermaid sanitization. For a destination collision, default to no
+      overwrite and require an explicit per-file replace decision protected by the live content hash; replacement
+      must preserve Canvas identity and version history. Refresh the derived Wiki Map/search after successful files,
+      return per-file outcomes for partial failures, and make retries idempotent. Generated Wiki roles may later
+      read and improve uploaded pages, but current repository evidence remains authoritative. Cover authorization,
+      folder upload, mixed/rejected input, collisions, partial failure, limits, sanitization, ACLs, version history,
+      Wiki Map refresh, and no-checkpoint-advancement behavior.
+- [ ] T28.8 Review module depth and boundaries. Prefer one owner for Wiki execution state, role/capability policy,
+      page/version persistence, source evidence, and Claw dispatch. Remove thin pass-through abstractions, repeated
+      switches, primitive role/tool strings, duplicated schemas, dead compatibility branches, and unreachable
+      recovery paths only when evidence proves they are unnecessary. Preserve YAGNI; do not redesign unrelated
+      Claw, Canvas, queue, or SDLC behavior.
+- [ ] T28.9 Review reliability and data integrity against observed long-run failures: restart/orphan recovery,
+      running→pending transitions, timeout classification, payload limits, retry/no-progress bounds, idempotent
+      writes, optimistic hashes, one-page mutation serialization, endpoint checkpoint enforcement, and durable
+      continuation after compaction. Every accepted fix needs a regression test at the narrowest authoritative seam.
+- [ ] T28.10 Review security and authorization: trusted execution/session/repository identity, cross-repository and
+      cross-workspace isolation, path/ref validation, read-only role enforcement, provider URL construction,
+      credential/log leakage, Mermaid safety, and mutation authorization. Treat repository/Wiki/history content as
+      untrusted data throughout.
+- [ ] T28.11 Review boundedness and performance for large repositories: Git history/diff pagination, Wiki Map size,
+      page-version pagination, source verification batching, prompt/payload sizes, repeated schema/file reads,
+      Canvas conversion costs, debugger event volume, and database query/index behavior. Prefer measured fixes over
+      speculative caching or new infrastructure.
+- [ ] T28.12 Review dashboard/Canvas behavior and accessibility for Wiki progress, recovery, debugger identity,
+      nested paths, archived pages, version history/diff, citations, code blocks, Mermaid theme/toolbars, loading,
+      cancellation, and terminal errors. Avoid redesigning generic Canvas/debugger surfaces for Wiki-only needs.
+- [ ] T28.13 Convert accepted findings into a dependency-ordered implementation checklist before editing code.
+      Separate correctness/security fixes from structural cleanup and presentation polish; record deferred findings
+      explicitly instead of silently dropping them. Keep commits small enough to split into focused PRs later.
+- [ ] T28.14 Verification and handoff: run focused regression suites per change, then relevant backend/Claw/shared/
+      dashboard typechecks, lint/build, and `git diff --check`. Run at most one small synthetic sample if required.
+      Stop after implementation and automated verification; the human starts, monitors, cancels, retries, and
+      evaluates the configured large-repository stress run.
+
 ## V2 backlog — multi-ticket Tech Doc execution
 
 Credential/provider/security v2 decisions are tracked separately in

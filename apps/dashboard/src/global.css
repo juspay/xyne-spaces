@@ -3067,9 +3067,8 @@ img.inline-emoji,
 }
 
 /* ── XyneAI sidebar overrides — black text, blue links ── */
-.xyne-ai-markdown *:not(a):not(code):not(.mention-text):not(.mention-text *):not(.hljs):not(
-    .hljs *
-  ) {
+.xyne-ai-markdown
+  *:not(a):not(code):not(.mention-text):not(.mention-text *):not(.hljs):not(.hljs *) {
   color: hsl(var(--foreground)) !important;
 }
 

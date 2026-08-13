@@ -2,7 +2,10 @@ jest.mock('../../../src/database/client', () => ({
   DatabaseClient: { getInstance: jest.fn() },
 }));
 jest.mock('../../../src/config/env', () => ({
-  config: { env: 'test', logging: { level: 'error' } },
+  config: {
+    env: 'test',
+    logging: { level: 'error', fluent: { enabled: false, host: 'localhost', port: 24224 } },
+  },
 }));
 
 import {

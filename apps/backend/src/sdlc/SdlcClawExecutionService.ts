@@ -699,7 +699,7 @@ ${parent}
 Title: ${context.title}
 User direction: ${context.prompt || 'Use the available evidence and repository conventions.'}
 
-Call spaces-sdlc-create-artifact exactly once with repoId ${context.repoId}, kind ${context.kind},
+Call spaces-sdlc-mutate-artifact exactly once with repoId ${context.repoId}, artifactType ${context.kind}, action create,
 title ${JSON.stringify(context.title)}, workflowExecutionId ${executionId}${
       context.parentCanvasId ? `, parentCanvasId ${context.parentCanvasId}` : ''
     }, and the complete Markdown. Then submit the returned canvas id. Never create a generic canvas.`;
