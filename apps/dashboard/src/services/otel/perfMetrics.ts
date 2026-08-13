@@ -9,9 +9,10 @@ function getMeter(): Meter {
 
 // --- Route normalization (low-cardinality metric label) ---
 //
-// Web-vitals / long-task entries carry no route context, and the metric
-// resource only labels `service_instance_id` + `platform_name`. Without a
-// screen dimension you can see *that* INP is bad but not *where*. We derive a
+// Web-vitals / long-task entries carry no route context, and metric series
+// carry only `job` + `instance` (resource attributes land on `target_info`,
+// not here). Without a screen dimension you can see *that* INP is bad but not
+// *where*. We derive a
 // low-cardinality route template from the current path (the same value the
 // bridge logger records as `pageUrl`) by collapsing id-like segments to `:id`,
 // so cardinality is bounded by the number of route shapes — not by ids.

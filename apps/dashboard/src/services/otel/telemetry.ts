@@ -37,12 +37,15 @@ export function initializeTelemetry(): void {
     const platformName = detectPlatform();
 
     // Create resource with service identification.
-    // `platform.name` becomes the Prometheus label `platform_name` after OTLP→Collector
-    // export and is what lets dashboards filter web/electron/mobile separately.
+    // The Collector's prometheusremotewrite exporter only turns `service.name` into `job`
+    // and `service.instance.id` into `instance`. Every other resource attribute,
+    // `platform.name` included, lands solely on `target_info` and has to be read with
+    // `* on(job, instance) group_left(platform_name) target_info`. Dimensions you want to
+    // filter or group by directly belong on the instrument, not here.
     const resource = resourceFromAttributes({
       [ATTR_SERVICE_NAME]: OTEL_SERVICE_NAME,
       [SEMRESATTRS_SERVICE_INSTANCE_ID]: deviceId,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- OTel semantic-convention dotted key (becomes `platform_name` in Prometheus)
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- OTel semantic-convention dotted key (becomes `platform_name` on `target_info`)
       'platform.name': platformName,
     });
 
@@ -85,6 +88,14 @@ export function initializeTelemetry(): void {
       .catch(() => {
         // Non-critical — perf metrics registration failed
       });
+
+    if (window.electronAPI?.glass) {
+      import('./glassMetrics')
+        .then(({ registerGlassStateGauge }) => {
+          registerGlassStateGauge();
+        })
+        .catch(() => undefined);
+    }
 
     // Emit a single bridge breadcrumb pairing the OTel `service_instance_id`
     // (= the per-browser device UUID, the only varying label on every frontend
