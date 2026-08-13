@@ -61,6 +61,23 @@ export class ExternalSourceRepository {
   }
 
   /**
+   * Find every migration source for a Slack channel.
+   *
+   * Migration source names are `slackMigration-<slackChannelId>-<xyneChannelId>`
+   * (one row per Xyne channel the Slack channel was migrated into), plus a legacy
+   * unsuffixed `slackMigration-<slackChannelId>`. The trailing `-` anchors the
+   * prefix match so `C123` does not also match `C1234`.
+   */
+  async findSlackMigrationSourcesByChannel(slackChannelId: string) {
+    const base = `slackMigration-${slackChannelId}`;
+    return await this.db.externalSource.findMany({
+      where: {
+        OR: [{ name: base }, { name: { startsWith: `${base}-` } }],
+      },
+    });
+  }
+
+  /**
    * Find external source by ID
    * Returns raw source with encrypted credentials
    */
