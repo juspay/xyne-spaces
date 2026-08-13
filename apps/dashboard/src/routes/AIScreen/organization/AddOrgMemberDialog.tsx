@@ -9,7 +9,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
 import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
 import type { AddableOrgRole } from '@/services/claw/clawOrgTypes';
-import { V2Dialog } from '../library/shared/primitives/V2Dialog';
+import { TitledDialogV2 } from '../library/shared/primitives/TitledDialogV2';
 import { BehaviourSelect } from '../library/agents/detail/behaviour/BehaviourRows';
 import { PersonRow } from '../library/agents/detail/people/PersonRow';
 import { ADDABLE_ROLE_OPTIONS, isAddableOrgRole } from './orgRoles';
@@ -84,12 +84,13 @@ export function AddOrgMemberDialog({
   };
 
   return (
-    <V2Dialog
+    <TitledDialogV2
       open={open}
       onOpenChange={onOpenChange}
       title='Add organization member'
       description='Add someone to this organization.'
       testId='add-org-member-dialog'
+      className='p-4'
       footer={
         <Button
           onClick={() => void commit()}
@@ -173,6 +174,6 @@ export function AddOrgMemberDialog({
           {role === 'ADMIN' ? 'admins' : 'members'}.
         </p>
       )}
-    </V2Dialog>
+    </TitledDialogV2>
   );
 }

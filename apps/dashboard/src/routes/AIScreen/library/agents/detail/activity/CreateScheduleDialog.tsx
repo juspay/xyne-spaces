@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button/index';
-import { V2Dialog } from '../../../shared/primitives/V2Dialog';
+import { TitledDialogV2 } from '../../../shared/primitives/TitledDialogV2';
 import { BehaviourSelect } from '../behaviour/BehaviourRows';
 import { MINUTE_MS, type NewScheduledJob } from './createScheduledJob';
 
@@ -70,7 +70,7 @@ export function CreateScheduleDialog({
   };
 
   return (
-    <V2Dialog
+    <TitledDialogV2
       open={open}
       onOpenChange={onOpenChange}
       title='Create schedule'
@@ -193,6 +193,6 @@ export function CreateScheduleDialog({
       {error && (
         <p className='text-xs font-normal leading-4 tracking-[-0.24px] text-destructive'>{error}</p>
       )}
-    </V2Dialog>
+    </TitledDialogV2>
   );
 }

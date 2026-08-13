@@ -1,13 +1,7 @@
 import { useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/Skeleton';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/Select';
+import { FilterSelect } from './components/FilterSelect';
 import { listAgentUsageStats } from '@/services/claw/clawAdminService';
 import type { AdminDateRange, AdminOrgScope, AgentUsageStat } from '@/services/claw/clawAdminTypes';
 import { CalendarRange } from '@xyne/icons';
@@ -81,29 +75,18 @@ export function UsageTab({
           className='w-full'
         />
         <div className='flex flex-wrap items-center justify-end gap-2'>
-          <Select
-            value={String(range)}
-            onValueChange={value => setRange(value === 'all' ? 'all' : (Number(value) as 7 | 30))}
-          >
-            <SelectTrigger
-              className='w-auto max-w-[16rem] focus-visible:border-ring focus-visible:ring-0'
-              aria-label='Date range'
-            >
-              <SelectValue>
-                <span className='flex min-w-0 items-center gap-2'>
-                  <CalendarRange className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-                  <span className='truncate'>
-                    {range === 'all' ? 'All time' : `Last ${range} days`}
-                  </span>
-                </span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='7'>Last 7 days</SelectItem>
-              <SelectItem value='30'>Last 30 days</SelectItem>
-              <SelectItem value='all'>All time</SelectItem>
-            </SelectContent>
-          </Select>
+          <FilterSelect
+            ariaLabel='Date range'
+            icon={<CalendarRange className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
+            value={range === 'all' ? '' : String(range)}
+            onChange={value => setRange(value ? (Number(value) as 7 | 30) : 'all')}
+            anchorLabel='Last 30 days'
+            options={[
+              { value: '7', label: 'Last 7 days' },
+              { value: '30', label: 'Last 30 days' },
+              { value: '', label: 'All time' },
+            ]}
+          />
         </div>
       </AdminToolbarPortal>
 

@@ -16,7 +16,7 @@ import { AdminPager, AdminTable, OrgBadge } from './components/AdminTable';
 import { FilterSelect } from './components/FilterSelect';
 import { adminScheduledKey, auditAgentOptionsKey } from './hooks/adminQueryKeys';
 import { orgLabel } from './orgLabel';
-import { PersonPill } from '../../shared/PersonPill';
+import { PersonPill } from '../shared/primitives/PersonPill';
 import { AdminFooterPortal, AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
 

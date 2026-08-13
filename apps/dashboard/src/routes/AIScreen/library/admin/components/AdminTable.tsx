@@ -20,7 +20,7 @@ export function AdminTable({
               <th
                 key={header.label}
                 className={cn(
-                  'sticky top-0 z-10 whitespace-nowrap bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] px-4 py-2.5 shadow-[inset_0_-1px_0_var(--border)]',
+                  'sticky top-0 z-10 whitespace-nowrap bg-[color-mix(in_srgb,hsl(var(--muted))_50%,hsl(var(--background)))] px-4 py-2.5 shadow-[inset_0_-1px_0_hsl(var(--border))]',
                   header.align === 'right' && 'text-right',
                   header.width,
                 )}

@@ -46,7 +46,7 @@ import {
   workflowRequestsKey,
 } from './hooks/adminQueryKeys';
 import { orgLabel } from './orgLabel';
-import { PersonPill } from '../../shared/PersonPill';
+import { PersonPill } from '../shared/primitives/PersonPill';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
@@ -444,7 +444,7 @@ export function RequestsTab({
                 </span>
               </Tooltip>
 
-              <div className='flex min-w-0 flex-1 flex-col gap-1'>
+              <div className='flex min-w-0 flex-1 flex-col gap-2'>
                 <div className='flex min-w-0 items-center gap-2'>
                   {row.onView ? (
                     <button
@@ -501,7 +501,7 @@ export function RequestsTab({
                   <span className='size-7' aria-hidden />
                 )}
 
-                <Tooltip content='Approve request' side='top'>
+                <Tooltip content={row.approveLabel} side='top'>
                   <Button
                     type='button'
                     variant='ghost'

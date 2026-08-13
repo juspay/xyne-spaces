@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button/index';
-import { V2Dialog } from '../../../shared/primitives/V2Dialog';
+import { TitledDialogV2 } from '../../../shared/primitives/TitledDialogV2';
 
 interface BehaviourTextDialogProps {
   open: boolean;
@@ -36,7 +36,7 @@ export function BehaviourTextDialog({
   }, [open, value]);
 
   return (
-    <V2Dialog
+    <TitledDialogV2
       open={open}
       onOpenChange={onOpenChange}
       title={title}
@@ -90,6 +90,6 @@ export function BehaviourTextDialog({
           </span>
         )}
       </section>
-    </V2Dialog>
+    </TitledDialogV2>
   );
 }

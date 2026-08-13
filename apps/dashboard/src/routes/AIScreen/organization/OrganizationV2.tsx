@@ -24,7 +24,7 @@ import { Pill } from '../library/shared/primitives/Pill';
 import { BehaviourSelect } from '../library/agents/detail/behaviour/BehaviourRows';
 import { AdminPager } from '../library/admin/components/AdminTable';
 import { DetailCard, DetailEmptyState } from '../library/shared/primitives/DetailPrimitives';
-import { PersonPill } from '../shared/PersonPill';
+import { PersonPill } from '../library/shared/primitives/PersonPill';
 import { AddOrgMemberDialog } from './AddOrgMemberDialog';
 import { OrganizationSurfacesSection } from './OrganizationSurfacesSection';
 import { OrganizationServiceTokensSection } from './OrganizationServiceTokensSection';
@@ -206,33 +206,31 @@ const OrganizationV2 = (): ReactElement => {
   return (
     <div className='max-w-ai-content mx-auto flex min-h-full w-full flex-col px-6'>
       <div className='sticky top-0 z-10 flex flex-col bg-background'>
-        <div className='flex items-center gap-5 pt-5'>
-          <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
-            <div className='flex min-w-0 items-center gap-2'>
-              <h1 className='truncate text-2xl font-semibold leading-tight tracking-tight text-foreground'>
-                {summary.name}
-              </h1>
-              <Pill tone={summary.status.toLowerCase() === 'active' ? 'success' : 'neutral'}>
-                {summary.status}
-              </Pill>
-              <Pill tone='neutral'>{orgRoleLabel(summary.role)}</Pill>
-            </div>
-            <p className='text-sm leading-tight text-muted-foreground'>
-              {summary.description || 'Manage your organization and its members.'}
-            </p>
+        <div className='flex flex-col justify-center gap-1 pt-5'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <h1 className='truncate text-2xl font-semibold leading-tight tracking-tight text-foreground'>
+              {summary.name}
+            </h1>
+            <Pill tone={summary.status.toLowerCase() === 'active' ? 'success' : 'neutral'}>
+              {summary.status}
+            </Pill>
+            <Pill tone='neutral'>{orgRoleLabel(summary.role)}</Pill>
+            {canManage && activeTab === 'members' && (
+              <Button
+                type='button'
+                className='ml-auto shrink-0'
+                onClick={() => setAddOpen(true)}
+                data-track-category='Claw Organization'
+                data-track-name='Organization: open add member'
+              >
+                <PlusDefault className='size-4' aria-hidden />
+                Add member
+              </Button>
+            )}
           </div>
-          {canManage && activeTab === 'members' && (
-            <Button
-              type='button'
-              className='shrink-0'
-              onClick={() => setAddOpen(true)}
-              data-track-category='Claw Organization'
-              data-track-name='Organization: open add member'
-            >
-              <PlusDefault className='size-4' aria-hidden />
-              Add member
-            </Button>
-          )}
+          <p className='text-sm leading-tight text-muted-foreground'>
+            {summary.description || 'Manage your organization and its members.'}
+          </p>
         </div>
 
         <div className='mt-3 flex flex-col gap-3 pb-3 pt-2'>

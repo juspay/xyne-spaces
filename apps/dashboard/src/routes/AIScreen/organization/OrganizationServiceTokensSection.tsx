@@ -21,7 +21,7 @@ import type {
 import { clawErrorText } from '@/services/claw/clawRequest';
 import { DetailCard, DetailEmpty } from '../library/shared/primitives/DetailPrimitives';
 import { Pill } from '../library/shared/primitives/Pill';
-import { V2Dialog } from '../library/shared/primitives/V2Dialog';
+import { TitledDialogV2 } from '../library/shared/primitives/TitledDialogV2';
 
 interface OrganizationServiceTokensSectionProps {
   orgId: string;
@@ -245,7 +245,7 @@ export function OrganizationServiceTokensSection({
         )}
       </DetailCard>
 
-      <V2Dialog
+      <TitledDialogV2
         open={createOpen}
         onOpenChange={open => {
           if (!open) closeCreate();
@@ -471,7 +471,7 @@ export function OrganizationServiceTokensSection({
             </label>
           </div>
         )}
-      </V2Dialog>
+      </TitledDialogV2>
 
       <ConfirmDialog
         open={revokeTarget !== null}

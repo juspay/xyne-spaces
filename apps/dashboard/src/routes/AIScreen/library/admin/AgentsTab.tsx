@@ -39,7 +39,7 @@ import { SlackCommandDialog } from './components/SlackCommandDialog';
 import { orgLabel } from './orgLabel';
 import { AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
-import { PersonPill } from '../../shared/PersonPill';
+import { PersonPill } from '../shared/primitives/PersonPill';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
 const isRegistered = (agent: Agent): boolean =>
@@ -139,7 +139,7 @@ function AgentSection({
   slackStatuses: Record<string, SlackAgentStatus>;
 }): ReactElement {
   return (
-    <section className='flex flex-col gap-3'>
+    <section className='flex flex-col gap-3 pt-4'>
       <h3 className='text-sm font-semibold text-foreground'>
         {heading} ({agents.length})
       </h3>

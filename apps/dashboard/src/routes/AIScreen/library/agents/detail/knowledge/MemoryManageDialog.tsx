@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button/index';
 import { clawErrorText } from '@/services/claw/clawRequest';
-import { V2Dialog } from '../../../shared/primitives/V2Dialog';
+import { TitledDialogV2 } from '../../../shared/primitives/TitledDialogV2';
 import { BehaviourRow, BehaviourToggle } from '../behaviour/BehaviourRows';
 import { DetailCard } from '../../../shared/primitives/DetailPrimitives';
 import {
@@ -73,7 +73,7 @@ export function MemoryManageDialog({
   };
 
   return (
-    <V2Dialog
+    <TitledDialogV2
       open={open}
       onOpenChange={next => {
         setConfirmClear(false);
@@ -170,6 +170,6 @@ export function MemoryManageDialog({
           )}
         </section>
       )}
-    </V2Dialog>
+    </TitledDialogV2>
   );
 }

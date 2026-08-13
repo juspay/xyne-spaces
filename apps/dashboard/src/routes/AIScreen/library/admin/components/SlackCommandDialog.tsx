@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { V2Dialog } from '../../shared/primitives/V2Dialog';
+import { TitledDialogV2 } from '../../shared/primitives/TitledDialogV2';
 import type { SlackCommandChoice } from '../hooks/useSlackActions';
 
 export function SlackCommandDialog({
@@ -28,7 +28,7 @@ export function SlackCommandDialog({
   if (!choice) return null;
 
   return (
-    <V2Dialog
+    <TitledDialogV2
       open
       onOpenChange={open => {
         if (!open) onClose();
@@ -102,6 +102,6 @@ export function SlackCommandDialog({
           </Button>
         </div>
       </section>
-    </V2Dialog>
+    </TitledDialogV2>
   );
 }

@@ -14,6 +14,7 @@ export function FilterSelect({
   onChange,
   ariaLabel,
   icon,
+  anchorLabel,
   className = 'w-auto',
 }: {
   value: string;
@@ -21,11 +22,13 @@ export function FilterSelect({
   onChange: (value: string) => void;
   ariaLabel: string;
   icon?: ReactNode;
+  anchorLabel?: string;
   className?: string;
 }): ReactElement {
   const current = options.find(option => (option.value || 'all') === (value || 'all'));
   const label = current?.label ?? '';
-  const widthAnchor = options.find(option => !option.value)?.label ?? options[0]?.label ?? '';
+  const widthAnchor =
+    anchorLabel ?? options.find(option => !option.value)?.label ?? options[0]?.label ?? '';
 
   return (
     <Select value={value || 'all'} onValueChange={next => onChange(next === 'all' ? '' : next)}>
