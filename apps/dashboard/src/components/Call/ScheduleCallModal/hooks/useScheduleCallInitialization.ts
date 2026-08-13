@@ -2,6 +2,7 @@ import { useEffect, useState, type MutableRefObject } from 'react';
 import { ChannelScopeType } from '@xyne/shared';
 import type { UseFormReset, UseFormSetValue } from 'react-hook-form';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
+import { getDefaultScheduledCallTitle } from '../defaults';
 import type { EditCallData, ScheduleCallFormData, SeriesEndsType } from '../types';
 
 interface VisibleChannel {
@@ -185,7 +186,7 @@ export function useScheduleCallInitialization({
 
     if (displayName !== 'Unknown') {
       reset({
-        title: initialTitle ?? `${displayName.split(' ')[0]}'s Call`,
+        title: initialTitle ?? getDefaultScheduledCallTitle(user),
         startsAt: start,
         endsAt: end,
         participants: prefilledParticipants,

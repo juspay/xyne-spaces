@@ -20,7 +20,7 @@ import {
   VideoCallDefault,
 } from '@xyne/icons';
 import { CallStatus, ChannelScopeType, ChannelVisibility, MeetingStatus } from '@xyne/shared';
-import { useQuery } from '@xyne/shared/hooks';
+import { useCachedQuery } from '@xyne/shared/hooks';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { queries } from '../../../zero/queries';
@@ -456,7 +456,7 @@ const CallDetailSidebarView = ({
 
   // The list queries only load the current user's participant row, so the full
   // guest list has to be fetched per call.
-  const [participantRows] = useQuery(queries.callParticipantsByCallId({ callId: call.id }), {
+  const [participantRows] = useCachedQuery(queries.callParticipantsByCallId({ callId: call.id }), {
     enabled: !isExternalCalendar,
   });
 
