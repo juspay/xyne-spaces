@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Pill } from '../../../../shared/primitives/Pill';
-import { TitledDialogV2 } from '../../../../shared/primitives/TitledDialogV2';
+import { V2Dialog } from '../../../../shared/primitives/V2Dialog';
 import type { AgentProviderCredentialStatus } from './agentCredentialsService';
 import { CredentialFormFields } from './CredentialFormFields';
 import {
@@ -78,7 +78,7 @@ export function AgentKeysDialog({
   };
 
   return (
-    <TitledDialogV2
+    <V2Dialog
       open={open}
       onOpenChange={next => {
         onOpenChange(next);
@@ -226,6 +226,6 @@ export function AgentKeysDialog({
           <CredentialFormFields form={form} onChange={setForm} editing={editing} />
         </section>
       )}
-    </TitledDialogV2>
+    </V2Dialog>
   );
 }

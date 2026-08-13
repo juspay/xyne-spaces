@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Check, Copy, KeyRound, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { Checkbox } from '@/components/ui/Checkbox/Checkbox';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,17 +20,14 @@ import type {
   ServiceAccessToken,
 } from '@/services/claw/clawOrgTypes';
 import { clawErrorText } from '@/services/claw/clawRequest';
-import { DetailCard, DetailEmpty } from '../library/shared/primitives/DetailPrimitives';
-import { Pill } from '../library/shared/primitives/Pill';
-import { TitledDialogV2 } from '../library/shared/primitives/TitledDialogV2';
+import { DetailCard, DetailEmpty } from '../../library/shared/primitives/DetailPrimitives';
+import { Pill } from '../../library/shared/primitives/Pill';
+import { V2Dialog } from '../../library/shared/primitives/V2Dialog';
 
 interface OrganizationServiceTokensSectionProps {
   orgId: string;
   canManage: boolean;
 }
-
-const FIELD_CLASS =
-  'h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50';
 
 const formatDate = (value: string | null, fallback: string): string =>
   value ? new Date(value).toLocaleString() : fallback;
@@ -245,7 +243,7 @@ export function OrganizationServiceTokensSection({
         )}
       </DetailCard>
 
-      <TitledDialogV2
+      <V2Dialog
         open={createOpen}
         className='p-4'
         onOpenChange={open => {
@@ -305,12 +303,12 @@ export function OrganizationServiceTokensSection({
           <div className='flex flex-col gap-4'>
             <label className='flex flex-col gap-2 text-xs font-medium text-foreground'>
               Name
-              <input
+              <Input
                 value={name}
                 maxLength={60}
                 placeholder='Production billing worker'
                 onChange={event => setName(event.target.value)}
-                className={FIELD_CLASS}
+                variant='flat'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: service token name'
               />
@@ -343,13 +341,13 @@ export function OrganizationServiceTokensSection({
                 </div>
               ) : (
                 <>
-                  <input
+                  <Input
                     value={memberQuery}
                     placeholder='Search members by name or email'
                     onChange={event => setMemberQuery(event.target.value)}
                     disabled={mintToken.isPending}
                     aria-label='Search members'
-                    className={FIELD_CLASS}
+                    variant='flat'
                     data-track-category='Claw Organization'
                     data-track-name='Organization: service token member search'
                   />
@@ -412,13 +410,13 @@ export function OrganizationServiceTokensSection({
                   ))}
                 </div>
               )}
-              <input
+              <Input
                 value={agentFilter}
                 placeholder='Filter agents'
                 onChange={event => setAgentFilter(event.target.value)}
                 disabled={mintToken.isPending}
                 aria-label='Filter agents'
-                className={FIELD_CLASS}
+                variant='flat'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: filter service token agents'
               />
@@ -458,21 +456,25 @@ export function OrganizationServiceTokensSection({
               </span>
             </div>
 
-            <label className='flex flex-col gap-2 text-xs font-medium text-foreground'>
+            <label
+              htmlFor='service-token-expiry'
+              className='flex flex-col gap-2 text-xs font-medium text-foreground'
+            >
               Expiry (optional)
-              <input
+              <Input
+                id='service-token-expiry'
                 type='datetime-local'
                 value={expiry}
                 min={localDateTimeNow()}
                 onChange={event => setExpiry(event.target.value)}
-                className={FIELD_CLASS}
+                variant='flat'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: service token expiry'
               />
             </label>
           </div>
         )}
-      </TitledDialogV2>
+      </V2Dialog>
 
       <ConfirmDialog
         open={revokeTarget !== null}

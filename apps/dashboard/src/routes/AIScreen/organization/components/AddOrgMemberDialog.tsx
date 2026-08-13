@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
+import Input from '@/components/ui/Input';
 import { Checkbox } from '@/components/ui/Checkbox/Checkbox';
 import { useAuth } from '@/hooks/useAuth';
 import { useClawOrganizationMembers } from '@/hooks/useClawOrganization';
@@ -9,10 +10,10 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
 import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
 import type { AddableOrgRole } from '@/services/claw/clawOrgTypes';
-import { TitledDialogV2 } from '../library/shared/primitives/TitledDialogV2';
-import { BehaviourSelect } from '../library/agents/detail/behaviour/BehaviourRows';
-import { PersonRow } from '../library/agents/detail/people/PersonRow';
-import { ADDABLE_ROLE_OPTIONS, isAddableOrgRole } from './orgRoles';
+import { V2Dialog } from '../../library/shared/primitives/V2Dialog';
+import { BehaviourSelect } from '../../library/agents/detail/behaviour/BehaviourRows';
+import { PersonRow } from '../../library/agents/detail/people/PersonRow';
+import { ADDABLE_ROLE_OPTIONS, isAddableOrgRole } from '../orgRoles';
 
 interface AddOrgMemberDialogProps {
   open: boolean;
@@ -84,7 +85,7 @@ export function AddOrgMemberDialog({
   };
 
   return (
-    <TitledDialogV2
+    <V2Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Add organization member'
@@ -110,14 +111,15 @@ export function AddOrgMemberDialog({
             className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
             aria-hidden
           />
-          <input
+          <Input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder='Search by name or email'
             aria-label='Search people'
             data-track-category='Claw Organization'
             data-track-name='Organization: search people'
-            className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10'
+            variant='flat'
+            className='pl-9'
           />
         </div>
         <BehaviourSelect
@@ -174,6 +176,6 @@ export function AddOrgMemberDialog({
           {role === 'ADMIN' ? 'admins' : 'members'}.
         </p>
       )}
-    </TitledDialogV2>
+    </V2Dialog>
   );
 }

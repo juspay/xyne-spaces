@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button/index';
 import { useAuth } from '@/hooks/useAuth';
 import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
 import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
-import { TitledDialogV2 } from '../../../shared/primitives/TitledDialogV2';
+import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 import { PersonRow } from '../../../agents/detail/people/PersonRow';
 
 interface AddContributorDialogProps {
@@ -48,7 +48,7 @@ export function AddContributorDialog({
   const candidates = (results.data ?? []).filter(entry => !existingUserIds.has(entry.id));
 
   return (
-    <TitledDialogV2
+    <V2Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Add contributors'
@@ -115,6 +115,6 @@ export function AddContributorDialog({
           ))
         )}
       </div>
-    </TitledDialogV2>
+    </V2Dialog>
   );
 }

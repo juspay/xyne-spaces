@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select/index';
 import { validateBehaviour, type BehaviourDraft } from '@/services/claw/behaviourConfig';
-import { TitledDialogV2 } from '../../../shared/primitives/TitledDialogV2';
+import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 
 const LABEL = 'text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground';
 const FIELD =
@@ -59,7 +59,7 @@ export function StructuredOutputDialog({
   };
 
   return (
-    <TitledDialogV2
+    <V2Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Structured output'
@@ -173,6 +173,6 @@ export function StructuredOutputDialog({
       {error && (
         <p className='text-xs font-normal leading-4 tracking-[-0.24px] text-destructive'>{error}</p>
       )}
-    </TitledDialogV2>
+    </V2Dialog>
   );
 }

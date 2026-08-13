@@ -3,6 +3,7 @@ import { Slack } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button/index';
 import Tooltip from '@/components/ui/Tooltip';
+import Input from '@/components/ui/Input';
 import {
   useClawOrganizationSurfaces,
   useStoreClawSlackConfigToken,
@@ -12,16 +13,13 @@ import {
   DetailCard,
   DetailEmpty,
   DetailLockedNote,
-} from '../library/shared/primitives/DetailPrimitives';
-import { Pill } from '../library/shared/primitives/Pill';
+} from '../../library/shared/primitives/DetailPrimitives';
+import { Pill } from '../../library/shared/primitives/Pill';
 
 interface OrganizationSurfacesSectionProps {
   orgId: string;
   canManage: boolean;
 }
-
-const TOKEN_INPUT_CLASS =
-  'h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function OrganizationSurfacesSection({
   orgId,
@@ -103,30 +101,38 @@ export function OrganizationSurfacesSection({
         {canManage ? (
           <div className='flex flex-col gap-4 p-4'>
             <div className='grid gap-3 md:grid-cols-2'>
-              <label className='flex min-w-0 flex-col gap-1.5 text-xs font-medium text-foreground'>
+              <label
+                htmlFor='slack-config-access-token'
+                className='flex min-w-0 flex-col gap-1.5 text-xs font-medium text-foreground'
+              >
                 Configuration access token
-                <input
+                <Input
+                  id='slack-config-access-token'
                   type='password'
                   autoComplete='off'
                   placeholder='xoxe.xoxp-…'
                   value={accessToken}
                   onChange={event => setAccessToken(event.target.value)}
                   disabled={storeToken.isPending}
-                  className={TOKEN_INPUT_CLASS}
+                  variant='flat'
                   data-track-category='Claw Organization'
                   data-track-name='Organization: enter Slack access token'
                 />
               </label>
-              <label className='flex min-w-0 flex-col gap-1.5 text-xs font-medium text-foreground'>
+              <label
+                htmlFor='slack-config-refresh-token'
+                className='flex min-w-0 flex-col gap-1.5 text-xs font-medium text-foreground'
+              >
                 Configuration refresh token
-                <input
+                <Input
+                  id='slack-config-refresh-token'
                   type='password'
                   autoComplete='off'
                   placeholder='xoxe-1-…'
                   value={refreshToken}
                   onChange={event => setRefreshToken(event.target.value)}
                   disabled={storeToken.isPending}
-                  className={TOKEN_INPUT_CLASS}
+                  variant='flat'
                   data-track-category='Claw Organization'
                   data-track-name='Organization: enter Slack refresh token'
                 />

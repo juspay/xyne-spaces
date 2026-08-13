@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
 import type { AgentShareRole, ClawUser } from '@/services/claw/clawAuthAgentTypes';
 import { cn } from '@/utils/classNames';
-import { TitledDialogV2 } from '../../../shared/primitives/TitledDialogV2';
+import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 import { BehaviourSelect } from '../behaviour/BehaviourRows';
 import { ROLE_OPTIONS } from './roles';
 import { PersonRow } from './PersonRow';
@@ -55,7 +55,7 @@ export function AddMemberDialog({
   const candidates = (results.data ?? []).filter(entry => !existingUserIds.has(entry.id));
 
   return (
-    <TitledDialogV2
+    <V2Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Add people'
@@ -133,6 +133,6 @@ export function AddMemberDialog({
           ))
         )}
       </div>
-    </TitledDialogV2>
+    </V2Dialog>
   );
 }

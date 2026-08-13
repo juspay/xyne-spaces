@@ -149,7 +149,7 @@ function AgentSection({
 }): ReactElement {
   return (
     <section className='flex flex-col gap-3 pt-4'>
-      <h3 className='text-md font-semibold text-foreground'>
+      <h3 className='text-base font-semibold text-foreground'>
         {heading} ({agents.length})
       </h3>
       {agents.length === 0 ? (

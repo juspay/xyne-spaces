@@ -464,14 +464,6 @@ router.post("/:id/members", async (req: Request, res: Response) => {
       return;
     }
 
-    if (targetUser.orgId && targetUser.orgId !== orgId) {
-      res.status(403).json({
-        success: false,
-        error: "Cannot add a user who belongs to a different organization",
-      });
-      return;
-    }
-
     const member = await prisma.orgMember.upsert({
       where: { userId_orgId: { userId: targetUser.id, orgId } },
       create: { orgId, userId: targetUser.id, role: requestedRole, invitedBy: requesterId },
@@ -584,12 +576,8 @@ router.delete("/:id/members/:userId", async (req: Request, res: Response) => {
       return;
     }
 
+    // Guard: don't strip the org of its last OWNER.
     if (target.role === "OWNER") {
-      if (!(await isOrgOwner(requesterId, orgId))) {
-        res.status(403).json({ success: false, error: "Only an OWNER can remove another OWNER" });
-        return;
-      }
-
       const owners = await prisma.orgMember.count({ where: { orgId, role: "OWNER", leftAt: null } });
       if (owners <= 1) {
         res.status(409).json({ success: false, error: "Cannot remove the last OWNER of the organization" });

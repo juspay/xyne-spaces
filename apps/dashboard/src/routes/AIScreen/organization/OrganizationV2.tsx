@@ -26,9 +26,9 @@ import { AdminPager } from '../library/admin/components/AdminTable';
 import { AdminSearchField } from '../library/admin/components/AdminSearchField';
 import { DetailCard, DetailEmptyState } from '../library/shared/primitives/DetailPrimitives';
 import { PersonPill } from '../library/shared/primitives/PersonPill';
-import { AddOrgMemberDialog } from './AddOrgMemberDialog';
-import { OrganizationSurfacesSection } from './OrganizationSurfacesSection';
-import { OrganizationServiceTokensSection } from './OrganizationServiceTokensSection';
+import { AddOrgMemberDialog } from './components/AddOrgMemberDialog';
+import { OrganizationSurfacesSection } from './components/OrganizationSurfacesSection';
+import { OrganizationServiceTokensSection } from './components/OrganizationServiceTokensSection';
 import { ADDABLE_ROLE_OPTIONS, isOrgRole, OWNER_ROLE_OPTION, orgRoleLabel } from './orgRoles';
 import {
   ORGANIZATION_TABS,

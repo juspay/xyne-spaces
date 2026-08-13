@@ -15,7 +15,6 @@ const AdminFooterSlotContext = createContext<HTMLElement | null>(null);
 
 export const AdminFooterSlotProvider = AdminFooterSlotContext.Provider;
 
-/** Renders into the panel's pinned footer bar so pagers stay at the bottom. */
 export function AdminFooterPortal({ children }: { children: ReactNode }): ReactElement | null {
   const slot = useContext(AdminFooterSlotContext);
   if (!slot) return null;

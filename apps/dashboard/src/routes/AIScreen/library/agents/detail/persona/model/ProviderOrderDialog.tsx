@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { ChevronBigDown, ChevronBigUp, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { Button } from '@/components/ui/Button/index';
 import { ALL_PROVIDERS, PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
-import { TitledDialogV2 } from '../../../../shared/primitives/TitledDialogV2';
+import { V2Dialog } from '../../../../shared/primitives/V2Dialog';
 
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
@@ -40,7 +40,7 @@ export function ProviderOrderDialog({
   };
 
   return (
-    <TitledDialogV2
+    <V2Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Providers'
@@ -158,6 +158,6 @@ export function ProviderOrderDialog({
           </div>
         </section>
       )}
-    </TitledDialogV2>
+    </V2Dialog>
   );
 }

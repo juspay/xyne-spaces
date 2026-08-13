@@ -5,7 +5,7 @@ import { Dialog } from '@/components/ui/Dialog/index';
 
 const WIDTH = { form: 'max-w-[560px]', wide: 'max-w-[800px]' } as const;
 
-interface TitledDialogV2Props {
+interface V2DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -17,7 +17,7 @@ interface TitledDialogV2Props {
   children: ReactNode;
 }
 
-export function TitledDialogV2({
+export function V2Dialog({
   open,
   onOpenChange,
   title,
@@ -27,7 +27,7 @@ export function TitledDialogV2({
   footer,
   className,
   children,
-}: TitledDialogV2Props): ReactElement {
+}: V2DialogProps): ReactElement {
   return (
     <Dialog
       open={open}
@@ -41,7 +41,7 @@ export function TitledDialogV2({
         className,
       )}
     >
-      <div className='flex h-9 shrink-0 items-center justify-between gap-2'>
+      <div className='flex h-9 shrink-0 items-center justify-between gap-2 pl-[18px] pr-2'>
         <span className='text-base font-semibold leading-6 tracking-[-0.16px] text-foreground'>
           {title}
         </span>
@@ -57,9 +57,13 @@ export function TitledDialogV2({
         </button>
       </div>
 
-      <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto'>{children}</div>
+      <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] pb-2'>
+        {children}
+      </div>
 
-      {footer && <div className='flex shrink-0 items-center justify-end gap-3'>{footer}</div>}
+      {footer && (
+        <div className='flex shrink-0 items-center justify-end gap-3 px-[22px] pb-3'>{footer}</div>
+      )}
     </Dialog>
   );
 }
