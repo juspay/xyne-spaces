@@ -1378,6 +1378,11 @@ model McpServer {
   healthcheckSpec      Json?
   writeToolPolicy      Json?
   connectorMeta        Json?
+  /// Explicitly marks if this connector requires an OAuth browser flow.
+  isOauth              Boolean                   @default(false)
+  /// Dynamic configuration for the OAuth flow (fallback to codebase if null).
+  /// Shape: { clientId, authUrl, tokenUrl, scopes[], pkce: boolean }
+  oauthConfig          Json?
   /// Whether this server type can fall back to admin-managed global
   /// credentials when a user has no personal connection. Off by default —
   /// admins must opt-in per server (e.g. enable it for shared infra creds

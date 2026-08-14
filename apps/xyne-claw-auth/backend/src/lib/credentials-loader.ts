@@ -36,9 +36,8 @@ import { getOAuthProvider } from "../routes/oauth-token.js";
 
 // OAuth connectors whose tools run as claw-auth-hosted stdio MCP servers. Their
 // stored creds are an access/refresh-token pair, so resolution must hand back a
-// FRESH access token (refresh + persist when stale) for the spawned server's
 // env — not the raw encrypted blob. Same refresh path as /oauth/:provider/token.
-import { OAUTH_SERVER_TYPES as STDIO_OAUTH_SERVER_TYPES } from "./oauth-server-types.js";
+const STDIO_OAUTH_SERVER_TYPES = new Set(["google", "microsoft"]);
 
 import { createLogger } from "../logger.js";
 const log = createLogger("credentials-loader");
