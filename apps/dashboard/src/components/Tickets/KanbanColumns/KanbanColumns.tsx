@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle, Plus } from 'lucide-react';
+import { Circle, Plus, RotateCcw } from 'lucide-react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -357,6 +357,12 @@ interface KanbanColumnsProps {
   slaPolicies?: BoardSlaPolicy[];
   /** Called when the user reorders columns via drag. Only provided when a scope context (board/channel/project) exists. */
   onReorderStages?: (draggedStageId: string, targetStageId: string) => void;
+  /** Called when the user moves a column via keyboard. Only provided when a scope context exists. */
+  onMoveStage?: (stageId: string, direction: 'left' | 'right') => void;
+  /** Clears the saved column order, restoring the API default. Only provided when a scope context exists. */
+  onResetOrder?: () => void;
+  /** Whether a custom column order is saved for the current scope (controls reset-button visibility). */
+  hasSavedOrder?: boolean;
 }
 
 export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
@@ -387,6 +393,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   onTicketsChange,
   onAddTicketInColumn,
   onReorderStages,
+  onMoveStage,
+  onResetOrder,
+  hasSavedOrder,
 }) => {
   const columnType = paginatedColumnConfig?.columnType ?? 'stage';
   const knownTicketsForOptimisticMerge = React.useMemo(
@@ -473,7 +482,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
               className={cn(
-                'group/kanbancol flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
+                'group/kanbancol relative flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
                 isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
                 draggedStageId === stage.id && 'opacity-40',
                 dragOverStageId === stage.id &&
@@ -500,22 +509,42 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 }
               }}
             >
+              {/* Drop indicator — left-edge insertion line on the target column.
+                  Insert-before-target semantics means the dragged column will
+                  land to the LEFT of the highlighted target. */}
+              {dragOverStageId === stage.id && draggedStageId !== stage.id && (
+                <div className='absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-l-lg z-10' />
+              )}
+
               {/* DRAG HANDLE — top-center strip, any kanban layout, both states */}
               {onReorderStages && (
                 <div
-                  className='flex items-center justify-center w-full rounded-t-lg transition-colors select-none cursor-grab active:cursor-grabbing hover:bg-accent/30'
-                  style={{ height: 20 }}
+                  className='flex items-center justify-center w-full h-5 rounded-t-lg transition-colors select-none cursor-grab active:cursor-grabbing hover:bg-accent/30'
                   draggable
+                  tabIndex={0}
+                  role='button'
+                  aria-label={`Drag to reorder ${stage.name} column`}
+                  title='Drag to reorder'
                   onDragStart={e => {
                     e.dataTransfer.setData('text/plain', stage.id);
                     e.dataTransfer.effectAllowed = 'move';
                     startColumnDrag(stage.id);
                   }}
                   onDragEnd={endColumnDrag}
+                  onKeyDown={e => {
+                    if (!onMoveStage) return;
+                    if (e.key === 'ArrowLeft') {
+                      e.preventDefault();
+                      onMoveStage(stage.id, 'left');
+                    } else if (e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      onMoveStage(stage.id, 'right');
+                    }
+                  }}
                 >
                   <div className='flex gap-[3px] items-center'>
-                    {[0, 1, 2].map(i => (
-                      <div key={i} className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40' />
+                    {['left-dot', 'center-dot', 'right-dot'].map(dot => (
+                      <div key={dot} className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40' />
                     ))}
                   </div>
                 </div>
@@ -657,6 +686,21 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           </DroppableStage>
         );
       })}
+      {onResetOrder && hasSavedOrder && (
+        <div className='flex items-center self-start mt-2 shrink-0'>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={onResetOrder}
+            className='text-muted-foreground hover:text-foreground'
+            data-track-category='Tickets'
+            data-track-name='ResetKanbanColumnOrder'
+          >
+            <RotateCcw className='w-4 h-4 mr-1' />
+            Reset order
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

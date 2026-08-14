@@ -427,8 +427,13 @@ export const SupportKanbanBoard = ({
   // desk channel gets its own independent column order even if multiple desks
   // share the same board.
   const columnOrderScope = channelId;
-  const { orderedStages: orderedDeskStages, handleReorder: handleReorderDeskStages } =
-    useKanbanColumnReorder(stageColumns, columnOrderScope);
+  const {
+    orderedStages: orderedDeskStages,
+    handleReorder: handleReorderDeskStages,
+    moveStage: handleMoveDeskStage,
+    resetOrder: handleResetDeskStageOrder,
+    hasSavedOrder: deskHasSavedOrder,
+  } = useKanbanColumnReorder(stageColumns, columnOrderScope);
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -461,6 +466,9 @@ export const SupportKanbanBoard = ({
           showEmailReads={true}
           visibleColumns={DESK_KANBAN_VISIBLE_COLUMNS}
           {...(columnOrderScope ? { onReorderStages: handleReorderDeskStages } : {})}
+          {...(columnOrderScope ? { onMoveStage: handleMoveDeskStage } : {})}
+          {...(columnOrderScope ? { onResetOrder: handleResetDeskStageOrder } : {})}
+          {...(columnOrderScope ? { hasSavedOrder: deskHasSavedOrder } : {})}
           {...(activeTicketId !== undefined && { activeTicketId })}
           slaPolicies={slaPolicies}
         />

@@ -1,10 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 
-const STORAGE_KEY = 'kanbanStageOrder';
+import { KANBAN_STAGE_ORDER_KEY } from '../constants/settings';
 
-function readAll(): Record<string, string[]> {
+type StageOrderMap = Record<string, string[]>;
+
+/**
+ * Read and validate the saved stage-order map from localStorage.
+ *
+ * Defensive against corrupted / shape-mismatched data: any value that isn't
+ * a plain object whose every value is an array of strings is treated as
+ * empty (so the board falls back to the API order instead of crashing).
+ */
+function readAll(): StageOrderMap {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as Record<string, string[]>;
+    const parsed: unknown = JSON.parse(localStorage.getItem(KANBAN_STAGE_ORDER_KEY) ?? '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const result: StageOrderMap = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
+        result[key] = value;
+      }
+    }
+    return result;
   } catch {
     return {};
   }
@@ -48,7 +65,13 @@ export function useKanbanStageOrder(scopeKey?: string | null) {
       } else {
         all[scopeKey] = next;
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      // Guard against QuotaExceededError (full storage, private browsing, etc.)
+      // — degrade silently rather than crashing the drag handler.
+      try {
+        localStorage.setItem(KANBAN_STAGE_ORDER_KEY, JSON.stringify(all));
+      } catch {
+        return;
+      }
       setOrder(next);
     },
     [scopeKey],

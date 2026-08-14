@@ -157,6 +157,7 @@ export const Event = {
   THREAD_CONTEXT_BUTTON_CLICKED: 'thread_context_button_clicked',
   THREAD_CONTEXT_SUBMITTED: 'thread_context_submitted',
   KANBAN_ENTITY_LOADED: 'kanban_entity_loaded',
+  KANBAN_COLUMN_REORDERED: 'kanban_column_reordered',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
