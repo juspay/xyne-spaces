@@ -2710,10 +2710,16 @@ export const queries = defineQueries({
     z.object({ projectId: z.string(), boardType: z.nativeEnum(BoardType).optional() }),
     ({ args: { projectId, boardType } }) => {
       return zql.stages
-        .whereExists('board', b => {
+        .whereExists(
+        'board',
+        b => {
           const scoped = b.where('projectId', projectId);
           return boardType ? scoped.where('boardType', boardType) : scoped;
-        })
+        },
+        // boards-per-project is the selective side; without the flip the
+        // pipeline walks every stage in the workspace probing boards
+        { flip: true },
+      )
         .orderBy('boardId', 'asc')
         .orderBy('sequenceNumber', 'asc');
     },
