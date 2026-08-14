@@ -50,7 +50,7 @@ type AutoLoginResult = {
 
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
-  private googleClientNew: OAuth2Client | null = null;
+  private googleNyClient: OAuth2Client | null = null;
   private mobileGoogleClient: OAuth2Client;
   private userService: UserService;
   private userSessionService: UserSessionService;
@@ -89,10 +89,16 @@ export class AuthV2Controller {
 
     this.googleClient = new OAuth2Client(clientId, clientSecret);
 
-    const clientIdNew = process.env.GOOGLE_CLIENT_ID_NEW;
-    const clientSecretNew = process.env.GOOGLE_CLIENT_SECRET_NEW;
-    if (clientIdNew && clientSecretNew) {
-      this.googleClientNew = new OAuth2Client(clientIdNew, clientSecretNew);
+    // The alternative Google OAuth app the `isNy` query parameter selects: a second
+    // live audience alongside the primary, not a rotation of it. Renamed from _NEW,
+    // which read as "the new value during a rotation" — writing a rotated primary
+    // secret into it would take this audience's sign-in down. The old spelling is
+    // still read so the rename can land ahead of the deployment secrets, and `||`
+    // rather than `??` because an unset variable is often present-and-empty.
+    const nyClientId = process.env.GOOGLE_CLIENT_ID_NY || process.env.GOOGLE_CLIENT_ID_NEW;
+    const nyClientSecret = process.env.GOOGLE_CLIENT_SECRET_NY || process.env.GOOGLE_CLIENT_SECRET_NEW;
+    if (nyClientId && nyClientSecret) {
+      this.googleNyClient = new OAuth2Client(nyClientId, nyClientSecret);
     }
     this.mobileGoogleClient = new OAuth2Client(mobileClientId, mobileClientSecret);
 
@@ -102,8 +108,8 @@ export class AuthV2Controller {
   }
 
   private getGoogleClient(isNy?: boolean): OAuth2Client {
-    if (isNy && this.googleClientNew) {
-      return this.googleClientNew;
+    if (isNy && this.googleNyClient) {
+      return this.googleNyClient;
     }
     return this.googleClient;
   }
@@ -462,7 +468,9 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Verifying ID token`);
       const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy
+          ? process.env.GOOGLE_CLIENT_ID_NY || process.env.GOOGLE_CLIENT_ID_NEW
+          : process.env.GOOGLE_CLIENT_ID,
       });
 
       const payload = ticket.getPayload();
@@ -864,7 +872,9 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Verifying ID token`);
       const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy
+          ? process.env.GOOGLE_CLIENT_ID_NY || process.env.GOOGLE_CLIENT_ID_NEW
+          : process.env.GOOGLE_CLIENT_ID,
       });
 
       const payload = ticket.getPayload();

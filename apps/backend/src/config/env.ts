@@ -51,9 +51,18 @@ const envSchema = Joi.object({
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   // Email sender configuration (Google OAuth2 via nodemailer)
   GOOGLE_REFRESH_TOKEN: Joi.string().allow('').default(''),
-  // Alternative Google OAuth app (isNy flow)
+  // The alternative Google OAuth app selected per request by the `isNy` query
+  // parameter — a second live audience, not a replacement for the primary and
+  // not a slot held open for rotating it.
+  GOOGLE_CLIENT_ID_NY: Joi.string().allow('').default(''),
+  GOOGLE_CLIENT_SECRET_NY: Joi.string().allow('').default(''),
+  // Deprecated spelling of the two above. `_NEW` reads as "the new value during a
+  // rotation", which is what a reader of the rotation plan took it for; both are
+  // permanently live and each rotates on its own. Still honoured so the rename can
+  // land before the deployment secrets move, and dropped once they have.
   GOOGLE_CLIENT_ID_NEW: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_SECRET_NEW: Joi.string().allow('').default(''),
+  // Declared but read nowhere in the service.
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
