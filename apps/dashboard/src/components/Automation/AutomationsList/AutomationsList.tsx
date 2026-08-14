@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Archive,
   ArrowUpDown,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   History,
   Link2,
@@ -79,6 +81,8 @@ export function AutomationsList({
       : DEFAULT_AUTOMATION_FILTERS,
   );
   const [sort, setSort] = useState<AutomationSort>(DEFAULT_AUTOMATION_SORT);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
@@ -195,6 +199,13 @@ export function AutomationsList({
     [visibleItems, query, filters, sort],
   );
 
+  useEffect(() => setPage(1), [query, filters, sort]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageItems = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize],
+  );
+
   const hasAnyFilter = hasActiveFilters(query, filters);
 
   return (
@@ -262,7 +273,7 @@ export function AutomationsList({
             <EmptyState hasFilter={hasAnyFilter} onCreate={onCreate} />
           ) : (
             <ul className='flex flex-col gap-2'>
-              {filtered.map(item => (
+              {pageItems.map(item => (
                 <AutomationRow
                   key={item.id}
                   automation={item}
@@ -292,6 +303,18 @@ export function AutomationsList({
                 />
               ))}
             </ul>
+          )}
+          {filtered.length > 0 && (
+            <PaginationBar
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={size => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
           )}
         </div>
       </div>
@@ -452,6 +475,65 @@ function SortDropdown({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+const PAGE_SIZE_OPTIONS = [50, 100, 250, 500];
+
+function PaginationBar({
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}): React.ReactElement {
+  return (
+    <div className='flex flex-shrink-0 items-center justify-between border-t border-border pt-3'>
+      <div className='flex items-center gap-2'>
+        <span className='text-xs text-muted-foreground'>Rows per page</span>
+        <Select value={String(pageSize)} onValueChange={v => onPageSizeChange(Number(v))}>
+          <SelectTrigger size='sm' className='h-8 w-[68px] text-xs' aria-label='Rows per page'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align='start'>
+            {PAGE_SIZE_OPTIONS.map(size => (
+              <SelectItem key={size} value={String(size)}>
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className='flex items-center gap-3'>
+        <span className='text-xs text-muted-foreground'>
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          variant='outline'
+          size='iconSm'
+          disabled={page <= 1}
+          aria-label='Previous page'
+          onClick={() => onPageChange(page - 1)}
+        >
+          <ChevronLeft className='size-4' />
+        </Button>
+        <Button
+          variant='outline'
+          size='iconSm'
+          disabled={page >= totalPages}
+          aria-label='Next page'
+          onClick={() => onPageChange(page + 1)}
+        >
+          <ChevronRight className='size-4' />
+        </Button>
+      </div>
+    </div>
   );
 }
 
