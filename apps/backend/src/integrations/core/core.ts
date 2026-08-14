@@ -450,11 +450,17 @@ export class ExternalSourceCore {
 
     // Keep merge scoped to the configured external source. All providers share
     // this logic, but one source must not merge into another source's tickets.
-    const existingExtMsg = await this.externalMessageRepo.findByThreadId(
-      source.id,
-      normalizedData.externalThreadId,
-      isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
-    );
+
+    const isChannelEmail = this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType);
+    // Channel emails always create a new conversation — no thread merging even
+    // for replies.
+    const existingExtMsg = isChannelEmail
+      ? null
+      : await this.externalMessageRepo.findByThreadId(
+          source.id,
+          normalizedData.externalThreadId,
+          isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
+        );
 
     if (existingExtMsg && !isDeskChannel) {
       const messageRepo = await this.messageRepo.findById(existingExtMsg.messageId);
@@ -465,6 +471,7 @@ export class ExternalSourceCore {
       if (!conversation) {
         throw new Error(`Conversation ${conversationid} not found`);
       }
+
 
       // Create reply message
 
