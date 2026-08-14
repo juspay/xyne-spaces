@@ -39,10 +39,15 @@ const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com"
 // Background job: prefer the low-priority automation key so curator bursts
 // can't queue interactive agent turns on the main key's parallel-slot pool.
 const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
-// Model name passed to LiteLLM for the distill call. Reads from `LITELLM_MODEL`
-// to share the same env var with other LiteLLM-backed paths in this service
-// (avoids having to keep two model env vars in sync when we upgrade Haiku).
-const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
+// Model name passed to LiteLLM for the distill call. MUST resolve from the same
+// source as LITELLM_API_KEY above: LiteLLM keys are team-scoped and the teams'
+// allowed-model lists are DISJOINT, so sending the interactive `LITELLM_MODEL`
+// with the automation key is a hard 403 ("team not allowed to access model") —
+// prod 2026-08-14, automation team allowed `private-large` but not
+// `private-large-spaces`. Mirrors the key fallback order.
+const CURATOR_MODEL = process.env["LITELLM_AUTOMATION_MODEL"]?.trim()
+  || process.env["LITELLM_MODEL"]
+  || "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
 // Per-retry timeout escalation: a slow LLM gateway is usually just slow, not
 // stuck, so give each retry more room. attempt 1 = base (10m), attempt 2 =
