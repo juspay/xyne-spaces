@@ -93,7 +93,13 @@ export interface MarkTicketSuggestionAsCreatedResponse {
   conversationId: string;
 }
 
-export type ThreadListSection = 'unread' | 'read';
+export type ThreadListSection = 'unread' | 'read' | 'recent';
+
+// Threads inbox sort mode.
+// - 'sections' (default): unread threads first, then read threads.
+// - 'recent': flat list ordered by lastReplyAt desc, no read/unread divider,
+//   without marking threads as read.
+export type ThreadListSort = 'sections' | 'recent';
 
 export interface ThreadListEntry {
   conversationId: string;
@@ -149,11 +155,13 @@ export class ConversationService {
     cursor: string | null,
     limit: number,
     signal?: AbortSignal,
+    sort: ThreadListSort = 'sections',
   ): Promise<ThreadListResponse> {
     const response = await apiInstance.get<ThreadListResponse>('/conversations/threads', {
       params: {
         limit,
         ...(cursor ? { cursor } : {}),
+        ...(sort !== 'sections' ? { sort } : {}),
       },
       ...(signal ? { signal } : {}),
     });

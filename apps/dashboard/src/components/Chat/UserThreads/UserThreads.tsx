@@ -18,7 +18,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
 import { useNavigate, useParams, Outlet } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { conversationService, ThreadListEntry } from '../../../services/Chat/conversationService';
+import { conversationService, ThreadListEntry, ThreadListSort } from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
 import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
 
@@ -125,6 +125,7 @@ const UserThreads = (): ReactElement => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<ThreadListSort>('sections');
   const hasConversations = allConversations.length > 0;
   const seenConversationIdsRef = useRef(new Set<string>());
   const nextCursorRef = useRef<string | null>(null);
@@ -164,6 +165,7 @@ const UserThreads = (): ReactElement => {
             pageCursor,
             PAGE_SIZE,
             abortController.signal,
+            sortMode,
           );
           if (generationRef.current !== generation || abortController.signal.aborted) return;
 
@@ -199,7 +201,7 @@ const UserThreads = (): ReactElement => {
         }
       }
     },
-    [user?.id],
+    [user?.id, sortMode],
   );
 
   useEffect(() => {
@@ -243,7 +245,8 @@ const UserThreads = (): ReactElement => {
       thread =>
         thread.sectionAtLoad === 'read' && unreadThreadConversationIds.has(thread.conversationId),
     );
-    const shouldShowDivider = hasUnreadAtLoadThread && !hasReadAtLoadThreadTurnedUnread;
+    const shouldShowDivider =
+      sortMode === 'sections' && hasUnreadAtLoadThread && !hasReadAtLoadThreadTurnedUnread;
 
     for (const thread of allConversations) {
       if (thread.sectionAtLoad === 'read' && shouldShowDivider && !addedReadDivider) {
@@ -254,7 +257,7 @@ const UserThreads = (): ReactElement => {
     }
 
     return items;
-  }, [allConversations, unreadThreadConversationIds]);
+  }, [allConversations, unreadThreadConversationIds, sortMode]);
 
   // Memoize the itemContent callback
   const itemContent = useCallback(
@@ -301,6 +304,39 @@ const UserThreads = (): ReactElement => {
           showThreadPanel ? (isMobile ? 'hidden' : 'w-1/2 border-r border-border') : 'w-full'
         }`}
       >
+        <div className='flex items-center justify-between px-4 pb-3'>
+          <span className='text-sm font-semibold text-foreground'>Threads</span>
+          <div className='inline-flex items-center rounded-md border border-border p-0.5 text-sm'>
+            <button
+              type='button'
+              onClick={(): void => setSortMode('sections')}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                sortMode === 'sections'
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              aria-pressed={sortMode === 'sections'}
+              data-track-category='USER_THREADS'
+              data-track-name='SORT_UNREAD_FIRST'
+            >
+              Unread first
+            </button>
+            <button
+              type='button'
+              onClick={(): void => setSortMode('recent')}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                sortMode === 'recent'
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              aria-pressed={sortMode === 'recent'}
+              data-track-category='USER_THREADS'
+              data-track-name='SORT_MOST_RECENT'
+            >
+              Most recent
+            </button>
+          </div>
+        </div>
         <div className='flex-1'>
           {isInitialLoading && !hasConversations ? (
             <div className='flex h-full items-center justify-center'>
