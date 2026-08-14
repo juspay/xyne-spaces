@@ -322,7 +322,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   )}
 
                   {/* Conversation Subscription */}
-                  {open && onReplyInThread && conversationId && (
+                  {open && conversationId && (
                     <ConversationSubscription
                       conversationId={conversationId}
                       {...(conversation && { conversation })}

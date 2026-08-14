@@ -358,11 +358,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
               const hasSubscriptionSection =
-                (onReplyInThread && conversationId) ||
-                onMarkAsUnread ||
-                onBookmark ||
-                onRemindMeOption ||
-                onPinMessage;
+                conversationId || onMarkAsUnread || onBookmark || onRemindMeOption || onPinMessage;
               const hasCopySection = onCopyLink || onCopyMessage || onForwardMessage;
               const hasDelete = showEditAction && onDeleteMessage;
 
@@ -403,7 +399,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {hasEditSection && hasSubscriptionSection && <DropdownMenuSeparator />}
 
                   {/* Conversation Subscription */}
-                  {isDropdownOpen && onReplyInThread && conversationId && (
+                  {isDropdownOpen && conversationId && (
                     <DropdownMenuItem asChild>
                       <ConversationSubscription
                         conversationId={conversationId}
