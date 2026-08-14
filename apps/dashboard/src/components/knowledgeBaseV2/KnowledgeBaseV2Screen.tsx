@@ -38,6 +38,10 @@ import { mutators } from '../../zero/mutators';
 import { useAllVisibleChannels, useVisibleProjects } from '../../hooks/useChannels';
 import { EntryGridV2 } from '../../components/knowledgeBaseV2/components/EntryGridV2';
 import { EntryListV2, ColumnDef } from '../../components/knowledgeBaseV2/components/EntryListV2';
+import {
+  CollectionStatusDrawer,
+  StatusDrawerTarget,
+} from '../../components/knowledgeBaseV2/components/CollectionStatusDrawer';
 import { SearchFieldV2 } from '../../components/knowledgeBaseV2/components/SearchFieldV2';
 import { ViewToggleV2, ViewMode } from '../../components/knowledgeBaseV2/components/ViewToggleV2';
 import { EmptyPaneV2 } from '../../components/knowledgeBaseV2/components/EmptyPaneV2';
@@ -126,6 +130,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // `activeCollection` machine slot, so opening the modal also seeds that
   // slot from the chosen card and we restore it on close.
   const [shareTarget, setShareTarget] = useState<CollectionChild | null>(null);
+  // Collection whose ingestion status drawer is open (root view only).
+  const [statusFor, setStatusFor] = useState<StatusDrawerTarget | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
@@ -216,9 +222,12 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         type: 'FOLDER' as NodeType,
         size: 0,
         updatedAt: new Date().toISOString(),
-        ingestionStatus: null,
+        ingestionStatus: c.ingestionStatus ?? null,
         mimeType: '',
         parentId: null,
+        fileTotal: c.fileTotal,
+        fileIngested: c.fileIngested,
+        fileFailed: c.fileFailed,
       }));
     }
 
@@ -406,6 +415,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       return 'Collection';
     },
     [globalCollections, channelNameById, projectNameById],
+  );
+
+  // Open the per-collection ingestion status drawer (root badge click).
+  const onOpenStatus = useCallback(
+    (entry: CollectionChild): void => {
+      setStatusFor({ id: entry.id, name: entry.name, location: locationOf(entry) });
+    },
+    [locationOf],
   );
 
   // ── Open entry ───────────────────────────────────────────────────────
@@ -917,7 +934,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
-                  {...(isAtRoot ? { folderCaption: locationOf, onShare } : {})}
+                  {...(isAtRoot ? { folderCaption: locationOf, onShare, onOpenStatus } : {})}
                 />
               ) : (
                 <EntryListV2
@@ -935,6 +952,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   {...(isAtRoot
                     ? {
                         onShare,
+                        onOpenStatus,
                         resolveColumnValue: (entry, key): string | undefined =>
                           key === 'location' ? locationOf(entry) : undefined,
                       }
@@ -990,6 +1008,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             );
           })()
         : null}
+
+      <CollectionStatusDrawer collection={statusFor} onClose={() => setStatusFor(null)} />
     </div>
   );
 };

@@ -4777,6 +4777,23 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Every latest, non-deleted file across a whole collection (matched on
+  // rootCollectionId, so it spans subfolders). Powers the root "collection
+  // status" drawer, which lists each file's ingestion status + size.
+  collectionFilesByRoot: defineQuery(
+    z.object({ rootCollectionId: z.string() }),
+    ({ args: { rootCollectionId } }) => {
+      return zql.collection_items
+        .where('rootCollectionId', rootCollectionId)
+        .where('isLatest', true)
+        .where('deletedAt', 'IS', null)
+        .orderBy('createdAt', 'asc')
+        .related('attachment', a =>
+          a.where('entityType', AttachmentEntityType.COLLECTION).where('isDeleted', false),
+        );
+    },
+  ),
+
   // Root collections, optionally filtered by scope. Pass { scopeType, scopeId } to
   // scope to a channel; pass {} for ALL collections the user can access (Ask AI
   // picker from any chat). Access is enforced by the collections ACL either way.
@@ -4788,6 +4805,24 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
       return scoped
         .related('permissions', p => p.where('userId', ctx.userID))
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  // Like `scopedCollections`, but also relates every latest, non-deleted file
+  // in each collection (via rootCollectionId) so the KB root view can show a
+  // per-collection "X / Y ingested" rollup. Kept separate from
+  // `scopedCollections` so the Ask-AI collection pickers don't pay to sync all
+  // item rows.
+  scopedCollectionsWithItems: defineQuery(
+    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
+    ({ ctx, args: { scopeType, scopeId } }) => {
+      const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
+      const scoped =
+        scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
+      return scoped
+        .related('permissions', p => p.where('userId', ctx.userID))
+        .related('allItems', i => i.where('isLatest', true).where('deletedAt', 'IS', null))
         .orderBy('createdAt', 'asc');
     },
   ),

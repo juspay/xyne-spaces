@@ -14,6 +14,11 @@ export interface CollectionChild {
   type: NodeType;
   mimeType: string;
   parentId: string | null;
+  /** Per-collection ingestion rollup, only populated for collections at the KB
+   *  root (see useGlobalCollections). Undefined for files and subfolders. */
+  fileTotal?: number;
+  fileIngested?: number;
+  fileFailed?: number;
 }
 
 export interface CollectionItemVersion {
