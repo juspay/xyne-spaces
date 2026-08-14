@@ -125,7 +125,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
-  const [canvasList] = useCachedQuery(
+  const [canvasList, canvasListDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'channel',
       channelId,
@@ -815,6 +815,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           <div className='flex-1 overflow-hidden'>
             <ChannelCanvasList
               canvases={canvases}
+              loading={canvasListDetails.type !== 'complete' && canvases.length === 0}
               folders={folders}
               onSelect={handleSelectCanvas}
               currentUserId={user?.id}

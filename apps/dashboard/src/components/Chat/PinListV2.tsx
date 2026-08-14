@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { ConversationTabContext } from './ConversationTabContext';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { DelayedSpinner } from '../ui/DelayedSpinner';
 import { useGetChannelUserStatus } from '@xyne/shared/hooks';
 import { DatePill } from './DatePill';
 import { formatDatePill } from '../../utils/dateUtils';
@@ -19,9 +20,16 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
   const { setActiveTab } = useContext(ConversationTabContext);
 
   const userChannelStatus = useGetChannelUserStatus(channelId);
-  const [pinned] = useCachedQuery(
+  const [pinned, pinnedDetails] = useCachedQuery(
     queries.getPinnedMessegesV2({ channelId: channelId, isMember: !!userChannelStatus }),
   );
+
+  // Query still in flight and nothing cached yet — show a loader, not the empty state.
+  if (pinnedDetails.type !== 'complete' && pinned.length === 0) {
+    return (
+      <DelayedSpinner className='flex flex-1 items-center justify-center bg-background py-8' />
+    );
+  }
 
   if (pinned.length === 0) {
     return (

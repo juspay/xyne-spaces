@@ -92,9 +92,12 @@ const ProjectDetailScreen = (): ReactElement => {
   });
 
   // Fetch boards for this project (lightweight list without stages)
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
-    enabled: !!projectId,
-  });
+  const [boards, boardsDetails] = useCachedQuery(
+    queries.boardsListByProject({ projectId: projectId || '' }),
+    {
+      enabled: !!projectId,
+    },
+  );
 
   // Consume the Ticket view's edit-board intent once.
   const requestedEditBoardId = searchParams.get('editBoard');
@@ -358,6 +361,7 @@ const ProjectDetailScreen = (): ReactElement => {
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
                   boards={boards}
+                  loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}

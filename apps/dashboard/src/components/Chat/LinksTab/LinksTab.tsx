@@ -3,6 +3,7 @@ import { Link as LinkIcon, Trash2, Plus, Globe, Lock, Pencil } from 'lucide-reac
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { useZero } from '../../../hooks/useZero';
 import type { Link } from '@xyne/shared';
 import { LinkVisibility } from '@xyne/shared';
@@ -22,7 +23,7 @@ interface LinksTabProps {
 const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
   const zero = useZero();
   const context = useAuthContextValues();
-  const [links] = useCachedQuery(queries.channelLinks({ channelId }));
+  const [links, linksDetails] = useCachedQuery(queries.channelLinks({ channelId }));
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
@@ -406,7 +407,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
 
       {/* Two-column Layout */}
       <div className='flex-1 overflow-auto bg-muted'>
-        {links.length === 0 ? (
+        {linksDetails.type !== 'complete' && links.length === 0 ? (
+          <DelayedSpinner className='flex h-full items-center justify-center' />
+        ) : links.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-8'>
             <LinkIcon size={48} className='mb-4 opacity-20' />
             <p className='text-sm text-muted-foreground font-medium'>No links yet</p>
