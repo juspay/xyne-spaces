@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { DeleteDustbin01 } from '@xyne/icons';
+import { Bot, CheckTickCircle, DeleteDustbin01, UserDefault } from '@xyne/icons';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
@@ -16,6 +16,10 @@ import { AdminPager, AdminTable, OrgBadge } from './components/AdminTable';
 import { FilterSelect } from './components/FilterSelect';
 import { adminScheduledKey, auditAgentOptionsKey } from './hooks/adminQueryKeys';
 import { orgLabel } from './orgLabel';
+import { PersonPill } from '../shared/primitives/PersonPill';
+import { AdminFooterPortal, AdminToolbarPortal } from './components/AdminToolbarSlot';
+import { AdminSearchField } from './components/AdminSearchField';
+import { HighlightMatch } from './components/HighlightMatch';
 
 const PAGE_SIZE = 50;
 
@@ -50,6 +54,7 @@ export function ScheduledTab({
   const [status, setStatus] = useState('');
   const [agentSlug, setAgentSlug] = useState('');
   const [jobUserId, setJobUserId] = useState('');
+  const [query, setQuery] = useState('');
   const [cancelTarget, setCancelTarget] = useState<AdminScheduledJob | null>(null);
 
   const { data: agents } = useQuery({
@@ -109,32 +114,44 @@ export function ScheduledTab({
   };
 
   const filterBar = (
-    <div className='flex flex-wrap items-center justify-end gap-2'>
-      <FilterSelect
-        ariaLabel='Agent filter'
-        value={agentSlug}
-        onChange={value => resetTo(() => setAgentSlug(value))}
-        options={agentOptions}
+    <AdminToolbarPortal>
+      <AdminSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder='Search scheduled jobs'
+        ariaLabel='Search scheduled jobs'
+        trackName='Admin: search scheduled jobs'
+        className='w-full'
       />
-      <FilterSelect
-        ariaLabel='User filter'
-        value={jobUserId}
-        onChange={value => resetTo(() => setJobUserId(value))}
-        options={userOptions}
-      />
-      <FilterSelect
-        ariaLabel='Status filter'
-        className='w-40'
-        value={status}
-        onChange={value => resetTo(() => setStatus(value))}
-        options={STATUS_OPTIONS}
-      />
-    </div>
+      <div className='flex flex-wrap items-center justify-end gap-2'>
+        <FilterSelect
+          ariaLabel='Agent filter'
+          icon={<Bot className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
+          value={agentSlug}
+          onChange={value => resetTo(() => setAgentSlug(value))}
+          options={agentOptions}
+        />
+        <FilterSelect
+          ariaLabel='User filter'
+          icon={<UserDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
+          value={jobUserId}
+          onChange={value => resetTo(() => setJobUserId(value))}
+          options={userOptions}
+        />
+        <FilterSelect
+          ariaLabel='Status filter'
+          icon={<CheckTickCircle className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
+          value={status}
+          onChange={value => resetTo(() => setStatus(value))}
+          options={STATUS_OPTIONS}
+        />
+      </div>
+    </AdminToolbarPortal>
   );
 
   if (isPending) {
     return (
-      <div className='flex flex-col gap-6 pt-4'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <Skeleton className='h-40 w-full' />
       </div>
@@ -143,7 +160,7 @@ export function ScheduledTab({
 
   if (isError) {
     return (
-      <div className='flex flex-col gap-6 pt-4'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <TabMessage>Couldn’t load scheduled jobs.</TabMessage>
       </div>
@@ -152,11 +169,19 @@ export function ScheduledTab({
 
   const { rows, total } = data;
 
-  const visible = orgId ? rows.filter(job => job.orgId === orgId) : rows;
+  const scoped = orgId ? rows.filter(job => job.orgId === orgId) : rows;
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? scoped.filter(job =>
+        `${job.agentSlug} ${job.label ?? ''} ${job.user?.name ?? ''} ${job.user?.email ?? ''}`
+          .toLowerCase()
+          .includes(needle),
+      )
+    : scoped;
 
   if (visible.length === 0) {
     return (
-      <div className='flex flex-col gap-6 pt-4'>
+      <div className='flex min-h-0 flex-1 flex-col gap-6'>
         {filterBar}
         <TabMessage>No scheduled jobs.</TabMessage>
       </div>
@@ -164,59 +189,75 @@ export function ScheduledTab({
   }
 
   return (
-    <div className='flex flex-col gap-6 pt-4'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6'>
       {filterBar}
 
       <AdminTable
         headers={[
-          { label: 'User' },
+          { label: 'User', width: 'max-w-[14rem]' },
           ...(showOrgLabels ? [{ label: 'Org' }] : []),
-          { label: 'Agent' },
+          { label: 'Agent', width: 'max-w-[14rem]' },
           { label: 'Type' },
-          { label: 'Schedule' },
-          { label: 'Next / Last run' },
+          { label: 'Schedule', width: 'max-w-[18rem]' },
+          { label: 'Next run' },
+          { label: 'Last run' },
           { label: 'Runs' },
           { label: 'Status' },
-          { label: '' },
+          { label: '', align: 'right' as const, width: 'w-14' },
         ]}
       >
         {visible.map((job: AdminScheduledJob) => (
           <tr key={job.id} className='border-b border-border hover:bg-muted/40'>
-            <td className='whitespace-nowrap px-4 py-3 text-muted-foreground'>
-              <div title={job.user?.email ?? job.userId}>{job.user?.email ?? job.userId}</div>
-              {job.user?.name && (
-                <div className='text-xs text-muted-foreground'>{job.user.name}</div>
-              )}
+            <td className='max-w-[14rem] px-4 py-3 align-top leading-5 text-muted-foreground'>
+              <PersonPill
+                userId={job.userId}
+                name={job.user?.name || job.user?.email || job.userId}
+                className='block truncate text-xs'
+              />
             </td>
             {showOrgLabels && (
-              <td className='whitespace-nowrap px-4 py-3'>
+              <td className='px-4 py-3 align-top leading-5'>
                 <OrgBadge orgName={orgLabel(job.orgId, job.orgName, orgNamesById)} />
               </td>
             )}
-            <td className='whitespace-nowrap px-4 py-3 text-foreground'>{job.agentSlug}</td>
-            <td className='whitespace-nowrap px-4 py-3'>
-              <Badge variant='secondary'>{job.type}</Badge>
+            <td className='max-w-[14rem] px-4 py-3 align-top leading-5'>
+              <Badge variant='secondary' className='-ml-2 max-w-full truncate font-mono'>
+                <HighlightMatch text={job.agentSlug} query={query} />
+              </Badge>
             </td>
-            <td className='whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground'>
+            <td className='px-4 py-3 align-top leading-5'>
+              <Badge variant='secondary' className='-ml-2'>
+                {job.type}
+              </Badge>
+            </td>
+            <td className='max-w-[18rem] px-4 py-3 align-top text-xs leading-5 text-muted-foreground'>
               <div className='flex flex-col gap-1'>
-                <span>{job.type === 'cron' ? (job.cronExpression ?? '—') : '—'}</span>
                 {job.label && (
-                  <div className='font-sans text-xs text-muted-foreground'>{job.label}</div>
+                  <span className='break-words text-foreground'>
+                    <HighlightMatch text={job.label} query={query} />
+                  </span>
+                )}
+                {job.type === 'cron' && job.cronExpression && (
+                  <span className='break-words font-mono'>{job.cronExpression}</span>
                 )}
               </div>
             </td>
-            <td className='whitespace-nowrap px-4 py-3 text-xs text-muted-foreground'>
-              <div>next: {formatDate(job.nextRunAt)}</div>
-              <div>last: {formatDate(job.lastRunAt)}</div>
+            <td className='px-4 py-3 align-top text-xs leading-5 text-muted-foreground'>
+              {formatDate(job.nextRunAt)}
             </td>
-            <td className='whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground'>
+            <td className='px-4 py-3 align-top text-xs leading-5 text-muted-foreground'>
+              {formatDate(job.lastRunAt)}
+            </td>
+            <td className='px-4 py-3 align-top font-mono text-xs leading-5 text-muted-foreground'>
               {job.runCount}
               {job.maxRuns !== null && job.maxRuns !== undefined ? ` / ${job.maxRuns}` : ''}
             </td>
-            <td className='whitespace-nowrap px-4 py-3'>
-              <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
+            <td className='px-4 py-3 align-top leading-5'>
+              <Badge variant={statusVariant(job.status)} className='-ml-2'>
+                {job.status}
+              </Badge>
             </td>
-            <td className='whitespace-nowrap px-4 py-3 text-right'>
+            <td className='px-4 py-3 text-right align-top leading-5'>
               <Tooltip content='Cancel scheduled job' side='top'>
                 <span className='inline-flex'>
                   <Button
@@ -225,7 +266,7 @@ export function ScheduledTab({
                     size='icon'
                     disabled={job.status !== 'active' || cancelJob.isPending}
                     onClick={() => setCancelTarget(job)}
-                    className='text-muted-foreground hover:text-destructive'
+                    className='-my-2 text-muted-foreground hover:text-destructive'
                     aria-label='Cancel scheduled job'
                     data-track-category='Claw Admin'
                     data-track-name='Cancel scheduled job'
@@ -246,13 +287,15 @@ export function ScheduledTab({
         </p>
       )}
 
-      <AdminPager
-        offset={offset}
-        count={rows.length}
-        total={total}
-        onPrev={() => setOffset(current => Math.max(0, current - PAGE_SIZE))}
-        onNext={() => setOffset(current => current + PAGE_SIZE)}
-      />
+      <AdminFooterPortal>
+        <AdminPager
+          offset={offset}
+          count={rows.length}
+          total={total}
+          onPrev={() => setOffset(current => Math.max(0, current - PAGE_SIZE))}
+          onNext={() => setOffset(current => current + PAGE_SIZE)}
+        />
+      </AdminFooterPortal>
 
       <ConfirmDialog
         open={cancelTarget !== null}
