@@ -5005,6 +5005,7 @@ const spacesEmails: ToolDef = {
   description:
     "Get the full email thread for an Xyne Desk ticket. Returns all emails (inbound and outbound) " +
     "associated with a desk ticket's conversation — subject, from, to, cc, bcc, body, and timestamps. " +
+    "Use from=first for the oldest emails or from=last for the latest emails; results are rendered chronologically. " +
     "Use the conversationId from spaces-tickets results. Desk tickets have their email history here; " +
     "regular chat messages live in spaces-messages instead.",
   inputSchema: {
@@ -5021,6 +5022,12 @@ const spacesEmails: ToolDef = {
         default: 100,
         description: "Max emails to return (default 100)",
       },
+      from: {
+        type: "string",
+        enum: ["first", "last"],
+        default: "first",
+        description: "Fetch from the first/oldest or last/latest email (default first).",
+      },
       offset: {
         type: "number",
         minimum: 0,
@@ -5035,20 +5042,22 @@ const spacesEmails: ToolDef = {
     try {
       const conversationId = String(args["conversationId"]);
       const take = (args["limit"] as number | undefined) ?? 100;
+      const from = (args["from"] as "first" | "last" | undefined) ?? "first";
       const skip = (args["offset"] as number | undefined) ?? 0;
 
       const rows = (await interact({
         model: "email",
         operation: "findMany",
         where: { conversationId: { equals: conversationId } },
-        orderBy: [{ createdAt: "asc" }],
+        orderBy: [{ createdAt: from === "last" ? "desc" : "asc" }],
         take,
         skip,
       })) as EmailRow[];
 
       if (!rows || rows.length === 0) return ok(`No emails found for conversation ${conversationId}.`);
+      const chronologicalRows = from === "last" ? [...rows].reverse() : rows;
 
-      const lines = rows.map((e, idx) => {
+      const lines = chronologicalRows.map((e, idx) => {
         const parts = [`[${idx + 1}] ${e.type === "DEFAULT" ? "\u{1F4E5} Inbound" : "\u{1F4E4} Outbound"}`];
         parts.push(`  Subject: ${e.subject}`);
         parts.push(`  From: ${e.from}`);
@@ -5078,7 +5087,7 @@ const spacesEmails: ToolDef = {
       const citations: Citation[] = [];
       const channelId = rows.find((r) => r.channelId)?.channelId;
       const ticketXyneId = await resolveTicketByConversation(conversationId);
-      rows.forEach((e, idx) => {
+      chronologicalRows.forEach((e, idx) => {
         pushThreadCitation(citations, channelId, conversationId, idx + 1, "Desk email thread", {
           ...(ticketXyneId ? { xyneId: ticketXyneId } : {}),
           ...(e.id ? { mailId: e.id } : {}),
