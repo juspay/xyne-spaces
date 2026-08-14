@@ -1800,7 +1800,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       conversationId: payload.conversationId,
       markdownText: [
         "**Slash commands**",
-        "- `/goal <condition>` — work autonomously until the condition is met · options: `model=<name>` `provider=<name>` `maxTurns=<1-20>`",
+        "- `/goal <condition>` — work autonomously until the condition is met · options: `model=<name>` `provider=<name>` `maxTurns=<1-20>` `maxTime=<30m|2h>`",
         "- `/goal status` — show the active goal",
         "- `/experiment <duration> [focus...]` — explore until the deadline · `/experiment status` · `/experiment stop`",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
@@ -1964,7 +1964,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? slash
       : null;
   const intercept = await handleSlashCommandBeforeRun({ command: goalCommand, conversationId: payload.conversationId });
-  let pendingGoalStart: { condition: string; providerOverride?: { provider: string; model?: string }; maxTurns?: number } | null = null;
+  let pendingGoalStart: { condition: string; providerOverride?: { provider: string; model?: string }; maxTurns?: number; maxWallClockMs?: number } | null = null;
   let task: string;
   if (intercept.kind === "goalStatusReply" || intercept.kind === "goalCleared") {
     await spacesAppFetch("/chat/postMessage", {
@@ -1989,6 +1989,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       condition: intercept.condition,
       ...(intercept.providerOverride ? { providerOverride: intercept.providerOverride } : {}),
       ...(intercept.maxTurns != null ? { maxTurns: intercept.maxTurns } : {}),
+      ...(intercept.maxWallClockMs != null ? { maxWallClockMs: intercept.maxWallClockMs } : {}),
     };
     task = intercept.firstTurnTask;
     // Show "Starting /goal…" on the ephemeral progress spinner (same surface as
@@ -3015,6 +3016,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           orgId: agent.orgId,
           condition: pendingGoalStart.condition,
           ...(pendingGoalStart.maxTurns != null ? { maxTurns: pendingGoalStart.maxTurns } : {}),
+          ...(pendingGoalStart.maxWallClockMs != null ? { maxWallClockMs: pendingGoalStart.maxWallClockMs } : {}),
           // dispatchPayload is JSON-safe by construction (strings / arrays /
           // plain objects only); the cast satisfies Prisma's InputJsonValue
           // brand which doesn't accept Record<string, unknown> directly.

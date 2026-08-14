@@ -30,9 +30,11 @@ export const activeGoalRepository = {
     orgId: string;
     condition: string;
     maxTurns?: number;
+    maxWallClockMs?: number | null;
     runPayload: Prisma.InputJsonValue;
   }) {
     const max = args.maxTurns ?? Number(process.env["GOAL_MAX_TURNS_DEFAULT"] ?? 5);
+    const maxWallClockMs = args.maxWallClockMs ?? null;
     return prisma.activeGoal.upsert({
       where: { conversationId: args.conversationId },
       update: {
@@ -40,6 +42,7 @@ export const activeGoalRepository = {
         agentSlug: args.agentSlug,
         condition: args.condition,
         maxTurns: max,
+        maxWallClockMs,
         runPayload: args.runPayload,
         orgId: args.orgId,
         status: "active",
@@ -59,6 +62,7 @@ export const activeGoalRepository = {
         orgId: args.orgId,
         condition: args.condition,
         maxTurns: max,
+        maxWallClockMs,
         runPayload: args.runPayload,
         status: "active",
       },

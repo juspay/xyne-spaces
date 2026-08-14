@@ -16,7 +16,7 @@
 export type ProviderOverride = { provider: string; model?: string };
 
 export type SlashCommand =
-  | { kind: "goalStart"; condition: string; providerOverride?: ProviderOverride; maxTurns?: number }
+  | { kind: "goalStart"; condition: string; providerOverride?: ProviderOverride; maxTurns?: number; maxWallClockMs?: number }
   | { kind: "goalStatus" }
   | { kind: "goalClear" }
   // `/clear` — wipe this thread's agent session (forget prior context).
@@ -59,6 +59,26 @@ const GOAL_OVERRIDABLE_PROVIDERS = new Set(["spaces", "litellm", "claude", "code
 // applies. Anything above this cap is clamped down — a user-configured loop
 // must never be able to schedule unbounded, cost-bearing agent turns.
 const GOAL_MAX_TURNS_CAP = 20;
+// Hard ceiling for a user-supplied `/goal maxTime=…` wall-clock budget: 6h.
+// Absent → no time cap (only maxTurns applies). Like maxTurns, this bounds a
+// user-configured loop so it can never run unbounded, cost-bearing turns.
+const GOAL_MAX_WALL_CLOCK_MS_CAP = 6 * 60 * 60 * 1000;
+
+/**
+ * Parse a compact duration like `30m`, `2h`, `45s`, `500ms`, or a bare
+ * integer (interpreted as MINUTES) into milliseconds. Returns undefined for
+ * anything non-positive or malformed so the caller can preserve it as goal
+ * text rather than silently coercing junk.
+ */
+export function parseDurationMs(raw: string): number | undefined {
+  const m = /^(\d+)(ms|s|m|h)?$/iu.exec(raw.trim());
+  if (!m) return undefined;
+  const n = Number.parseInt(m[1] ?? "", 10);
+  if (!Number.isInteger(n) || n <= 0) return undefined;
+  const unit = (m[2] ?? "m").toLowerCase();
+  const mult = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "h" ? 3_600_000 : 60_000;
+  return n * mult;
+}
 
 export function parseSlashCommand(input: string | undefined | null): SlashCommand | null {
   if (!input) return null;
@@ -145,6 +165,7 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
       condition: condition.slice(0, 2_000),
       ...(parsed.providerOverride ? { providerOverride: parsed.providerOverride } : {}),
       ...(parsed.maxTurns != null ? { maxTurns: parsed.maxTurns } : {}),
+      ...(parsed.maxWallClockMs != null ? { maxWallClockMs: parsed.maxWallClockMs } : {}),
     };
   }
   return null;
@@ -153,10 +174,11 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
 /** Extract the same provider/model tokens as `/experiment` while leaving the
  * remaining text as the goal's exit condition. A model-only override uses the
  * Spaces provider, matching `/experiment`'s default. */
-function parseGoalStart(raw: string): { condition: string; providerOverride?: ProviderOverride; maxTurns?: number } {
+function parseGoalStart(raw: string): { condition: string; providerOverride?: ProviderOverride; maxTurns?: number; maxWallClockMs?: number } {
   let provider: string | undefined;
   let model: string | undefined;
   let maxTurns: number | undefined;
+  let maxWallClockMs: number | undefined;
   const conditionParts: string[] = [];
   for (const part of raw.trim().split(/\s+/)) {
     const match = /^([^=]+)=(.*)$/u.exec(part);
@@ -182,6 +204,14 @@ function parseGoalStart(raw: string): { condition: string; providerOverride?: Pr
       else conditionParts.push(part);
       continue;
     }
+    if (key === "maxtime" || key === "max_time" || key === "maxwallclock" || key === "timeout" || key === "deadline") {
+      const ms = parseDurationMs(match?.[2] ?? "");
+      // Valid positive duration only; clamp to the hard cap. Junk is kept as
+      // goal text rather than silently coerced — mirrors maxTurns handling.
+      if (ms != null) maxWallClockMs = Math.min(ms, GOAL_MAX_WALL_CLOCK_MS_CAP);
+      else conditionParts.push(part);
+      continue;
+    }
     conditionParts.push(part);
   }
   const condition = conditionParts.join(" ").replace(/^focus=/i, "").trim();
@@ -190,5 +220,6 @@ function parseGoalStart(raw: string): { condition: string; providerOverride?: Pr
     condition,
     ...(resolvedProvider ? { providerOverride: { provider: resolvedProvider, ...(model ? { model } : {}) } } : {}),
     ...(maxTurns != null ? { maxTurns } : {}),
+    ...(maxWallClockMs != null ? { maxWallClockMs } : {}),
   };
 }

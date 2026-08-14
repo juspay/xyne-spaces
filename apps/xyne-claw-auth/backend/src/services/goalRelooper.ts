@@ -14,6 +14,7 @@
  */
 
 import { activeGoalRepository } from "../repositories/activeGoalRepository.js";
+import { formatDurationMs, isWallClockExceeded } from "./loopBudget.js";
 import { judgeGoalViaClaw } from "./goalJudgeClient.js";
 import type { Prisma } from "@prisma/client";
 
@@ -149,6 +150,7 @@ export type SlashIntercept =
       replyToUser: string;
       providerOverride?: { provider: string; model?: string };
       maxTurns?: number;
+      maxWallClockMs?: number;
     }
   | { kind: "goalStatusReply"; replyToUser: string }
   | { kind: "goalCleared"; replyToUser: string }
@@ -189,6 +191,7 @@ export async function handleSlashCommandBeforeRun(args: {
       kind: "goalStatusReply",
       replyToUser:
         `**/goal status** — turn ${goal.turnCount}/${goal.maxTurns}` +
+        (goal.maxWallClockMs != null ? ` · budget ${formatDurationMs(goal.maxWallClockMs)}` : "") +
         (goal.lastReason ? ` · last: ${goal.lastReason}` : "") +
         `\n_${condPreview}_`,
     };
@@ -218,6 +221,7 @@ export async function handleSlashCommandBeforeRun(args: {
     firstTurnTask: NEXT_TURN_TASK_TEMPLATE(command.condition),
     ...(command.providerOverride ? { providerOverride: command.providerOverride } : {}),
     ...(command.maxTurns != null ? { maxTurns: command.maxTurns } : {}),
+    ...(command.maxWallClockMs != null ? { maxWallClockMs: command.maxWallClockMs } : {}),
     // Don't echo the condition back — the user just typed it, the thread
     // already contains it. A short, fixed ack keeps the thread clean even
     // when the goal is multi-paragraph.
@@ -236,6 +240,7 @@ export async function persistGoalStart(args: {
   condition: string;
   runPayload: Prisma.InputJsonValue;
   maxTurns?: number;
+  maxWallClockMs?: number;
 }): Promise<void> {
   await activeGoalRepository.startOrReplace(args);
 }
@@ -293,6 +298,19 @@ export async function recordTurnAndDecide(args: {
       kind: "terminated",
       reason: `max_turns_reached:${updated.maxTurns}`,
       replyToUser: `**/goal stopped — turn limit (${updated.maxTurns}) reached.**`,
+    };
+  }
+
+  // Wall-clock budget — the second mandatory ceiling alongside maxTurns.
+  // Enforced BEFORE the judge so a long-running loop always halts even when
+  // turns remain. Null (legacy/unset goals) means no time cap.
+  if (updated.maxWallClockMs != null && isWallClockExceeded(updated.createdAt, updated.maxWallClockMs)) {
+    const label = formatDurationMs(updated.maxWallClockMs);
+    await activeGoalRepository.terminate(conversationId, "failed", `wall_clock_exceeded:${updated.maxWallClockMs}ms`);
+    return {
+      kind: "terminated",
+      reason: `wall_clock_exceeded:${updated.maxWallClockMs}ms`,
+      replyToUser: `**/goal stopped — time budget (${label}) reached.**`,
     };
   }
 

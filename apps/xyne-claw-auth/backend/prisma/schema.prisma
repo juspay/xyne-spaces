@@ -1782,6 +1782,7 @@ model ActiveGoal {
   status         String   @default("active") /// "active" | "done" | "cancelled" | "failed"
   turnCount      Int      @default(0) /// Turns completed so far
   maxTurns       Int      @default(5) /// Hard cap, enforced by relooper. Default 5: covers worker → audit → 1-2 fix cycles. Longer loops tend to burn LLM cost on judge-driven rabbit holes (e.g. judge falsely flagging missing attachments).
+  maxWallClockMs Int? /// Optional wall-clock budget (ms) measured from createdAt; enforced by relooper alongside maxTurns. Null = no time cap (legacy/default). Second mandatory ceiling for user-configured loops.
   lastTurnResult String? /// Most recent worker output (≤ 4KB stored)
   lastReason     String? /// Last boss reason or terminal reason
   runPayload     Json /// Stashed first-turn /run inputs to replay
