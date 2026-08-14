@@ -18,7 +18,6 @@ import logging
 import math
 import os
 import time
-import uuid
 from typing import Dict, List, Optional, Callable, Awaitable, Set, Any
 
 import aiohttp
@@ -726,13 +725,8 @@ class MultiUserTranscriber:
             logger.warning("session_pool_exhausted | creating_on_demand")
             return self._create_pooled_session()
 
-    async def _emit_transcription(self, data: dict, stt_source: Optional[str] = None):
+    async def _emit_transcription(self, data: dict):
         """Emit transcription event via EventBus."""
-        await self.bus.emit("STT_STATUS", {
-            "type": "stt_recovered",
-            "timestamp": time.time(),
-            "stt_source": stt_source or data.get("participant_identity", "unknown"),
-        })
         await self.bus.emit("TRANSCRIPTION", data)
 
     async def _emit_identified_transcription(self, data: dict):
@@ -958,23 +952,11 @@ class MultiUserTranscriber:
         
         # Grab pre-warmed session from pool (instant, no initialization delay)
         session = await self._get_session_from_pool()
-        session_source = f"{participant.identity}:{uuid.uuid4()}"
-
-        @session.on("error")
-        def on_session_error(event):
-            if isinstance(event.error, stt.STTError):
-                asyncio.create_task(self.bus.emit("STT_STATUS", {
-                    "type": "stt_error",
-                    "timestamp": event.created_at,
-                    "recoverable": event.error.recoverable,
-                    "stt_source": session_source,
-                }))
-        
         # Create agent for this participant with shared turn detector
         agent = ParticipantTranscriber(
             participant_identity=participant.identity,
             participant_name=participant_name,
-            on_transcription=lambda data: self._emit_transcription(data, session_source),
+            on_transcription=self._emit_transcription,
             call_id=self._call_id,
             ai_enabled=self._is_ai_enabled(),
             turn_detector=self._create_turn_detector(),

@@ -1,14 +1,30 @@
 import { logger } from '@/utils/logger';
 import { recordingRepairQueue } from '@/queues/recordingRepairQueue';
+import { recordingRepairService } from '@/services/recordingRepairService';
+import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 
 class RecordingRepairWorker {
   private started = false;
   private recoveryTimer: NodeJS.Timeout | null = null;
+  private lastCleanupAt = 0;
+  private recoveryRunning = false;
 
   private recover(): void {
-    void recordingRepairQueue.recoverPending().catch(error =>
-      logger.error('[RecordingRepairWorker] Recovery sweep failed', error),
-    );
+    if (this.recoveryRunning) return;
+    this.recoveryRunning = true;
+    const now = Date.now();
+    const cleanupDue = now - this.lastCleanupAt >= 6 * 60 * 60_000;
+    if (cleanupDue) this.lastCleanupAt = now;
+    void Promise.all([
+      recordingRepairQueue.recoverPending(),
+      recordingRepairService.recoverPendingArtifacts(),
+      recordingRepairStateService.purgeCompleted(),
+      ...(cleanupDue ? [recordingRepairService.cleanupStaleObjects(now)] : []),
+    ])
+      .catch((error) => logger.error('[RecordingRepairWorker] Recovery sweep failed', error))
+      .finally(() => {
+        this.recoveryRunning = false;
+      });
   }
 
   start(): void {

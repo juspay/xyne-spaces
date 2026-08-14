@@ -151,6 +151,7 @@ export interface RecordingRepairOutage {
 export interface RecordingRepairStatus {
   status: 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
   processingError: string | null;
+  retryable: boolean;
 }
 
 export const RECORDING_REPAIR_MERGED_EVENT = 'xyne-recording-repair-merged';

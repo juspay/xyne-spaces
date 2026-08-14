@@ -1,8 +1,17 @@
 import { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { randomUUID } from 'crypto';
+import { recordingRepairOutagesHash } from '@/services/recordingRepairIntervals';
+
+const REPAIR_LEASE_SECONDS = 120;
 
 export type RecordingRepairStatus = 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
-export type RecordingRepairReason = 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left' | 'stt_failed';
+export type RecordingRepairReason =
+  | 'browser_offline'
+  | 'livekit_disconnected'
+  | 'reconnect_timeout'
+  | 'agent_left'
+  | 'stt_failed';
 
 export interface RecordingRepairOutage {
   startedAt: number;
@@ -17,6 +26,10 @@ export interface RecordingRepairCaptureState {
   processingError: string | null;
   mergedAt: number | null;
   retryable: boolean;
+  leaseId: string | null;
+  leaseExpiresAt: number | null;
+  outagesHash: string | null;
+  artifactsRefreshed: boolean;
 }
 
 interface CaptureRow {
@@ -26,6 +39,10 @@ interface CaptureRow {
   processingError: string | null;
   mergedAt: Date | null;
   retryable: boolean;
+  leaseId: string | null;
+  leaseExpiresAt: Date | null;
+  outagesHash: string | null;
+  artifactsRefreshed: boolean;
 }
 
 function stateFromRow(row: CaptureRow): RecordingRepairCaptureState {
@@ -36,13 +53,18 @@ function stateFromRow(row: CaptureRow): RecordingRepairCaptureState {
     processingError: row.processingError,
     mergedAt: row.mergedAt?.getTime() ?? null,
     retryable: row.retryable,
+    leaseId: row.leaseId,
+    leaseExpiresAt: row.leaseExpiresAt?.getTime() ?? null,
+    outagesHash: row.outagesHash,
+    artifactsRefreshed: row.artifactsRefreshed,
   };
 }
 
 class RecordingRepairStateService {
   async get(callId: string, captureId: string): Promise<RecordingRepairCaptureState | null> {
     const rows = await DatabaseClient.getInstance().$queryRaw<CaptureRow[]>(Prisma.sql`
-      SELECT "status", "outages", "finalizedAt", "processingError", "mergedAt", "retryable"
+      SELECT "status", "outages", "outagesHash", "finalizedAt", "processingError", "mergedAt",
+             "retryable", "leaseId", "leaseExpiresAt", "artifactsRefreshed"
       FROM "public"."recording_repair_captures"
       WHERE "captureId" = ${captureId} AND "callExternalId" = ${callId}
       LIMIT 1
@@ -53,13 +75,14 @@ class RecordingRepairStateService {
   async finalize(
     callId: string,
     captureId: string,
-    outages: RecordingRepairOutage[],
+    outages: RecordingRepairOutage[]
   ): Promise<RecordingRepairCaptureState> {
     await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
       INSERT INTO "public"."recording_repair_captures"
-        ("captureId", "callExternalId", "status", "outages", "finalizedAt", "updatedAt")
+        ("captureId", "callExternalId", "status", "outages", "outagesHash", "finalizedAt", "updatedAt")
       VALUES
-        (${captureId}, ${callId}, 'FINALIZED', ${JSON.stringify(outages)}::jsonb, NOW(), NOW())
+        (${captureId}, ${callId}, 'FINALIZED', ${JSON.stringify(outages)}::jsonb,
+         ${recordingRepairOutagesHash(outages)}, NOW(), NOW())
       ON CONFLICT ("captureId") DO NOTHING
     `);
     const state = await this.get(callId, captureId);
@@ -68,53 +91,173 @@ class RecordingRepairStateService {
   }
 
   async claim(callId: string, captureId: string): Promise<RecordingRepairCaptureState | null> {
+    const leaseId = randomUUID();
     const rows = await DatabaseClient.getInstance().$queryRaw<CaptureRow[]>(Prisma.sql`
       UPDATE "public"."recording_repair_captures"
-      SET "status" = 'PROCESSING', "processingError" = NULL, "updatedAt" = NOW()
+      SET "status" = 'PROCESSING', "processingError" = NULL, "leaseId" = ${leaseId},
+          "leaseExpiresAt" = NOW() + ${REPAIR_LEASE_SECONDS} * INTERVAL '1 second',
+          "updatedAt" = NOW()
       WHERE "captureId" = ${captureId}
         AND "callExternalId" = ${callId}
         AND (
           "status" = 'FINALIZED'
           OR ("status" = 'FAILED' AND "retryable" = true)
-          OR ("status" = 'PROCESSING' AND "updatedAt" < NOW() - INTERVAL '5 minutes')
+          OR ("status" = 'PROCESSING' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < NOW()))
         )
-      RETURNING "status", "outages", "finalizedAt", "processingError", "mergedAt", "retryable"
+      RETURNING "status", "outages", "outagesHash", "finalizedAt", "processingError", "mergedAt",
+                "retryable", "leaseId", "leaseExpiresAt", "artifactsRefreshed"
     `);
     return rows[0] ? stateFromRow(rows[0]) : null;
   }
 
-  async markMerged(callId: string, captureId: string): Promise<void> {
-    await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
+  async heartbeat(callId: string, captureId: string, leaseId: string): Promise<boolean> {
+    const updated = await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
       UPDATE "public"."recording_repair_captures"
-      SET "status" = 'MERGED', "processingError" = NULL, "mergedAt" = NOW(), "updatedAt" = NOW()
+      SET "leaseExpiresAt" = NOW() + ${REPAIR_LEASE_SECONDS} * INTERVAL '1 second', "updatedAt" = NOW()
       WHERE "captureId" = ${captureId} AND "callExternalId" = ${callId}
+        AND "status" = 'PROCESSING' AND "leaseId" = ${leaseId}
+        AND "leaseExpiresAt" > NOW()
     `);
+    return updated === 1;
+  }
+
+  async assertLease(callId: string, captureId: string, leaseId: string): Promise<void> {
+    const rows = await DatabaseClient.getInstance().$queryRaw<Array<{ owned: boolean }>>(Prisma.sql`
+      SELECT EXISTS (
+        SELECT 1 FROM "public"."recording_repair_captures"
+        WHERE "captureId" = ${captureId} AND "callExternalId" = ${callId}
+          AND "status" = 'PROCESSING' AND "leaseId" = ${leaseId}
+          AND "leaseExpiresAt" > NOW()
+      ) AS "owned"
+    `);
+    if (rows[0]?.owned !== true) throw new Error('Recording repair lease was lost');
+  }
+
+  async markMerged(callId: string, captureId: string, leaseId: string): Promise<void> {
+    const updated = await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
+      UPDATE "public"."recording_repair_captures"
+      SET "status" = 'MERGED', "processingError" = NULL, "mergedAt" = NOW(),
+          "leaseId" = NULL, "leaseExpiresAt" = NULL, "updatedAt" = NOW()
+      WHERE "captureId" = ${captureId} AND "callExternalId" = ${callId}
+        AND "status" = 'PROCESSING' AND "leaseId" = ${leaseId}
+    `);
+    if (updated !== 1) throw new Error('Recording repair lease was lost before merge commit');
   }
 
   async markFailed(
     callId: string,
     captureId: string,
     error: string,
-    retryable = true,
+    leaseId: string,
+    retryable = true
   ): Promise<void> {
-    await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
+    const updated = await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
       UPDATE "public"."recording_repair_captures"
       SET "status" = 'FAILED', "processingError" = ${error.slice(0, 1000)},
-          "retryable" = ${retryable}, "updatedAt" = NOW()
+          "retryable" = ${retryable}, "leaseId" = NULL, "leaseExpiresAt" = NULL, "updatedAt" = NOW()
       WHERE "captureId" = ${captureId} AND "callExternalId" = ${callId}
+        AND "status" = 'PROCESSING' AND "leaseId" = ${leaseId}
     `);
+    if (updated !== 1) throw new Error('Recording repair lease was lost before failure commit');
   }
 
   async findPending(): Promise<Array<{ callId: string; captureId: string }>> {
-    return DatabaseClient.getInstance().$queryRaw<Array<{ callId: string; captureId: string }>>(Prisma.sql`
+    return DatabaseClient.getInstance().$queryRaw<
+      Array<{ callId: string; captureId: string }>
+    >(Prisma.sql`
       SELECT "callExternalId" AS "callId", "captureId"
       FROM "public"."recording_repair_captures"
       WHERE "status" = 'FINALIZED'
          OR ("status" = 'FAILED' AND "retryable" = true)
-         OR ("status" = 'PROCESSING' AND "updatedAt" < NOW() - INTERVAL '5 minutes')
+         OR ("status" = 'PROCESSING' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < NOW()))
       ORDER BY "finalizedAt" ASC
       LIMIT 1000
     `);
+  }
+
+  async hasUnmergedForCall(callId: string): Promise<boolean> {
+    const rows = await DatabaseClient.getInstance().$queryRaw<
+      Array<{ pending: boolean }>
+    >(Prisma.sql`
+      SELECT EXISTS (
+        SELECT 1 FROM "public"."recording_repair_captures"
+        WHERE "callExternalId" = ${callId}
+          AND ("status" IN ('FINALIZED', 'PROCESSING') OR ("status" = 'FAILED' AND "retryable" = true))
+      ) AS "pending"
+    `);
+    return rows[0]?.pending === true;
+  }
+
+  async findCallsNeedingArtifactRefresh(): Promise<string[]> {
+    const rows = await DatabaseClient.getInstance().$queryRaw<Array<{ callId: string }>>(Prisma.sql`
+      SELECT DISTINCT repair."callExternalId" AS "callId"
+      FROM "public"."recording_repair_captures" repair
+      WHERE repair."status" = 'MERGED' AND repair."artifactsRefreshed" = false
+        AND NOT EXISTS (
+          SELECT 1 FROM "public"."recording_repair_captures" pending
+          WHERE pending."callExternalId" = repair."callExternalId"
+            AND (pending."status" IN ('FINALIZED', 'PROCESSING')
+              OR (pending."status" = 'FAILED' AND pending."retryable" = true))
+        )
+      LIMIT 100
+    `);
+    return rows.map((row) => row.callId);
+  }
+
+  async needsArtifactRefresh(callId: string): Promise<boolean> {
+    const rows = await DatabaseClient.getInstance().$queryRaw<Array<{ needed: boolean }>>(
+      Prisma.sql`
+        SELECT EXISTS (
+          SELECT 1 FROM "public"."recording_repair_captures" repair
+          WHERE repair."callExternalId" = ${callId}
+            AND repair."status" = 'MERGED' AND repair."artifactsRefreshed" = false
+            AND NOT EXISTS (
+              SELECT 1 FROM "public"."recording_repair_captures" pending
+              WHERE pending."callExternalId" = repair."callExternalId"
+                AND (pending."status" IN ('FINALIZED', 'PROCESSING')
+                  OR (pending."status" = 'FAILED' AND pending."retryable" = true))
+            )
+        ) AS "needed"
+      `
+    );
+    return rows[0]?.needed === true;
+  }
+
+  async markArtifactsRefreshed(callId: string): Promise<void> {
+    await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
+      UPDATE "public"."recording_repair_captures"
+      SET "artifactsRefreshed" = true, "updatedAt" = NOW()
+      WHERE "callExternalId" = ${callId} AND "status" = 'MERGED'
+    `);
+  }
+
+  async listDeletableCaptureIdsForCall(callId: string): Promise<string[]> {
+    const rows = await DatabaseClient.getInstance().$queryRaw<
+      Array<{ captureId: string }>
+    >(Prisma.sql`
+      SELECT "captureId" FROM "public"."recording_repair_captures"
+      WHERE "callExternalId" = ${callId}
+        AND (("status" = 'MERGED' AND "artifactsRefreshed" = true)
+          OR ("status" = 'FAILED' AND "retryable" = false))
+    `);
+    return rows.map((row) => row.captureId);
+  }
+
+  async purgeCompleted(retainHours = 30 * 24): Promise<number> {
+    const deleted = await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
+      DELETE FROM "public"."recording_repair_captures"
+      WHERE ("artifactsRefreshed" = true OR ("status" = 'FAILED' AND "retryable" = false))
+        AND "updatedAt" < NOW() - ${retainHours} * INTERVAL '1 hour'
+    `);
+    await DatabaseClient.getInstance().$executeRaw(Prisma.sql`
+      DELETE FROM "public"."recording_repair_call_states" call_state
+      WHERE call_state."updatedAt" < NOW() - INTERVAL '30 days'
+        AND NOT EXISTS (
+          SELECT 1 FROM "public"."recording_repair_captures" repair
+          WHERE repair."callExternalId" = call_state."callExternalId"
+        )
+    `);
+    return deleted;
   }
 
   async markLiveTranscriptFinalized(callId: string): Promise<void> {
@@ -128,7 +271,9 @@ class RecordingRepairStateService {
   }
 
   async isLiveTranscriptFinalized(callId: string): Promise<boolean> {
-    const rows = await DatabaseClient.getInstance().$queryRaw<Array<{ finalized: boolean }>>(Prisma.sql`
+    const rows = await DatabaseClient.getInstance().$queryRaw<
+      Array<{ finalized: boolean }>
+    >(Prisma.sql`
       SELECT EXISTS (
         SELECT 1 FROM "public"."recording_repair_call_states"
         WHERE "callExternalId" = ${callId}

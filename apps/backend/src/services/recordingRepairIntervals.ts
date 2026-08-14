@@ -2,6 +2,7 @@ import type {
   RecordingRepairOutage,
   RecordingRepairReason,
 } from '@/services/recordingRepairStateService';
+import { createHash } from 'crypto';
 
 const REASONS = new Set<RecordingRepairReason>([
   'browser_offline',
@@ -16,20 +17,24 @@ export interface RecordingRepairCoverage {
   endedAt: number;
 }
 
-function normalizeCoverage(
-  coverage: RecordingRepairCoverage[],
-): RecordingRepairCoverage[] {
+function normalizeCoverage(coverage: RecordingRepairCoverage[]): RecordingRepairCoverage[] {
   return coverage
-    .filter(interval => Number.isFinite(interval.startedAt) && interval.endedAt > interval.startedAt)
+    .filter(
+      (interval) => Number.isFinite(interval.startedAt) && interval.endedAt > interval.startedAt
+    )
     .sort((left, right) => left.startedAt - right.startedAt || left.endedAt - right.endedAt);
 }
 
 export function validateRecordingRepairOutages(value: unknown): RecordingRepairOutage[] {
   if (!Array.isArray(value) || value.length === 0) throw new Error('Outages are required');
-  const outages = value.map(item => {
+  const outages = value.map((item) => {
     const candidate = item as { startedAt?: unknown; endedAt?: unknown; reasons?: unknown };
-    const startedAt = new Date(typeof candidate.startedAt === 'string' ? candidate.startedAt : '').getTime();
-    const endedAt = new Date(typeof candidate.endedAt === 'string' ? candidate.endedAt : '').getTime();
+    const startedAt = new Date(
+      typeof candidate.startedAt === 'string' ? candidate.startedAt : ''
+    ).getTime();
+    const endedAt = new Date(
+      typeof candidate.endedAt === 'string' ? candidate.endedAt : ''
+    ).getTime();
     if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt <= startedAt) {
       throw new Error('Invalid outage timestamps');
     }
@@ -37,7 +42,10 @@ export function validateRecordingRepairOutages(value: unknown): RecordingRepairO
       throw new Error('Each outage requires at least one reason');
     }
     const reasons = candidate.reasons as RecordingRepairReason[];
-    if (new Set(reasons).size !== reasons.length || reasons.some(reason => !REASONS.has(reason))) {
+    if (
+      new Set(reasons).size !== reasons.length ||
+      reasons.some((reason) => !REASONS.has(reason))
+    ) {
       throw new Error('Invalid outage reasons');
     }
     return { startedAt, endedAt, reasons: [...reasons].sort() };
@@ -50,8 +58,12 @@ export function validateRecordingRepairOutages(value: unknown): RecordingRepairO
   return outages;
 }
 
+export function recordingRepairOutagesHash(outages: RecordingRepairOutage[]): string {
+  return createHash('sha256').update(JSON.stringify(outages)).digest('hex');
+}
+
 export function coalesceRecordingRepairCoverage(
-  chunks: RecordingRepairCoverage[],
+  chunks: RecordingRepairCoverage[]
 ): RecordingRepairCoverage[] {
   const sorted = normalizeCoverage(chunks);
   const coverage: RecordingRepairCoverage[] = [];
@@ -68,7 +80,7 @@ export function coalesceRecordingRepairCoverage(
 
 export function intersectRecordingRepairCoverage(
   chunks: RecordingRepairCoverage[],
-  outages: RecordingRepairCoverage[],
+  outages: RecordingRepairCoverage[]
 ): RecordingRepairCoverage[] {
   const normalizedChunks = normalizeCoverage(chunks);
   const normalizedOutages = normalizeCoverage(outages);
@@ -88,7 +100,7 @@ export function intersectRecordingRepairCoverage(
 
 export function outagesAreFullyCovered(
   outages: RecordingRepairCoverage[],
-  chunks: RecordingRepairCoverage[],
+  chunks: RecordingRepairCoverage[]
 ): boolean {
   const normalizedOutages = normalizeCoverage(outages);
   const covered = intersectRecordingRepairCoverage(chunks, normalizedOutages);

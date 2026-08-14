@@ -13,7 +13,10 @@ import {
   type RecordingRepairMergedEventDetail,
   type RecordingRepairReason,
 } from '../../services/Recording/recordingService';
-import { offlineRecordingService } from '../../services/Recording/offlineRecordingService';
+import {
+  offlineRecordingService,
+  RECORDING_STORAGE_EXHAUSTED_EVENT,
+} from '../../services/Recording/offlineRecordingService';
 import {
   AGENT_LEFT_CONFIRM_DELAY_MS,
   isTranscriptionAgentIdentity,
@@ -28,7 +31,6 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
   const previousExternalId = useRef<string | null>(null);
   const everHadOutage = useRef(false);
   const warnedUnavailable = useRef(false);
-  const failedSttSources = useRef(new Set<string>());
   const connectionTroubleActive = useRef(false);
   const connectionWarningExternalId = useRef<string | null>(null);
 
@@ -75,8 +77,25 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
       });
     };
     initialize();
+    const prepareForPageHide = (): void => offlineRecordingService.prepareForPageHide();
     window.addEventListener('online', initialize);
-    return (): void => window.removeEventListener('online', initialize);
+    window.addEventListener('pagehide', prepareForPageHide);
+    return (): void => {
+      window.removeEventListener('online', initialize);
+      window.removeEventListener('pagehide', prepareForPageHide);
+    };
+  }, []);
+
+  useEffect(() => {
+    const stopForExhaustedStorage = (): void => {
+      const currentStatus = getRecordingStatus();
+      if (currentStatus === 'recording' || currentStatus === 'paused') {
+        sendRecordingEvent({ type: 'stopRecording' });
+      }
+    };
+    window.addEventListener(RECORDING_STORAGE_EXHAUSTED_EVENT, stopForExhaustedStorage);
+    return (): void =>
+      window.removeEventListener(RECORDING_STORAGE_EXHAUSTED_EVENT, stopForExhaustedStorage);
   }, []);
 
   useEffect(() => {
@@ -116,25 +135,9 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
   }, [status]);
 
   useEffect(() => {
-    if (!externalId || (status !== 'recording' && status !== 'paused')) return;
-    const handleOffline = (): void => showConnectionWarning();
-    const handleOnline = (): void => {
-      if (room?.state === ConnectionState.Connected) connectionTroubleActive.current = false;
-    };
-    if (!navigator.onLine) showConnectionWarning();
-    window.addEventListener('offline', handleOffline);
-    window.addEventListener('online', handleOnline);
-    return (): void => {
-      window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('online', handleOnline);
-    };
-  }, [externalId, room, showConnectionWarning, status]);
-
-  useEffect(() => {
     const previous = previousExternalId.current;
     previousExternalId.current = externalId;
     if (externalId && externalId !== previous) everHadOutage.current = false;
-    if (externalId && externalId !== previous) failedSttSources.current.clear();
     if (!externalId && previous) {
       if (everHadOutage.current) sendRecordingEvent({ type: 'setRepairPending', pending: true });
       void offlineRecordingService.stopAndUpload().catch(() => undefined);
@@ -186,45 +189,23 @@ export function RecordingFallbackCoordinator(): ReactElement | null {
         return;
       }
       // Reconnecting and browser-offline states keep only the in-memory rolling
-      // buffer. Persist only after LiveKit declares the room terminally disconnected.
-      if (state === ConnectionState.Reconnecting || state === ConnectionState.Disconnected) {
-        showConnectionWarning();
-      }
+      // buffer. Warn and persist only after LiveKit declares a terminal disconnect.
       if (state === ConnectionState.Disconnected) {
+        showConnectionWarning();
         const currentStatus = getRecordingStatus();
         const isActive = currentStatus === 'recording' || currentStatus === 'paused';
         if (isActive) setReason('livekit_disconnected', true);
       }
     };
-    const handleData = (
-      payload: Uint8Array,
-      _participant?: unknown,
-      _kind?: unknown,
-      topic?: string,
-    ): void => {
-      if (topic !== 'transcriptions') return;
-      try {
-        const data = JSON.parse(new TextDecoder().decode(payload)) as Record<string, unknown>;
-        const sttSource = data['stt_source'];
-        if (typeof sttSource !== 'string') return;
-        if (data['type'] === 'stt_error') failedSttSources.current.add(sttSource);
-        if (data['type'] === 'stt_recovered') failedSttSources.current.delete(sttSource);
-      } catch {
-        // The recording store owns ordinary transcript payload validation.
-      }
-    };
-
     handleConnection(room.state);
     room.on(RoomEvent.ConnectionStateChanged, handleConnection);
     room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
     room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-    room.on(RoomEvent.DataReceived, handleData);
     return (): void => {
       if (agentTimer) clearTimeout(agentTimer);
       room.off(RoomEvent.ConnectionStateChanged, handleConnection);
       room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
       room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-      room.off(RoomEvent.DataReceived, handleData);
     };
   }, [externalId, room, setReason, showConnectionWarning]);
 

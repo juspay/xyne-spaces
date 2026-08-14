@@ -1,5 +1,5 @@
 import { config } from '@/config/env';
-import { getStorageService, type StorageService } from '@/services/storage';
+import { getStorageService, type ListedFile, type StorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 
 export interface RecordingRepairChunkMetadata {
@@ -22,9 +22,7 @@ export interface RecordingRepairChunkInput {
 
 class RecordingRepairStorageService {
   constructor(
-    private readonly storage: StorageService = getStorageService(
-      config.gcs.transcriptionBucketName,
-    ),
+    private readonly storage: StorageService = getStorageService(config.gcs.transcriptionBucketName)
   ) {}
 
   chunkPath(callId: string, captureId: string, sequence: number): string {
@@ -39,7 +37,7 @@ class RecordingRepairStorageService {
     callId: string,
     captureId: string,
     buffer: Buffer,
-    input: RecordingRepairChunkInput,
+    input: RecordingRepairChunkInput
   ): Promise<{ created: boolean; chunk: RecordingRepairChunkMetadata | null }> {
     const path = this.chunkPath(callId, captureId, input.sequence);
     const result = await this.storage.uploadFileIfAbsent(buffer, {
@@ -56,17 +54,19 @@ class RecordingRepairStorageService {
     });
     return {
       created: result.created,
-      chunk: result.created
-        ? { path, size: buffer.length, ...input }
-        : await this.getChunk(path),
+      chunk: result.created ? { path, size: buffer.length, ...input } : await this.getChunk(path),
     };
   }
 
   async getChunk(path: string): Promise<RecordingRepairChunkMetadata | null> {
     try {
-      if (!(await this.storage.fileExists(path))) return null;
       return this.parse(path, await this.storage.getFileMetadata(path));
     } catch (error) {
+      const status =
+        (error as { $metadata?: { httpStatusCode?: number }; code?: number }).$metadata
+          ?.httpStatusCode ?? (error as { code?: number }).code;
+      const name = (error as { name?: string }).name;
+      if (status === 404 || name === 'NoSuchKey' || name === 'NotFound') return null;
       logger.warn('[RecordingRepairStorage] Failed to read chunk metadata', { path, error });
       throw error;
     }
@@ -74,7 +74,17 @@ class RecordingRepairStorageService {
 
   async listChunks(callId: string, captureId: string): Promise<RecordingRepairChunkMetadata[]> {
     const files = await this.storage.listFiles(this.capturePrefix(callId, captureId));
-    const chunks = await Promise.all(files.map(file => this.getChunk(file.name)));
+    const chunks = await Promise.all(
+      files.map((file) =>
+        file.metadata
+          ? this.parse(file.name, {
+              size: file.size,
+              contentType: file.contentType,
+              metadata: file.metadata,
+            })
+          : this.getChunk(file.name)
+      )
+    );
     return chunks
       .filter((chunk): chunk is RecordingRepairChunkMetadata => chunk !== null)
       .sort((a, b) => a.sequence - b.sequence || a.startedAt - b.startedAt);
@@ -84,13 +94,34 @@ class RecordingRepairStorageService {
     return this.storage.getFileBuffer(path);
   }
 
+  async listRepairObjects(): Promise<ListedFile[]> {
+    return this.storage.listFiles('recording-repairs/');
+  }
+
+  async deletePaths(paths: string[]): Promise<void> {
+    const chunks = paths.map((path) => ({ path })) as RecordingRepairChunkMetadata[];
+    await this.deleteChunks(chunks);
+  }
+
   async deleteChunks(chunks: RecordingRepairChunkMetadata[]): Promise<void> {
-    await Promise.allSettled(chunks.map(chunk => this.storage.deleteFile(chunk.path)));
+    const results = await Promise.allSettled(
+      chunks.map((chunk) => this.storage.deleteFile(chunk.path))
+    );
+    const failures = results.flatMap((result, index) =>
+      result.status === 'rejected' ? [{ path: chunks[index]?.path, error: result.reason }] : []
+    );
+    if (failures.length > 0) {
+      throw new Error(
+        `Failed to delete ${failures.length} recording repair chunk(s): ${failures
+          .map((failure) => `${failure.path} (${String(failure.error)})`)
+          .join(', ')}`
+      );
+    }
   }
 
   private parse(
     path: string,
-    file: { size?: number | string; contentType?: string; metadata?: Record<string, string> },
+    file: { size?: number | string; contentType?: string; metadata?: Record<string, string> }
   ): RecordingRepairChunkMetadata | null {
     const metadata = file.metadata ?? {};
     const sequence = Number(metadata.sequence);

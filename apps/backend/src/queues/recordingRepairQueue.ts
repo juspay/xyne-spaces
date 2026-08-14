@@ -1,7 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import {
-  RecordingRepairDeferredError,
   RecordingRepairTerminalError,
   recordingRepairService,
 } from '@/services/recordingRepairService';
@@ -32,12 +31,16 @@ class RecordingRepairQueue {
     return this.queue;
   }
 
-  async enqueue(callId: string, captureId: string, finalizedAt: number | null = null): Promise<void> {
+  async enqueue(
+    callId: string,
+    captureId: string,
+    finalizedAt: number | null = null
+  ): Promise<void> {
     const queue = this.ensureQueue();
     const jobId = `recording-repair:${callId}:${captureId}`;
     const existing = await queue.getJob(jobId);
     if (existing) {
-      if (await existing.getState() !== 'failed') return;
+      if ((await existing.getState()) !== 'failed') return;
       await existing.remove();
     }
     const delay = Math.max(0, (finalizedAt ?? Date.now()) + 45_000 - Date.now());
@@ -45,15 +48,22 @@ class RecordingRepairQueue {
   }
 
   async recoverPending(): Promise<void> {
-    for (const { callId, captureId } of await recordingRepairStateService.findPending()) {
-      const state = await recordingRepairStateService.get(callId, captureId);
-      await this.enqueue(callId, captureId, state?.finalizedAt ?? null);
-    }
+    const pending = await recordingRepairStateService.findPending();
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(10, pending.length) }, async () => {
+      while (cursor < pending.length) {
+        const item = pending[cursor++];
+        if (!item) continue;
+        const state = await recordingRepairStateService.get(item.callId, item.captureId);
+        await this.enqueue(item.callId, item.captureId, state?.finalizedAt ?? null);
+      }
+    });
+    await Promise.all(workers);
   }
 
   startConsumer(): void {
     const queue = this.ensureQueue();
-    queue.process('repair', async job => {
+    queue.process('repair', async (job) => {
       try {
         await recordingRepairService.process(job.data.callId, job.data.captureId);
       } catch (error) {
@@ -63,16 +73,13 @@ class RecordingRepairQueue {
       }
     });
     queue.on('failed', (job, error) => {
-      logger.error(`[RECORDING-REPAIR] Job for ${job.data?.callId}/${job.data?.captureId} failed:`, error);
-      const attempts = Number(job.opts.attempts ?? 1);
-      if (job.attemptsMade >= attempts && job.data?.callId && job.data?.captureId) {
-        void recordingRepairStateService.markFailed(
-          job.data.callId,
-          job.data.captureId,
-          error.message,
-          error instanceof RecordingRepairDeferredError || error.name === 'RecordingRepairDeferredError',
-        );
-      }
+      logger.error(
+        `[RECORDING-REPAIR] Job for ${job.data?.callId}/${job.data?.captureId} failed:`,
+        error
+      );
+      // Claimed jobs persist their own fenced failure state. Deferred jobs are
+      // deliberately left FINALIZED so the recovery sweep can enqueue them once
+      // the live transcript commit signal exists.
     });
     logger.info('[RECORDING-REPAIR] Consumer started');
   }

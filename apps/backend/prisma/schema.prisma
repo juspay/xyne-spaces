@@ -2638,19 +2638,25 @@ model Call {
 /// Durable control-plane state for browser-local note-taker recording repairs.
 /// Audio bytes remain in object storage; Bull/Redis only carries this row's identity.
 model RecordingRepairCapture {
-  captureId       String   @id
-  callExternalId  String
-  status          String
-  outages         Json
-  finalizedAt     DateTime
-  processingError String?
-  mergedAt        DateTime?
-  retryable       Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  captureId          String    @id
+  callExternalId     String
+  status             String
+  outages            Json
+  outagesHash        String?
+  finalizedAt        DateTime
+  processingError    String?
+  mergedAt           DateTime?
+  retryable          Boolean   @default(true)
+  leaseId            String?
+  leaseExpiresAt     DateTime?
+  artifactsRefreshed Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@index([status, finalizedAt])
   @@index([callExternalId])
+  @@index([leaseExpiresAt])
+  @@index([callExternalId, status, artifactsRefreshed])
   @@map("recording_repair_captures")
   @@schema("public")
 }

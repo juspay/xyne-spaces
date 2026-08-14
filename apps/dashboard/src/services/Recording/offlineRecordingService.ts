@@ -19,8 +19,8 @@ const FALLBACK_AUDIO_BITS_PER_SECOND = 48_000;
 const STORAGE_ESTIMATE_INTERVAL_MS = 60_000;
 const STORAGE_LOW_REMAINING_MS = 2 * 60 * 60_000;
 const POLL_INTERVAL_MS = 2_000;
-const POLL_TIMEOUT_MS = 5 * 60_000;
 const FAILED_RETENTION_MS = 7 * 24 * 60 * 60_000;
+export const RECORDING_STORAGE_EXHAUSTED_EVENT = 'xyne-recording-storage-exhausted';
 
 interface StoredChunk {
   id: string;
@@ -39,6 +39,7 @@ interface PersistedCapture {
   outages: RecordingRepairOutage[];
   activeReasons: RecordingRepairReason[];
   activeOutageStartedAt: number | null;
+  lastDurableChunkEndedAt?: number;
   failedAt?: number;
   failureWarned?: boolean;
 }
@@ -70,11 +71,17 @@ function isQuotaExceededError(error: unknown): boolean {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, 3);
+    const request = indexedDB.open(DATABASE_NAME, 4);
     request.onupgradeneeded = (): void => {
       const database = request.result;
       if (!database.objectStoreNames.contains(CHUNK_STORE)) {
-        database.createObjectStore(CHUNK_STORE, { keyPath: 'id' });
+        const chunks = database.createObjectStore(CHUNK_STORE, { keyPath: 'id' });
+        chunks.createIndex('captureId', 'captureId', { unique: false });
+      } else {
+        const chunks = request.transaction?.objectStore(CHUNK_STORE);
+        if (chunks && !chunks.indexNames.contains('captureId')) {
+          chunks.createIndex('captureId', 'captureId', { unique: false });
+        }
       }
       if (!database.objectStoreNames.contains(CAPTURE_STORE)) {
         database.createObjectStore(CAPTURE_STORE, { keyPath: 'captureId' });
@@ -93,15 +100,18 @@ async function checksum(blob: Blob): Promise<string> {
 export class OfflineRecordingService {
   private capture: Capture | null = null;
   private pendingWrites = new Set<Promise<void>>();
+  private writeFailures = new Set<unknown>();
   private pendingUpload: Promise<void> = Promise.resolve();
   private warnedPersistenceFailure = false;
   private recoveryPromise: Promise<void> | null = null;
+  private statusPolls = new Map<string, Promise<void>>();
   private storageReclaimPromise: Promise<void> | null = null;
   private startingCallId: string | null = null;
   private startPromise: Promise<void> | null = null;
   private lastStorageEstimateAt = 0;
   private warnedLowStorage = false;
   private warnedStorageFull = false;
+  private storageExhausted = false;
   private recentChunkRates: Array<{ bytes: number; durationMs: number }> = [];
 
   async initialize(): Promise<void> {
@@ -134,12 +144,23 @@ export class OfflineRecordingService {
     return this.startPromise;
   }
 
+  /** Best effort for a normal page close; hard crashes recover to the last durable chunk. */
+  prepareForPageHide(): void {
+    const capture = this.capture;
+    if (!capture) return;
+    this.clearSegmentTimer(capture);
+    if (capture.recorder?.state === 'recording') capture.recorder.stop();
+  }
+
   private async startCapture(callId: string, track: MediaStreamTrack): Promise<void> {
     await this.initialize();
 
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
+      : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : null;
+    if (!mimeType) throw new Error('WebM audio recording is unavailable in this browser');
     const capture: Capture = {
       captureId: crypto.randomUUID(),
       callId,
@@ -163,8 +184,10 @@ export class OfflineRecordingService {
     };
     this.capture = capture;
     this.warnedPersistenceFailure = false;
+    this.writeFailures.clear();
     this.warnedLowStorage = false;
     this.warnedStorageFull = false;
+    this.storageExhausted = false;
     this.lastStorageEstimateAt = 0;
     this.recentChunkRates = [];
     this.startSegment(capture);
@@ -248,15 +271,21 @@ export class OfflineRecordingService {
       capture.captureId,
       capture.outages,
     );
-    await this.cleanupIfMerged(capture);
+    this.scheduleCleanupIfMerged(capture);
   }
 
   private startSegment(capture: Capture): void {
     if (capture.stopping || capture.paused || this.capture !== capture) return;
-    const recorder = new MediaRecorder(capture.stream, {
-      mimeType: capture.mimeType,
-      audioBitsPerSecond: FALLBACK_AUDIO_BITS_PER_SECOND,
-    });
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(capture.stream, {
+        mimeType: capture.mimeType,
+        audioBitsPerSecond: FALLBACK_AUDIO_BITS_PER_SECOND,
+      });
+    } catch (error) {
+      if (this.capture === capture) this.capture = null;
+      throw error;
+    }
     capture.recorder = recorder;
     capture.chunkStartedAt = Date.now();
     let resolveStopped: (() => void) | undefined;
@@ -294,12 +323,34 @@ export class OfflineRecordingService {
         capture.recorder = null;
         capture.segmentStopped = null;
         if (!capture.stopping && !capture.paused && !capture.switchingTrack) {
-          this.startSegment(capture);
+          try {
+            this.startSegment(capture);
+          } catch {
+            toast.warning('Local recording protection stopped unexpectedly');
+          }
         }
       }
       resolveStopped?.();
     };
-    recorder.start();
+    recorder.onerror = (): void => {
+      this.clearSegmentTimer(capture);
+      if (capture.recorder === recorder) {
+        capture.recorder = null;
+        capture.segmentStopped = null;
+      }
+      resolveStopped?.();
+      if (this.capture === capture) this.capture = null;
+      toast.warning('Local recording protection stopped unexpectedly');
+    };
+    try {
+      recorder.start();
+    } catch (error) {
+      capture.recorder = null;
+      capture.segmentStopped = null;
+      if (this.capture === capture) this.capture = null;
+      resolveStopped?.();
+      throw error;
+    }
     capture.segmentTimer = setTimeout(() => {
       capture.segmentTimer = null;
       if (recorder.state === 'recording') recorder.stop();
@@ -338,6 +389,7 @@ export class OfflineRecordingService {
 
   private trackWrite(write: Promise<void>): void {
     const tracked = write.catch(error => {
+      this.writeFailures.add(error);
       if (isQuotaExceededError(error)) {
         this.warnStorageFull();
       } else if (!this.warnedPersistenceFailure) {
@@ -355,6 +407,9 @@ export class OfflineRecordingService {
 
   private async flushWrites(): Promise<void> {
     await Promise.all([...this.pendingWrites]);
+    if (this.writeFailures.size > 0) {
+      throw new Error('One or more local recording writes failed');
+    }
   }
 
   private async persistChunkWithRecovery(chunk: StoredChunk, capture: Capture): Promise<void> {
@@ -371,8 +426,29 @@ export class OfflineRecordingService {
       await this.reclaimLocalStorage(capture);
       // Retrying the same idempotent puts preserves the failed chunk when
       // acknowledged uploads or disposable captures freed enough space.
-      await persist();
+      try {
+        await persist();
+      } catch (retryError) {
+        if (isQuotaExceededError(retryError)) {
+          this.stopForStorageExhaustion(capture);
+        }
+        throw retryError;
+      }
     }
+  }
+
+  private stopForStorageExhaustion(capture: Capture): void {
+    if (this.storageExhausted) return;
+    this.storageExhausted = true;
+    capture.stopping = true;
+    this.clearSegmentTimer(capture);
+    if (capture.recorder?.state === 'recording') capture.recorder.stop();
+    toast.error('Recording stopped because local storage is full', {
+      description: 'Protected audio could no longer be saved safely.',
+      duration: Infinity,
+      closeButton: true,
+    });
+    window.dispatchEvent(new Event(RECORDING_STORAGE_EXHAUSTED_EVENT));
   }
 
   private recordChunkRate(chunk: StoredChunk): void {
@@ -494,9 +570,9 @@ export class OfflineRecordingService {
   ): Promise<void> {
     if (!navigator.onLine) return;
     const outages = this.outagesForUpload(capture, includeActiveOutage);
-    const chunks = (await this.getAll<StoredChunk>(CHUNK_STORE))
-      .filter(chunk => chunk.captureId === capture.captureId)
-      .sort((left, right) => left.sequence - right.sequence);
+    const chunks = (await this.getChunksForCapture(capture.captureId)).sort(
+      (left, right) => left.sequence - right.sequence,
+    );
     for (const chunk of chunks) {
       if (!this.overlapsOutage(chunk, outages)) continue;
       await recordingService.uploadRecordingRepairChunk(
@@ -558,27 +634,31 @@ export class OfflineRecordingService {
 
   private async recoverPending(): Promise<void> {
     const captures = await this.getAll<PersistedCapture>(CAPTURE_STORE);
-    for (const capture of captures) {
+    const pending = captures.filter(capture => capture.captureId !== this.capture?.captureId);
+    let cursor = 0;
+    const recoverOne = async (capture: PersistedCapture): Promise<void> => {
       capture.outages ??= [];
       capture.activeReasons ??= [];
       capture.activeOutageStartedAt ??= null;
-      if (capture.captureId === this.capture?.captureId) continue;
       if (capture.failedAt && Date.now() - capture.failedAt >= FAILED_RETENTION_MS) {
         await this.deleteLocalCapture(capture.captureId);
-        continue;
+        return;
       }
       if (capture.activeOutageStartedAt !== null && capture.activeReasons.length > 0) {
-        capture.outages.push({
-          startedAt: new Date(capture.activeOutageStartedAt).toISOString(),
-          endedAt: new Date().toISOString(),
-          reasons: capture.activeReasons,
-        });
+        const endedAt = capture.lastDurableChunkEndedAt ?? capture.activeOutageStartedAt;
+        if (endedAt > capture.activeOutageStartedAt) {
+          capture.outages.push({
+            startedAt: new Date(capture.activeOutageStartedAt).toISOString(),
+            endedAt: new Date(endedAt).toISOString(),
+            reasons: capture.activeReasons,
+          });
+        }
         capture.activeOutageStartedAt = null;
         await this.saveCapture(capture);
       }
       if (capture.outages.length === 0) {
         await this.deleteLocalCapture(capture.captureId);
-        continue;
+        return;
       }
       try {
         await this.queueUpload(capture);
@@ -587,21 +667,39 @@ export class OfflineRecordingService {
           capture.captureId,
           capture.outages,
         );
-        await this.cleanupIfMerged(capture);
+        this.scheduleCleanupIfMerged(capture);
       } catch {
         // Preserve durable data for the next online/application initialization.
       }
-    }
+    };
+    const workers = Array.from({ length: Math.min(3, pending.length) }, async () => {
+      while (cursor < pending.length) {
+        const capture = pending[cursor++];
+        if (capture) await recoverOne(capture);
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  private scheduleCleanupIfMerged(capture: PersistedCapture): void {
+    if (this.statusPolls.has(capture.captureId)) return;
+    const poll = this.cleanupIfMerged(capture).finally(() => {
+      if (this.statusPolls.get(capture.captureId) === poll) {
+        this.statusPolls.delete(capture.captureId);
+      }
+    });
+    this.statusPolls.set(capture.captureId, poll);
   }
 
   private async cleanupIfMerged(capture: PersistedCapture): Promise<void> {
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-    while (navigator.onLine && Date.now() < deadline) {
+    let pollDelayMs = POLL_INTERVAL_MS;
+    while (navigator.onLine) {
       let status: RecordingRepairStatus;
       try {
         status = await recordingService.getRecordingRepairStatus(capture.callId, capture.captureId);
       } catch {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+        await new Promise(resolve => setTimeout(resolve, pollDelayMs));
+        pollDelayMs = Math.min(30_000, Math.round(pollDelayMs * 1.5));
         continue;
       }
       if (status.status === 'MERGED') {
@@ -613,7 +711,7 @@ export class OfflineRecordingService {
         await this.deleteLocalCapture(capture.captureId);
         return;
       }
-      if (status.status === 'FAILED') {
+      if (status.status === 'FAILED' && !status.retryable) {
         capture.failedAt ??= Date.now();
         if (!capture.failureWarned) {
           capture.failureWarned = true;
@@ -622,7 +720,8 @@ export class OfflineRecordingService {
         await this.saveCapture(capture);
         return;
       }
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      await new Promise(resolve => setTimeout(resolve, pollDelayMs));
+      pollDelayMs = Math.min(30_000, Math.round(pollDelayMs * 1.5));
     }
   }
 
@@ -640,6 +739,9 @@ export class OfflineRecordingService {
       outages: capture.outages,
       activeReasons: capture.activeReasons,
       activeOutageStartedAt: capture.activeOutageStartedAt,
+      ...(capture.lastDurableChunkEndedAt
+        ? { lastDurableChunkEndedAt: capture.lastDurableChunkEndedAt }
+        : {}),
       ...(capture.failedAt ? { failedAt: capture.failedAt } : {}),
       ...(capture.failureWarned ? { failureWarned: true } : {}),
     };
@@ -658,7 +760,13 @@ export class OfflineRecordingService {
         const chunkStore = transaction.objectStore(CHUNK_STORE);
         const requests = [
           ...chunks.map(chunk => chunkStore.put(chunk)),
-          transaction.objectStore(CAPTURE_STORE).put(this.toPersistedCapture(capture)),
+          transaction.objectStore(CAPTURE_STORE).put({
+            ...this.toPersistedCapture(capture),
+            lastDurableChunkEndedAt: Math.max(
+              capture.lastDurableChunkEndedAt ?? 0,
+              ...chunks.map(chunk => chunk.endedAt),
+            ),
+          }),
         ];
         for (const request of requests) {
           request.onerror = (): void => {
@@ -680,6 +788,12 @@ export class OfflineRecordingService {
         if (settled) return;
         settled = true;
         database.close();
+        if (chunks.length > 0) {
+          capture.lastDurableChunkEndedAt = Math.max(
+            capture.lastDurableChunkEndedAt ?? 0,
+            ...chunks.map(chunk => chunk.endedAt),
+          );
+        }
         resolve();
       };
       const rejectTransaction = (): void => {
@@ -694,17 +808,55 @@ export class OfflineRecordingService {
   }
 
   private async deleteLocalCapture(captureId: string): Promise<void> {
-    await this.transaction(CAPTURE_STORE, 'readwrite', store => store.delete(captureId));
-    await this.deleteLocalChunks(captureId);
+    await this.deleteCaptureData(captureId, true);
   }
 
   private async deleteLocalChunks(captureId: string): Promise<void> {
-    const chunks = await this.getAll<StoredChunk>(CHUNK_STORE);
-    await Promise.all(
-      chunks
-        .filter(chunk => chunk.captureId === captureId)
-        .map(chunk => this.deleteChunk(chunk.id)),
-    );
+    await this.deleteCaptureData(captureId, false);
+  }
+
+  private async deleteCaptureData(captureId: string, includeCapture: boolean): Promise<void> {
+    const database = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const storeNames = includeCapture ? [CHUNK_STORE, CAPTURE_STORE] : [CHUNK_STORE];
+      const transaction = database.transaction(storeNames, 'readwrite');
+      let requestError: DOMException | null = null;
+      let settled = false;
+      const chunks = transaction.objectStore(CHUNK_STORE);
+      const cursor = chunks.index('captureId').openKeyCursor(IDBKeyRange.only(captureId));
+      cursor.onsuccess = (): void => {
+        const result = cursor.result;
+        if (!result) return;
+        const deletion = chunks.delete(result.primaryKey);
+        deletion.onerror = (): void => {
+          requestError ??= deletion.error;
+        };
+        result.continue();
+      };
+      cursor.onerror = (): void => {
+        requestError ??= cursor.error;
+      };
+      if (includeCapture) {
+        const deletion = transaction.objectStore(CAPTURE_STORE).delete(captureId);
+        deletion.onerror = (): void => {
+          requestError ??= deletion.error;
+        };
+      }
+      transaction.oncomplete = (): void => {
+        if (settled) return;
+        settled = true;
+        database.close();
+        resolve();
+      };
+      const rejectTransaction = (): void => {
+        if (settled) return;
+        settled = true;
+        database.close();
+        reject(requestError ?? transaction.error ?? new Error('IndexedDB cleanup failed'));
+      };
+      transaction.onerror = rejectTransaction;
+      transaction.onabort = rejectTransaction;
+    });
   }
 
   private async deleteChunk(chunkId: string): Promise<void> {
@@ -713,6 +865,15 @@ export class OfflineRecordingService {
 
   private getAll<T>(storeName: string): Promise<T[]> {
     return this.transaction<T[]>(storeName, 'readonly', store => store.getAll() as IDBRequest<T[]>);
+  }
+
+  private getChunksForCapture(captureId: string): Promise<StoredChunk[]> {
+    return this.transaction<StoredChunk[]>(
+      CHUNK_STORE,
+      'readonly',
+      store =>
+        store.index('captureId').getAll(IDBKeyRange.only(captureId)) as IDBRequest<StoredChunk[]>,
+    );
   }
 
   private async transaction<T>(

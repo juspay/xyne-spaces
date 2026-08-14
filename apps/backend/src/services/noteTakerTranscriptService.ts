@@ -4,9 +4,17 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
-import { acquireLock, releaseLock } from '@/utils/distributedLock';
-import { transcriptService, type TranscriptEntry, type MarkedItem } from '@/services/transcriptService';
-import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
+import { acquireLock, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
+import {
+  transcriptService,
+  type TranscriptEntry,
+  type MarkedItem,
+} from '@/services/transcriptService';
+import {
+  callDocumentService,
+  numberTranscriptSegments,
+  type CitationContext,
+} from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
@@ -20,6 +28,55 @@ import { recordingRepairStateService } from '@/services/recordingRepairStateServ
 // configured" check entirely (see assertManualCategoryOrOverride).
 const NOTE_TAKER_TAG_SOURCE_TYPE = 'CALL';
 const NOTE_TAKER_LABEL_CATEGORY = 'topic';
+const TRANSCRIPT_LOCK_TTL_SECONDS = 60;
+
+interface RenewableTranscriptLock {
+  assertOwned(): Promise<void>;
+  release(): Promise<void>;
+}
+
+async function acquireTranscriptLock(
+  callId: string,
+  purpose = 'processing'
+): Promise<RenewableTranscriptLock | null> {
+  const handle: LockHandle | null = await acquireLock(
+    `lock:note-taker-transcript-${purpose}:${callId}`,
+    {
+      ttlSeconds: TRANSCRIPT_LOCK_TTL_SECONDS,
+      waitTimeoutMs: 30_000,
+      retryDelayMs: 300,
+      failOpen: false,
+    }
+  );
+  if (!handle) return null;
+
+  let lost = false;
+  let renewal: Promise<boolean> | null = null;
+  const renew = async (): Promise<boolean> => {
+    if (lost) return false;
+    if (renewal) return renewal;
+    renewal = renewLock(handle, TRANSCRIPT_LOCK_TTL_SECONDS)
+      .then((owned) => {
+        if (!owned) lost = true;
+        return owned;
+      })
+      .finally(() => {
+        renewal = null;
+      });
+    return renewal;
+  };
+  const timer = setInterval(() => void renew(), 20_000);
+
+  return {
+    async assertOwned(): Promise<void> {
+      if (lost || !(await renew())) throw new Error('Canonical transcript lock was lost');
+    },
+    async release(): Promise<void> {
+      clearInterval(timer);
+      await releaseLock(handle);
+    },
+  };
+}
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
@@ -40,7 +97,7 @@ function userMarkedMoments(markedItems: Call['markedItems']): MarkedItem[] {
       !!item &&
       typeof item === 'object' &&
       !Array.isArray(item) &&
-      (item as Record<string, unknown>).type === 'moment',
+      (item as Record<string, unknown>).type === 'moment'
   );
 }
 
@@ -86,12 +143,8 @@ class NoteTakerTranscriptService {
     // Serialize processing per call — the room_finished reconcile fallback can
     // race the agent's transcript-ready webhook (itself fired twice). Wait for
     // the lock rather than skip, so a later/larger transcript still reprocesses.
-    const lockHandle = await acquireLock(`lock:note-taker-transcript-processing:${callId}`, {
-      ttlSeconds: 180,
-      waitTimeoutMs: 30_000,
-      retryDelayMs: 300,
-    });
-    if (!lockHandle) {
+    const transcriptLock = await acquireTranscriptLock(callId);
+    if (!transcriptLock) {
       logger.warn(`[${callId}] note_taker_process_lock_timeout`, {
         reason: 'another worker held the processing lock beyond the wait window',
       });
@@ -99,6 +152,7 @@ class NoteTakerTranscriptService {
     }
 
     try {
+      await transcriptLock.assertOwned();
       if (!hasTranscript) {
         logger.warn('transcript_processing_skipped', {
           call_id: callId,
@@ -129,6 +183,7 @@ class NoteTakerTranscriptService {
         return;
       }
 
+      await transcriptLock.assertOwned();
       try {
         await this.attachTranscript(call, entries);
       } catch (transcriptError) {
@@ -141,6 +196,7 @@ class NoteTakerTranscriptService {
         // Don't rethrow — summary generation below uses the entries we already have
         // in memory and may still succeed even if the storage upload above failed.
       }
+      await transcriptLock.assertOwned();
 
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
@@ -149,6 +205,7 @@ class NoteTakerTranscriptService {
       const detailedSummary = await this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelIds = await this.generateAndSaveLabels(call, formattedTranscript);
       const markedItems = await this.generateMarkedItemsList(call, formattedTranscript);
+      await transcriptLock.assertOwned();
       await this.finalizeCallUpdates(call, {
         metadata: {
           transcriptEntryCount: entries.length,
@@ -160,9 +217,10 @@ class NoteTakerTranscriptService {
         markedItems,
         summaryTemplateId: detailedSummary?.summaryTemplateId,
       });
+      await transcriptLock.assertOwned();
       await this.queueVespaIndexing(call);
     } finally {
-      await releaseLock(lockHandle);
+      await transcriptLock.release();
     }
   }
 
@@ -175,15 +233,13 @@ class NoteTakerTranscriptService {
     callId: string,
     repairEntries: TranscriptEntry[],
     coverage: Array<{ startedAt: number; endedAt: number }>,
+    assertRepairLease: () => Promise<void> = async () => undefined
   ): Promise<void> {
-    const lockHandle = await acquireLock(`lock:note-taker-transcript-processing:${callId}`, {
-      ttlSeconds: 180,
-      waitTimeoutMs: 30_000,
-      retryDelayMs: 300,
-    });
-    if (!lockHandle) throw new Error('Timed out waiting for note-taker transcript lock');
+    const transcriptLock = await acquireTranscriptLock(callId);
+    if (!transcriptLock) throw new Error('Timed out waiting for note-taker transcript lock');
 
     try {
+      await Promise.all([transcriptLock.assertOwned(), assertRepairLease()]);
       const call = await repositories.calls.findByExternalId(callId);
       if (!call || call.callType !== CallType.HEADLESS) {
         throw new Error('Headless recording not found');
@@ -191,25 +247,53 @@ class NoteTakerTranscriptService {
       const rawContent = await transcriptService.retrieveTranscriptAllowEmpty(callId);
       const baseEntries = rawContent ? transcriptService.parseTranscriptEntries(rawContent) : [];
       const mergedEntries = [
-        ...baseEntries.filter(entry => {
+        ...baseEntries.filter((entry) => {
           const timestampMs = entry.timestamp * 1000;
-          return !coverage.some(interval =>
-            timestampMs >= interval.startedAt && timestampMs < interval.endedAt,
+          return !coverage.some(
+            (interval) => timestampMs >= interval.startedAt && timestampMs < interval.endedAt
           );
         }),
         ...repairEntries,
       ].sort((left, right) => left.timestamp - right.timestamp);
 
+      await Promise.all([transcriptLock.assertOwned(), assertRepairLease()]);
       await transcriptService.persistRawTranscript(callId, mergedEntries);
       // Unlike ordinary processing, a repair must not become MERGED unless the
       // formatted transcript path is durably visible on Call.transcript.
+      await Promise.all([transcriptLock.assertOwned(), assertRepairLease()]);
       await this.attachTranscript(call, mergedEntries);
+    } finally {
+      await transcriptLock.release();
+    }
+  }
 
-      // The identified transcript cannot contain locally recovered audio, so
-      // repaired AI outputs must use the newly committed canonical entries.
-      const formattedTranscript = transcriptService.formatTranscript(mergedEntries, callId);
+  /** Refresh expensive derived outputs once after all canonical repairs for a call merge. */
+  async refreshRecordingArtifacts(callId: string): Promise<void> {
+    // Use the same renewable per-call lock as ordinary note-taker processing so
+    // live finalization and repair artifact refresh cannot overwrite each other.
+    const artifactLock = await acquireTranscriptLock(callId);
+    if (!artifactLock) throw new Error('Timed out waiting for recording artifact refresh lock');
+    try {
+      await artifactLock.assertOwned();
+      // Multiple workers may discover the same row before either acquires this
+      // lock. Recheck under the lock so only the first one pays for regeneration.
+      if (!(await recordingRepairStateService.needsArtifactRefresh(callId))) return;
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call || call.callType !== CallType.HEADLESS)
+        throw new Error('Headless recording not found');
+      const rawContent = await transcriptService.retrieveTranscriptAllowEmpty(callId);
+      const entries = rawContent ? transcriptService.parseTranscriptEntries(rawContent) : [];
+      const formattedTranscript = transcriptService.formatTranscript(entries, callId);
       if (!formattedTranscript) {
-        await this.finalizeCallUpdates(call, { metadata: { transcriptEntryCount: mergedEntries.length } });
+        await artifactLock.assertOwned();
+        await this.finalizeCallUpdates(
+          call,
+          {
+            metadata: { transcriptEntryCount: entries.length },
+          },
+          true
+        );
+        await recordingRepairStateService.markArtifactsRefreshed(callId);
         return;
       }
 
@@ -219,12 +303,11 @@ class NoteTakerTranscriptService {
         : [];
       const previousGeneratedTitle =
         typeof metadata.generatedTitle === 'string' ? metadata.generatedTitle : null;
-
       const generatedTitle = await this.generateAndSaveSummary(
         call,
         formattedTranscript,
-        previousGeneratedTitle,
-      ).catch(error => {
+        previousGeneratedTitle
+      ).catch((error) => {
         logger.error(`[${callId}] repair_summary_refresh_failed`, { error, path: 'note_taker' });
         return null;
       });
@@ -232,27 +315,38 @@ class NoteTakerTranscriptService {
       const generatedLabels = await this.generateAndSaveLabels(call, formattedTranscript);
       const generatedMarkedItems = await this.generateMarkedItemsList(call, formattedTranscript);
       const current = (await repositories.calls.findByExternalId(callId)) ?? call;
-      const labels = generatedLabels.length > 0
-        ? [...new Set([
-            ...(current.labels ?? []).filter(id => !previousGeneratedLabels.includes(id)),
-            ...generatedLabels,
-          ])]
-        : undefined;
+      const labels =
+        generatedLabels.length > 0
+          ? [
+              ...new Set([
+                ...(current.labels ?? []).filter((id) => !previousGeneratedLabels.includes(id)),
+                ...generatedLabels,
+              ]),
+            ]
+          : undefined;
 
-      await this.finalizeCallUpdates(current, {
-        metadata: {
-          transcriptEntryCount: mergedEntries.length,
-          detailedSummaryCanvasId: detailedSummary?.canvasId,
-          generatedLabelIds: generatedLabels.length > 0 ? generatedLabels : undefined,
-          generatedTitle: generatedTitle ?? undefined,
+      await artifactLock.assertOwned();
+      await this.finalizeCallUpdates(
+        current,
+        {
+          metadata: {
+            transcriptEntryCount: entries.length,
+            detailedSummaryCanvasId: detailedSummary?.canvasId,
+            generatedLabelIds: generatedLabels.length > 0 ? generatedLabels : undefined,
+            generatedTitle: generatedTitle ?? undefined,
+          },
+          labels,
+          markedItems: generatedMarkedItems,
+          summaryTemplateId: detailedSummary?.summaryTemplateId,
         },
-        labels,
-        markedItems: generatedMarkedItems,
-        summaryTemplateId: detailedSummary?.summaryTemplateId,
-      });
+        true
+      );
+      await artifactLock.assertOwned();
       await this.queueVespaIndexing(current);
+      await artifactLock.assertOwned();
+      await recordingRepairStateService.markArtifactsRefreshed(callId);
     } finally {
-      await releaseLock(lockHandle);
+      await artifactLock.release();
     }
   }
 
@@ -262,7 +356,7 @@ class NoteTakerTranscriptService {
    */
   async regenerateSummary(
     call: Call,
-    templateId: BuiltinRecordingSummaryTemplateId,
+    templateId: BuiltinRecordingSummaryTemplateId
   ): Promise<{
     summaryTemplateId: BuiltinRecordingSummaryTemplateId;
     detailedSummaryCanvasId: string | null;
@@ -273,7 +367,7 @@ class NoteTakerTranscriptService {
     const detailedSummary = await this.generateDetailedSummaryCanvas(
       call,
       formattedTranscript,
-      templateId,
+      templateId
     );
     if (!detailedSummary) return null;
 
@@ -355,6 +449,7 @@ class NoteTakerTranscriptService {
       markedItems?: MarkedItem[];
       summaryTemplateId?: string | null;
     },
+    throwOnError = false
   ): Promise<void> {
     const metadataChanges = updates.metadata
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
@@ -377,7 +472,6 @@ class NoteTakerTranscriptService {
       data.labels = updates.labels;
     }
     if (updates.markedItems && updates.markedItems.length > 0) {
-      
       const current = await repositories.calls.findByExternalId(call.externalId);
       const existingMoments = userMarkedMoments(current?.markedItems ?? call.markedItems);
 
@@ -399,6 +493,7 @@ class NoteTakerTranscriptService {
       });
     } catch (error) {
       logger.error(`[${call.externalId}] metadata_update_failed`, { error, path: 'note_taker' });
+      if (throwOnError) throw error;
     }
   }
 
@@ -412,10 +507,16 @@ class NoteTakerTranscriptService {
     const callId = call.externalId;
 
     const formattedTranscript = transcriptService.formatTranscript(entries, callId);
-    const storagePath = await transcriptService.uploadFormattedTranscript(callId, formattedTranscript);
+    const storagePath = await transcriptService.uploadFormattedTranscript(
+      callId,
+      formattedTranscript
+    );
 
     await repositories.calls.update(call.id, { transcript: storagePath });
-    logger.info(`[${callId}] call_record_updated`, { fields_updated: 'transcript', path: 'note_taker' });
+    logger.info(`[${callId}] call_record_updated`, {
+      fields_updated: 'transcript',
+      path: 'note_taker',
+    });
 
     // Fire-and-forget: translate transcript asynchronously in the background.
     transcriptService.translateTranscriptAsync(callId, storagePath).catch((err) => {
@@ -428,13 +529,19 @@ class NoteTakerTranscriptService {
    * available, falling back to the already-parsed plain entries. Returns null
    * (having already logged why) when there's nothing usable to summarize.
    */
-  private async getFormattedTranscript(callId: string, plainEntries: TranscriptEntry[]): Promise<string | null> {
+  private async getFormattedTranscript(
+    callId: string,
+    plainEntries: TranscriptEntry[]
+  ): Promise<string | null> {
     const speakerIdentificationEnabled = await transcriptService.isSpeakerIdentificationEnabled();
 
     if (speakerIdentificationEnabled) {
       const identifiedContent = await transcriptService.getIdentifiedTranscriptContent(callId);
       if (identifiedContent) return identifiedContent;
-      logger.warn(`[${callId}] identified_transcript_unavailable`, { action: 'fallback_to_plain', path: 'note_taker' });
+      logger.warn(`[${callId}] identified_transcript_unavailable`, {
+        action: 'fallback_to_plain',
+        path: 'note_taker',
+      });
     }
 
     return transcriptService.formatTranscript(plainEntries, callId);
@@ -443,7 +550,7 @@ class NoteTakerTranscriptService {
   private async generateAndSaveSummary(
     call: Call,
     formattedTranscript: string,
-    replaceGeneratedTitle: string | null = null,
+    replaceGeneratedTitle: string | null = null
   ): Promise<string | null> {
     const callId = call.externalId;
 
@@ -479,7 +586,10 @@ class NoteTakerTranscriptService {
       .slice(0, 100);
 
     if (!summary && !title) {
-      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
+      logger.error(`[${callId}] ai_summary_skipped`, {
+        reason: 'generation_failed',
+        path: 'note_taker',
+      });
       return null;
     }
 
@@ -487,7 +597,8 @@ class NoteTakerTranscriptService {
     // ago — long enough for the user to have renamed the recording while the LLM was
     // working. Re-read the title so the generated one never lands on a name they typed.
     const latestTitle = (await repositories.calls.findByExternalId(callId))?.title;
-    const titleToSave = title && (!latestTitle || latestTitle === replaceGeneratedTitle) ? title : null;
+    const titleToSave =
+      title && (!latestTitle || latestTitle === replaceGeneratedTitle) ? title : null;
 
     if (!summary && !titleToSave) {
       logger.info(`[${callId}] ai_title_discarded`, {
@@ -510,7 +621,10 @@ class NoteTakerTranscriptService {
       });
     } catch (updateError) {
       // P2025: call was deleted while summary was being generated — ignore gracefully
-      if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
+      if (
+        updateError instanceof Prisma.PrismaClientKnownRequestError &&
+        updateError.code === 'P2025'
+      ) {
         logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
         return null;
       }
@@ -535,13 +649,16 @@ class NoteTakerTranscriptService {
   private async generateDetailedSummaryCanvas(
     call: Call,
     formattedTranscript: string,
-    templateId?: BuiltinRecordingSummaryTemplateId,
+    templateId?: BuiltinRecordingSummaryTemplateId
   ): Promise<DetailedSummaryCanvasResult | null> {
     const callId = call.externalId;
 
     const workspaceId = call.workspaceId;
     if (!workspaceId) {
-      logger.warn(`[${callId}] detailed_summary_skipped`, { reason: 'no_workspace', path: 'note_taker' });
+      logger.warn(`[${callId}] detailed_summary_skipped`, {
+        reason: 'no_workspace',
+        path: 'note_taker',
+      });
       return null;
     }
 
@@ -550,17 +667,18 @@ class NoteTakerTranscriptService {
       // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
       // Note-taker calls have no channel, so speaker→userId resolution is skipped
       // (the frontend falls back to initials for unknown speakers).
-      const { numbered: numberedTranscript, segments } = numberTranscriptSegments(formattedTranscript);
+      const { numbered: numberedTranscript, segments } =
+        numberTranscriptSegments(formattedTranscript);
       const citationCtx: CitationContext = {
         callId,
-        segments: new Map(segments.map(s => [s.n, s])),
+        segments: new Map(segments.map((s) => [s.n, s])),
       };
 
       const latestCall = await repositories.calls.findByExternalId(callId);
       const resolvedCallTitle = latestCall?.title ?? call.title;
       const xyneAutomaticBotPromise = unifiedBotUserService
         .getBotByBotId('xyne-automatic', workspaceId)
-        .catch(error => {
+        .catch((error) => {
           logger.error(`[${callId}] detailed_summary_bot_lookup_failed`, {
             path: 'note_taker',
             error: error instanceof Error ? error.message : String(error),
@@ -575,7 +693,7 @@ class NoteTakerTranscriptService {
         const generated = await callDocumentService.generateRecordingSummary(
           numberedTranscript,
           callId,
-          templateId,
+          templateId
         );
         if (!generated) {
           logger.error(`[${callId}] detailed_summary_skipped`, {
@@ -604,7 +722,7 @@ class NoteTakerTranscriptService {
           call.createdByUserId,
           resolvedCallTitle,
           citationCtx,
-          workspaceId,
+          workspaceId
         );
         if (!canvasId) {
           logger.error(`[${callId}] detailed_summary_skipped`, {
@@ -619,7 +737,7 @@ class NoteTakerTranscriptService {
 
       const SYNC_INTERVAL_MS = 300;
       const sleepMs = (ms: number): Promise<void> =>
-        new Promise(resolve => setTimeout(resolve, ms));
+        new Promise((resolve) => setTimeout(resolve, ms));
       let latestMarkdown = '';
       let renderedMarkdown = '';
       let newCanvasId: string | null = null;
@@ -636,7 +754,7 @@ class NoteTakerTranscriptService {
         const synced = await callDocumentService.syncStreamingDetailedSummaryCanvas(
           newCanvasId,
           snapshot,
-          citationCtx,
+          citationCtx
         );
         if (synced) {
           renderedMarkdown = snapshot;
@@ -660,7 +778,7 @@ class NoteTakerTranscriptService {
 
       const ensureStreamingCanvas = async (
         firstMarkdown: string,
-        startLiveWriter = true,
+        startLiveWriter = true
       ): Promise<void> => {
         if (canvasInitialization || canvasInitializationError) {
           if (canvasInitialization) await canvasInitialization;
@@ -684,7 +802,7 @@ class NoteTakerTranscriptService {
             resolvedCallTitle,
             citationCtx,
             workspaceId,
-            { deferInsertSideEffects: true },
+            { deferInsertSideEffects: true }
           );
           if (!canvasId) {
             throw new Error('Failed to create detailed summary canvas');
@@ -710,9 +828,8 @@ class NoteTakerTranscriptService {
             canvas_id: canvasId,
           });
           if (startLiveWriter) startWriter();
-        })().catch(error => {
-          canvasInitializationError =
-            error instanceof Error ? error : new Error(String(error));
+        })().catch((error) => {
+          canvasInitializationError = error instanceof Error ? error : new Error(String(error));
           logger.error(`[${callId}] recording_summary_canvas_initialization_failed`, {
             error: canvasInitializationError.message,
           });
@@ -727,10 +844,10 @@ class NoteTakerTranscriptService {
           numberedTranscript,
           callId,
           templateId,
-          async accumulated => {
+          async (accumulated) => {
             latestMarkdown = accumulated;
             await ensureStreamingCanvas(accumulated);
-          },
+          }
         );
       } finally {
         writerActive = false;
@@ -779,7 +896,7 @@ class NoteTakerTranscriptService {
         callId,
         call.startedAt,
         resolvedCallTitle,
-        citationCtx,
+        citationCtx
       );
       if (!finalized) {
         logger.error(`[${callId}] detailed_summary_skipped`, {
@@ -814,14 +931,16 @@ class NoteTakerTranscriptService {
       return [];
     }
 
-    const labels = await transcriptService.generateCallLabels(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_labels_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
+    const labels = await transcriptService
+      .generateCallLabels(formattedTranscript, callId)
+      .catch((err) => {
+        logger.error(`[${callId}] generate_labels_threw`, {
+          path: 'note_taker',
+          error: err,
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+        return [] as string[];
       });
-      return [] as string[];
-    });
     if (labels.length === 0) return [];
 
     const tagIds: string[] = [];
@@ -858,7 +977,12 @@ class NoteTakerTranscriptService {
    * the "topic" category (see assertManualCategoryOrOverride).
    */
   private async getOrCreateLabelTag(call: Call, slug: string): Promise<string | null> {
-    const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
+    const existing = await tagRepository.findActiveTag(
+      call.id,
+      NOTE_TAKER_TAG_SOURCE_TYPE,
+      NOTE_TAKER_LABEL_CATEGORY,
+      slug
+    );
     if (existing) return existing.id;
 
     try {
@@ -868,13 +992,18 @@ class NoteTakerTranscriptService {
         call.workspaceId!,
         NOTE_TAKER_LABEL_CATEGORY,
         slug,
-        TagMethod.LLM,
+        TagMethod.LLM
       );
       return created.id;
     } catch (error) {
       // 409 = another run/racing worker created the same tag between the find and create above.
       if (error instanceof TagServiceError && error.status === 409) {
-        const raced = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
+        const raced = await tagRepository.findActiveTag(
+          call.id,
+          NOTE_TAKER_TAG_SOURCE_TYPE,
+          NOTE_TAKER_LABEL_CATEGORY,
+          slug
+        );
         return raced?.id ?? null;
       }
       throw error;
@@ -885,7 +1014,10 @@ class NoteTakerTranscriptService {
    * Generate key decisions/action items, each anchored to a transcript
    * timestamp. Returns [] on any failure or when nothing qualifies.
    */
-  private async generateMarkedItemsList(call: Call, formattedTranscript: string): Promise<MarkedItem[]> {
+  private async generateMarkedItemsList(
+    call: Call,
+    formattedTranscript: string
+  ): Promise<MarkedItem[]> {
     const callId = call.externalId;
     return transcriptService.generateMarkedItems(formattedTranscript, callId).catch((err) => {
       logger.error(`[${callId}] generate_marked_items_threw`, {
@@ -909,9 +1041,14 @@ class NoteTakerTranscriptService {
         app: SubApp.TRANSCRIPT,
         ...(call.workspaceId ? { workspaceId: call.workspaceId } : {}),
       });
-      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.id}`, { path: 'note_taker' });
+      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.id}`, {
+        path: 'note_taker',
+      });
     } catch (vespaError) {
-      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      logger.error(
+        `[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.id}:`,
+        vespaError
+      );
     }
   }
 }

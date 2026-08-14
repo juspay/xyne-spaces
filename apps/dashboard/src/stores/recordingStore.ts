@@ -4,12 +4,7 @@
  */
 
 import { createStore } from '@xstate/store';
-import {
-  Room,
-  RoomConnectOptions,
-  RoomEvent,
-  DataPacket_Kind,
-} from 'livekit-client';
+import { Room, RoomConnectOptions, RoomEvent, DataPacket_Kind } from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
@@ -76,7 +71,7 @@ export interface RecordingState {
   activeLayout: RecordingLayout;
   isTranscriptMinimized: boolean;
   agentLeft: boolean;
-  fallbackProtection: 'ready' | 'unavailable';
+  fallbackProtection: 'initializing' | 'ready' | 'unavailable';
   fallbackReasons: RecordingRepairReason[];
   repairPending: boolean;
 }
@@ -105,7 +100,7 @@ const initialContext: RecordingState = {
   activeLayout: 'transcript',
   isTranscriptMinimized: false,
   agentLeft: false,
-  fallbackProtection: 'ready',
+  fallbackProtection: 'initializing',
   fallbackReasons: [],
   repairPending: false,
 };

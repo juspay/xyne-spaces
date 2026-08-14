@@ -4,11 +4,10 @@ import { CallType } from '@xyne/shared';
 import { validate as isUuid } from 'uuid';
 import { repositories } from '@/database/repositories';
 import { recordingRepairQueue } from '@/queues/recordingRepairQueue';
-import {
-  recordingRepairStateService,
-} from '@/services/recordingRepairStateService';
+import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 import {
   outagesAreFullyCovered,
+  recordingRepairOutagesHash,
   validateRecordingRepairOutages,
 } from '@/services/recordingRepairIntervals';
 import {
@@ -26,13 +25,18 @@ function normalizeMimeType(value: string | undefined): string | null {
     : null;
 }
 
-function sameChunk(left: RecordingRepairChunkMetadata | null, right: RecordingRepairChunkInput): boolean {
-  return !!left &&
+function sameChunk(
+  left: RecordingRepairChunkMetadata | null,
+  right: RecordingRepairChunkInput
+): boolean {
+  return (
+    !!left &&
     left.sequence === right.sequence &&
     left.startedAt === right.startedAt &&
     left.endedAt === right.endedAt &&
     left.sha256 === right.sha256 &&
-    left.mimeType === right.mimeType;
+    left.mimeType === right.mimeType
+  );
 }
 
 class RecordingRepairController {
@@ -74,14 +78,19 @@ class RecordingRepairController {
       !normalizeMimeType(file.mimetype) ||
       !isStandaloneWebm(file.buffer)
     ) {
-      res.status(400).json({ success: false, error: 'Invalid recording repair metadata or WebM data' });
+      res
+        .status(400)
+        .json({ success: false, error: 'Invalid recording repair metadata or WebM data' });
       return;
     }
 
     try {
       const authorized = await this.getOwnedHeadlessCall(req, callId);
       if (authorized.error) {
-        res.status(authorized.error).json({ success: false, error: authorized.error === 403 ? 'Access denied' : 'Recording not found' });
+        res.status(authorized.error).json({
+          success: false,
+          error: authorized.error === 403 ? 'Access denied' : 'Recording not found',
+        });
         return;
       }
       const actualChecksum = createHash('sha256').update(file.buffer).digest('hex');
@@ -90,12 +99,21 @@ class RecordingRepairController {
         return;
       }
 
-      const input: RecordingRepairChunkInput = { sequence, startedAt, endedAt, sha256: checksum, mimeType };
+      const input: RecordingRepairChunkInput = {
+        sequence,
+        startedAt,
+        endedAt,
+        sha256: checksum,
+        mimeType,
+      };
       const path = recordingRepairStorageService.chunkPath(callId, captureId, sequence);
       const existing = await recordingRepairStorageService.getChunk(path);
       if (existing) {
         if (!sameChunk(existing, input)) {
-          res.status(409).json({ success: false, error: 'Chunk sequence already exists with different metadata' });
+          res.status(409).json({
+            success: false,
+            error: 'Chunk sequence already exists with different metadata',
+          });
           return;
         }
         res.json({ success: true, idempotent: true });
@@ -104,17 +122,21 @@ class RecordingRepairController {
 
       const capture = await recordingRepairStateService.get(callId, captureId);
       if (capture) {
-        res.status(409).json({ success: false, error: 'Recording repair capture is already finalized' });
+        res
+          .status(409)
+          .json({ success: false, error: 'Recording repair capture is already finalized' });
         return;
       }
       const result = await recordingRepairStorageService.writeChunkIfAbsent(
         callId,
         captureId,
         file.buffer,
-        input,
+        input
       );
       if (!result.created && !sameChunk(result.chunk, input)) {
-        res.status(409).json({ success: false, error: 'Chunk sequence already exists with different metadata' });
+        res
+          .status(409)
+          .json({ success: false, error: 'Chunk sequence already exists with different metadata' });
         return;
       }
       res.status(result.created ? 201 : 200).json({ success: true, idempotent: !result.created });
@@ -137,13 +159,27 @@ class RecordingRepairController {
     try {
       const authorized = await this.getOwnedHeadlessCall(req, callId);
       if (authorized.error) {
-        res.status(authorized.error).json({ success: false, error: authorized.error === 403 ? 'Access denied' : 'Recording not found' });
+        res.status(authorized.error).json({
+          success: false,
+          error: authorized.error === 403 ? 'Access denied' : 'Recording not found',
+        });
         return;
       }
       const outages = validateRecordingRepairOutages((req.body as { outages?: unknown }).outages);
       const existing = await recordingRepairStateService.get(callId, captureId);
       if (existing) {
-        if (existing.status === 'FINALIZED' || (existing.status === 'FAILED' && existing.retryable)) {
+        const incomingHash = recordingRepairOutagesHash(outages);
+        const existingHash = existing.outagesHash ?? recordingRepairOutagesHash(existing.outages);
+        if (incomingHash !== existingHash) {
+          res
+            .status(409)
+            .json({ success: false, error: 'Capture was finalized with different outages' });
+          return;
+        }
+        if (
+          existing.status === 'FINALIZED' ||
+          (existing.status === 'FAILED' && existing.retryable)
+        ) {
           await recordingRepairQueue.enqueue(callId, captureId, existing.finalizedAt);
         }
         res.json({ success: true, idempotent: true, status: existing.status });
@@ -151,10 +187,21 @@ class RecordingRepairController {
       }
       const chunks = await recordingRepairStorageService.listChunks(callId, captureId);
       if (!outagesAreFullyCovered(outages, chunks)) {
-        res.status(400).json({ success: false, error: 'Missing recording repair chunks for an outage' });
+        res
+          .status(400)
+          .json({ success: false, error: 'Missing recording repair chunks for an outage' });
         return;
       }
       const capture = await recordingRepairStateService.finalize(callId, captureId, outages);
+      if (
+        (capture.outagesHash ?? recordingRepairOutagesHash(capture.outages)) !==
+        recordingRepairOutagesHash(outages)
+      ) {
+        res
+          .status(409)
+          .json({ success: false, error: 'Capture was finalized with different outages' });
+        return;
+      }
       await recordingRepairQueue.enqueue(callId, captureId, capture.finalizedAt);
       res.json({ success: true, status: capture.status });
     } catch (error) {
@@ -179,7 +226,10 @@ class RecordingRepairController {
     }
     const authorized = await this.getOwnedHeadlessCall(req, callId);
     if (authorized.error) {
-      res.status(authorized.error).json({ success: false, error: authorized.error === 403 ? 'Access denied' : 'Recording not found' });
+      res.status(authorized.error).json({
+        success: false,
+        error: authorized.error === 403 ? 'Access denied' : 'Recording not found',
+      });
       return;
     }
     const capture = await recordingRepairStateService.get(callId, captureId);
@@ -187,7 +237,14 @@ class RecordingRepairController {
       res.status(404).json({ success: false, error: 'Recording repair capture not found' });
       return;
     }
-    res.json({ success: true, capture: { status: capture.status, processingError: capture.processingError } });
+    res.json({
+      success: true,
+      capture: {
+        status: capture.status,
+        processingError: capture.processingError,
+        retryable: capture.retryable,
+      },
+    });
   };
 }
 
