@@ -28,6 +28,13 @@ export interface SubagentDefinition {
   paramDescription: string;
   /** MCP server type this subagent wraps — matches serverType from /mcp/tools */
   serverType: string;
+  /** Additional serverTypes this definition also wraps. Prod can register the
+   *  same logical connector under a second type (e.g. the DB-provisioned
+   *  "github-mcp-npx" next to the code adapter's "github"); without an alias
+   *  the extra type has no definition and its tools become invisible to the
+   *  fast-mode catalog while passing through fine in normal mode. Alias types
+   *  share this definition's wrapper name, prompt, and allowlist identity. */
+  serverTypeAliases?: string[];
   /** Optional per-subagent reasoning level. When set, overrides the global
    *  AGENT.thinkingLevel for THIS subagent's child session. Retrieval-heavy
    *  subagents (spaces) benefit from "high"; cheap structured-fetch ones
@@ -190,6 +197,10 @@ Return structured findings (lists of {repo, number, title, state, url} when surf
     paramName: "question",
     paramDescription: "What to look up on GitHub. Include the owner/repo (e.g. 'anthropics/anthropic-sdk-python'), PR / issue numbers, branch names, file paths, or a code search expression.",
     serverType: "github",
+    // Prod's active GitHub connector is DB-registered under this second type
+    // (the code adapter's "github" is vestigial there). Without the alias its
+    // tools are invisible to the fast-mode catalog (2026-07-30 incident).
+    serverTypeAliases: ["github-mcp-npx"],
   },
 
   // ── Grafana ─────────────────────────────────────────────────────
@@ -1564,6 +1575,19 @@ If a query fails, include the error text and suggest a corrected index or query 
 /** Helper to get a definition by name */
 export function getSubagentDefinition(name: string): SubagentDefinition | undefined {
   return SUBAGENT_DEFINITIONS.find((d) => d.name === name);
+}
+
+/**
+ * Resolve the definition wrapping a given MCP serverType, honouring aliases.
+ * THE lookup for "which subagent owns this server's tools" — every call site
+ * (normal-mode wrapper build, fast-mode catalog + direct split) must use this
+ * instead of matching `d.serverType` inline, or alias-registered servers
+ * (github-mcp-npx) silently fall out of one mode but not the other.
+ */
+export function findSubagentDefinitionForServer(serverType: string): SubagentDefinition | undefined {
+  return SUBAGENT_DEFINITIONS.find(
+    (d) => d.serverType === serverType || (d.serverTypeAliases?.includes(serverType) ?? false),
+  );
 }
 
 

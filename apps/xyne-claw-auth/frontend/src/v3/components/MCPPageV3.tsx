@@ -491,6 +491,13 @@ export function MCPPageV3({ userId }: Props) {
   const handleCreateServer = useCallback(
     async (payload: Parameters<typeof createServer>[0]) => {
       const created = await createServer(payload, userId);
+      // Make a newly-created connector's form immediately available to the
+      // reconnect dialog instead of waiting for the page-level credential map
+      // (which is fetched only on mount).
+      setCredentialFields((current) => ({
+        ...current,
+        [created.type]: created.credentialForm?.fields ?? payload.credentialForm?.fields ?? [],
+      }));
       reload();
       return created;
     },

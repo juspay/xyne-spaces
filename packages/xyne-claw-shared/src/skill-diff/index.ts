@@ -256,9 +256,9 @@ export interface ApproverResolution {
  * are required.
  *
  *   personal skill → the owner approves (DM goes to the owner).
- *   global skill   → an admin must approve. We route the DM to the recorded
- *                    owner/promoter as the notify target, but the resolve step
- *                    still enforces `callerIsAdmin`.
+ *   global skill   → the recorded owner/promoter OR any admin may approve. The
+ *                    DM is routed to the owner/promoter as the notify target,
+ *                    and the resolve step accepts that owner or a CLAW_ADMIN.
  */
 export function resolveSkillUpdateApprover(skill: SkillForAuthz): ApproverResolution {
   if (skill.scope === "global") {
@@ -294,8 +294,12 @@ export function authorizeSkillUpdateApproval(params: {
   baseContentHash: string;
 }): SkillApprovalAuthz {
   if (params.requiresAdmin) {
-    if (!params.callerIsAdmin) {
-      return { ok: false, code: 403, reason: "global skill changes can only be approved by an admin" };
+    // Global skills are org-wide, so an admin may always approve. We also allow
+    // the skill's own owner/promoter (the resolved approverUserId) to approve
+    // their own change — otherwise the update DM is routed to the owner but the
+    // owner can never act on it, deadlocking the proposal.
+    if (!params.callerIsAdmin && params.callerUserId !== params.approverUserId) {
+      return { ok: false, code: 403, reason: "global skill changes can only be approved by the skill owner or an admin" };
     }
   } else if (params.callerUserId !== params.approverUserId && !params.callerIsAdmin) {
     return { ok: false, code: 403, reason: "only the skill owner (or an admin) can approve this change" };

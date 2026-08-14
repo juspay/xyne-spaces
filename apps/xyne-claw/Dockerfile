@@ -45,7 +45,6 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/kata-sdk/package.json         packages/kata-sdk/
 COPY packages/litellm-client/package.json   packages/litellm-client/
-COPY packages/storage/package.json          packages/storage/
 COPY packages/xyne-claw-shared/package.json packages/xyne-claw-shared/
 COPY apps/xyne-claw/package.json            apps/xyne-claw/
 
@@ -57,16 +56,13 @@ RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-c
 
 COPY packages/kata-sdk         packages/kata-sdk
 COPY packages/litellm-client   packages/litellm-client
-COPY packages/storage          packages/storage
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw/tsconfig.json apps/xyne-claw/
 COPY apps/xyne-claw/src           apps/xyne-claw/src
 COPY apps/xyne-claw/skills        apps/xyne-claw/skills
+COPY apps/xyne-claw/design-skills apps/xyne-claw/design-skills
 COPY apps/xyne-claw/scripts       apps/xyne-claw/scripts
-# @xyne/storage ships built output (main: dist/index.js); --ignore-scripts
-# skipped its prepare hook, so build it explicitly before the typecheck.
 RUN pnpm --filter @xyne/litellm-client run build && \
-    pnpm --filter @xyne/storage run build && \
     pnpm --filter xyne-claw run typecheck
 
 # Production image

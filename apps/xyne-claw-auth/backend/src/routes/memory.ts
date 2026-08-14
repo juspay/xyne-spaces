@@ -2207,9 +2207,9 @@ memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, 
 /**
  * POST /memory/banks/:agentSlug/upload-session
  *
- * Upload a raw Claude session export (Claude Code JSONL or claude.ai JSON) and
- * distill it into the agent's shared memory. Owner/admin only — the bank is
- * shared across everyone who uses the agent.
+ * Upload a raw session export (Claude Code JSONL, claude.ai JSON, OpenCode bundle,
+ * or Codex rollout JSONL) and distill it into the agent's shared memory.
+ * Owner/admin only — the bank is shared across everyone who uses the agent.
  *
  * The raw export is sent to claw's /internal/curator/distill-session, which
  * parses + normalizes it and runs a chunked map-reduce distill so a large
@@ -2220,7 +2220,7 @@ memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, 
  *
  * Async: the parse + N-chunk distill is slow (many LLM calls), so the handler
  * responds 202 immediately and does the work in the background (same pattern as
- * batch approve). Uploaded candidates carry a `claude-<ts>-<file>` sessionId so
+ * batch approve). Uploaded candidates carry a `<source>-<ts>-<file>` sessionId so
  * admins can spot upload-sourced proposals in the review queue.
  */
 memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (req, res) => {
@@ -2251,9 +2251,11 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
       return;
     }
 
-    const body = (req.body ?? {}) as { filename?: string; content?: string };
+    const body = (req.body ?? {}) as { filename?: string; content?: string; source?: string };
     const filename = (body.filename ?? "").trim();
     const content = (body.content ?? "").trim();
+    const rawSource = (body.source ?? "claude").trim().toLowerCase();
+    const source = ["claude", "opencode", "codex"].includes(rawSource) ? rawSource : "claude";
     if (!filename || !content) {
       res.status(400).json({ success: false, error: "filename and content are required" });
       return;
@@ -2266,7 +2268,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
 
     const now = new Date();
     const reviewDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const sessionId = `claude-${now.getTime()}-${filename}`.slice(0, 200);
+    const sessionId = `${source}-${now.getTime()}-${filename}`.slice(0, 200);
 
     // Respond immediately — the parse + map-reduce distill is slow and must not
     // block the request. Candidates appear in the review queue when done.
@@ -2281,7 +2283,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
         // facts. The legacy map-reduce distill (MEMORY_SESSION_INGEST=0)
         // queues per-subsystem review rows instead.
         if (process.env["MEMORY_SESSION_INGEST"] !== "0") {
-          const parsed = await parseSessionFile({ sessionId, agentSlug, userId, filename, rawSession: content });
+          const parsed = await parseSessionFile({ sessionId, agentSlug, userId, filename, source, rawSession: content });
           if (!parsed) {
             logger.warn("[memory] /upload-session parse produced no transcript", { agentSlug, filename, by: userId });
             return;
@@ -2306,7 +2308,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
             // without this tag the contributor is unrecoverable. contributor:
             // (not user:) — user: is the twin privacy filter prefix.
             `contributor:${userId}`,
-            "source:claude-upload",
+            `source:${source}-upload`,
             ...(subsystem ? [`subsystem:${subsystem}`] : []),
           ];
           // Retain in generous slices (provider chunks internally at ~3K; the
@@ -2320,7 +2322,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
               metadata: {
                 agentSlug,
                 sessionId,
-                source: "claude-upload",
+                source: `${source}-upload`,
                 filename: filename.slice(0, 120),
                 ...(subsystem ? { subsystem } : {}),
               },
@@ -2338,7 +2340,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
           return;
         }
 
-        const candidates = await distillSessionFile({ sessionId, agentSlug, userId, filename, rawSession: content });
+        const candidates = await distillSessionFile({ sessionId, agentSlug, userId, filename, source, rawSession: content });
         if (candidates.length === 0) {
           logger.info("[memory] /upload-session produced no candidates", { agentSlug, filename, by: userId });
           return;
@@ -2350,7 +2352,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
           orgId: agent.orgId,
           conversationId: null,
           channelId: null,
-          task: `Claude session upload "${filename}"`,
+          task: `${source.charAt(0).toUpperCase() + source.slice(1)} session upload "${filename}"`,
           result: "",
           toolsUsed: [],
           toolInvocations: [],
@@ -2361,7 +2363,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
           completedAt: new Date(),
         };
         const reviewIds = await persistSubsystemReviews(transcript, candidates, reviewDate);
-        logger.info("[memory] /upload-session curated claude session", {
+        logger.info(`[memory] /upload-session curated ${source} session`, {
           agentSlug, filename, candidatesCreated: reviewIds.length, by: userId,
         });
       } catch (err) {
