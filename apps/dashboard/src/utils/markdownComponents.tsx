@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { logger, Event } from './logger';
 import { openLink } from './openLink';
-import { Check, Copy } from 'lucide-react';
 import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
+import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
+import { copyTextToClipboard } from './clipboardUtils';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
 import { D2Block } from '../components/Markdown/D2Block';
@@ -38,14 +39,112 @@ interface CodeProps extends React.HTMLAttributes<HTMLElement> {
   node?: Element | undefined;
 }
 
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
+const CODE_BLOCK_PREVIEW_MAX_HEIGHT = 20 * 20 + 16;
+
+const FencedCodeBlock = ({
+  children,
+  codeText,
+}: {
+  children: React.ReactNode;
+  codeText: string;
+}): React.ReactElement => {
+  const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const resetTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => (): void => {
+      if (resetTimerRef.current !== undefined) window.clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
+
+  const handleCopy = (): void => {
+    void copyTextToClipboard(codeText)
+      .then(() => {
+        setCopied(true);
+        resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to copy code snippet to clipboard', error);
+      });
+  };
+
+  const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
+  const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+
+  return (
+    <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
+      <div
+        className='relative overflow-hidden'
+        style={
+          collapsible && !isExpanded
+            ? { maxHeight: `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px` }
+            : undefined
+        }
+      >
+        {children}
+        {collapsible && (
+          <div
+            className={
+              isExpanded
+                ? 'flex justify-center pb-2'
+                : 'pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pt-8 pb-3'
+            }
+            style={
+              isExpanded
+                ? undefined
+                : {
+                    backgroundImage: 'linear-gradient(to bottom, transparent, hsl(var(--muted)))',
+                  }
+            }
+          >
+            <button
+              type='button'
+              onClick={() => setIsExpanded(prev => !prev)}
+              className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_CODE_BLOCK'
+              data-track-metadata={JSON.stringify({ isExpanded, lineCount: lines })}
+            >
+              <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
+              <span>{isExpanded ? 'Show less' : `Show more (${lines} lines)`}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <button
+        type='button'
+        onClick={handleCopy}
+        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-sm transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
+        aria-label='Copy code snippet'
+        title='Copy code snippet'
+        data-track-category='MESSAGE'
+        data-track-name='COPY_CODE_SNIPPET'
+      >
+        <span className='flex items-center justify-center p-1'>
+          {copied ? (
+            <CopyCopied size={16} className='text-status-success' />
+          ) : (
+            <CopyDefault size={16} />
+          )}
+        </span>
+      </button>
+      <span aria-live='polite' className='sr-only'>
+        {copied ? 'Code snippet copied to clipboard' : ''}
+      </span>
+    </div>
+  );
+};
+
 const CodeBlock = ({
   className,
   children,
   node: _node,
   ...props
 }: CodeProps & { messageId: string }): React.ReactElement => {
-  const [copied, setCopied] = useState(false);
-
   const match = /language-(\w+)/.exec(String(className ?? ''));
   const language = match ? match[1] : '';
 
@@ -89,7 +188,7 @@ const CodeBlock = ({
   if (!isBlock) {
     return (
       <code
-        className='bg-muted text-foreground font-mono text-[0.8em] px-1.5 py-0.5 rounded'
+        className='bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-primary'
         {...props}
       >
         {children}
@@ -98,46 +197,14 @@ const CodeBlock = ({
   }
 
   // ── Fenced code block ──
-  const handleCopy = (): void => {
-    void navigator.clipboard.writeText(codeString).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   return (
-    <div className='xyne-code-block my-3 rounded-lg overflow-hidden border border-border max-w-full'>
-      {/* Header bar */}
-      <div className='flex items-center justify-between px-4 py-2 bg-muted border-b border-border'>
-        <span className='text-xs font-mono text-muted-foreground select-none'>
-          {language || 'code'}
-        </span>
-        <button
-          onClick={handleCopy}
-          className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
-          title='Copy code'
-          data-track-category='xyne-ai'
-          data-track-name='copy-code-block'
-        >
-          {copied ? (
-            <>
-              <Check size={12} />
-              <span>Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy size={12} />
-              <span>Copy</span>
-            </>
-          )}
-        </button>
-      </div>
-      <pre className='overflow-x-auto p-4 bg-[#f6f8fa] m-0 text-sm leading-6 text-[#1d1e1f]'>
+    <FencedCodeBlock codeText={codeString}>
+      <pre className='bg-muted m-0 px-4 py-3 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[0.875rem] leading-5 text-foreground'>
         <code className={className} style={{ color: 'inherit' }} {...props}>
           {children}
         </code>
       </pre>
-    </div>
+    </FencedCodeBlock>
   );
 };
 
@@ -173,7 +240,7 @@ export const createMarkdownComponents = (
   }: React.TableHTMLAttributes<HTMLTableElement> & {
     children?: React.ReactNode;
   }): React.ReactElement => (
-    <div style={{ overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
+    <div className='overflow-x-auto max-w-full'>
       <table {...props}>{children}</table>
     </div>
   ),

@@ -6,26 +6,32 @@
  * single shared element animated between segments via `layoutId`, which keeps the
  * movement continuous instead of cross-fading two backgrounds.
  *
- * The summary segment doubles as a summary-template picker, so regenerating under a
- * different template is one click from the tab you are already on — which is why the
- * template props hang off this control rather than sitting beside it. The segment
- * reads as a plain tab until it is the open pane, and only then reveals its chevron
- * and opens the picker on click.
+ * The summary segment doubles as a summary-template picker. Selecting a different
+ * template regenerates immediately; the refresh action reruns the currently selected
+ * template. The segment reads as a plain tab until it is the open pane, and only then
+ * reveals its chevron and opens the picker on click.
  */
 
-import { useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { CaptionOn } from '@xyne/icons';
-import { AlignLeft, Check, ChevronDown } from 'lucide-react';
-import { Popover } from '../../../components/ui/Popover';
-import type { BuiltinRecordingSummaryTemplateId } from '../../../services/Recording/recordingService';
+import {
+  Refresh,
+  CaptionOn,
+  CheckTickSingle,
+  GridDashboardBento,
+  Hashtag,
+  PlusDefault,
+  ChevronBigDown,
+  ListAiGenerated,
+} from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { XyneAIStar } from '@/components/icons/xyne-ai';
+import { Popover } from '../../../components/ui/Popover';
 
 export type RecordingContentTab = 'notes' | 'transcript' | 'summary';
 
 export interface RecordingSummaryTemplate {
-  id: BuiltinRecordingSummaryTemplateId;
+  id: string;
   name: string;
   icon: string;
 }
@@ -35,38 +41,47 @@ interface RecordingContentTabsProps {
   /** `transcript` while live, `summary` once ended. */
   secondTab: Exclude<RecordingContentTab, 'notes'>;
   onSelect: (tab: RecordingContentTab) => void;
-  /**
-   * Summary templates offered on the summary segment. Omit to render a plain
-   * "Default summary" pill with no menu.
-   */
-  templates?: ReadonlyArray<RecordingSummaryTemplate>;
-  /** The template the current summary was generated with; labels the segment. */
+  /** The template selected for this recording; labels the segment. */
   selectedTemplate?: RecordingSummaryTemplate;
   /** Swaps the segment's icon for a spinner and locks the menu while regenerating. */
   isRegenerating?: boolean;
-  onTemplateSelect?: (templateId: BuiltinRecordingSummaryTemplateId) => void;
+  templates?: RecordingSummaryTemplate[];
+  templatesLoading?: boolean;
+  onTemplateMenuOpen?: () => void;
+  onTemplateSelect?: (templateId: string) => void;
+  onRegenerate?: () => void;
+  onOpenTemplates?: () => void;
+  onNewTemplate?: () => void;
 }
 
 const TAB_INDICATOR_ID = 'recording-content-tab-indicator';
+const TEMPLATE_NAME_MAX_LENGTH = 24;
 
-const MIDNIGHT_LISTBOX_RESET =
-  '[[data-theme=midnight]_&[role=listbox]:not([cmdk-list])]:!bg-transparent';
-
-const MIDNIGHT_OPTION_RESET = cn(
-  '[[data-theme=midnight]_&[role=option]:not([cmdk-item])]:!text-foreground',
-);
+const truncateTemplateName = (name: string): string =>
+  name.length > TEMPLATE_NAME_MAX_LENGTH
+    ? `${name.slice(0, TEMPLATE_NAME_MAX_LENGTH - 1).trimEnd()}…`
+    : name;
 
 export const RecordingContentTabs = ({
   visibleTab,
   secondTab,
   onSelect,
-  templates,
   selectedTemplate,
   isRegenerating = false,
+  templates = [],
+  templatesLoading = false,
+  onTemplateMenuOpen,
   onTemplateSelect,
+  onRegenerate,
+  onOpenTemplates,
+  onNewTemplate,
 }: RecordingContentTabsProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (visibleTab !== 'summary' || isRegenerating) setIsTemplateMenuOpen(false);
+  }, [isRegenerating, visibleTab]);
 
   const renderTab = (
     tab: RecordingContentTab,
@@ -112,7 +127,8 @@ export const RecordingContentTabs = ({
 
   const renderSummaryTab = (): ReactElement => {
     const isActive = visibleTab === 'summary';
-    const label = selectedTemplate?.name ?? 'Default summary';
+    const fullLabel = selectedTemplate?.name ?? 'Default summary';
+    const label = truncateTemplateName(fullLabel);
 
     const indicator = isActive ? (
       <motion.span
@@ -125,150 +141,179 @@ export const RecordingContentTabs = ({
       />
     ) : null;
 
-    const icon =
-      selectedTemplate && selectedTemplate.id !== 'default' ? (
-        <span aria-hidden='true' className='leading-none'>
-          {selectedTemplate.icon}
+    const hasCustomIcon = Boolean(selectedTemplate && selectedTemplate.name !== 'Default summary');
+
+    const icon = hasCustomIcon ? (
+      <Hashtag className='size-3.5' aria-hidden='true' />
+    ) : (
+      <XyneAIStar size={12} />
+    );
+
+    /** The menu header sits at the list's icon scale rather than the tab's. */
+    const menuIcon = hasCustomIcon ? (
+      <span aria-hidden='true' className='leading-none'>
+        {selectedTemplate?.icon}
+      </span>
+    ) : (
+      <XyneAIStar size={14} />
+    );
+
+    const trigger = (
+      <button
+        type='button'
+        role='tab'
+        aria-selected={isActive}
+        aria-busy={isRegenerating}
+        onClick={() => {
+          if (!isActive) {
+            onSelect('summary');
+          }
+        }}
+        title={fullLabel}
+        data-track-category='RecordingDetailV2'
+        data-track-name='open_summary_templates'
+        className={cn(
+          'relative inline-flex h-8 items-center gap-2 rounded-full pl-5 pr-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          isRegenerating && 'cursor-wait',
+        )}
+      >
+        {indicator}
+        <span className='relative z-10 flex items-center gap-2'>
+          {icon}
+          {label}
+          <AnimatePresence initial={false}>
+            {isActive && onOpenTemplates && (
+              <motion.span
+                initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }}
+                animate={{ opacity: 1, scale: 1, width: 14 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.16 }}
+                className='flex shrink-0 items-center justify-center overflow-hidden'
+                aria-hidden='true'
+              >
+                <ChevronBigDown strokeWidth={2} className='size-3.5' />
+              </motion.span>
+            )}
+          </AnimatePresence>
         </span>
-      ) : (
-        <XyneAIStar size={12} />
-      );
+      </button>
+    );
 
-    if (!templates || !onTemplateSelect) {
-      return (
-        <button
-          type='button'
-          role='tab'
-          aria-selected={isActive}
-          onClick={() => onSelect('summary')}
-          data-track-category='RecordingDetailV2'
-          data-track-name='open_default_summary'
-          className={cn(
-            'relative inline-flex h-8 items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
-            isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {indicator}
-          <span className='relative z-10 flex items-center gap-2'>
-            {icon}
-            {label}
-          </span>
-        </button>
-      );
-    }
-
-    const handleOpenChange = (open: boolean): void => {
-      if (!open) {
-        setIsTemplateMenuOpen(false);
-        return;
-      }
-      if (!isActive) {
-        onSelect('summary');
-        return;
-      }
-      if (!isRegenerating) setIsTemplateMenuOpen(true);
-    };
-
-    const handleTemplateSelect = (templateId: BuiltinRecordingSummaryTemplateId): void => {
-      setIsTemplateMenuOpen(false);
-      onTemplateSelect(templateId);
-    };
+    if (!onOpenTemplates) return trigger;
 
     return (
       <Popover
-        open={isTemplateMenuOpen}
-        onOpenChange={handleOpenChange}
+        trigger={trigger}
+        open={isActive && isTemplateMenuOpen}
+        onOpenChange={open => {
+          if (isActive && !isRegenerating) {
+            if (open) onTemplateMenuOpen?.();
+            setIsTemplateMenuOpen(open);
+          }
+        }}
         side='bottom'
         align='start'
-        sideOffset={6}
-        className='w-64 rounded-xl border-border p-1.5 shadow-xl'
-        trigger={
+        sideOffset={8}
+        className='w-60 rounded-xl border-border p-1.5 shadow-xl'
+      >
+        <div className='flex items-center gap-0.5 rounded-lg p-0.5'>
+          <span className='flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-semibold text-foreground'>
+            <span className='flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm'>
+              {menuIcon}
+            </span>
+            <span className='min-w-0 flex-1 truncate' title={fullLabel}>
+              {label}
+            </span>
+          </span>
           <button
             type='button'
-            role='tab'
-            aria-selected={isActive}
-            aria-busy={isRegenerating}
+            disabled={isRegenerating || !selectedTemplate?.id}
+            onClick={() => {
+              setIsTemplateMenuOpen(false);
+              onRegenerate?.();
+            }}
+            aria-label={`Regenerate with ${fullLabel}`}
+            className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
             data-track-category='RecordingDetailV2'
-            data-track-name='open_summary_templates'
-            className={cn(
-              'relative inline-flex h-8 items-center gap-2 rounded-full pl-5 pr-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-              isRegenerating && 'cursor-wait',
-            )}
+            data-track-name='regenerate_selected_summary_template'
           >
-            {indicator}
-            <span className='relative z-10 flex items-center gap-2'>
-              {icon}
-              {label}
-              {/* The chevron belongs to the open pane only — off the summary the segment
-                  is a plain tab, and advertising a menu there would promise the wrong
-                  outcome for a click. Widening as it fades stops the label jumping. */}
-              <AnimatePresence initial={false}>
-                {isActive && (
-                  <motion.span
-                    initial={
-                      shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }
-                    }
-                    animate={{ opacity: 1, scale: 1, width: 14 }}
-                    exit={
-                      shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }
-                    }
-                    transition={{
-                      duration: shouldReduceMotion ? 0 : 0.16,
-                      ease: [0.22, 1, 0.36, 1],
-                    }}
-                    className='flex shrink-0 items-center justify-center overflow-hidden'
-                    aria-hidden='true'
-                  >
-                    <motion.span
-                      className='flex'
-                      animate={{ rotate: isTemplateMenuOpen ? 180 : 0 }}
-                      transition={{
-                        duration: shouldReduceMotion ? 0 : 0.18,
-                        ease: [0.22, 1, 0.36, 1],
-                      }}
-                    >
-                      <ChevronDown className='size-3.5' />
-                    </motion.span>
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </span>
+            <Refresh strokeWidth={2.5} className={cn('size-4', isRegenerating && 'animate-spin')} />
           </button>
-        }
-      >
-        <div
-          role='listbox'
-          aria-label='Summary templates'
-          className={cn('thin-scrollbar', MIDNIGHT_LISTBOX_RESET)}
-        >
-          {templates.map(template => {
-            const isSelected = template.id === selectedTemplate?.id;
-
-            return (
-              <button
-                key={template.id}
-                type='button'
-                role='option'
-                aria-selected={isSelected}
-                onClick={() => handleTemplateSelect(template.id)}
-                className={cn(
-                  'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent',
-                  MIDNIGHT_OPTION_RESET,
-                  isSelected && 'bg-accent',
-                )}
-                data-track-category='RecordingDetailV2'
-                data-track-name={`generate_summary_${template.id}`}
-              >
-                <span aria-hidden='true'>{template.icon}</span>
-                <span className='min-w-0 flex-1 truncate'>{template.name}</span>
-                {isSelected && (
-                  <Check className='size-3.5 shrink-0 text-primary' aria-hidden='true' />
-                )}
-              </button>
-            );
-          })}
+          <span className='flex w-5 shrink-0 items-center justify-center'>
+            <CheckTickSingle
+              strokeWidth={2.5}
+              className='size-4 text-status-success'
+              aria-label='Selected template'
+            />
+          </span>
         </div>
+
+        <div className='mx-1.5 my-1.5 h-px bg-border' />
+        <p className='px-2.5 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+          Templates
+        </p>
+        <div className='thin-scrollbar max-h-72 overflow-y-auto'>
+          {templatesLoading ? (
+            <p className='px-2.5 py-1.5 text-sm text-muted-foreground'>Loading templates…</p>
+          ) : (
+            templates
+              .filter(template => template.id !== selectedTemplate?.id)
+              .map(template => (
+                <button
+                  key={template.id}
+                  type='button'
+                  onClick={() => {
+                    setIsTemplateMenuOpen(false);
+                    onTemplateSelect?.(template.id);
+                  }}
+                  title={template.name}
+                  className='flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
+                  data-track-category='RecordingDetailV2'
+                  data-track-name='select_summary_template'
+                >
+                  <span className='flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm'>
+                    {template.icon}
+                  </span>
+                  <span className='min-w-0 flex-1 truncate'>
+                    {truncateTemplateName(template.name)}
+                  </span>
+                </button>
+              ))
+          )}
+        </div>
+
+        <div className='mx-1.5 my-1.5 h-px bg-border' />
+        <button
+          type='button'
+          onClick={() => {
+            setIsTemplateMenuOpen(false);
+            onOpenTemplates();
+          }}
+          className='flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
+          data-track-category='RecordingDetailV2'
+          data-track-name='open_all_summary_templates'
+        >
+          <span className='flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground'>
+            <GridDashboardBento strokeWidth={2} className='size-4' />
+          </span>
+          All templates…
+        </button>
+        <button
+          type='button'
+          onClick={() => {
+            setIsTemplateMenuOpen(false);
+            onNewTemplate?.();
+          }}
+          className='flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
+          data-track-category='RecordingDetailV2'
+          data-track-name='new_summary_template'
+        >
+          <span className='flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground'>
+            <PlusDefault className='size-4' />
+          </span>
+          New template
+        </button>
       </Popover>
     );
   };
@@ -282,7 +327,7 @@ export const RecordingContentTabs = ({
       {renderTab(
         'notes',
         'My notes',
-        <AlignLeft className='size-4' aria-hidden='true' />,
+        <ListAiGenerated className='size-4' aria-hidden='true' />,
         'open_notes',
       )}
       {secondTab === 'transcript'

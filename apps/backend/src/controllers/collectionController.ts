@@ -37,9 +37,43 @@ import {
  */
 const HIGHLIGHT_SNIPPET_BASE_WORDS = 30;
 const HIGHLIGHT_SNIPPET_HARD_WORDS = 80;
+/**
+ * Drop the heading breadcrumb Docling prepends to a chunk — the document title
+ * and section path ("# <title>", "## CHAPTER – IV …") that precede the prose.
+ * Those lines come from the outline and are never contiguous with the body in
+ * the PDF's text layer, so a find window starting with them (as the 30-word one
+ * always did) matches nothing and no highlight appears.
+ *
+ * Returns the original text when a chunk is nothing but headings (a
+ * table-of-contents chunk), so the caller still has something to work with.
+ */
+function stripLeadingHeadings(raw: string): string {
+    const lines = raw.split(/\r?\n/);
+    let i = 0;
+    const isSkippable = (line: string): boolean => {
+        const t = line.trim();
+        if (t.length === 0) return true;
+        if (/^#{1,6}\s/.test(t)) return true; // markdown heading
+        if (/^[-–—*_]{3,}$/.test(t)) return true; // horizontal rule
+        // A line that is ENTIRELY bold/emphasis is a heading in disguise
+        // ("**RESERVE BANK OF INDIA**"). A bold-PREFIXED paragraph
+        // ("**26.** (1) An RE should…") is real prose — keep it.
+        if (/^\*\*[^*]+\*\*$/.test(t)) return true;
+        return false;
+    };
+    while (i < lines.length && isSkippable(lines[i]!)) i++;
+    const body = lines.slice(i).join('\n').trim();
+    return body.length > 0 ? body : raw;
+}
+
 function buildHighlightSnippet(raw: string | undefined | null): string | null {
-    const cleaned = String(raw ?? '')
-        .replace(/^\[Pages?\s+\d+(?:[-,\s\d]*)?\]\s*/i, '') // drop leading [Page N] / [Pages 1, 2, 3] marker
+    // Page marker FIRST: ingestion prepends it inline ("[Page 6] # Title…"), so
+    // the heading test below only fires once it's gone.
+    const withoutPageMarker = String(raw ?? '').replace(
+        /^\[Pages?\s+\d+(?:[-,\s\d]*)?\]\s*/i,
+        '',
+    );
+    const cleaned = stripLeadingHeadings(withoutPageMarker)
         .replace(/<[^>]+>/g, ' ')                      // strip HTML tags
         .replace(/&[a-z]+;|&#\d+;/gi, ' ')             // strip HTML entities
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')       // unwrap markdown links
@@ -272,7 +306,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             const scopeType = typeof req.query.scopeType === 'string' ? req.query.scopeType : undefined;
             const scopeId = typeof req.query.scopeId === 'string' ? req.query.scopeId : undefined;
 
-            const roots = await listAccessibleRootCollections(user.id, { scopeType, scopeId });
+            const roots = await listAccessibleRootCollections(user.id, user.workspaceId, { scopeType, scopeId });
             const collections = includeItems ? await expandCollectionTrees(roots) : roots;
 
             res.status(200).json({ success: true, collections });

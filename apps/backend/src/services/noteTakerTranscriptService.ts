@@ -11,7 +11,6 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
-import type { BuiltinRecordingSummaryTemplateId } from '@/services/recordingSummaryTemplates';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No
 // configKey is used, so tagService.createTag skips the "category must be
@@ -21,7 +20,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
-  summaryTemplateId: BuiltinRecordingSummaryTemplateId;
+  summaryTemplateId: string;
 }
 
 /**
@@ -143,17 +142,43 @@ class NoteTakerTranscriptService {
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
 
-      await this.generateAndSaveSummary(call, formattedTranscript);
-      const detailedSummary = await this.generateDetailedSummaryCanvas(call, formattedTranscript);
-      const labelIds = await this.generateAndSaveLabels(call, formattedTranscript);
-      const markedItems = await this.generateMarkedItemsList(call, formattedTranscript);
+      // These workloads are independent once the transcript is available, so
+      // start them together. generateDetailedSummaryCanvas preserves its own
+      // ordered dependency chain: template selection -> prompt generation when
+      // needed -> detailed-summary streaming.
+      const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
+      const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
+      const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
+      const markedItemsPromise = this.generateMarkedItemsList(call, formattedTranscript);
+
+      const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
+        if (labelIds.length === 0) return labelIds;
+        try {
+          await repositories.calls.update(call.id, { labels: labelIds });
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels', path: 'note_taker' });
+        } catch (error) {
+          logger.error(`[${callId}] labels_save_failed`, { error, path: 'note_taker' });
+        }
+        return labelIds;
+      });
+      const saveMarkedItemsPromise = markedItemsPromise.then(async (markedItems) => {
+        if (markedItems.length > 0) {
+          await this.finalizeCallUpdates(call, { markedItems });
+        }
+        return markedItems;
+      });
+
+      const [, detailedSummary] = await Promise.all([
+        summaryPromise,
+        detailedSummaryPromise,
+        saveLabelsPromise,
+        saveMarkedItemsPromise,
+      ]);
       await this.finalizeCallUpdates(call, {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
         },
-        labels: labelIds,
-        markedItems,
         summaryTemplateId: detailedSummary?.summaryTemplateId,
       });
       await this.queueVespaIndexing(call);
@@ -168,9 +193,9 @@ class NoteTakerTranscriptService {
    */
   async regenerateSummary(
     call: Call,
-    templateId: BuiltinRecordingSummaryTemplateId,
+    templateId: string,
   ): Promise<{
-    summaryTemplateId: BuiltinRecordingSummaryTemplateId;
+    summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
@@ -350,76 +375,67 @@ class NoteTakerTranscriptService {
     // The tokens stay inline in the stored aiSummary and are parsed client-side.
     const { numbered: numberedTranscript } = numberTranscriptSegments(formattedTranscript);
 
-    const [summary, generatedTitle] = await Promise.all([
-      transcriptService.generateCallSummary(numberedTranscript, callId).catch((err) => {
+    const summaryPromise = transcriptService.generateCallSummary(numberedTranscript, callId).catch((err) => {
         logger.error(`[${callId}] generate_summary_threw`, {
           path: 'note_taker',
           error: err,
           stack: err instanceof Error ? err.stack : undefined,
         });
         return null;
-      }),
-      call.title
-        ? Promise.resolve(null)
-        : transcriptService.generateCallTitle(formattedTranscript, callId).catch((err) => {
+      });
+    const titlePromise = call.title
+      ? Promise.resolve(null)
+      : transcriptService.generateCallTitle(formattedTranscript, callId).catch((err) => {
             logger.error(`[${callId}] generate_title_threw`, {
               path: 'note_taker',
               error: err,
               stack: err instanceof Error ? err.stack : undefined,
             });
             return null;
-          }),
-    ]);
+          });
 
-    const title = generatedTitle
-      ?.split(/\r?\n/, 1)[0]
-      ?.trim()
-      .replace(/^['"]|['"]$/g, '')
-      .slice(0, 100);
-
-    if (!summary && !title) {
-      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
-      return;
-    }
-
-    // `call` was snapshotted when processing started, which by now can be a minute
-    // ago — long enough for the user to have renamed the recording while the LLM was
-    // working. Re-read the title so the generated one never lands on a name they typed.
-    const titleToSave =
-      title && !(await repositories.calls.findByExternalId(callId))?.title ? title : null;
-
-    if (!summary && !titleToSave) {
-      logger.info(`[${callId}] ai_title_discarded`, {
-        reason: 'renamed_during_processing',
-        path: 'note_taker',
-      });
-      return;
-    }
-
-    try {
-      await repositories.calls.update(call.id, {
-        ...(summary ? { aiSummary: summary } : {}),
-        ...(titleToSave ? { title: titleToSave } : {}),
-      });
-      logger.info(`[${callId}] call_record_updated`, {
-        fields_updated: [summary ? 'aiSummary' : '', titleToSave ? 'title' : '']
-          .filter(Boolean)
-          .join(','),
-        path: 'note_taker',
-      });
-    } catch (updateError) {
-      // P2025: call was deleted while summary was being generated — ignore gracefully
-      if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
-        logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-        return;
+    const saveSummaryPromise = summaryPromise.then(async (summary) => {
+      if (!summary) return false;
+      try {
+        await repositories.calls.update(call.id, { aiSummary: summary });
+        logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary', path: 'note_taker' });
+        return true;
+      } catch (error) {
+        logger.error(`[${callId}] call_record_update_failed`, {
+          stage: 'summary_save', path: 'note_taker', error,
+        });
+        return false;
       }
-      logger.error(`[${callId}] call_record_update_failed`, {
-        stage: 'call_record_update',
-        path: 'note_taker',
-        error: updateError,
-        stack: updateError instanceof Error ? updateError.stack : undefined,
-      });
-      return;
+    });
+
+    const saveTitlePromise = titlePromise.then(async (generatedTitle) => {
+      const title = generatedTitle
+        ?.split(/\r?\n/, 1)[0]
+        ?.trim()
+        .replace(/^['"]|['"]$/g, '')
+        .slice(0, 100);
+      if (!title) return false;
+
+      // Re-read the title so a user rename made while the LLM was working wins.
+      if ((await repositories.calls.findByExternalId(callId))?.title) {
+        logger.info(`[${callId}] ai_title_discarded`, { reason: 'renamed_during_processing', path: 'note_taker' });
+        return false;
+      }
+      try {
+        await repositories.calls.update(call.id, { title });
+        logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+        return true;
+      } catch (error) {
+        logger.error(`[${callId}] call_record_update_failed`, {
+          stage: 'title_save', path: 'note_taker', error,
+        });
+        return false;
+      }
+    });
+
+    const [savedSummary, savedTitle] = await Promise.all([saveSummaryPromise, saveTitlePromise]);
+    if (!savedSummary && !savedTitle) {
+      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
     }
   }
 
@@ -433,7 +449,7 @@ class NoteTakerTranscriptService {
   private async generateDetailedSummaryCanvas(
     call: Call,
     formattedTranscript: string,
-    templateId?: BuiltinRecordingSummaryTemplateId,
+    templateId?: string,
   ): Promise<DetailedSummaryCanvasResult | null> {
     const callId = call.externalId;
 

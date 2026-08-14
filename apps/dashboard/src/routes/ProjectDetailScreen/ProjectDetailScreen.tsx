@@ -8,6 +8,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import BoardEditScreen from '../../components/Board/BoardEditScreen/BoardEditScreen';
 import BoardStageConfigScreen from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen';
 import { BoardRolesConfigScreen } from '../../components/Board/BoardRolesConfigScreen';
+import { BoardConfigCopyScreen } from '../../components/Board/BoardConfigCopyScreen';
 import BoardCreateScreen from '../../components/Board/BoardCreateScreen/BoardCreateScreen';
 import { BoardTypeChooserDialog } from '../../components/Board/BoardTypeChooserDialog/BoardTypeChooserDialog';
 import { FlowBoardCreateScreen } from '../../components/Board/FlowBoardCreateScreen/FlowBoardCreateScreen';
@@ -55,7 +56,7 @@ const getNextClonedBoardName = (
 };
 
 const ProjectDetailScreen = (): ReactElement => {
-  const { projectId } = useParams<{ projectId: string }>();
+  const { workspaceId, projectId } = useParams<{ workspaceId: string; projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -83,6 +84,7 @@ const ProjectDetailScreen = (): ReactElement => {
     useState<BoardWithStages | null>(null);
   const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
   const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
+  const [copyConfigTargetBoard, setCopyConfigTargetBoard] = useState<BoardWithStages | null>(null);
 
   // Fetch project details
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
@@ -358,7 +360,15 @@ const ProjectDetailScreen = (): ReactElement => {
                   boards={boards}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
+                  onCopyConfig={board => setCopyConfigTargetBoard(board)}
                   applicationBoardIds={applicationBoardIds}
+                  applicationByBoardId={applicationByBoardId}
+                  {...(workspaceId && projectId
+                    ? {
+                        onBoardClick: (board: BoardWithStages) =>
+                          void navigate(`/${workspaceId}/projects/${projectId}/${board.id}`),
+                      }
+                    : {})}
                 />
               </Tabs.Content>
 
@@ -637,6 +647,18 @@ const ProjectDetailScreen = (): ReactElement => {
             setConfiguringStagesForBoard(null);
             setBoardIdToEdit(null);
           }}
+        />
+      )}
+
+      {/* Copy Board Configuration Modal */}
+      {copyConfigTargetBoard && projectId && (
+        <BoardConfigCopyScreen
+          targetBoardId={copyConfigTargetBoard.id}
+          targetBoardName={copyConfigTargetBoard.name}
+          projectId={projectId}
+          isOpen={true}
+          onClose={() => setCopyConfigTargetBoard(null)}
+          onDone={() => setCopyConfigTargetBoard(null)}
         />
       )}
 

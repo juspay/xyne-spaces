@@ -882,11 +882,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.REGULAR}
-                      showActiveStatus={false}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -988,11 +984,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.REGULAR}
-                      showActiveStatus={false}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -1015,7 +1007,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* ================== RIGHT SIDE ================== */}
-        <div className='flex-1 flex flex-col gap-1 min-w-0'>
+        <div className='flex-1 flex flex-col min-w-0'>
           {isBookmarked && variant !== 'pinned' && (
             <div className='inline-flex items-center gap-1 text-blue-700 dark:text-blue-200 text-[11px] font-medium'>
               <Bookmark className='w-3 h-3 fill-current' />
@@ -1847,7 +1839,7 @@ export const ReactionView = ({
                       setEmojiPickerOpen(false);
                     }}
                     customEmojis={customEmojis || []}
-                    previewConfig={{ showPreview: false }}
+                    previewConfig={{ showPreview: true }}
                   />
                 </Popover.Content>
               </>

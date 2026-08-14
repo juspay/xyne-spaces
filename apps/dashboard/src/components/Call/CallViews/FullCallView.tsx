@@ -1,8 +1,8 @@
 import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
 import { WifiLow } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { MutableRefObject } from 'react';
 import {
   useParticipantNetworkQuality,
   useNetworkQualityToast,
@@ -31,8 +31,6 @@ import { recordingService } from '../../../services/Recording/recordingService';
 import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveRecording';
 import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
-import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
-import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { hasJoinedExternalParticipant } from '../callParticipant.utils';
 import { CallWhiteboardView } from '../CallWhiteboard';
@@ -41,11 +39,6 @@ import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
-
-const CALL_PRIVACY_DESCRIPTION = [
-  'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
-  'Meeting data, including audio, may be processed and kept temporarily to create the selected artifacts.',
-];
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -121,10 +114,6 @@ interface FullCallViewProps {
   isRecording?: boolean | undefined;
   /** Authoritative active recording state from the external lobby API. */
   externalActiveRecording?: ActiveRecording | null | undefined;
-  /** Delays reminder sound until external recording state is known. */
-  privacyReminderEnabled?: boolean | undefined;
-  /** Session-scoped reminder clock, owned by CustomLiveKitRoom so it survives view switches. */
-  reminderClockRef?: MutableRefObject<CallReminderClock> | undefined;
 }
 
 export function FullCallView({
@@ -170,8 +159,6 @@ export function FullCallView({
   onToggleHandRaise,
   isRecording: isRecordingProp = false,
   externalActiveRecording,
-  privacyReminderEnabled = true,
-  reminderClockRef,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   const { user } = useAuth();
@@ -188,6 +175,25 @@ export function FullCallView({
   const showQualityToast = useNetworkQualityToast(networkQuality);
 
   const isHost = isHostProp ?? false;
+
+  // Host transcription kill-switch state (see roomMachine TOGGLE_TRANSCRIPTION).
+  const isTranscriptionEnabled = useSelector(
+    roomActor,
+    state => state.context.isTranscriptionEnabled,
+  );
+
+  // Host display name (from room-metadata `createdBy`) for the non-host "who can
+  // remove the agent" note in the transcription popover.
+  const hostName = useMemo(() => {
+    if (!room?.metadata) return null;
+    try {
+      const createdBy = (JSON.parse(room.metadata) as { createdBy?: string }).createdBy;
+      if (!createdBy) return null;
+      return participants.find(p => p.identity === createdBy)?.name ?? null;
+    } catch {
+      return null;
+    }
+  }, [room?.metadata, participants]);
 
   // Active-recording state is driven by room metadata so every participant (incl.
   // late joiners) sees the indicator. `isRecordingProp`/optimistic local state are
@@ -234,12 +240,10 @@ export function FullCallView({
   const [optimisticRecordingType, setOptimisticRecordingType] = useState<RecordingType | null>(
     null,
   );
-  const [privacyReminderTriggerKey, setPrivacyReminderTriggerKey] = useState(0);
 
   const handleStartRecording = useCallback(
     async (type: RecordingType): Promise<void> => {
       setOptimisticRecordingType(type);
-      setPrivacyReminderTriggerKey(prev => prev + 1);
       setOptimisticRecording(true);
       try {
         const res = await recordingService.startCallRecording(callId, type);
@@ -300,12 +304,6 @@ export function FullCallView({
   const { reactions, sendReaction } = useReactions(room);
   const displayRecordingType =
     displayActiveRecording?.recordingType ?? (optimisticRecording ? optimisticRecordingType : null);
-  const callPrivacyActions = createCallPrivacyActions({
-    isRecordingActive,
-    recordingType: displayRecordingType,
-    recordingElapsed,
-    recordingStartedByName: displayActiveRecording?.startedByName,
-  });
 
   // Get call title and origin from activeCalls
 
@@ -480,14 +478,10 @@ export function FullCallView({
         </div>
         <div className='flex items-center gap-3'>
           <CallPrivacyIndicator
-            title='Transcribing'
-            callId={callId}
-            description={CALL_PRIVACY_DESCRIPTION}
-            actions={callPrivacyActions}
-            activeTone={isRecordingActive ? 'recording' : 'ai'}
-            reminderTriggerKey={privacyReminderTriggerKey}
-            reminderEnabled={privacyReminderEnabled}
-            reminderClockRef={reminderClockRef}
+            isTranscriptionEnabled={isTranscriptionEnabled}
+            isHost={isHost}
+            hostName={hostName}
+            onToggleTranscription={() => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' })}
             trackMetadata={{
               isRecordingActive,
               recordingType: displayRecordingType,
