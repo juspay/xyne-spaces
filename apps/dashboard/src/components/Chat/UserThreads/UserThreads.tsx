@@ -18,7 +18,11 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
 import { useNavigate, useParams, Outlet } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { conversationService, ThreadListEntry, ThreadListSort } from '../../../services/Chat/conversationService';
+import {
+  conversationService,
+  ThreadListEntry,
+  ThreadListSort,
+} from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
 import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
 
@@ -298,14 +302,17 @@ const UserThreads = (): ReactElement => {
   );
 
   return (
-    <div className='flex h-full w-full bg-background'>
+    <div className='flex h-full w-full bg-background pt-14 [@media(min-width:500px)]:pt-0'>
       <div
-        className={`pt-8 h-full flex flex-col bg-background ${
+        className={`flex flex-col bg-background ${
           showThreadPanel ? (isMobile ? 'hidden' : 'w-1/2 border-r border-border') : 'w-full'
         }`}
       >
-        <div className='flex items-center justify-between px-4 pb-3'>
-          <span className='text-sm font-semibold text-foreground'>Threads</span>
+        <div className='relative z-30 shrink-0 px-6 py-4 border-b border-border/50 bg-background flex items-center justify-between'>
+          <div className='flex items-center gap-2 text-foreground'>
+            <MessageCircle className='w-5 h-5 text-primary' />
+            <h1 className='text-lg font-semibold tracking-tight'>Threads</h1>
+          </div>
           <div className='inline-flex items-center rounded-md border border-border p-0.5 text-sm'>
             <button
               type='button'
