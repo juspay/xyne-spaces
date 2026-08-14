@@ -75,22 +75,33 @@ describe('MessagesACL.canDelete', () => {
     );
   });
 
-  // The banner is the one system message its recipient may remove. Everything else the
-  // product posts as SYSTEM — call summaries, whiteboards, channel notices — stays.
+  // `visibleTo` is what separates a notice addressed to one person from one posted to the
+  // channel. Anything the product posts channel-wide leaves it unset, so it is refused by
+  // default — no subtype list to keep in step.
   it.each([
-    ['call_summary', { messageSubtype: 'call_summary' }],
-    ['call_whiteboard', { messageSubtype: 'call_whiteboard' }],
-    ['channel_email', { messageSubtype: 'channel_email' }],
-    ['no subtype at all', {}],
-  ])('refuses to delete a system message of subtype %s', async (_label, metadata) => {
+    ['a call summary', { messageSubtype: 'call_summary' }],
+    ['a whiteboard', { messageSubtype: 'call_whiteboard' }],
+    ['a channel email notice', { messageSubtype: 'channel_email' }],
+    ['a subtype nobody has written yet', { messageSubtype: 'something_added_next_quarter' }],
+    ['no metadata at all', undefined],
+  ])('refuses to delete %s, which is addressed to the channel', async (_label, metadata) => {
     const tx = transactionReturning(
-      nonParticipantBanner({ metadata }),
+      nonParticipantBanner({ visibleTo: null, metadata }),
       { channel: { workspaceId: context.workspaceId } },
     );
 
     await expect(acl.canDelete({ messageId: 'message-1' }, tx)).rejects.toThrow(
       'system messages cannot be deleted',
     );
+  });
+
+  it('lets the recipient dismiss a personal notice of any subtype', async () => {
+    const tx = transactionReturning(
+      nonParticipantBanner({ metadata: { messageSubtype: 'some_future_personal_nudge' } }),
+      { channel: { workspaceId: context.workspaceId } },
+    );
+
+    await expect(acl.canDelete({ messageId: 'message-1' }, tx)).resolves.toBeUndefined();
   });
 
   it("refuses a banner addressed to someone else", async () => {
@@ -103,6 +114,69 @@ describe('MessagesACL.canDelete', () => {
       'system messages cannot be deleted',
     );
   });
+
+  it("refuses another user's ordinary message", async () => {
+    const tx = transactionReturning(
+      { messageId: 'message-1', conversationId: 'conversation-1', msgType: 'USER', senderId: 'user-2' },
+      { channel: { workspaceId: context.workspaceId } },
+    );
+
+    await expect(acl.canDelete({ messageId: 'message-1' }, tx)).rejects.toThrow(
+      'only the original sender can delete this message',
+    );
+  });
+});
+
+describe('MessagesACL.canUpdate', () => {
+  const acl = new MessagesACL(context);
+
+  function participantNotice(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      messageId: 'message-1',
+      conversationId: 'conversation-1',
+      msgType: 'SYSTEM',
+      metadata: { operationType: 'participants_removed', adminUserId: context.userID },
+      ...overrides,
+    };
+  }
+
+  // Removing several people in a row coalesces into one notice, so the admin who wrote it
+  // edits it. Without this the second removal fails outright.
+  it('lets the admin who posted a participant notice coalesce into it', async () => {
+    const tx = transactionReturning(
+      participantNotice(),
+      { channel: { workspaceId: context.workspaceId } },
+      { channel: { id: 'channel-1', visibility: 'PUBLIC' } },
+    );
+
+    await expect(acl.canUpdate({ messageId: 'message-1' }, tx)).resolves.toBeUndefined();
+  });
+
+  it('refuses a participant notice posted by a different admin', async () => {
+    const tx = transactionReturning(
+      participantNotice({ metadata: { operationType: 'participants_removed', adminUserId: 'user-2' } }),
+      { channel: { workspaceId: context.workspaceId } },
+    );
+
+    await expect(acl.canUpdate({ messageId: 'message-1' }, tx)).rejects.toThrow(
+      'system messages cannot be modified',
+    );
+  });
+
+  it('refuses any other system message', async () => {
+    const tx = transactionReturning(
+      participantNotice({ metadata: { messageSubtype: 'call_summary' } }),
+      { channel: { workspaceId: context.workspaceId } },
+    );
+
+    await expect(acl.canUpdate({ messageId: 'message-1' }, tx)).rejects.toThrow(
+      'system messages cannot be modified',
+    );
+  });
+});
+
+describe('MessagesACL.canDelete — sender path', () => {
+  const acl = new MessagesACL(context);
 
   it("refuses another user's ordinary message", async () => {
     const tx = transactionReturning(

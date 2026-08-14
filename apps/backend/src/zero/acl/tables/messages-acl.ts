@@ -75,10 +75,28 @@ export class MessagesACL extends BaseACL<'messages'> {
       throw new MutationACLError('Message update failed: message does not exist', 'messages');
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
-    if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
+
+    // A run of participant changes by one admin coalesces into a single notice rather than
+    // posting one per person, so that notice is edited after it is written. Only its own
+    // author may do so, and only in a channel they belong to — every other system message
+    // stays as posted.
+    if (message.msgType === MessageType.SYSTEM) {
+      const meta = message.metadata as { operationType?: string; adminUserId?: string } | null;
+      const isParticipantNotice =
+        meta?.operationType === 'participants_added' ||
+        meta?.operationType === 'participants_removed' ||
+        meta?.operationType === 'participants_joined';
+
+      if (!isParticipantNotice || meta?.adminUserId !== this.ctx.userID) {
+        throw new MutationACLError('Message update failed: system messages cannot be modified', 'messages');
+      }
+      await this.assertChannelMembership(message.conversationId, tx);
       return;
     }
-    throw new MutationACLError('Message update failed: only the original sender can edit this message', 'messages');
+    if (message.senderId !== this.ctx.userID) {
+      throw new MutationACLError('Message update failed: only the original sender can edit this message', 'messages');
+    }
+    await this.assertChannelMembership(message.conversationId, tx);
   }
 
   async canDelete(args: DeleteID<TableSchema<'messages'>>, tx: Transaction<Schema>): Promise<void> {
@@ -88,12 +106,15 @@ export class MessagesACL extends BaseACL<'messages'> {
     }
     await this.verifyConversationInWorkspace(message.conversationId, tx);
 
-    // The non-participant banner is addressed to one person and dismissed by them, so its
-    // recipient is the one caller who may remove a system message. Every other system
-    // message — call summaries, whiteboards, channel notices — stays put.
+    // A system message carrying `visibleTo` was addressed to one person, so dismissing it is
+    // theirs to do. One left unset was posted to the channel — call summaries, release
+    // notes, commit reports — and belongs to everyone, so nobody deletes it.
+    //
+    // Keyed on who it is addressed to rather than a list of subtypes: a new personal notice
+    // then works without touching this file, and a new channel-wide one is refused by
+    // default rather than by remembering to add it.
     if (message.msgType === MessageType.SYSTEM) {
-      const subtype = (message.metadata as { messageSubtype?: string } | null)?.messageSubtype;
-      if (message.visibleTo === this.ctx.userID && subtype === 'user_not_in_channel') {
+      if (message.visibleTo === this.ctx.userID) {
         return;
       }
       throw new MutationACLError('Message delete failed: system messages cannot be deleted', 'messages');
