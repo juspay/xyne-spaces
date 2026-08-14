@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
 import { IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
-import { AttachmentEntityType, ChannelScopeType, UserType } from '@xyne/shared';
+import { AttachmentEntityType, CallType, ChannelScopeType, UserType } from '@xyne/shared';
 
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
@@ -14,6 +14,18 @@ export interface AnalyticsFilters {
   endDate?: string; // ISO date string for custom range end
   repoName?: string; // Repository filter
   userId?: string; // User filter - 'all' or specific user ID
+}
+
+// Calls and recordings are the same table, split by callType (HEADLESS = recording)
+export interface CallsBreakdown {
+  calls: number;      // Regular calls (every callType except HEADLESS)
+  recordings: number; // Recordings (HEADLESS)
+}
+
+export interface CallsTimeSeriesPoint {
+  date: string;
+  calls: number;      // Call count for the bucket (recordings excluded)
+  recordings: number; // Recording count for the bucket
 }
 
 // New optimized types for execution stats
@@ -2410,10 +2422,14 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get number of calls
-   * Counts the number of calls started in the selected time period
+   * Get the calls that lasted more than 60 seconds in the selected time period
+   * Calls and recordings live in the same table - HEADLESS calls are note taker recordings,
+   * every other call type is a regular call
    */
-  async getNumberOfCalls(filters: AnalyticsFilters): Promise<number> {
+  private async getValidCalls(filters: AnalyticsFilters): Promise<{
+    validCalls: { startedAt: Date; isRecording: boolean }[];
+    dateCondition: Date | { gte: Date; lte?: Date };
+  }> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const userIds = await this.getUsersId(workspaceId);
@@ -2431,69 +2447,67 @@ export class AnalyticsRepository {
       },
       select: {
         startedAt: true,
-        endedAt: true
+        endedAt: true,
+        callType: true
       }
     }));
 
     // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls.filter(call => {
-      if (!call.endedAt) return false;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      return duration > 60;
-    });
+    const validCalls = calls
+      .filter(call => {
+        if (!call.endedAt) return false;
+        const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+        return duration > 60;
+      })
+      .map(call => ({
+        startedAt: call.startedAt,
+        isRecording: call.callType === CallType.HEADLESS
+      }));
 
-    return validCalls.length;
+    return { validCalls, dateCondition };
+  }
+
+  /**
+   * Get number of calls and recordings
+   * Counts the calls started in the selected time period, split into regular calls
+   * and note taker recordings
+   */
+  async getNumberOfCalls(filters: AnalyticsFilters): Promise<CallsBreakdown> {
+    const { validCalls } = await this.getValidCalls(filters);
+
+    return {
+      calls: validCalls.filter(call => !call.isRecording).length,
+      recordings: validCalls.filter(call => call.isRecording).length
+    };
   }
 
   /**
    * Get number of calls time-series data
+   * Each point carries the call and recording counts for its bucket
    */
-  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<CallsTimeSeriesPoint[]> {
+    const { validCalls, dateCondition } = await this.getValidCalls(filters);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
-
-    // Get calls
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
-      where: {
-        startedAt: dateCondition,
-        ...this.getCallWorkspaceFilter(workspaceId, userIds)
-      },
-      select: {
-        startedAt: true,
-        endedAt: true
-      }
-    }));
-
-    // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls.filter(call => {
-      if (!call.endedAt) return false;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      return duration > 60;
-    });
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
+    const callBuckets = new Map<string, number>();
+    const recordingBuckets = new Map<string, number>();
 
     // Initialize buckets
     timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
+      callBuckets.set(bucket, 0);
+      recordingBuckets.set(bucket, 0);
     });
 
     // Group calls by time buckets
     validCalls.forEach(call => {
       const bucketKey = this.getBucketKey(call.startedAt, groupBy);
+      const bucketData = call.isRecording ? recordingBuckets : callBuckets;
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
       }
@@ -2502,7 +2516,8 @@ export class AnalyticsRepository {
     // Convert to array format
     return timeBuckets.map(bucketKey => ({
       date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
+      calls: callBuckets.get(bucketKey) || 0,
+      recordings: recordingBuckets.get(bucketKey) || 0
     })).sort((a, b) => a.date.localeCompare(b.date));
   }
 

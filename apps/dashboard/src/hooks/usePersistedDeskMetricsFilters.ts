@@ -86,6 +86,8 @@ interface StoredFilters {
   selectedStageNames: string[];
   selectedPriorities: TicketPriority[];
   selectedUserGroupIds: string[];
+  selectedTagCategory: string | null;
+  selectedTagValues: string[];
   // Per-field selected values or text terms: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
@@ -99,6 +101,8 @@ const DEFAULT_STORED: StoredFilters = {
   selectedStageNames: [],
   selectedPriorities: [],
   selectedUserGroupIds: [],
+  selectedTagCategory: null,
+  selectedTagValues: [],
   selectedCustomFieldValues: {},
   comparedChannelIds: [],
 };
@@ -133,6 +137,9 @@ const readStorage = (key: string): StoredFilters => {
       selectedUserGroupIds: isStringArray(p['selectedUserGroupIds'])
         ? p['selectedUserGroupIds']
         : [],
+      selectedTagCategory:
+        typeof p['selectedTagCategory'] === 'string' ? p['selectedTagCategory'] : null,
+      selectedTagValues: isStringArray(p['selectedTagValues']) ? p['selectedTagValues'] : [],
       // Handle migration from old string[] format → default to empty
       selectedCustomFieldValues: isPerKeyValues(p['selectedCustomFieldValues'])
         ? p['selectedCustomFieldValues']
@@ -163,6 +170,8 @@ export interface PersistedDeskMetricsFilters {
   selectedStageNames: string[];
   selectedPriorities: TicketPriority[];
   selectedUserGroupIds: string[];
+  selectedTagCategory: string | null;
+  selectedTagValues: string[];
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
@@ -170,6 +179,8 @@ export interface PersistedDeskMetricsFilters {
   setSelectedStageNames: (names: string[]) => void;
   setSelectedPriorities: (priorities: TicketPriority[]) => void;
   setSelectedUserGroupIds: (ids: string[]) => void;
+  setSelectedTagCategory: (cat: string | null) => void;
+  setSelectedTagValues: (vals: string[]) => void;
   setSelectedCustomFieldValues: (vals: Record<string, string[]>) => void;
   setComparedChannelIds: (ids: string[]) => void;
 }
@@ -243,6 +254,21 @@ export const usePersistedDeskMetricsFilters = (
     [persist],
   );
 
+  const setSelectedTagCategory = useCallback(
+    (cat: string | null) => {
+      // Changing category always clears specific tag selections
+      persist(prev => ({ ...prev, selectedTagCategory: cat, selectedTagValues: [] }));
+    },
+    [persist],
+  );
+
+  const setSelectedTagValues = useCallback(
+    (vals: string[]) => {
+      persist(prev => ({ ...prev, selectedTagValues: vals }));
+    },
+    [persist],
+  );
+
   const setSelectedCustomFieldValues = useCallback(
     (vals: Record<string, string[]>) => {
       persist(prev => ({ ...prev, selectedCustomFieldValues: vals }));
@@ -266,6 +292,8 @@ export const usePersistedDeskMetricsFilters = (
     selectedStageNames: stored.selectedStageNames,
     selectedPriorities: stored.selectedPriorities,
     selectedUserGroupIds: stored.selectedUserGroupIds,
+    selectedTagCategory: stored.selectedTagCategory,
+    selectedTagValues: stored.selectedTagValues,
     selectedCustomFieldValues: stored.selectedCustomFieldValues,
     comparedChannelIds: stored.comparedChannelIds,
     setDateRange,
@@ -273,6 +301,8 @@ export const usePersistedDeskMetricsFilters = (
     setSelectedStageNames,
     setSelectedPriorities,
     setSelectedUserGroupIds,
+    setSelectedTagCategory,
+    setSelectedTagValues,
     setSelectedCustomFieldValues,
     setComparedChannelIds,
   };

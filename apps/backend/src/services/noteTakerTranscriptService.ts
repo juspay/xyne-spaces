@@ -4,13 +4,17 @@ import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
-import { transcriptService, type TranscriptEntry, type MarkedItem } from '@/services/transcriptService';
+import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
+import {
+  mergeRecordingSummaryMarkedItems,
+  type RecordingSummaryMarkedItem,
+} from '@/services/recordingSummaryMarkedItems';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No
 // configKey is used, so tagService.createTag skips the "category must be
@@ -21,29 +25,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
-}
-
-/**
- * Moments the user flagged during the recording, read back off a Call row.
- * They share Call.markedItems with the decisions/actions generated here, and the
- * type filter is what keeps re-runs idempotent: a second pass drops the previous
- * run's generated items and keeps only the user's.
- */
-function userMarkedMoments(markedItems: Call['markedItems']): MarkedItem[] {
-  if (!Array.isArray(markedItems)) return [];
-
-  return markedItems.filter(
-    (item): item is MarkedItem & Prisma.JsonObject =>
-      !!item &&
-      typeof item === 'object' &&
-      !Array.isArray(item) &&
-      (item as Record<string, unknown>).type === 'moment',
-  );
-}
-
-/** Marked items come from JSON, so the timestamp can be anything at runtime. */
-function markedItemTimestamp(item: MarkedItem): number {
-  return typeof item.timestampSeconds === 'number' ? item.timestampSeconds : 0;
+  markedItems: RecordingSummaryMarkedItem[];
 }
 
 /**
@@ -143,13 +125,11 @@ class NoteTakerTranscriptService {
       if (!formattedTranscript) return;
 
       // These workloads are independent once the transcript is available, so
-      // start them together. generateDetailedSummaryCanvas preserves its own
-      // ordered dependency chain: template selection -> prompt generation when
-      // needed -> detailed-summary streaming.
+      // start them together. The detailed-summary result is also the sole source
+      // for generated decisions/actions and their transcript timestamps.
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
-      const markedItemsPromise = this.generateMarkedItemsList(call, formattedTranscript);
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -161,18 +141,10 @@ class NoteTakerTranscriptService {
         }
         return labelIds;
       });
-      const saveMarkedItemsPromise = markedItemsPromise.then(async (markedItems) => {
-        if (markedItems.length > 0) {
-          await this.finalizeCallUpdates(call, { markedItems });
-        }
-        return markedItems;
-      });
-
       const [, detailedSummary] = await Promise.all([
         summaryPromise,
         detailedSummaryPromise,
         saveLabelsPromise,
-        saveMarkedItemsPromise,
       ]);
       await this.finalizeCallUpdates(call, {
         metadata: {
@@ -180,6 +152,7 @@ class NoteTakerTranscriptService {
           detailedSummaryCanvasId: detailedSummary?.canvasId,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
+        ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       await this.queueVespaIndexing(call);
     } finally {
@@ -208,16 +181,24 @@ class NoteTakerTranscriptService {
     );
     if (!detailedSummary) return null;
 
+    const current = await repositories.calls.findByExternalId(call.externalId);
     const currentMetadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : {};
+      current?.metadata && typeof current.metadata === 'object' && !Array.isArray(current.metadata)
+        ? (current.metadata as Record<string, unknown>)
+        : call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>)
+          : {};
+    const markedItems = mergeRecordingSummaryMarkedItems(
+      current?.markedItems ?? call.markedItems,
+      detailedSummary.markedItems,
+    ) as Prisma.InputJsonValue[];
     await repositories.calls.update(call.id, {
       metadata: {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
+      markedItems,
     });
 
     return {
@@ -277,7 +258,7 @@ class NoteTakerTranscriptService {
     updates: {
       metadata?: Record<string, unknown>;
       labels?: string[];
-      markedItems?: MarkedItem[];
+      markedItems?: RecordingSummaryMarkedItem[];
       summaryTemplateId?: string | null;
     },
   ): Promise<void> {
@@ -301,14 +282,12 @@ class NoteTakerTranscriptService {
     if (updates.labels && updates.labels.length > 0) {
       data.labels = updates.labels;
     }
-    if (updates.markedItems && updates.markedItems.length > 0) {
-      
+    if (updates.markedItems !== undefined) {
       const current = await repositories.calls.findByExternalId(call.externalId);
-      const existingMoments = userMarkedMoments(current?.markedItems ?? call.markedItems);
-
-      const merged = [...existingMoments, ...updates.markedItems];
-      merged.sort((a, b) => markedItemTimestamp(a) - markedItemTimestamp(b));
-      data.markedItems = merged as unknown as Prisma.InputJsonValue[];
+      data.markedItems = mergeRecordingSummaryMarkedItems(
+        current?.markedItems ?? call.markedItems,
+        updates.markedItems,
+      ) as Prisma.InputJsonValue[];
     }
     if (updates.summaryTemplateId !== undefined) {
       data.summaryTemplateId = updates.summaryTemplateId;
@@ -490,6 +469,8 @@ class NoteTakerTranscriptService {
           numberedTranscript,
           callId,
           templateId,
+          undefined,
+          citationCtx.segments,
         );
         if (!generated) {
           logger.error(`[${callId}] detailed_summary_skipped`, {
@@ -528,7 +509,11 @@ class NoteTakerTranscriptService {
           return null;
         }
 
-        return { canvasId, summaryTemplateId: generated.template.id };
+        return {
+          canvasId,
+          summaryTemplateId: generated.template.id,
+          markedItems: generated.markedItems,
+        };
       }
 
       const SYNC_INTERVAL_MS = 300;
@@ -645,6 +630,7 @@ class NoteTakerTranscriptService {
             latestMarkdown = accumulated;
             await ensureStreamingCanvas(accumulated);
           },
+          citationCtx.segments,
         );
       } finally {
         writerActive = false;
@@ -703,7 +689,11 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id };
+      return {
+        canvasId: newCanvasId,
+        summaryTemplateId: generated.template.id,
+        markedItems: generated.markedItems,
+      };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',
@@ -793,22 +783,6 @@ class NoteTakerTranscriptService {
       }
       throw error;
     }
-  }
-
-  /**
-   * Generate key decisions/action items, each anchored to a transcript
-   * timestamp. Returns [] on any failure or when nothing qualifies.
-   */
-  private async generateMarkedItemsList(call: Call, formattedTranscript: string): Promise<MarkedItem[]> {
-    const callId = call.externalId;
-    return transcriptService.generateMarkedItems(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_marked_items_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      return [] as MarkedItem[];
-    });
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized
