@@ -14,7 +14,7 @@ import {
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { affinityService } from '../../services/affinityService';
-import { useAffinityLoaded } from '../../hooks/useAffinityLoaded';
+import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import { TabType, type MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -82,7 +82,7 @@ const GlobalCommandMenu = ({
   const allChannelsUserStatus = useUserChannelStatuses();
   // Re-render once when affinity weights finish loading so the ranking memo below re-reads them
   // (they load async after mount and are otherwise invisible until an unrelated dep changes).
-  const affinityVersion = useAffinityLoaded();
+  const affinityVersion = useAffinityCallback();
   const [internalOpen, setInternalOpen] = useState(false);
   const [internalInitialMention, setInternalInitialMention] = useState<MentionData | null>(null);
   const [internalContextualTab, setInternalContextualTab] = useState<TabType | undefined>(

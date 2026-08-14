@@ -48,6 +48,6 @@ function getSnapshot(): number {
  * Re-renders the caller once when the shared affinity weights finish loading. Add the returned value
  * to an affinity-ranked memo's dependency array so it recomputes with the loaded weights.
  */
-export function useAffinityLoaded(): number {
+export function useAffinityCallback(): number {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

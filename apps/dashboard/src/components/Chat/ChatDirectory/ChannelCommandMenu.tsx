@@ -66,7 +66,7 @@ import {
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
-import { useAffinityLoaded } from '../../../hooks/useAffinityLoaded';
+import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
@@ -548,7 +548,7 @@ const ChannelCommandMenu = ({
   // recovers those query-matching weighted users from the full `allUsers` list.
   // Re-render once when affinity weights finish loading so the empty People-tab ranking re-reads
   // them (rankUsersWithMfu reads getUserWeight imperatively; same fix as GlobalCommandMenu browse).
-  const affinityVersion = useAffinityLoaded();
+  const affinityVersion = useAffinityCallback();
   const rankedLocalUsers = useMemo(() => {
     void affinityVersion;
     return rankUsersWithMfu(filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency);
