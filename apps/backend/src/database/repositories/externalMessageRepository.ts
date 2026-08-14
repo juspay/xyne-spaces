@@ -55,6 +55,24 @@ export class ExternalMessageRepository {
     });
   }
 
+  /** Like `findByThreadId`, but only returns a thread whose conversation is in the given channel. */
+  async findByThreadIdInChannel(
+    externalSourceId: string,
+    externalThreadId: string,
+    channelId: string,
+    entityType?: ExternalEntityType,
+  ) {
+    return await this.db.externalMessage.findFirst({
+      where: {
+        externalSourceId,
+        externalThreadId,
+        ...(entityType && { entityType: entityType }),
+        entity: { is: { conversation: { is: { channelId } } } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   /**
    * Find external message by message ID
    */
