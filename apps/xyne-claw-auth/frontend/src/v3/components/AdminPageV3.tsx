@@ -30,6 +30,7 @@ import {
 import { PageLayout } from "./ui/PageLayout";
 import { PageHeader } from "./ui/PageHeader";
 import { Tabs, type TabItem } from "./ui/Tabs";
+import { KbExtractionTab } from "./admin/KbExtractionTab";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { TextField } from "./ui/TextField";
@@ -101,7 +102,8 @@ type TabKey =
   | "audit"
   | "usage"
   | "scheduled"
-  | "globalmcp";
+  | "globalmcp"
+  | "kb";
 
 interface Props {
   userId: string;
@@ -1106,6 +1108,7 @@ export function AdminPageV3({ userId }: Props) {
       { id: "usage", label: "Usage" },
       { id: "scheduled", label: scheduledTotal > 0 ? `Scheduled (${scheduledTotal})` : "Scheduled" },
       { id: "globalmcp", label: "Global MCP" },
+      { id: "kb", label: "Knowledge Base" },
     ],
     [requests.length, mcpRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
   );
@@ -1350,6 +1353,8 @@ export function AdminPageV3({ userId }: Props) {
                     showOrgLabels={allOrgs}
                   />
                 )}
+
+                {tab === "kb" && <KbExtractionTab />}
 
                 {tab === "globalmcp" && (
                   <GlobalMcpTab

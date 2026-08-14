@@ -153,3 +153,36 @@ export async function validateKbGrants(
   }
   return { accepted, rejected };
 }
+
+/**
+ * Attaches the agent's collection grants to the config sent to claw, but only
+ * for KB-curating agents (`kbAccess: "files"`).
+ *
+ * claw builds its KB target from `knowledgeBase` on the config it receives.
+ * Without this the grant never crosses the wire and claw logs "kbAccess=files
+ * but no knowledgeBase grant" — the agent silently falls back to filesystem
+ * tools pointed at an empty session workspace, which looks like the KB is empty
+ * rather than like a misconfiguration.
+ *
+ * Every dispatcher that calls claw's /run must go through this, or the tools
+ * differ depending on which entry point the user happened to hit.
+ */
+export async function attachKbGrantsToConfig(
+  config: Record<string, unknown> | undefined,
+  agentId: string,
+  // Structurally typed so both dispatchers can pass their own client without
+  // this module importing prisma and creating a cycle.
+  prisma: { agentCollection: { findMany: (args: any) => Promise<Array<{ collectionId: string }>> } },
+): Promise<Record<string, unknown> | undefined> {
+  if (config?.["kbAccess"] !== "files") return config;
+
+  const grants = await prisma.agentCollection.findMany({
+    where: { agentId },
+    select: { collectionId: true },
+  });
+
+  return {
+    ...config,
+    knowledgeBase: grants.map((g) => ({ collectionId: g.collectionId })),
+  };
+}

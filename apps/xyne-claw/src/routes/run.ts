@@ -105,6 +105,10 @@ import {
   type SetupStep,
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import type { KbTarget } from "../kb-tools.js";
+import { FindingCollector, createEmitFindingTool, type FindingScope } from "../finding-tools.js";
+import { DEFAULT_FINDING_VOCABULARY, type FindingVocabulary } from "xyne-claw-shared";
+import { gcsUploadFindings } from "../gcs.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
@@ -182,6 +186,99 @@ function providerToolRequestCap(provider: string | undefined): number {
   const raw = (envKey ? process.env[envKey] : undefined) ?? process.env["XYNE_TOOL_REQUEST_CAP"] ?? "128";
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 128;
+}
+
+/**
+ * File-style KB access, resolved from the agent row's `kbAccess: "files"`.
+ *
+ * Agents that merely *read* a knowledge base do it through Vespa retrieval —
+ * ranked chunks, which is what answering a question needs. The path-based
+ * tools here exist for the opposite job: curating the KB, which means writing.
+ * So there is one flag, not a permission ladder. Absent (every agent today)
+ * means no KB tools at all and Vespa search as before.
+ */
+function resolveKbAccess(
+  agentConfig: Record<string, unknown> | undefined,
+  userId: string,
+): KbTarget | null {
+  if (agentConfig?.["kbAccess"] !== "files") return null;
+
+  const grants = agentConfig?.["knowledgeBase"];
+  const first = Array.isArray(grants) ? (grants[0] as Record<string, unknown> | undefined) : undefined;
+  const collectionId = typeof first?.["collectionId"] === "string" ? first["collectionId"] : undefined;
+  if (!collectionId) {
+    clog.warn(`[agent] kbAccess=files but no knowledgeBase grant; KB tools not attached`);
+    return null;
+  }
+
+  const scopeType = typeof first?.["scopeType"] === "string" ? first["scopeType"] : undefined;
+  const scopeId = typeof first?.["scopeId"] === "string" ? first["scopeId"] : undefined;
+
+  return {
+    collectionId,
+    userId,
+    // Uppercased because the collections API compares scopeType exactly, and a
+    // lower-case value fails as "not accessible" — which reads like a
+    // permissions problem rather than the typo it is.
+    ...(scopeType ? { scopeType: scopeType.toUpperCase() } : {}),
+    ...(scopeId ? { scopeId } : {}),
+  };
+}
+
+/**
+ * Extraction scope, from the orchestrator (kbExtractDaily) rather than the model.
+ *
+ * Present only for the extractor agent. Closing project and workspace over the
+ * tool is what stops a finding being attributed to the wrong project — the
+ * model supplies observations, never the scope they belong to.
+ */
+function resolveFindingScope(
+  agentConfig: Record<string, unknown> | undefined,
+  model: string,
+  sessionId: string,
+  agentSlug: string | undefined,
+): (FindingScope & { day?: string }) | null {
+  const raw = agentConfig?.["findingScope"] as
+    | {
+        workspaceId?: string;
+        project?: { id?: string; code?: string; name?: string };
+        /** Date of the CONVERSATION this batch covers, not of the run. */
+        day?: string;
+      }
+    | undefined;
+  if (!raw?.workspaceId || !raw.project?.id || !raw.project.code) return null;
+
+  return {
+    workspaceId: raw.workspaceId,
+    project: { id: raw.project.id, code: raw.project.code, name: raw.project.name ?? raw.project.code },
+    producer: { sessionId, agentSlug: agentSlug ?? "unknown", model },
+    ...(raw.day ? { day: raw.day } : {}),
+  };
+}
+
+/**
+ * The kinds and modes emit-finding will accept, from the agent row.
+ *
+ * Lets the taxonomy be retuned where the prompt already lives, instead of
+ * costing a shared-package bump and a redeploy of both services. Falls back to
+ * the built-in set, so an agent that says nothing behaves as before. A partial
+ * override is honoured per field — replacing the modes should not silently
+ * reset the entity kinds.
+ */
+function resolveFindingVocabulary(agentConfig: Record<string, unknown> | undefined): FindingVocabulary {
+  const raw = agentConfig?.["findingVocabulary"] as
+    | { entityKinds?: unknown; modes?: unknown }
+    | undefined;
+
+  const strings = (value: unknown): string[] | undefined =>
+    Array.isArray(value) && value.every((v) => typeof v === "string" && v.trim())
+      ? (value as string[])
+      : undefined;
+
+  return {
+    entityKinds: strings(raw?.entityKinds) ?? DEFAULT_FINDING_VOCABULARY.entityKinds,
+    modes: strings(raw?.modes) ?? DEFAULT_FINDING_VOCABULARY.modes,
+  };
 }
 
 function configFastModeEnabled(agentConfig: Record<string, unknown> | undefined): boolean {
@@ -2762,6 +2859,29 @@ async function processTask(
     // outputFormat is set it wins over verifyResponses and is skipped in
     // copilot mode.
     const modelSettings = parseModelSettings(agentConfig);
+    const kbAccess = resolveKbAccess(agentConfig, userId);
+    const findingScope = resolveFindingScope(
+      agentConfig,
+      modelSettings?.model ?? "unknown",
+      sessionId,
+      agentSlug,
+    );
+    const findingVocabulary = resolveFindingVocabulary(agentConfig);
+    const findingCollector = findingScope
+      ? new FindingCollector(findingScope, findingVocabulary)
+      : null;
+    if (findingCollector) {
+      clog.info(
+        `[agent] extraction session: project=${findingScope!.project.code} ` +
+          `modes=${findingVocabulary.modes.join("|")}`,
+      );
+    }
+    if (kbAccess) {
+      clog.info(
+        `[agent] KB file access: collection=${kbAccess.collectionId} ` +
+          `agent=${agentSlug ?? "unknown"}`,
+      );
+    }
     if (modelSettings) {
       log(`Per-agent modelSettings: ${JSON.stringify(modelSettings)}`);
     }
@@ -3581,7 +3701,14 @@ async function processTask(
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
-        customTools: tools,
+        // emit-finding exists only for extraction sessions; every other agent
+        // gets the palette unchanged.
+        customTools: findingCollector
+          ? [...(tools ?? []), createEmitFindingTool(findingCollector)]
+          : tools,
+        ...(kbAccess
+          ? { kbTarget: kbAccess }
+          : {}),
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,
@@ -3710,6 +3837,34 @@ async function processTask(
           log(`Quota fallback succeeded on ${provider}.`),
       },
     });
+    // Flush findings before anything else can fail. The session's whole value is
+    // in these observations; losing them to a later error would mean re-running
+    // the extraction to get them back.
+    if (findingCollector) {
+      const stats = findingCollector.stats();
+      const jsonl = findingCollector.toJsonl();
+      if (jsonl) {
+        // Partition by when the conversation happened, not when extraction ran.
+        // A backfill spans months; filing it all under the run date collapses
+        // that into one pile and the merge loses chronological order — which
+        // makes the first/last freshness markers meaningless.
+        const day = findingScope?.day ?? new Date().toISOString().slice(0, 10);
+        const written = await gcsUploadFindings(
+          day,
+          findingCollector.scopeRef.project.code,
+          sessionId,
+          jsonl,
+        );
+        clog.info(
+          `[agent] findings ${written ? "written" : "LOST — upload failed"}: ` +
+            `emitted=${stats.emitted} rejected=${stats.rejected} duplicates=${stats.duplicates} ` +
+            `project=${findingCollector.scopeRef.project.code}`,
+        );
+      } else {
+        clog.info(`[agent] no findings emitted (rejected=${stats.rejected})`);
+      }
+    }
+
     const result = fbResult;
 
     const resultAttachments = [...getAttachments(), ...(mcpGetAttachments?.() ?? [])];
