@@ -2291,6 +2291,7 @@ model MessageAttachment {
   @@index([conversationId])
   @@index([entityId])
   @@index([entityId, id])
+  @@index([entityId, entityType, createdAt(sort: Desc)])
   @@index([workspaceId, createdAt(sort: Desc), id])
   @@map("message_attachments")
   @@schema("public")
