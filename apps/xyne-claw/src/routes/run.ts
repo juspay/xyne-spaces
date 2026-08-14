@@ -3171,7 +3171,12 @@ async function processTask(
         "### Step 3 — cite with clf tokens",
         "Your tool results contain inline citation tokens like `[clf-abc123#14]`. After any factual claim you draw from a tool result, append the EXACT token(s) that appeared in that tool's output, verbatim — e.g. `... no reviewer has been assigned to any of them [clf-abc123#14].` Never invent a token; only use ones you actually saw. If a claim rests on several sources, include several tokens. These are the brief's only citation mechanism.",
         "",
-        "### Step 4 — emit",
+        "### Step 4 — mention people and channels by id",
+        "When you name a person whose id appears in a tool result, write them as `<@userId>` with the id copied EXACTLY. Ticket results render people as `Name <email> (id: cm…)`; activity rows carry `actorId:`; message lines carry the sender's id.",
+        "When you name a channel whose id appears in a tool result, write it as `<#channelId>` the same way. Channel listings render as `#name (id: …)`; activity rows carry `channelId:`.",
+        "Same discipline as citations — copy, never invent, never infer an id from a name, never reuse one id for another thing. If you have no id, write the plain name or `#channel-name` as text: an unlinked name is correct, a wrong id is a lie. Only people and channels take this form — never tickets or PRs.",
+        "",
+        "### Step 5 — emit",
         "Call `emit_brief` EXACTLY ONCE with each section as an array of your written lines. This ENDS your turn. Do NOT narrate, do NOT write a chat answer, do NOT call any tool after it. If a data source is unavailable, skip it gracefully rather than failing the whole brief.",
       ].join("\n");
       fullContext = fullContext ? `${fullContext}\n\n${briefPrimer}` : briefPrimer;

@@ -16,6 +16,7 @@ import {
   DAILY_BRIEF_SLUG,
   type DailyBriefPayload,
 } from "../services/dailyBrief.js";
+import { recordDailyBriefRegeneration } from "../otel/daily-brief-metrics.js";
 
 const log = createLogger("daily-brief-routes");
 const MAX_INSTRUCTIONS = 8000;
@@ -39,7 +40,8 @@ router.get("/config", async (req: Request, res: Response) => {
       success: true,
       data: {
         enabled: user?.dailyBriefEnabled ?? false,
-        instructions: instruction?.enabled ? (instruction?.instructions ?? "") : "",
+        instructions: instruction?.instructions ?? "",
+        instructionsEnabled: instruction ? instruction.enabled : true,
         updatedAt: instruction?.updatedAt ?? null,
       },
     });
@@ -58,7 +60,16 @@ router.put("/config", async (req: Request, res: Response) => {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
     }
-    const body = req.body as { enabled?: unknown; instructions?: unknown };
+    const body = req.body as {
+      enabled?: unknown;
+      instructions?: unknown;
+      instructionsEnabled?: unknown;
+    };
+
+    if (body.instructionsEnabled !== undefined && typeof body.instructionsEnabled !== "boolean") {
+      res.status(400).json({ success: false, error: "instructionsEnabled must be a boolean" });
+      return;
+    }
 
     if (body.enabled !== undefined) {
       if (typeof body.enabled !== "boolean") {
@@ -74,16 +85,24 @@ router.put("/config", async (req: Request, res: Response) => {
       });
     }
 
-    if (body.instructions !== undefined) {
-      if (body.instructions !== null && typeof body.instructions !== "string") {
+    if (body.instructions !== undefined || body.instructionsEnabled !== undefined) {
+      if (
+        body.instructions !== undefined &&
+        body.instructions !== null &&
+        typeof body.instructions !== "string"
+      ) {
         res.status(400).json({ success: false, error: "instructions must be a string or null" });
         return;
       }
-      const instructions = typeof body.instructions === "string" ? body.instructions.slice(0, MAX_INSTRUCTIONS) : "";
-      await userAgentInstructionRepository.upsert(userId, orgId, DAILY_BRIEF_SLUG, {
-        instructions,
-        enabled: true,
-      });
+      const data: { instructions?: string; enabled?: boolean } = {
+        // Absent instructionsEnabled keeps the historical write-enables behaviour.
+        enabled: typeof body.instructionsEnabled === "boolean" ? body.instructionsEnabled : true,
+      };
+      if (body.instructions !== undefined) {
+        data.instructions =
+          typeof body.instructions === "string" ? body.instructions.slice(0, MAX_INSTRUCTIONS) : "";
+      }
+      await userAgentInstructionRepository.upsert(userId, orgId, DAILY_BRIEF_SLUG, data);
     }
 
     const [user, instruction] = await Promise.all([
@@ -95,6 +114,7 @@ router.put("/config", async (req: Request, res: Response) => {
       data: {
         enabled: user?.dailyBriefEnabled ?? false,
         instructions: instruction?.instructions ?? "",
+        instructionsEnabled: instruction ? instruction.enabled : true,
         updatedAt: instruction?.updatedAt ?? null,
       },
     });
@@ -192,10 +212,18 @@ router.post("/regenerate", async (req: Request, res: Response) => {
     if (!res.writableEnded) abort.abort();
   });
 
-  send("start", { date: briefDateBucket() });
+  const dateBucket = briefDateBucket();
+  // Read the row BEFORE generateDailyBrief flips it to "generating", otherwise
+  // there is no way to tell a rejected brief from a retry after a failure.
+  const existing = await generatedContentRepository
+    .findForBucket(userId, DAILY_BRIEF_KIND, dateBucket)
+    .catch(() => null);
+  void recordDailyBriefRegeneration(userId, dateBucket, existing);
+  send("start", { date: dateBucket });
   try {
     const result = await generateDailyBrief(userId, {
       signal: abort.signal,
+      trigger: "regenerate",
       onProgress: (label) => send("progress", { label }),
     });
     if (result) {
