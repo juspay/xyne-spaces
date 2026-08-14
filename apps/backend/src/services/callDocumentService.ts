@@ -35,6 +35,11 @@ import {
   DEFAULT_RECORDING_SUMMARY_FIELDS,
   RECORDING_DETAILED_SUMMARY_PROMPT,
 } from './recordingSummaryTemplates';
+import {
+  extractMarkedItemsFromRecordingSummary,
+  stripRecordingSummaryMarkedItemAnnotations,
+  type RecordingSummaryMarkedItem,
+} from './recordingSummaryMarkedItems';
 import { summaryTemplateService } from './summaryTemplateService';
 
 // PRD Document structure
@@ -969,7 +974,12 @@ export class CallDocumentService {
     callId: string,
     templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
-  ): Promise<{ summary: string; template: SummaryTemplate } | null> {
+    citationSegments?: CitationContext['segments'],
+  ): Promise<{
+    summary: string;
+    template: SummaryTemplate;
+    markedItems: RecordingSummaryMarkedItem[];
+  } | null> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call?.workspaceId) return null;
 
@@ -1003,7 +1013,7 @@ export class CallDocumentService {
       return null;
     }
 
-    const summary = await this.generateDetailedSummary(
+    const rawSummary = await this.generateDetailedSummary(
       transcript,
       callId,
       template.autoTriggerPrompt ?? undefined,
@@ -1011,10 +1021,19 @@ export class CallDocumentService {
       template.systemPrompt,
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
-      onDelta,
+      onDelta
+        ? accumulated => onDelta(stripRecordingSummaryMarkedItemAnnotations(accumulated))
+        : undefined,
     );
 
-    return summary ? { summary, template } : null;
+    if (!rawSummary) return null;
+
+    const markedItems = citationSegments
+      ? extractMarkedItemsFromRecordingSummary(rawSummary, citationSegments)
+      : [];
+    const summary = stripRecordingSummaryMarkedItemAnnotations(rawSummary);
+
+    return { summary, template, markedItems };
   }
 
   /**
