@@ -349,6 +349,21 @@ export async function buildParticipantMap(channelId: string): Promise<Map<string
   return participantMap;
 }
 
+/** Return the distinct people who actually contributed speech to a formatted transcript. */
+function extractTranscriptSpeakers(transcript: string): string[] {
+  const speakers = new Map<string, string>();
+  const speakerLine = /^\s*(?:\[\d+\]\s*)?\[[^\]]+\]\s*([^:\n]+):/gm;
+
+  for (const match of transcript.matchAll(speakerLine)) {
+    const speaker = match[1].trim();
+    if (speaker && speaker.toLowerCase() !== 'unknown') {
+      speakers.set(speaker.toLowerCase(), speaker);
+    }
+  }
+
+  return Array.from(speakers.values());
+}
+
 // PRD Generation prompt
 const PRD_GENERATION_PROMPT = `You are a senior product manager creating a Product Requirements Document (PRD) from a call transcript.
 
@@ -415,6 +430,11 @@ MARKDOWN TEMPLATE:
 - The transcript may contain misspelled or incorrectly transcribed participant names
 - If a name in the transcript seems close to a participant name, use the correct version from the list
 - For @mentions in Action Items, use the full correct name (e.g., @Mayank Bansal)
+
+**CALL CREATOR:**
+- In the CALL PARTICIPANTS list above, the person who created/initiated the call is annotated with "{HOST}".
+- In the Call Overview Participants line, keep that "{HOST}" marker immediately after their name.
+- Do not add a "{HOST}" marker to anyone who is not annotated as such in the list above.
 
 **INSTRUCTIONS:**
 - Determine call length from transcript and use appropriate number of phases (1-7)
@@ -1010,28 +1030,31 @@ export class CallDocumentService {
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
   ): Promise<string | null> {
-    // Resolve channelId and build participant map once (expensive DB lookups)
+    // Use people who actually spoke in the transcript. A channel roster can contain
+    // members who never joined or contributed to this particular call.
     const call = await repositories.calls.findByExternalId(callId);
-    const channelId = call?.channelId;
+    const spokenParticipantNames = extractTranscriptSpeakers(transcript);
+    const callParticipants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
+    const participantByName = new Map(
+      callParticipants.map((participant) => [participant.userName.toLowerCase(), participant]),
+    );
+    const callCreator = call
+      ? await repositories.users.findById(call.createdByUserId)
+      : null;
 
-    const participantMap: Map<string, ParticipantInfo> = channelId
-      ? await buildParticipantMap(channelId)
-      : new Map<string, ParticipantInfo>();
-
-    if (!channelId && call) {
-      const callParticipants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
-      for (const participant of callParticipants) {
-        participantMap.set(participant.userName.toLowerCase(), {
-          userId: participant.userId,
-          username: participant.userName,
-          userEmail: participant.userEmail,
-          userPicture: participant.userPicture || undefined,
-        });
-      }
-    }
-
-    const participantList = Array.from(participantMap.values())
-      .map(p => `- ${p.username}`)
+    // Resolve transcript labels to known user names when possible, then annotate
+    // the creator only when they were one of the speakers.
+    const callCreatorUserId = call?.createdByUserId;
+    const participantList = spokenParticipantNames
+      .map((speaker) => {
+        const participant = participantByName.get(speaker.toLowerCase());
+        const isCallCreator = participant?.userId === callCreatorUserId
+          || (!participant
+            && callCreator
+            && speaker.toLowerCase() === (callCreator.displayName || callCreator.name).toLowerCase());
+        const name = participant?.userName || speaker;
+        return `- ${name}${isCallCreator ? ' {HOST}' : ''}`;
+      })
       .join('\n');
 
     const sanitizedTranscript = sanitizeInput(transcript);

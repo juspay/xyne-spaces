@@ -1165,6 +1165,7 @@ export const callTable = table('calls')
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
+    xyneManaged: boolean(),
   })
   .primaryKey('id');
 
