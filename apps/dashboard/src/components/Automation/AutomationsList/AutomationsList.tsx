@@ -109,6 +109,21 @@ export function AutomationsList({
     return adapted.filter(a => isVisibleToUser(a, meId));
   }, [adapted, me]);
 
+  // Authors of any version that went live (current or superseded) may toggle it.
+  const lineageAuthorIds = useMemo(() => {
+    const bySeries = new Map<string, Set<string>>();
+    for (const a of adapted) {
+      if (!isLiveStatus(a.status) && a.status !== AutomationStatusValues.ARCHIVED) continue;
+      const seriesId = a.automationSeriesId ?? a.id;
+      const set = bySeries.get(seriesId) ?? new Set<string>();
+      set.add(a.createdById);
+      bySeries.set(seriesId, set);
+    }
+    return bySeries;
+  }, [adapted]);
+  const isLineageAuthor = (item: Automation): boolean =>
+    !!me && (lineageAuthorIds.get(item.automationSeriesId ?? item.id)?.has(me.id) ?? false);
+
   const deleteMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
       zero.mutate(mutators.automations.delete({ id }));
@@ -265,7 +280,8 @@ export function AutomationsList({
                   onToggleActive={
                     isLiveStatus(item.status) &&
                     (item.status === AutomationStatusValues.DISABLED ||
-                      (item.status === AutomationStatusValues.ACTIVE && isAutomationsAdmin))
+                      (item.status === AutomationStatusValues.ACTIVE &&
+                        (isAutomationsAdmin || isLineageAuthor(item))))
                       ? next => (next ? activateMutation.mutate(item.id) : setPendingDisable(item))
                       : undefined
                   }
