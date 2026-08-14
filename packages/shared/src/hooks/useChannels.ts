@@ -88,7 +88,8 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt &&
-      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat &&
+      a?.priorityConflictEnabled === b?.priorityConflictEnabled,
   );
   const visibleChannel = useSelector(
     stateMachineActor,
@@ -100,7 +101,8 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt &&
-      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat &&
+      a?.priorityConflictEnabled === b?.priorityConflictEnabled,
   );
   return channel || visibleChannel;
 };

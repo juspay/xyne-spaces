@@ -233,6 +233,20 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture previous claim state so the handler can distinguish a real PENDING → ACCEPTED
+  // transition from a no-op update and avoid duplicate "you're unblocked" notifications.
+  if (operation === 'update' && table === 'priority_conflict_claims') {
+    const entity = await tx.run(zql.priority_conflict_claims.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        state: entity.state,
+        ticketId: entity.ticketId,
+        raisedBy: entity.raisedBy,
+        respondentId: entity.respondentId,
+      };
+    }
+  }
+
   accumulator.push({
     entityType: table,
     entityId,
@@ -339,7 +353,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'links':
     case 'link_access':
     case 'rcas':
-    case 'ticket_stage_requests': {
+    case 'ticket_stage_requests':
+    case 'priority_conflict_claims': {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }

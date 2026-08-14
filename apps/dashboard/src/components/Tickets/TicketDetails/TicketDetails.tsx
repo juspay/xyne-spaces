@@ -110,6 +110,7 @@ import { isReleaseTicket } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
 import { searchService } from '../../../services/searchService';
 import { AIClassificationPanel } from './AIClassificationPanel';
+import { PriorityConflictBanner } from './PriorityConflictBanner';
 import type { TicketClassificationData } from '../../../types/classification';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
@@ -3865,6 +3866,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
           />
         )}
+
+        {/* Priority conflict — renders only for tickets that went through the queue flow */}
+        <div className='my-4'>
+          <PriorityConflictBanner
+            ticketId={ticket.id}
+            currentUserId={currentUser?.id}
+            priority={ticket.priority}
+            createdBy={ticket.createdBy}
+            channelId={ticket.channelId}
+          />
+        </div>
 
         {/* AI Classification Panel */}
         {ticket?.classificationData && channelId && (

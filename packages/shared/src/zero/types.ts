@@ -607,6 +607,10 @@ export enum NotificationType {
   STAGE_APPROVAL_REQUESTED = "STAGE_APPROVAL_REQUESTED",
   STAGE_APPROVAL_APPROVED = "STAGE_APPROVAL_APPROVED",
   STAGE_APPROVAL_REJECTED = "STAGE_APPROVAL_REJECTED",
+  // You own a task someone wants their new task taken up ahead of.
+  PRIORITY_CONFLICT_RAISED = "PRIORITY_CONFLICT_RAISED",
+  // The owner agreed; your ticket is unblocked.
+  PRIORITY_CONFLICT_ACCEPTED = "PRIORITY_CONFLICT_ACCEPTED",
   CHANNEL_READ = "CHANNEL_READ",
   THREAD_READ = "THREAD_READ",
   INCOMING_CALL = "INCOMING_CALL",
@@ -856,6 +860,14 @@ export enum TicketStageRequestStatus {
   SUBMITTED = 'SUBMITTED',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
+}
+// Lifecycle of a single "this should go ahead of that" claim. There is deliberately no
+// REJECTED state: the superseded task's owner is never asked to reject. Silence is the block —
+// a claim stays PENDING until accepted, and only the raiser can withdraw it to point elsewhere.
+export enum PriorityConflictState {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  WITHDRAWN = 'WITHDRAWN',
 }
 export enum ReleaseEnvironment {
   SANDBOX = 'SANDBOX',

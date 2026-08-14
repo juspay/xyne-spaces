@@ -91,6 +91,10 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
   isDeskChannelType,
+  isNegotiatedPriority,
+  isSupersedableStatus,
+  MAX_OPEN_PRIORITY_CLAIMS,
+  PriorityConflictState,
   deskTypeForChannelType,
   Platform 
 } from '@xyne/shared';
@@ -1412,6 +1416,36 @@ export function createMutators(
           await tx.mutate.channels.update({
             id: channelId,
             showTicketsTabTicketsInChat: show,
+          });
+        },
+      ),
+      // Opt a channel in/out of the priority conflict resolution flow.
+      updatePriorityConflictEnabled: defineMutator(
+        z.object({
+          channelId: z.string(),
+          enabled: z.boolean(),
+        }),
+        async ({ tx, args: { channelId, enabled } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+            throw new Error('Can only update this setting for default channels');
+          }
+
+          const participant = await tx.run(zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', authData.sub)
+            .one());
+          if (channel.createdBy !== authData.sub && (!participant || participant.role !== ChannelRole.ADMIN)) {
+            throw new Error('Only channel admins or the owner can change the ticket intake flow');
+          }
+
+          await tx.mutate.channels.update({
+            id: channelId,
+            priorityConflictEnabled: enabled,
           });
         },
       ),
@@ -5599,6 +5633,38 @@ export function createMutators(
             }
           }
 
+          // Escalating an existing ticket into HIGH/CRITICAL is the same act as raising one at
+          // that priority, so it goes through the same queue rules. Creation is guarded in
+          // ticketController; this is the post-creation path (ticket detail, kanban, anywhere
+          // else that edits priority). Without it, a raiser could create at LOW and immediately
+          // escalate to bypass the negotiation entirely.
+          const isEscalatingPriority =
+            params.priority !== undefined &&
+            params.priority !== ticket.priority &&
+            isNegotiatedPriority(params.priority);
+
+          if (isEscalatingPriority && ticket.channelId) {
+            const escalationChannel = await tx.run(
+              zql.channels.where('id', ticket.channelId).one(),
+            );
+            if (escalationChannel?.priorityConflictEnabled) {
+              const claims = await tx.run(
+                zql.priority_conflict_claims.where('ticketId', ticket.id),
+              );
+              const hasOpenOrAcceptedClaim = claims.some(
+                c =>
+                  c.state === PriorityConflictState.PENDING ||
+                  c.state === PriorityConflictState.ACCEPTED,
+              );
+              // No claim yet means the ticket has never contended for a place in the queue.
+              // Escalating is allowed — it simply joins the back of the queue — but if the
+              // raiser wants to jump ahead of someone they raise a claim separately.
+              if (!hasOpenOrAcceptedClaim && ticket.createdBy !== authData.sub) {
+                throw new Error('Only the ticket raiser can escalate priority in this channel');
+              }
+            }
+          }
+
           // ACL Business Logic: Check ticket transfer permission for assignedTo, userGroupId,
           // eta, stageName (which triggers stage ETA recalculation), or boardId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
@@ -6446,6 +6512,163 @@ export function createMutators(
               });
             }
           }
+        },
+      ),
+    },
+    // "This should go ahead of that" negotiation for HIGH/CRITICAL tickets in opted-in channels.
+    // A ticket is blocked while its newest claim is PENDING and unblocked once one is ACCEPTED.
+    // Nobody is ever asked to reject: leaving a claim unanswered is what keeps the ticket
+    // blocked, and only the raiser can withdraw it to point at a different task.
+    priorityConflict: {
+      // Raiser points at an existing task their ticket should be taken up ahead of.
+      // Withdraws any still-pending claim first, so a ticket has at most one open claim.
+      claim: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string(),
+          supersededTicketId: z.string(),
+          justification: z.string().min(1, 'A justification is required'),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, ticketId, supersededTicketId, justification, timestamp } }) => {
+          if (ticketId === supersededTicketId) {
+            throw new Error('A ticket cannot supersede itself');
+          }
+
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) {
+            throw new Error('Ticket not found');
+          }
+          if (ticket.createdBy !== authData.sub) {
+            throw new Error('Only the ticket raiser can claim priority over another task');
+          }
+
+          // This mutator is the post-creation/escalation entry point, so it has to re-assert the
+          // same rules priorityConflictService.validateIntake enforces on the REST create path.
+          // Without these a client could raise claims in channels that never opted in, from
+          // LOW-priority tickets, or against work that is already finished.
+          if (!ticket.channelId) {
+            throw new Error('Ticket has no associated channel');
+          }
+          const claimChannel = await tx.run(zql.channels.where('id', ticket.channelId).one());
+          if (!claimChannel?.priorityConflictEnabled) {
+            throw new Error('Priority conflict resolution is not enabled for this channel');
+          }
+          if (!isNegotiatedPriority(ticket.priority)) {
+            throw new Error('Only high priority tickets can claim a place ahead of another task');
+          }
+
+          const superseded = await tx.run(zql.tickets.where('id', supersededTicketId).one());
+          if (!superseded) {
+            throw new Error('The task you are trying to supersede no longer exists');
+          }
+          if (superseded.channelId !== ticket.channelId) {
+            throw new Error('You can only supersede a task in the same channel');
+          }
+          if (superseded.isArchived || !isSupersedableStatus(superseded.statusV2)) {
+            throw new Error('That task is already closed — pick a task that is still in progress');
+          }
+
+          // The person who has to accept is whoever owns that work; fall back to its raiser when
+          // the task is unassigned, so a claim always has a named respondent to wait on.
+          const respondentId = superseded.assignedTo ?? superseded.createdBy;
+          if (respondentId === authData.sub) {
+            throw new Error(
+              'You cannot supersede your own task — pick a task owned by someone else',
+            );
+          }
+
+          const existingClaims = await tx.run(
+            zql.priority_conflict_claims.where('ticketId', ticketId),
+          );
+          if (existingClaims.some(claim => claim.state === PriorityConflictState.ACCEPTED)) {
+            throw new Error('This ticket already has an accepted priority claim');
+          }
+          // This mutator only ever leaves one PENDING row behind, so the loop below normally
+          // touches at most one claim. Bound it anyway: an append-only history plus a
+          // misbehaving client should not turn a single mutation into an unbounded write.
+          const openClaims = existingClaims.filter(
+            claim => claim.state === PriorityConflictState.PENDING,
+          );
+          if (openClaims.length > MAX_OPEN_PRIORITY_CLAIMS) {
+            throw new Error('This ticket has too many open priority claims to add another');
+          }
+          for (const claim of openClaims) {
+            await tx.mutate.priority_conflict_claims.update({
+              id: claim.id,
+              state: PriorityConflictState.WITHDRAWN,
+              updatedAt: timestamp,
+            });
+          }
+
+          await tx.mutate.priority_conflict_claims.insert({
+            id,
+            workspaceId: ticket.workspaceId,
+            ticketId,
+            supersededTicketId,
+            channelId: ticket.channelId,
+            state: PriorityConflictState.PENDING,
+            justification,
+            raisedBy: authData.sub,
+            respondentId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      // The superseded task's owner agrees the new ticket should go first. This is the only
+      // action that unblocks the raising ticket.
+      accept: defineMutator(
+        z.object({
+          id: z.string(),
+          responseNote: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, responseNote, timestamp } }) => {
+          const claim = await tx.run(zql.priority_conflict_claims.where('id', id).one());
+          if (!claim) {
+            throw new Error('Priority claim not found');
+          }
+          if (claim.state !== PriorityConflictState.PENDING) {
+            throw new Error('This priority claim is no longer awaiting a response');
+          }
+          // respondentId is snapshotted at claim time, so reassigning the superseded ticket
+          // afterwards cannot hand the decision to someone who was never looped in.
+          if (claim.respondentId !== authData.sub) {
+            throw new Error('Only the owner of the superseded task can accept this claim');
+          }
+
+          await tx.mutate.priority_conflict_claims.update({
+            id,
+            state: PriorityConflictState.ACCEPTED,
+            respondedBy: authData.sub,
+            respondedAt: timestamp,
+            ...(responseNote ? { responseNote } : {}),
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      // Raiser drops a pending claim without immediately naming a replacement (e.g. they decided
+      // to lower the priority instead). Re-picking a different task goes through `claim`.
+      withdraw: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          const claim = await tx.run(zql.priority_conflict_claims.where('id', id).one());
+          if (!claim) {
+            throw new Error('Priority claim not found');
+          }
+          if (claim.raisedBy !== authData.sub) {
+            throw new Error('Only the ticket raiser can withdraw this claim');
+          }
+          if (claim.state !== PriorityConflictState.PENDING) {
+            throw new Error('Only a pending priority claim can be withdrawn');
+          }
+
+          await tx.mutate.priority_conflict_claims.update({
+            id,
+            state: PriorityConflictState.WITHDRAWN,
+            updatedAt: timestamp,
+          });
         },
       ),
     },

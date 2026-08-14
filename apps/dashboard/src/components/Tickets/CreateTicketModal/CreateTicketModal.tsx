@@ -47,7 +47,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../../hooks/useAuth';
-import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
@@ -158,6 +158,9 @@ export interface CreateTicketFormData {
   dynamicFields: Record<string, string | string[]>;
   merchantId?: string;
   ticketType?: string;
+  // Priority queue placement, only used when the channel opts into conflict resolution.
+  supersededTicketId: string;
+  supersedeJustification: string;
 }
 
 interface TicketResponse {
@@ -432,6 +435,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       dynamicFields: {},
       merchantId: '',
       ticketType: BaseTicketType.Fix,
+      supersededTicketId: '',
+      supersedeJustification: '',
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
       if (!user) return;
@@ -492,6 +497,29 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
   const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
   const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
+
+  // Priority queue placement: an opt-in, per-channel flow. When the channel has it on, every
+  // ticket needs an ETA, and a HIGH/CRITICAL ticket may also name an existing task it should go
+  // ahead of — that task's owner has to agree before the ticket is unblocked.
+  const effectiveChannelId = (isFromSubTicket || isFromAI ? selectedChannelId : channelId) || '';
+  const intakeChannel = useChannel(effectiveChannelId);
+  const priorityConflictEnabled = intakeChannel?.priorityConflictEnabled === true;
+  const requiresSupersede =
+    priorityConflictEnabled &&
+    (formValues?.priority === TicketPriority.HIGH ||
+      formValues?.priority === TicketPriority.CRITICAL);
+
+  // Live work in this channel that the new ticket could go ahead of. The raiser's own tasks are
+  // excluded: someone else has to be able to accept the claim.
+  const [supersedableTickets] = useCachedQuery(
+    queries.getSupersedableTicketsByChannel({ channelId: effectiveChannelId || 'nonexistent' }),
+    { enabled: requiresSupersede && !!effectiveChannelId },
+  );
+
+  const supersedeOptions = useMemo(
+    () => (supersedableTickets ?? []).filter(t => (t.assignedTo ?? t.createdBy) !== user?.id),
+    [supersedableTickets, user?.id],
+  );
 
   // Fetch form mapping for the selected board (TICKET entity type)
   const [formMapping] = useCachedQuery(
@@ -1086,6 +1114,25 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         mandatoryFieldErrors.push('Merchant ID is required');
       }
 
+      // Intake for channels that opted into priority conflict resolution. These mirror
+      // apps/backend/src/services/priorityConflictService.ts → validateIntake purely so the
+      // raiser sees the problem inline; the server is authoritative. Keep both in sync when the
+      // rules change — the server rejecting something the client allowed shows as a generic 400.
+      if (priorityConflictEnabled) {
+        if (!formData.eta) {
+          mandatoryFieldErrors.push('ETA is required');
+        }
+        // Naming a task to go ahead of is optional — without one the ticket simply joins the
+        // back of the queue. The justification only becomes required once a task is named.
+        if (
+          requiresSupersede &&
+          formData.supersededTicketId &&
+          !formData.supersedeJustification?.trim()
+        ) {
+          mandatoryFieldErrors.push('Say why this should go ahead of the task you picked');
+        }
+      }
+
       if (mandatoryFieldErrors.length > 0) {
         toast.error('Missing Required Fields', {
           description: mandatoryFieldErrors.join(', '),
@@ -1259,6 +1306,23 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           formDataPayload.append('fileMetadata', JSON.stringify(fileMetadata));
         }
 
+        if (priorityConflictEnabled) {
+          // The intake requires an ETA. The generic append above is conditional, so send it
+          // unconditionally here to match the JSON path — otherwise a falsy eta reaching this
+          // branch would surface as a generic 400 instead of the inline field error.
+          if (formData.eta) {
+            formDataPayload.set('eta', formData.eta.toISOString());
+          }
+          // Only sent when the raiser actually picked a task to go ahead of.
+          if (requiresSupersede && formData.supersededTicketId) {
+            formDataPayload.append('supersededTicketId', formData.supersededTicketId);
+            formDataPayload.append(
+              'supersedeJustification',
+              formData.supersedeJustification.trim(),
+            );
+          }
+        }
+
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
@@ -1291,6 +1355,17 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ...(formData.merchantId && { merchantId: formData.merchantId }),
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
+          // The intake requires an ETA, but the base payload only sends one when the ticket came
+          // from a conversation — send it unconditionally so the server-side check can pass.
+          ...(priorityConflictEnabled && {
+            eta: formData.eta?.toISOString(),
+            // Only sent when the raiser actually picked a task to go ahead of.
+            ...(requiresSupersede &&
+              formData.supersededTicketId && {
+                supersededTicketId: formData.supersededTicketId,
+                supersedeJustification: formData.supersedeJustification.trim(),
+              }),
+          }),
           dynamicFields: activeDynamicFields,
         });
 
@@ -2141,6 +2216,91 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             }}
           </form.Field>
         </div>
+
+        {/* Priority queue placement — only for channels that opted into conflict resolution, and
+            only once the priority is high enough to contend for a place in the queue. Sits below
+            the board selector; padding not margin, because the parent sets space-y-0 which
+            forces margin-top:0 on every direct child. */}
+        {priorityConflictEnabled && requiresSupersede && (
+          <div className='pt-4 pb-2'>
+            <div
+              data-testid='priority-queue-card'
+              className='space-y-2 rounded-md border border-border bg-muted p-3'
+            >
+              <div className='space-y-1'>
+                <label
+                  htmlFor='ticket-supersede-selector'
+                  className='text-sm font-semibold text-foreground'
+                >
+                  Jump ahead of a task
+                </label>
+                <p className='text-sm text-muted-foreground'>
+                  Leave this empty and the task joins the back of the priority queue. Pick a task
+                  to go ahead of it — its owner has to agree before work can start.
+                </p>
+              </div>
+
+              <form.Field name='supersededTicketId'>
+                {field => (
+                  <div className='space-y-1'>
+                    {/* width='100%' — EntitySelector sets an inline width, so a CSS class alone
+                        can't stretch it; without this the trigger stays a pill and long ticket
+                        titles wrap onto three lines. */}
+                    <EntitySelector
+                      options={supersedeOptions.map(t => ({
+                        value: t.id,
+                        label: t.title || t.xyneId,
+                        icon: null,
+                      }))}
+                      selectedValue={field.state.value || null}
+                      onSelect={(value: string | null) => field.handleChange(value ?? '')}
+                      searchPlaceholder='Search tasks'
+                      placeholder='Go ahead of…'
+                      width='100%'
+                      inputClassName='bg-background justify-between py-1.5'
+                      showClearButton={true}
+                      showIndicator={false}
+                      testId='ticket-supersede-selector'
+                    />
+                    {supersedeOptions.length === 0 && (
+                      <p className='text-sm text-muted-foreground'>
+                        No one else has open tasks here, so this one goes to the back of the queue.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </form.Field>
+
+              {/* Justification only matters once a task is actually named. */}
+              {!!formValues?.supersededTicketId && (
+                <form.Field name='supersedeJustification'>
+                  {field => (
+                    <div className='space-y-1 pt-1'>
+                      <label
+                        htmlFor='ticket-supersede-justification'
+                        className='text-sm font-semibold text-foreground'
+                      >
+                        Why should it go first? *
+                      </label>
+                      <Textarea
+                        rows={2}
+                        id='ticket-supersede-justification'
+                        required={true}
+                        aria-required='true'
+                        value={field.state.value || ''}
+                        placeholder='This will be shown to the other task’s owner...'
+                        aria-label='Why should it go first'
+                        data-testid='ticket-supersede-justification-input'
+                        onChange={e => field.handleChange(e.target.value)}
+                        className='resize-none bg-background text-sm'
+                      />
+                    </div>
+                  )}
+                </form.Field>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Dynamic Form Fields */}
         {activeDynamicFields.length > 0 && (

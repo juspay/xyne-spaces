@@ -48,6 +48,10 @@ const preferencesSchema = z.record(
     'MENTION',
     'WORKFLOW_COMPLETION',
     'WORKFLOW_FAILURE',
+    // PRIORITY_CONFLICT_RAISED is deliberately absent: it is actionable — a ticket stays
+    // blocked until the respondent acts — so users must not be able to opt out of it.
+    // The paired ACCEPTED notification is informational and can be toggled.
+    'PRIORITY_CONFLICT_ACCEPTED',
   ]),
   z.object({
     browserEnabled: z.boolean(),
@@ -294,6 +298,8 @@ export class NotificationController {
         'MENTION',
         'WORKFLOW_COMPLETION',
         'WORKFLOW_FAILURE',
+        // See the schema above: RAISED is intentionally not user-toggleable.
+        'PRIORITY_CONFLICT_ACCEPTED',
       ];
 
       // First filter the request body to remove invalid types before validation

@@ -21,6 +21,7 @@ export * from './utils/etaCalculation';
 export * from './utils/formFieldBranching';
 export * from './utils/formFieldOptions';
 export * from './utils/slaCalculator';
+export * from './utils/priorityConflict';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
 export * from './utils/canvasHierarchy';

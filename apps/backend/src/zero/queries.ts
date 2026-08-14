@@ -37,6 +37,7 @@ import {
   TicketStageRequestStatus,
   MailboxState,
   TicketStatusV2,
+  PriorityConflictState,
   TicketReferenceRelation,
   DelayedMessageStatus,
   RecapEntityType,
@@ -4480,6 +4481,48 @@ dmChannelsLatestMessagesPaginated: defineQuery(
             helpers.cmp('status', '=', TicketStageRequestStatus.SUBMITTED),
           )
         );
+    },
+  ),
+
+  // Full negotiation history for one ticket, newest first. The ticket is blocked while the
+  // newest row is PENDING and unblocked once any row is ACCEPTED. Mirrors shared queries.
+  getPriorityConflictClaims: defineQuery(
+    z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.priority_conflict_claims
+        .where('ticketId', ticketId)
+        .related('supersededTicket')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+  // "What am I being asked to accept" — the respondent's pending decisions.
+  getPendingPriorityConflictClaimsForUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.priority_conflict_claims
+        .where('respondentId', userId)
+        .where('state', PriorityConflictState.PENDING)
+        .related('ticket')
+        .related('supersededTicket')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+  // Candidate tasks a raiser can go ahead of: the channel's live, unarchived work.
+  // Callers exclude the raiser's own tasks and the ticket being raised.
+  getSupersedableTicketsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('statusV2', '=', TicketStatusV2.TODO),
+            helpers.cmp('statusV2', '=', TicketStatusV2.STARTED),
+            helpers.cmp('statusV2', '=', TicketStatusV2.PAUSED),
+          ),
+        )
+        .orderBy('createdAt', 'desc');
     },
   ),
 

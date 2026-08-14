@@ -69,6 +69,7 @@ import {
   TicketAssignmentsACL,
   TicketStageEtaACL,
   TicketStageRequestsACL,
+  PriorityConflictClaimsACL,
   UserProfilesACL,
   UserPreferencesACL,
   FormsACL,
@@ -265,6 +266,8 @@ export class QueryACLFactory {
         return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_requests':
         return new TicketStageRequestsACL(ctx) as BaseQueryACL<TTable>;
+      case 'priority_conflict_claims':
+        return new PriorityConflictClaimsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':
