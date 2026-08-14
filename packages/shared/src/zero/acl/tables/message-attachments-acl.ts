@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import type { SelectArgs } from '../core/types';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
@@ -9,7 +10,7 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
     super(ctx, 'message_attachments');
   }
 
-  canSelect<TReturn>(query: Query<'message_attachments', Schema, TReturn>): Query<'message_attachments', Schema, TReturn> {
+  canSelect<TReturn>(query: Query<'message_attachments', Schema, TReturn>, args?: SelectArgs): Query<'message_attachments', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query
         .where('workspaceId', '=', this.ctx.workspaceId)
@@ -21,6 +22,36 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
                 ch
                   .where('workspaceId', '=', this.ctx.workspaceId)
                   .where(guestChannelAccessWhere(this.ctx)),
+              ),
+            ),
+          ),
+        );
+    }
+
+    // Fast path: a channel-scoped query (arg matches the query's own filter
+    // by convention) has a row-invariant channel-access decision — the literal
+    // pin on channels.id lets the scalar exists resolve ONCE per hydration
+    // instead of probing channel/participants per attachment row. Falls back
+    // to the per-row EXISTS if the scalar is not resolvable.
+    const channelId = args?.channelId as string | undefined;
+    if (channelId) {
+      return query
+        .where('workspaceId', '=', this.ctx.workspaceId)
+        .where(({ or, cmp, exists }) =>
+          or(
+            cmp('createdBy', '=', this.ctx.userID),
+            exists('conversation', (c) =>
+              c.where('channelId', channelId).whereExists('channel', (ch) =>
+                ch
+                  .where('id', channelId)
+                  .where('workspaceId', '=', this.ctx.workspaceId)
+                  .where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
+                    or2(
+                      cmp2('visibility', '=', ChannelVisibility.PUBLIC),
+                      exists2('participants', (p) => p.where('userId', this.ctx.userID)),
+                    ),
+                  ),
+                { scalar: true },
               ),
             ),
           ),
