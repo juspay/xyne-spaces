@@ -416,6 +416,11 @@ MARKDOWN TEMPLATE:
 - If a name in the transcript seems close to a participant name, use the correct version from the list
 - For @mentions in Action Items, use the full correct name (e.g., @Mayank Bansal)
 
+**CALL CREATOR:**
+- In the CALL PARTICIPANTS list above, the person who created/initiated the call is annotated with "(call creator)".
+- In the Call Overview Participants line, keep that "(call creator)" annotation next to their name so it is clear who set up the call.
+- Do not add a "(call creator)" note to anyone who is not annotated as such in the list above.
+
 **INSTRUCTIONS:**
 - Determine call length from transcript and use appropriate number of phases (1-7)
 - Short/quick calls should have FEWER phases - don't force many phases on a brief discussion
@@ -1030,8 +1035,15 @@ export class CallDocumentService {
       }
     }
 
+    // Annotate the participant who created/initiated the call so the summary
+    // (Call Overview → Participants) can surface who set up the meeting.
+    const callCreatorUserId = call?.createdByUserId;
     const participantList = Array.from(participantMap.values())
-      .map(p => `- ${p.username}`)
+      .map(p =>
+        callCreatorUserId && p.userId === callCreatorUserId
+          ? `- ${p.username} (call creator)`
+          : `- ${p.username}`,
+      )
       .join('\n');
 
     const sanitizedTranscript = sanitizeInput(transcript);
