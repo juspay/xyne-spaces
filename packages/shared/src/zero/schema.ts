@@ -1285,6 +1285,7 @@ export const canvasTable = table('canvases')
     editAccessId: string().optional(),
     visibility: enumeration<CanvasVisibility>(),
     isTemplate: boolean(),
+    isArchived: boolean(),
     isCollaborative: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),
