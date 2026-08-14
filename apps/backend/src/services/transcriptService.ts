@@ -242,36 +242,39 @@ TRANSCRIPT:
 {transcript}
 `;
 
-// Decisions/actions extraction. Transcript lines are prefixed with a "[MM:SS]"
-// (or "[HH:MM:SS]") timestamp relative to call start — the LLM is asked to
-// report that same timestamp back per item so it can be stored alongside the
-// text, instead of us trying to re-locate the sentence in the transcript.
-const MARKED_ITEMS_PROMPT = `
-You are analyzing a call transcript (each line is prefixed with a "[MM:SS]" or "[HH:MM:SS]" timestamp relative to the start of the call) to extract key decisions made and action items assigned.
+// Decisions/actions extraction. This runs AFTER the detailed summary has
+// already been generated, and reads THAT summary (not the raw transcript) so
+// Call.markedItems always matches what the Action Items / Decisions Made
+// sections of the summary show — the two used to be derived independently and
+// could disagree. Every claim in the summary is already followed by a
+// "[clf-N]" citation token pointing at a transcript segment number, so we ask
+// the LLM to report that segment number back per item; the caller resolves
+// N -> timestamp deterministically via the same segment map used to render
+// the summary's citation chips, instead of trusting the LLM to do timestamp
+// math itself.
+const MARKED_ITEMS_FROM_SUMMARY_PROMPT = `
+You are extracting a structured list of key decisions and action items from an ALREADY-GENERATED call summary (Markdown below). Do not analyze a transcript — only read this summary and pull out items already present in it, typically under headings like "Action Items" and "Decisions Made" / "Consolidated Outcomes".
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Extract 0-15 items total across decisions and actions \u2014 only clear, concrete ones
-- For each item, use the exact "[MM:SS]" (or "[HH:MM:SS]") timestamp of the transcript line it is most closely associated with
+- Extract every decision/action item already listed in the summary's Action Items and Decisions Made (or equivalent Consolidated Outcomes) sections \u2014 do not invent new ones, do not omit ones present there
 - "type" must be exactly "decision" or "action"
-- Keep "text" concise (one sentence)
-- If nothing clear qualifies, return an empty array for "items"
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- Keep "text" concise (one sentence), stripping table formatting but keeping @mentions
+- Each item's line is followed by a citation token like "[clf-7]". Copy the NUMBER from that item's own citation token as "segment" (an integer). If a line has multiple tokens, use the first one. If an item has no citation token at all, omit that item entirely
+- If nothing qualifies, return an empty array for "items"
 
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
   "items": [
-    { "type": "decision" | "action", "text": "[concise description]", "timestamp": "MM:SS" }
+    { "type": "decision" | "action", "text": "[concise description]", "segment": 7 }
   ]
 }
 
 Only output valid JSON.
 No explanations.
 
-TRANSCRIPT:
-{transcript}
+SUMMARY:
+{summary}
 `;
 
 export interface TicketSuggestion {
@@ -288,6 +291,14 @@ export interface MarkedItem {
   type: 'decision' | 'action' | 'moment';
   text: string;
   timestampSeconds: number;
+}
+
+/** Minimal citation-segment shape needed to resolve a "[clf-N]" token back to
+ * a timestamp. Structurally compatible with callDocumentService's
+ * CitationSegment (which carries more fields we don't need here). */
+export interface SummarySegmentRef {
+  n: number;
+  timestamp: string; // "MM:SS" or "HH:MM:SS", as emitted by numberTranscriptSegments
 }
 
 export class TranscriptService {
@@ -1313,19 +1324,27 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
-   * Generate key decisions/action items from the transcript, each anchored to
-   * the timestamp (in seconds from call start) of the transcript line it came
-   * from. Returns [] on any failure or when nothing qualifies.
+   * Extract key decisions/action items from an ALREADY-GENERATED detailed
+   * summary (not the raw transcript), so Call.markedItems always matches what
+   * the summary's Action Items / Decisions Made sections show. Each item's
+   * timestamp is resolved from the "[clf-N]" citation segment the summary LLM
+   * already attached to it, via the same segment map used to build the
+   * summary's citation chips. Returns [] on any failure or when nothing
+   * qualifies.
    */
-  async generateMarkedItems(transcript: string, callId?: string): Promise<MarkedItem[]> {
+  async generateMarkedItemsFromSummary(
+    summaryMarkdown: string,
+    segments: SummarySegmentRef[],
+    callId?: string,
+  ): Promise<MarkedItem[]> {
     const logCallId = callId || 'unknown';
     const agent = await this.createAgent(logCallId);
     if (!agent) {
-      logger.warn('Agent creation failed. Skipping marked items generation.');
+      logger.warn('Agent creation failed. Skipping marked items extraction from summary.');
       return [];
     }
 
-    const prompt = MARKED_ITEMS_PROMPT.replace('{transcript}', transcript);
+    const prompt = MARKED_ITEMS_FROM_SUMMARY_PROMPT.replace('{summary}', summaryMarkdown);
 
     try {
       const result = await agent.execute({
@@ -1350,20 +1369,25 @@ Output ONLY the processed transcript, nothing else.`;
         return [];
       }
 
+      const timestampBySegment = new Map(segments.map(s => [s.n, s.timestamp]));
+
       const items: MarkedItem[] = parsed.items
         .slice(0, 15)
         .map((item: any) => {
           const text = typeof item?.text === 'string' ? item.text.trim() : '';
-          if (!text) return null;
+          const segmentNumber =
+            typeof item?.segment === 'number' ? item.segment : parseInt(item?.segment, 10);
+          const timestamp = timestampBySegment.get(segmentNumber);
+          if (!text || !timestamp) return null;
           return {
             type: item?.type === 'action' ? 'action' : 'decision',
             text,
-            timestampSeconds: this.parseTimestampToSeconds(item?.timestamp),
+            timestampSeconds: this.parseTimestampToSeconds(timestamp),
           } satisfies MarkedItem;
         })
         .filter((item: MarkedItem | null): item is MarkedItem => item !== null);
 
-      logger.info(`Generated ${items.length} marked items`);
+      logger.info(`Generated ${items.length} marked items from summary`);
       return items;
     } catch (error) {
       logger.error(`marked_items_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);

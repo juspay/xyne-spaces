@@ -4,7 +4,7 @@ import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
-import { transcriptService, type TranscriptEntry, type MarkedItem } from '@/services/transcriptService';
+import { transcriptService, type TranscriptEntry, type MarkedItem, type SummarySegmentRef } from '@/services/transcriptService';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -21,6 +21,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
+  markedItems: MarkedItem[];
 }
 
 /**
@@ -145,11 +146,12 @@ class NoteTakerTranscriptService {
       // These workloads are independent once the transcript is available, so
       // start them together. generateDetailedSummaryCanvas preserves its own
       // ordered dependency chain: template selection -> prompt generation when
-      // needed -> detailed-summary streaming.
+      // needed -> detailed-summary streaming -> marked-items extraction FROM
+      // that finished summary (so Call.markedItems always matches what the
+      // summary's Action Items / Decisions Made sections show).
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
-      const markedItemsPromise = this.generateMarkedItemsList(call, formattedTranscript);
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -161,18 +163,11 @@ class NoteTakerTranscriptService {
         }
         return labelIds;
       });
-      const saveMarkedItemsPromise = markedItemsPromise.then(async (markedItems) => {
-        if (markedItems.length > 0) {
-          await this.finalizeCallUpdates(call, { markedItems });
-        }
-        return markedItems;
-      });
 
       const [, detailedSummary] = await Promise.all([
         summaryPromise,
         detailedSummaryPromise,
         saveLabelsPromise,
-        saveMarkedItemsPromise,
       ]);
       await this.finalizeCallUpdates(call, {
         metadata: {
@@ -180,6 +175,7 @@ class NoteTakerTranscriptService {
           detailedSummaryCanvasId: detailedSummary?.canvasId,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
+        markedItems: detailedSummary?.markedItems,
       });
       await this.queueVespaIndexing(call);
     } finally {
@@ -208,16 +204,14 @@ class NoteTakerTranscriptService {
     );
     if (!detailedSummary) return null;
 
-    const currentMetadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : {};
-    await repositories.calls.update(call.id, {
-      metadata: {
-        ...currentMetadata,
-        detailedSummaryCanvasId: detailedSummary.canvasId,
-      },
+    // Re-derive markedItems too — a different template can change what's in
+    // the Action Items / Decisions Made sections, so re-run through the same
+    // finalizeCallUpdates merge (preserves the user's own flagged moments)
+    // instead of a raw update.
+    await this.finalizeCallUpdates(call, {
+      metadata: { detailedSummaryCanvasId: detailedSummary.canvasId },
       summaryTemplateId: detailedSummary.summaryTemplateId,
+      markedItems: detailedSummary.markedItems,
     });
 
     return {
@@ -528,7 +522,8 @@ class NoteTakerTranscriptService {
           return null;
         }
 
-        return { canvasId, summaryTemplateId: generated.template.id };
+        const markedItems = await this.extractMarkedItemsFromSummary(generated.summary, segments, callId);
+        return { canvasId, summaryTemplateId: generated.template.id, markedItems };
       }
 
       const SYNC_INTERVAL_MS = 300;
@@ -703,7 +698,8 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id };
+      const markedItems = await this.extractMarkedItemsFromSummary(generated.summary, segments, callId);
+      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id, markedItems };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',
@@ -713,6 +709,27 @@ class NoteTakerTranscriptService {
       });
       return null;
     }
+  }
+
+  /**
+   * Derive key decisions/action items from the just-generated detailed
+   * summary (not the raw transcript), so Call.markedItems always matches what
+   * the summary's Action Items / Decisions Made sections show. Returns [] on
+   * any failure or when nothing qualifies.
+   */
+  private async extractMarkedItemsFromSummary(
+    summaryMarkdown: string,
+    segments: SummarySegmentRef[],
+    callId: string,
+  ): Promise<MarkedItem[]> {
+    return transcriptService.generateMarkedItemsFromSummary(summaryMarkdown, segments, callId).catch((err) => {
+      logger.error(`[${callId}] generate_marked_items_threw`, {
+        path: 'note_taker',
+        error: err,
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      return [] as MarkedItem[];
+    });
   }
 
   /**
@@ -793,22 +810,6 @@ class NoteTakerTranscriptService {
       }
       throw error;
     }
-  }
-
-  /**
-   * Generate key decisions/action items, each anchored to a transcript
-   * timestamp. Returns [] on any failure or when nothing qualifies.
-   */
-  private async generateMarkedItemsList(call: Call, formattedTranscript: string): Promise<MarkedItem[]> {
-    const callId = call.externalId;
-    return transcriptService.generateMarkedItems(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_marked_items_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      return [] as MarkedItem[];
-    });
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized
