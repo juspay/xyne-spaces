@@ -32,6 +32,7 @@ import {
 import { calendarSyncErrorMessage, isPermanentCalendarAuthError } from './calendarSyncErrorUtils';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][QUEUE]';
+const INCREMENTAL_CONTINUATION_DELAY_MS = 5_000;
 
 type CalendarSyncJobData = {
   sourceId?: string;
@@ -351,9 +352,13 @@ class GoogleCalendarSyncQueue {
       if (continuation) {
         const continuationId = continuationJobId(continuation.sourceId, continuation.pageToken);
         await clearDeadJobForReenqueue(queue, continuationId);
+        logger.info(`${TAG} Scheduling incremental continuation`, {
+          sourceId: continuation.sourceId,
+          delayMs: INCREMENTAL_CONTINUATION_DELAY_MS,
+        });
         await queue.add('incremental-sync', continuation, {
           jobId: continuationId,
-          delay: 0,
+          delay: INCREMENTAL_CONTINUATION_DELAY_MS,
         });
       }
     });
