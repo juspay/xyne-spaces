@@ -9,7 +9,65 @@ interface PythonTranscriptionResponse {
   duration_s?: number;
 }
 
+interface RecordingRepairTranscriptionResponse extends PythonTranscriptionResponse {
+  speech_detected: boolean;
+  speech_duration_s: number;
+  audio_duration_s: number;
+}
+
 export class VoiceInputService {
+  async transcribeRecordingRepair(
+    file: Express.Multer.File,
+    offsets: { startOffsetMs: number; endOffsetMs: number },
+  ): Promise<{
+    text: string;
+    language?: string;
+    speechDetected: boolean;
+    speechDurationSeconds: number;
+    audioDurationSeconds: number;
+  }> {
+    const pythonAgentUrl = config.pythonAgentUrl;
+    if (!pythonAgentUrl) throw new Error('PYTHON_AGENT_URL is not configured');
+
+    const form = new FormData();
+    form.append('audio', file.buffer, {
+      filename: file.originalname,
+      contentType: file.mimetype,
+    });
+    form.append('startOffsetMs', String(offsets.startOffsetMs));
+    form.append('endOffsetMs', String(offsets.endOffsetMs));
+
+    const startedAt = Date.now();
+    try {
+      const response = await axios.post<RecordingRepairTranscriptionResponse>(
+        `${pythonAgentUrl}/transcribe-recording-repair`,
+        form,
+        { headers: form.getHeaders(), timeout: 60_000 },
+      );
+      logger.info('[VoiceInputService] Recording repair VAD/STT completed', {
+        elapsedMs: Date.now() - startedAt,
+        sizeBytes: file.size,
+        speechDetected: response.data.speech_detected,
+        speechDurationSeconds: response.data.speech_duration_s,
+        audioDurationSeconds: response.data.audio_duration_s,
+        chars: response.data.text?.length ?? 0,
+      });
+      return {
+        text: response.data.text ?? '',
+        language: response.data.language,
+        speechDetected: response.data.speech_detected,
+        speechDurationSeconds: response.data.speech_duration_s,
+        audioDurationSeconds: response.data.audio_duration_s,
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const body = error.response?.data as { error?: string } | undefined;
+        throw new Error(`Recording repair transcription error: ${body?.error || error.message}`);
+      }
+      throw error;
+    }
+  }
+
   async transcribeAudio(
     file: Express.Multer.File,
     options?: {

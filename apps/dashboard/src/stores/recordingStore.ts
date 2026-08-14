@@ -9,18 +9,12 @@ import {
   RoomConnectOptions,
   RoomEvent,
   DataPacket_Kind,
-  type RemoteParticipant,
 } from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
 import { calculateRecordingElapsedMs } from '../utils/recordingUtils';
-import {
-  AGENT_LEFT_CONFIRM_DELAY_MS,
-  isTranscriptionAgentIdentity,
-  shouldConfirmTranscriptionAgentLeft,
-} from '../utils/livekitAgent';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import type { RecordingRepairReason } from '../services/Recording/recordingService';
 
@@ -234,36 +228,6 @@ export const recordingStore = createStore({
 
       // Set up transcript subscription directly in the store
       // This ensures only ONE listener regardless of how many components use the hook
-      let agentLeftTimer: ReturnType<typeof setTimeout> | null = null;
-
-      const clearAgentLeftTimer = (): void => {
-        if (agentLeftTimer) {
-          clearTimeout(agentLeftTimer);
-          agentLeftTimer = null;
-        }
-      };
-
-      const handleParticipantDisconnected = (participant: RemoteParticipant): void => {
-        if (!isTranscriptionAgentIdentity(participant.identity)) return;
-
-        clearAgentLeftTimer();
-        agentLeftTimer = setTimeout(() => {
-          agentLeftTimer = null;
-          const current = recordingStore.getSnapshot().context;
-          const isActive = current.status === 'recording' || current.status === 'paused';
-
-          if (current.room === room && isActive && shouldConfirmTranscriptionAgentLeft(room)) {
-            recordingStore.send({ type: 'agentLeftUnexpectedly' });
-          }
-        }, AGENT_LEFT_CONFIRM_DELAY_MS);
-      };
-
-      const handleParticipantConnected = (participant: RemoteParticipant): void => {
-        if (isTranscriptionAgentIdentity(participant.identity)) {
-          clearAgentLeftTimer();
-        }
-      };
-
       const handleDataReceived = (
         payload: Uint8Array,
         _participant?: unknown,
@@ -302,14 +266,9 @@ export const recordingStore = createStore({
       };
 
       room.on(RoomEvent.DataReceived, handleDataReceived);
-      room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-      room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
 
       transcriptUnsubscribe = (): void => {
-        clearAgentLeftTimer();
         room.off(RoomEvent.DataReceived, handleDataReceived);
-        room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-        room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
       };
 
       playAudio(AUDIO_PATHS.RECORDING_START);
@@ -525,25 +484,6 @@ export const recordingStore = createStore({
       ...context,
       markedMoments: [...context.markedMoments, event.moment],
     }),
-
-    /**
-     * The transcription agent unexpectedly left mid-recording. Flag it only while
-     * a recording is genuinely in progress — if we're already stopping / idle, the
-     * agent is just following the room down on a user-initiated stop.
-     *
-     * Agent loss is an independent fallback reason. Recording lifecycle stays
-     * recording/paused so both dashboard versions remain usable.
-     */
-    agentLeftUnexpectedly: (context): RecordingState => {
-      if (context.status !== 'recording' && context.status !== 'paused') {
-        return context;
-      }
-      return {
-        ...context,
-        agentLeft: false,
-        fallbackReasons: [...new Set([...context.fallbackReasons, 'agent_left' as const])],
-      };
-    },
 
     setFallbackReason: (
       context,

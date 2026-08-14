@@ -1,6 +1,10 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { RecordingRepairTerminalError, recordingRepairService } from '@/services/recordingRepairService';
+import {
+  RecordingRepairDeferredError,
+  RecordingRepairTerminalError,
+  recordingRepairService,
+} from '@/services/recordingRepairService';
 import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 import { redisService } from '@/services/redisService';
 
@@ -66,7 +70,7 @@ class RecordingRepairQueue {
           job.data.callId,
           job.data.captureId,
           error.message,
-          false,
+          error instanceof RecordingRepairDeferredError || error.name === 'RecordingRepairDeferredError',
         );
       }
     });

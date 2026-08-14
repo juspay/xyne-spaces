@@ -149,7 +149,7 @@ export interface RecordingRepairOutage {
 }
 
 export interface RecordingRepairStatus {
-  status: 'OPEN' | 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
+  status: 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
   processingError: string | null;
 }
 

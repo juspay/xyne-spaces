@@ -7,14 +7,21 @@ import {
 import { voiceInputService } from '@/services/voiceInputService';
 import { logger } from '@/utils/logger';
 import { isStandaloneWebm } from '@/utils/webm';
-import { intersectRecordingRepairCoverage } from '@/services/recordingRepairIntervals';
+import { coalesceRecordingRepairCoverage } from '@/services/recordingRepairIntervals';
 
 export class RecordingRepairTerminalError extends Error {
   override readonly name = 'RecordingRepairTerminalError';
 }
 
-class RecordingRepairService {
+export class RecordingRepairDeferredError extends Error {
+  override readonly name = 'RecordingRepairDeferredError';
+}
+
+export class RecordingRepairService {
   async process(callId: string, captureId: string): Promise<void> {
+    if (!(await recordingRepairStateService.isLiveTranscriptFinalized(callId))) {
+      throw new RecordingRepairDeferredError('Live transcript has not been finalized yet');
+    }
     const capture = await recordingRepairStateService.claim(callId, captureId);
     if (!capture) return;
 
@@ -31,6 +38,7 @@ class RecordingRepairService {
       }
 
       const repairs: Array<{ user: string; text: string; timestamp: number; participant_identity: string }> = [];
+      const replacementCoverage: Array<{ startedAt: number; endedAt: number }> = [];
       for (const chunk of selected) {
         const buffer = await recordingRepairStorageService.readChunk(chunk.path);
         if (!isStandaloneWebm(buffer)) {
@@ -38,27 +46,48 @@ class RecordingRepairService {
             `Stored recording repair chunk ${chunk.sequence} has no standalone WebM header`,
           );
         }
-        const result = await voiceInputService.transcribeAudio({
+        const file = {
           buffer,
           size: chunk.size,
           mimetype: chunk.mimeType,
           originalname: `${chunk.sequence}.webm`,
-        } as Express.Multer.File);
-        if (result.text.trim()) {
+        } as Express.Multer.File;
+        const intersections = capture.outages
+          .map(outage => ({
+            startedAt: Math.max(chunk.startedAt, outage.startedAt),
+            endedAt: Math.min(chunk.endedAt, outage.endedAt),
+          }))
+          .filter(interval => interval.endedAt > interval.startedAt);
+
+        for (const interval of intersections) {
+          const result = await voiceInputService.transcribeRecordingRepair(file, {
+            startOffsetMs: interval.startedAt - chunk.startedAt,
+            endOffsetMs: interval.endedAt - chunk.startedAt,
+          });
+          const text = result.text.trim();
+          if (!result.speechDetected || !text) continue;
           repairs.push({
             user: 'Recovered audio',
-            text: result.text.trim(),
-            timestamp: chunk.startedAt / 1000,
+            text,
+            timestamp: interval.startedAt / 1000,
             participant_identity: '',
           });
+          replacementCoverage.push(interval);
         }
       }
 
-      await noteTakerTranscriptService.applyRecordingRepair(
-        callId,
-        repairs,
-        intersectRecordingRepairCoverage(selected, capture.outages),
-      );
+      if (repairs.length > 0) {
+        await noteTakerTranscriptService.applyRecordingRepair(
+          callId,
+          repairs,
+          coalesceRecordingRepairCoverage(replacementCoverage),
+        );
+      } else {
+        logger.info('[RecordingRepairService] VAD/STT found no replacement speech', {
+          callId,
+          captureId,
+        });
+      }
       await recordingRepairStateService.markMerged(callId, captureId);
       void recordingRepairStorageService.deleteChunks(chunks).catch(error => {
         logger.warn('[RecordingRepairService] Post-merge chunk cleanup failed', {

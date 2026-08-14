@@ -44,7 +44,6 @@ export type RecordingStoreEvent =
   | { type: 'setTitle'; title: string }
   | { type: 'setActiveLayout'; layout: RecordingLayout }
   | { type: 'setTranscriptMinimized'; isMinimized: boolean }
-  | { type: 'agentLeftUnexpectedly' }
   | { type: 'setFallbackReason'; reason: RecordingRepairReason; active: boolean }
   | { type: 'setFallbackProtection'; availability: RecordingState['fallbackProtection'] }
   | { type: 'setRepairPending'; pending: boolean };

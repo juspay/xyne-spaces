@@ -86,13 +86,13 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    FE[OfflineRecordingService] --> REDIS[(Repair state in Redis)]
+    FE[OfflineRecordingService] --> DB[(Repair state in Postgres)]
     FE --> GCS[(Chunk objects in storage)]
     FE --> IDX[(IndexedDB local cache)]
 
-    REDIS --> Q[Repair queue]
+    DB --> Q[Redis / Bull repair queue]
     Q --> WK[Repair worker]
-    WK --> REDIS
+    WK --> DB
     WK --> GCS
     WK --> CALL[(Call transcript + metadata)]
 ```
@@ -134,7 +134,8 @@ sequenceDiagram
     User->>Dash: recording in progress
     Dash->>Local: set fallback reason active
     Local->>Local: record standalone WebM chunks
-    Local->>Local: persist chunks + outage intervals in IndexedDB
+    Local->>Local: keep a 20-second rolling buffer in memory
+    Local->>Local: persist overlapping chunks only after a definitive outage
 
     alt network restored before stop
         Local->>API: upload overlapping chunks
@@ -157,13 +158,17 @@ sequenceDiagram
 
 ### 1. Frontend outage detection
 
-The dashboard now tracks outage reasons independently of the main recording lifecycle:
+The dashboard activates durable fallback only for definitive recording-path loss:
 
-- browser offline
-- LiveKit reconnect/disconnect
-- reconnect timeout
-- transcription agent left
-- STT failure/recovery
+- LiveKit reaches terminal `Disconnected` (ordinary `Reconnecting` remains memory-only)
+- a previously connected transcription agent remains absent past its confirmation delay
+
+Browser offline/reconnecting and individual STT provider errors do not persist audio.
+STT failure/recovery events carry a session-specific source id so recovery from one
+session cannot clear another session's failure.
+During a browser-offline or LiveKit reconnect/disconnect incident, the dashboard shows
+a persistent, yellow, user-dismissible warning that local capture is active and the
+transcript will be repaired later.
 
 These reasons are accumulated in store state and mirrored into `OfflineRecordingService`.
 
@@ -172,8 +177,14 @@ These reasons are accumulated in store state and mirrored into `OfflineRecording
 `OfflineRecordingService`:
 
 - creates standalone WebM chunks with one MediaRecorder lifecycle per chunk
-- persists chunks into IndexedDB
-- persists outage windows into IndexedDB
+- pins fallback Opus capture to 48 kbps, matching LiveKit's default mono publish ceiling
+- keeps healthy/reconnecting audio in a bounded 20-second memory buffer
+- begins IndexedDB persistence only when a definitive outage is confirmed
+- silently estimates origin storage capacity and warns when less than roughly two hours remain
+- deletes a local chunk only after its checksummed upload is acknowledged by the backend
+- on quota exhaustion, drains acknowledged chunks and removes only disposable local captures before retrying the failed write
+- switches to a newly published microphone track without changing capture identity
+- resolves IndexedDB writes only after their containing transaction commits
 - retries unfinished uploads/finalization on startup and browser `online`
 
 ### 3. Backend capture finalization
@@ -182,7 +193,7 @@ These reasons are accumulated in store state and mirrored into `OfflineRecording
 
 - accepts repair chunk uploads
 - validates finalized outage windows
-- creates repair state in Redis
+- creates durable repair state in Postgres
 - enqueues a repair job
 
 ### 4. Backend repair processing
@@ -190,7 +201,9 @@ These reasons are accumulated in store state and mirrored into `OfflineRecording
 `recordingRepairWorker` + `recordingRepairQueue`:
 
 - recover pending repair jobs
-- transcribe stored repair chunks
+- trim each chunk to the exact outage intersection
+- run local Silero VAD and skip billable STT for intervals without speech
+- transcribe only VAD-admitted repair intervals
 - merge text into the canonical transcript
 - mark repair state `MERGED` or `FAILED`
 
@@ -203,10 +216,11 @@ Frontend local:
 
 Backend transient:
 
-- Redis hash per `recording-repair:<callId>:<captureId>`
+- Bull job reference in Redis
 
 Backend durable:
 
+- repair capture state in Postgres (`recording_repair_captures`)
 - object storage under `recording-repairs/<callId>/<captureId>/...`
 - canonical transcript storage remains the source of truth after merge
 
@@ -214,7 +228,6 @@ Backend durable:
 
 Repair status:
 
-- `OPEN`
 - `FINALIZED`
 - `PROCESSING`
 - `MERGED`
@@ -248,7 +261,8 @@ This branch requires the following to be healthy for repaired audio to appear:
 - repair chunk storage configured
 - Redis available for repair state + queue
 - repair worker running
-- transcription service accepts uploaded WebM chunks
+- transcription service exposes the VAD-gated `/transcribe-recording-repair` endpoint
+- transcription-agent image includes FFmpeg for exact outage trimming
 
 Without the repair worker, fallback audio can be captured and uploaded, but it will not be merged into the transcript.
 
@@ -273,8 +287,9 @@ Without the repair worker, fallback audio can be captured and uploaded, but it w
 ## Suggested verification checklist
 
 - start a note-taker recording and keep network healthy
-- force browser offline for part of the call
-- verify IndexedDB chunks are written
+- force a temporary browser/LiveKit reconnect and verify current-call chunks are not written to IndexedDB
+- force terminal LiveKit disconnection or confirmed agent departure
+- verify only outage-overlapping chunks are written to IndexedDB
 - restore connectivity
 - stop the call
 - verify repair state transitions `FINALIZED -> PROCESSING -> MERGED`

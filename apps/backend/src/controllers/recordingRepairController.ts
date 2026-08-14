@@ -103,7 +103,7 @@ class RecordingRepairController {
       }
 
       const capture = await recordingRepairStateService.get(callId, captureId);
-      if (capture && capture.status !== 'OPEN') {
+      if (capture) {
         res.status(409).json({ success: false, error: 'Recording repair capture is already finalized' });
         return;
       }

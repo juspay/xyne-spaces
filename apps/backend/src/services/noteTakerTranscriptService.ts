@@ -13,6 +13,7 @@ import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 import type { BuiltinRecordingSummaryTemplateId } from '@/services/recordingSummaryTemplates';
+import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 
 // Generic Tag framework sourceType/category for note-taker call labels. No
 // configKey is used, so tagService.createTag skips the "category must be
@@ -308,6 +309,9 @@ class NoteTakerTranscriptService {
         return;
       }
       await this.processTranscript(call, true);
+      // Reconciliation runs after room-finished grace and is the fallback commit
+      // signal when the agent's transcript-ready webhook never arrived.
+      await recordingRepairStateService.markLiveTranscriptFinalized(callId);
     } catch (error) {
       logger.error(`[${callId}] note_taker_reconcile_failed`, {
         error,
