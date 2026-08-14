@@ -1821,6 +1821,7 @@ model ChannelStats {
   channel          Channel               @relation(fields: [channelId], references: [id])
 
   @@index([channelId])
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
   @@map("channel_stats")
   @@schema("public")
 }
