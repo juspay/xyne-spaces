@@ -1,7 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 
 // A mailbox overlay row is private to its owner (userId). A user may read it only when
 // it's theirs AND they can see the underlying channel: either it's a public channel or
@@ -13,16 +14,20 @@ export class TicketUserMailboxACL extends BaseQueryACL<'ticket_user_mailbox'> {
 
   canSelect<TReturn>(
     query: Query<'ticket_user_mailbox', Schema, TReturn>,
+    args?: SelectArgs,
   ): Query<'ticket_user_mailbox', Schema, TReturn> {
-    return query
-      .where('userId', this.ctx.userID)
-      .whereExists('channel', (ch) =>
-        ch.where(({ or, cmp, exists }) =>
-          or(
-            cmp('visibility', ChannelVisibility.PUBLIC),
-            exists('participants', (p) => p.where('userId', this.ctx.userID)),
-          ),
-        ),
-      );
+    const owned = query.where('userId', this.ctx.userID);
+
+    // Single-channel queries (args.channelId matches the query's own filter):
+    // the access decision is row-invariant, so it resolves ONCE per hydration
+    // (scalar) instead of per-row channel/participant probes.
+    const { channelId, isMember } = channelAccessArgs(args);
+    if (channelId) {
+      return owned.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
+    }
+
+    return owned.whereExists('channel', (ch) =>
+      ch.where(channelAccessWhere(this.ctx)),
+    );
   }
 }

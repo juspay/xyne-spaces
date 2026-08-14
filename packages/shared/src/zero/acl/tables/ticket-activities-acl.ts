@@ -1,7 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import { type Schema, type Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 import { guestTicketAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class TicketActivitiesACL extends BaseQueryACL<'ticket_activities'> {
@@ -9,7 +10,7 @@ export class TicketActivitiesACL extends BaseQueryACL<'ticket_activities'> {
     super(ctx, 'ticket_activities');
   }
 
-  canSelect<TReturn>(query: Query<'ticket_activities', Schema, TReturn>): Query<'ticket_activities', Schema, TReturn> {
+  canSelect<TReturn>(query: Query<'ticket_activities', Schema, TReturn>, args?: SelectArgs): Query<'ticket_activities', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query.whereExists('ticket', (t) =>
         t
@@ -18,16 +19,24 @@ export class TicketActivitiesACL extends BaseQueryACL<'ticket_activities'> {
       );
     }
 
+    // Single-channel queries (args.channelId): the access decision is
+    // row-invariant, so the channel check resolves ONCE per hydration (scalar);
+    // the ticket probe stays per row and is re-anchored to the same channel via
+    // tickets.channelId.
+    const { channelId, isMember } = channelAccessArgs(args);
+    if (channelId) {
+      return query.whereExists('ticket', (t) =>
+        t
+          .where('channelId', channelId)
+          .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR)
+      );
+    }
+
     return query.whereExists('ticket', (t) =>
       t
         .where('workspaceId', '=', this.ctx.workspaceId)
         .whereExists('channel', (ch) =>
-          ch.where(({ or, cmp, exists }) =>
-            or(
-              cmp('visibility', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
-            )
-          )
+          ch.where(channelAccessWhere(this.ctx))
         )
     );
   }

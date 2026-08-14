@@ -64,9 +64,12 @@ export function scalarChannelBody(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): (ch: any) => any {
   if (isMember === true) {
+    // id is pinned so the OUTER channel exists is scalar-resolvable too (a
+    // scalar only resolves when a unique key is literal-pinned; the inner
+    // participants scalar rides along after resolving inside-out).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (ch: any) =>
-      ch.whereExists(
+      ch.where('id', channelId).whereExists(
         'participants',
         (p: any) => p.where('userId', ctx.userID).where('channelId', channelId),
         SCALAR,

@@ -1,7 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 
 // A label-on-conversation mapping is shared within the channel (the desk label views
 // show all applied labels, not just the caller's). It's readable when the user can see
@@ -14,15 +15,19 @@ export class ConversationLabelMappingsACL extends BaseQueryACL<'conversation_lab
 
   canSelect<TReturn>(
     query: Query<'conversation_label_mappings', Schema, TReturn>,
+    args?: SelectArgs,
   ): Query<'conversation_label_mappings', Schema, TReturn> {
+    // Single-channel queries (args.channelId matches the query's own filter):
+    // the access decision is row-invariant, so it resolves ONCE per hydration
+    // (scalar) instead of per-row channel/participant probes.
+    const { channelId, isMember } = channelAccessArgs(args);
+    if (channelId) {
+      return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
+    }
+
     return query
       .whereExists('channel', (ch) =>
-        ch.where(({ or, cmp, exists }) =>
-          or(
-            cmp('visibility', ChannelVisibility.PUBLIC),
-            exists('participants', (p) => p.where('userId', this.ctx.userID)),
-          ),
-        ),
+        ch.where(channelAccessWhere(this.ctx)),
       );
   }
 }
