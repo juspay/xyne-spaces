@@ -134,6 +134,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Organization", path: "/v3/organizations", icon: BuildingsIcon },
       { label: "Settings", path: "/v3/settings", icon: GearSixIcon },
+      { label: "Digital Twin Users", path: "/v3/configurations/digital-twin", icon: BrainIcon },
     ],
   },
 ];
@@ -308,7 +309,9 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
         ...g,
         items: g.items.filter((i) => {
           if (i.path === "/v3/search-evals") return hasSearchEvalAccess;
-          return i.path !== "/v3/evals" && i.path !== "/v3/entity-types";
+          return i.path !== "/v3/evals"
+            && i.path !== "/v3/entity-types"
+            && i.path !== "/v3/configurations/digital-twin";
         }),
       }))
   ).filter((g) => g.items.length > 0);
