@@ -12,7 +12,7 @@ const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
 export type ExperimentCommand =
-  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string }
+  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: "understanding" }
   | { sub: "status" }
   | { sub: "stop" }
   | { sub: "findings"; id?: string }
@@ -29,9 +29,20 @@ const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 export function parseExperimentCommand(text: string | undefined | null): ExperimentCommand | null {
   if (!text) return null;
   const trimmed = text.trim().replace(LEADING_MENTIONS, "");
-  if (!trimmed.toLowerCase().startsWith("/experiment")) return null;
-  const rest = trimmed.slice("/experiment".length).trim();
-  if (!rest) return { sub: "start", durationMs: DEFAULT_DURATION_MS };
+  const lower = trimmed.toLowerCase();
+  // /understanding is /experiment's coverage-gated sibling: identical epoch loop
+  // and subcommands, but the run is tagged so end-experiment stays locked until
+  // the open-conjecture frontier is exhausted (the epoch runtime keys off the
+  // dispatch payload's `kind`). Everything below is shared parsing.
+  const commandWord = lower.startsWith("/understanding")
+    ? "/understanding"
+    : lower.startsWith("/experiment")
+      ? "/experiment"
+      : null;
+  if (!commandWord) return null;
+  const kind = commandWord === "/understanding" ? ("understanding" as const) : undefined;
+  const rest = trimmed.slice(commandWord.length).trim();
+  if (!rest) return { sub: "start", durationMs: DEFAULT_DURATION_MS, ...(kind ? { kind } : {}) };
   const [first, ...tail] = rest.split(/\s+/);
   const firstLower = first?.toLowerCase() ?? "";
   if (firstLower === "status") return { sub: "status" };
@@ -64,6 +75,7 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
     ...(model ? { model } : {}),
     ...(invalidProvider !== undefined ? { invalidProvider } : {}),
+    ...(kind ? { kind } : {}),
   };
 }
 
@@ -344,6 +356,9 @@ async function dispatchExperimentRun(
       deadlineAt: run.deadlineAt.toISOString(),
       ...(run.focus ? { focus: run.focus } : {}),
       ...(opts.mode ? { mode: opts.mode } : {}),
+      // Understanding runs advertise their coverage-gated intent to the epoch
+      // runtime, which keeps end-experiment locked until the frontier empties.
+      ...(run.kind === "understanding" ? { kind: "understanding" as const } : {}),
     },
   };
 

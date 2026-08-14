@@ -47,6 +47,7 @@ export const experimentRepository = {
     focus?: string | null;
     provider?: string | null;
     modelId?: string | null;
+    kind?: string | null;
     deadlineAt: Date;
   }) {
     return prisma.experimentRun.create({
@@ -59,6 +60,7 @@ export const experimentRepository = {
         focus: args.focus ?? null,
         provider: args.provider ?? null,
         modelId: args.modelId ?? null,
+        ...(args.kind ? { kind: args.kind } : {}),
         deadlineAt: args.deadlineAt,
       },
     });
