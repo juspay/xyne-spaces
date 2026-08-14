@@ -96,6 +96,7 @@ import {
   CMDK_USER_LIMIT,
 } from '../../../hooks/useSearchMetrics';
 import { searchMetricsService } from '../../../services/searchMetricsService';
+import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -339,6 +340,16 @@ const ChannelCommandMenu = ({
     () => (seedCommandMode ? { mentions: [], text: '/' } : initialQuery),
     [seedCommandMode, initialQuery],
   );
+
+  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back
+  // arrow (and the browser back gesture) closes the palette instead of leaving the page.
+  // Closing it any other way pops that entry straight back off.
+  const { markNavigating } = useHistoryBackedOverlay({
+    open,
+    onClose: () => onOpenChange(false),
+    id: 'command-menu',
+    enabled: !inline && !contextSelectionMode,
+  });
 
   useShortcutById(
     'global.search',
@@ -1002,6 +1013,10 @@ const ChannelCommandMenu = ({
     if (navigatingToResultsRef.current) return;
     navigatingToResultsRef.current = true;
     showResultsTriggerRef.current = 'keyboard';
+
+    // Tell the history hook this close comes with a navigation, so it doesn't pop the
+    // palette's entry and land the user back where they started.
+    markNavigating();
 
     // Metrics must never be able to swallow the navigation.
     try {
