@@ -21,6 +21,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
+  markedItems: MarkedItem[];
 }
 
 /**
@@ -65,8 +66,9 @@ function markedItemTimestamp(item: MarkedItem): number {
  *     the canvas is created/updated but never posted anywhere,
  *   - generates topical labels and stores them as generic Tag rows, with the
  *     resulting tag ids saved on Call.labels,
- *   - generates key decisions/action items (each anchored to a transcript
- *     timestamp) and stores them directly on Call.markedItems,
+ *   - generates key decisions/action items derived from the detailed summary
+ *     itself (each anchored to a transcript timestamp via the summary's own
+ *     citation segments) and stores them directly on Call.markedItems,
  *   - queues Vespa search indexing for the transcript.
  *
  * Dedup: the agent's transcript-ready webhook fires twice per call (initial +
@@ -145,11 +147,11 @@ class NoteTakerTranscriptService {
       // These workloads are independent once the transcript is available, so
       // start them together. generateDetailedSummaryCanvas preserves its own
       // ordered dependency chain: template selection -> prompt generation when
-      // needed -> detailed-summary streaming.
+      // needed -> detailed-summary streaming -> marked items (derived from the
+      // generated summary itself, see generateDetailedSummaryCanvas).
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
-      const markedItemsPromise = this.generateMarkedItemsList(call, formattedTranscript);
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -161,18 +163,11 @@ class NoteTakerTranscriptService {
         }
         return labelIds;
       });
-      const saveMarkedItemsPromise = markedItemsPromise.then(async (markedItems) => {
-        if (markedItems.length > 0) {
-          await this.finalizeCallUpdates(call, { markedItems });
-        }
-        return markedItems;
-      });
 
       const [, detailedSummary] = await Promise.all([
         summaryPromise,
         detailedSummaryPromise,
         saveLabelsPromise,
-        saveMarkedItemsPromise,
       ]);
       await this.finalizeCallUpdates(call, {
         metadata: {
@@ -180,6 +175,7 @@ class NoteTakerTranscriptService {
           detailedSummaryCanvasId: detailedSummary?.canvasId,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
+        markedItems: detailedSummary?.markedItems,
       });
       await this.queueVespaIndexing(call);
     } finally {
@@ -212,12 +208,13 @@ class NoteTakerTranscriptService {
       call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
         ? (call.metadata as Record<string, unknown>)
         : {};
-    await repositories.calls.update(call.id, {
+    await this.finalizeCallUpdates(call, {
       metadata: {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
+      markedItems: detailedSummary.markedItems,
     });
 
     return {
@@ -528,7 +525,8 @@ class NoteTakerTranscriptService {
           return null;
         }
 
-        return { canvasId, summaryTemplateId: generated.template.id };
+        const markedItems = await this.generateMarkedItemsFromSummary(callId, generated.summary, citationCtx);
+        return { canvasId, summaryTemplateId: generated.template.id, markedItems };
       }
 
       const SYNC_INTERVAL_MS = 300;
@@ -703,7 +701,8 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id };
+      const markedItems = await this.generateMarkedItemsFromSummary(callId, generated.summary, citationCtx);
+      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id, markedItems };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',
@@ -796,19 +795,26 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Generate key decisions/action items, each anchored to a transcript
-   * timestamp. Returns [] on any failure or when nothing qualifies.
+   * Generate key decisions/action items DERIVED FROM the just-generated
+   * detailed summary markdown (see transcriptService.generateMarkedItems),
+   * reusing the same segment map built for the canvas's `[clf-n]` citations
+   * to resolve each item's timestamp. Returns [] on any failure.
    */
-  private async generateMarkedItemsList(call: Call, formattedTranscript: string): Promise<MarkedItem[]> {
-    const callId = call.externalId;
-    return transcriptService.generateMarkedItems(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_marked_items_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
+  private async generateMarkedItemsFromSummary(
+    callId: string,
+    summaryMarkdown: string,
+    citationCtx: CitationContext,
+  ): Promise<MarkedItem[]> {
+    return transcriptService
+      .generateMarkedItems(summaryMarkdown, citationCtx.segments, callId)
+      .catch((err) => {
+        logger.error(`[${callId}] generate_marked_items_threw`, {
+          path: 'note_taker',
+          error: err,
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+        return [] as MarkedItem[];
       });
-      return [] as MarkedItem[];
-    });
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized

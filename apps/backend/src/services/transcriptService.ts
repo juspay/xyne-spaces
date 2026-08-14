@@ -242,19 +242,24 @@ TRANSCRIPT:
 {transcript}
 `;
 
-// Decisions/actions extraction. Transcript lines are prefixed with a "[MM:SS]"
-// (or "[HH:MM:SS]") timestamp relative to call start — the LLM is asked to
-// report that same timestamp back per item so it can be stored alongside the
-// text, instead of us trying to re-locate the sentence in the transcript.
+// Decisions/actions extraction — derived from the ALREADY-GENERATED detailed
+// call summary (not the raw transcript) so the decisions/action items are
+// guaranteed to match what the user sees in the detailed summary canvas,
+// instead of an independent LLM pass over the transcript producing different
+// wording/results. The summary's inline `[clf-N]` citation tokens (segment
+// numbers) are reused to recover the timestamp — the LLM only has to report
+// which token, if any, it copied the item from.
 const MARKED_ITEMS_PROMPT = `
-You are analyzing a call transcript (each line is prefixed with a "[MM:SS]" or "[HH:MM:SS]" timestamp relative to the start of the call) to extract key decisions made and action items assigned.
+You are analyzing an already-generated call summary (Markdown) to extract the key decisions and action items it documents.
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Extract 0-15 items total across decisions and actions \u2014 only clear, concrete ones
-- For each item, use the exact "[MM:SS]" (or "[HH:MM:SS]") timestamp of the transcript line it is most closely associated with
+- Extract 0-15 items total across decisions and actions \u2014 only clear, concrete ones already stated in the summary (e.g. in sections like "Action Items", "Decisions Made", "Key Takeaways", "Consolidated Outcomes")
+- Do NOT introduce facts that are not in the summary \u2014 reuse its wording, only trimming for conciseness
 - "type" must be exactly "decision" or "action"
-- Keep "text" concise (one sentence)
+- Keep "text" concise (one sentence), WITHOUT any "[clf-N]" token in it
+- The summary may have one or more inline citation tokens like "[clf-12]" attached to an item \u2014 report the FIRST such number that appears on that item as "segment" (a number). If the item has no citation token, set "segment" to null
+- Do NOT invent segment numbers \u2014 only report numbers that literally appear as "[clf-N]" in the summary text
 - If nothing clear qualifies, return an empty array for "items"
 
 BRAND NAME CORRECTION:
@@ -263,15 +268,15 @@ BRAND NAME CORRECTION:
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
   "items": [
-    { "type": "decision" | "action", "text": "[concise description]", "timestamp": "MM:SS" }
+    { "type": "decision" | "action", "text": "[concise description]", "segment": 12 | null }
   ]
 }
 
 Only output valid JSON.
 No explanations.
 
-TRANSCRIPT:
-{transcript}
+CALL SUMMARY:
+{summary}
 `;
 
 export interface TicketSuggestion {
@@ -1313,11 +1318,19 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
-   * Generate key decisions/action items from the transcript, each anchored to
-   * the timestamp (in seconds from call start) of the transcript line it came
-   * from. Returns [] on any failure or when nothing qualifies.
+   * Generate key decisions/action items DERIVED FROM the already-generated
+   * detailed call summary (rather than a second, independent pass over the raw
+   * transcript), so the marked items always match what's shown in the detailed
+   * summary. `segments` is the same segment-number -> transcript-line map used
+   * to resolve the summary's inline "[clf-N]" citation tokens when rendering
+   * the canvas; it's reused here purely to recover each item's timestamp.
+   * Returns [] on any failure or when nothing qualifies.
    */
-  async generateMarkedItems(transcript: string, callId?: string): Promise<MarkedItem[]> {
+  async generateMarkedItems(
+    summaryMarkdown: string,
+    segments: Map<number, { timestamp: string }>,
+    callId?: string,
+  ): Promise<MarkedItem[]> {
     const logCallId = callId || 'unknown';
     const agent = await this.createAgent(logCallId);
     if (!agent) {
@@ -1325,7 +1338,7 @@ Output ONLY the processed transcript, nothing else.`;
       return [];
     }
 
-    const prompt = MARKED_ITEMS_PROMPT.replace('{transcript}', transcript);
+    const prompt = MARKED_ITEMS_PROMPT.replace('{summary}', summaryMarkdown);
 
     try {
       const result = await agent.execute({
@@ -1355,15 +1368,17 @@ Output ONLY the processed transcript, nothing else.`;
         .map((item: any) => {
           const text = typeof item?.text === 'string' ? item.text.trim() : '';
           if (!text) return null;
+          const segmentNumber = typeof item?.segment === 'number' ? item.segment : null;
+          const segment = segmentNumber !== null ? segments.get(segmentNumber) : undefined;
           return {
             type: item?.type === 'action' ? 'action' : 'decision',
             text,
-            timestampSeconds: this.parseTimestampToSeconds(item?.timestamp),
+            timestampSeconds: segment ? this.parseTimestampToSeconds(segment.timestamp) : 0,
           } satisfies MarkedItem;
         })
         .filter((item: MarkedItem | null): item is MarkedItem => item !== null);
 
-      logger.info(`Generated ${items.length} marked items`);
+      logger.info(`Generated ${items.length} marked items from detailed summary`);
       return items;
     } catch (error) {
       logger.error(`marked_items_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
