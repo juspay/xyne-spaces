@@ -3,6 +3,7 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class MessagesACL extends BaseQueryACL<'messages'> {
@@ -35,30 +36,19 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
       );
     });
 
-    // Fast paths: when the query is scoped to one channel/conversation (the
-    // arg matches the query's own filter by convention), the channel-access
-    // decision is row-invariant — pin the unique key with a literal so the
-    // scalar exists resolves ONCE per hydration instead of probing
-    // channel/participants per message row. Membership is still verified
-    // against ctx.userID; a non-simple scalar silently falls back to the
-    // per-row EXISTS, so this can only improve cost, never widen access.
-    const channelId = args?.channelId as string | undefined;
+    // Fast paths (uniform with ConversationsACL): single-channel /
+    // single-conversation queries have a row-invariant access decision — the
+    // scalar exists resolves it ONCE per hydration instead of probing
+    // channel/participants per message row. Falls back to the per-row EXISTS
+    // when not resolvable.
+    const { channelId, isMember } = channelAccessArgs(args);
     const conversationId = args?.conversationId as string | undefined;
 
     if (channelId) {
       return withVisibleTo.whereExists('conversation', (c) =>
-        c.where('channelId', channelId).whereExists('channel', (ch) =>
-          ch
-            .where('id', channelId)
-            .where('workspaceId', '=', this.ctx.workspaceId)
-            .where(({ or, cmp, exists }) =>
-              or(
-                cmp('visibility', '=', ChannelVisibility.PUBLIC),
-                exists('participants', (p) => p.where('userId', this.ctx.userID))
-              )
-            ),
-          { scalar: true }
-        )
+        c
+          .where('channelId', channelId)
+          .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR)
       );
     }
 
@@ -69,14 +59,9 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
           .whereExists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
-              .where(({ or, cmp, exists }) =>
-                or(
-                  cmp('visibility', '=', ChannelVisibility.PUBLIC),
-                  exists('participants', (p) => p.where('userId', this.ctx.userID))
-                )
-              )
+              .where(channelAccessWhere(this.ctx))
           ),
-        { scalar: true }
+        SCALAR
       );
     }
 
@@ -84,12 +69,7 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
       c.whereExists('channel', (ch) =>
         ch
           .where('workspaceId', '=', this.ctx.workspaceId)
-          .where(({ or, cmp, exists }) =>
-            or(
-              cmp('visibility', '=', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
-            )
-          )
+          .where(channelAccessWhere(this.ctx))
       )
     );
   }

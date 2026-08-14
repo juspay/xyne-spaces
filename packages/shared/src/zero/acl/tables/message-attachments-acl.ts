@@ -3,6 +3,7 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
@@ -28,12 +29,10 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
         );
     }
 
-    // Fast path: a channel-scoped query (arg matches the query's own filter
-    // by convention) has a row-invariant channel-access decision — the literal
-    // pin on channels.id lets the scalar exists resolve ONCE per hydration
-    // instead of probing channel/participants per attachment row. Falls back
-    // to the per-row EXISTS if the scalar is not resolvable.
-    const channelId = args?.channelId as string | undefined;
+    // Fast path (uniform with ConversationsACL): a channel-scoped query has a
+    // row-invariant access decision — resolved ONCE per hydration via scalar
+    // exists instead of per-attachment channel/participant probes.
+    const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query
         .where('workspaceId', '=', this.ctx.workspaceId)
@@ -41,18 +40,9 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
           or(
             cmp('createdBy', '=', this.ctx.userID),
             exists('conversation', (c) =>
-              c.where('channelId', channelId).whereExists('channel', (ch) =>
-                ch
-                  .where('id', channelId)
-                  .where('workspaceId', '=', this.ctx.workspaceId)
-                  .where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
-                    or2(
-                      cmp2('visibility', '=', ChannelVisibility.PUBLIC),
-                      exists2('participants', (p) => p.where('userId', this.ctx.userID)),
-                    ),
-                  ),
-                { scalar: true },
-              ),
+              c
+                .where('channelId', channelId)
+                .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR),
             ),
           ),
         );
