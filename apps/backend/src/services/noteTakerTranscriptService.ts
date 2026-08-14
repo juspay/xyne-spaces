@@ -21,6 +21,7 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
+  markedItems: MarkedItem[];
 }
 
 /**
@@ -46,6 +47,112 @@ function markedItemTimestamp(item: MarkedItem): number {
   return typeof item.timestampSeconds === 'number' ? item.timestampSeconds : 0;
 }
 
+/** Parse a "MM:SS" or "HH:MM:SS" citation timestamp (from CitationSegment.timestamp) to seconds. */
+function timestampStringToSeconds(value: string): number {
+  const match = value.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  const hours = match[1] ? parseInt(match[1], 10) : 0;
+  const minutes = parseInt(match[2], 10);
+  const seconds = parseInt(match[3], 10);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+const MAX_DERIVED_MARKED_ITEMS = 15;
+
+/**
+ * Derive decisions/action items directly from the already-generated detailed
+ * summary markdown instead of running a second, separate LLM pass over the raw
+ * transcript. The summary's "Action Items" and "Decisions Made" sections (or
+ * any custom-template section whose heading mentions "action item"/"decision")
+ * are scanned for table rows/bullets, each anchored to the transcript
+ * timestamp of its first `[clf-N]` citation \u2014 the SAME citation segments used
+ * to render citation chips in the canvas \u2014 so the two features can never
+ * disagree and no extra LLM call is needed.
+ *
+ * Rows/bullets with no `[clf-N]` citation are skipped: a marked item that
+ * can't be anchored to a transcript moment isn't useful here.
+ */
+function deriveMarkedItemsFromSummary(markdown: string, citationCtx: CitationContext): MarkedItem[] {
+  const items: MarkedItem[] = [];
+  let currentType: 'action' | 'decision' | null = null;
+  let tableRowIndex = 0;
+
+  const classifyLabel = (label: string): 'action' | 'decision' | null => {
+    if (/action item/i.test(label)) return 'action';
+    if (/decision/i.test(label)) return 'decision';
+    return null;
+  };
+
+  const resolveTimestampSeconds = (text: string): number | null => {
+    const match = text.match(/\[clf-(\d+)\]/);
+    if (!match) return null;
+    const segment = citationCtx.segments.get(parseInt(match[1], 10));
+    if (!segment) return null;
+    return timestampStringToSeconds(segment.timestamp);
+  };
+
+  const cleanText = (text: string): string =>
+    text
+      .replace(/\[clf-\d+\]/g, '')
+      .replace(/\*\*/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  for (const rawLine of markdown.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const headingMatch = line.match(/^#{1,6}\s*(.+)$/);
+    const boldLabelMatch = !headingMatch ? line.match(/^\*\*([^*]+)\*\*/) : null;
+    const labelText = headingMatch?.[1] ?? boldLabelMatch?.[1] ?? null;
+    if (labelText !== null) {
+      currentType = classifyLabel(labelText);
+      tableRowIndex = 0;
+      continue;
+    }
+
+    if (!currentType) continue;
+
+    if (line.startsWith('|')) {
+      const isSeparatorRow = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/.test(line);
+      if (isSeparatorRow) {
+        tableRowIndex += 1;
+        continue;
+      }
+      const isDataRow = tableRowIndex > 0;
+      tableRowIndex += 1;
+      if (!isDataRow) continue; // header row
+
+      const cells = line.split('|').map(c => c.trim()).filter(c => c.length > 0);
+      const contentCell = /^\d+$/.test(cells[0] ?? '') ? cells[1] : cells[0];
+      if (!contentCell) continue;
+
+      const timestampSeconds = resolveTimestampSeconds(contentCell);
+      if (timestampSeconds === null) continue;
+
+      const text = cleanText(contentCell);
+      if (!text) continue;
+
+      items.push({ type: currentType, text, timestampSeconds });
+      continue;
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(?:\[[ xX]\]\s+)?(.+)$/);
+    if (bulletMatch) {
+      const content = bulletMatch[1];
+      const timestampSeconds = resolveTimestampSeconds(content);
+      if (timestampSeconds === null) continue;
+
+      const text = cleanText(content);
+      if (!text) continue;
+
+      items.push({ type: currentType, text, timestampSeconds });
+    }
+  }
+
+  return items.slice(0, MAX_DERIVED_MARKED_ITEMS);
+}
+
 /**
  * NOTE_TAKER (HEADLESS / "Xyne Oats") call transcript pipeline.
  *
@@ -65,8 +172,10 @@ function markedItemTimestamp(item: MarkedItem): number {
  *     the canvas is created/updated but never posted anywhere,
  *   - generates topical labels and stores them as generic Tag rows, with the
  *     resulting tag ids saved on Call.labels,
- *   - generates key decisions/action items (each anchored to a transcript
- *     timestamp) and stores them directly on Call.markedItems,
+ *   - derives key decisions/action items (each anchored to a transcript
+ *     timestamp) from the detailed summary's own "Action Items"/"Decisions
+ *     Made" sections — no separate LLM call — and stores them directly on
+ *     Call.markedItems,
  *   - queues Vespa search indexing for the transcript.
  *
  * Dedup: the agent's transcript-ready webhook fires twice per call (initial +
@@ -145,11 +254,13 @@ class NoteTakerTranscriptService {
       // These workloads are independent once the transcript is available, so
       // start them together. generateDetailedSummaryCanvas preserves its own
       // ordered dependency chain: template selection -> prompt generation when
-      // needed -> detailed-summary streaming.
+      // needed -> detailed-summary streaming. Decisions/action items are no
+      // longer a separate LLM call: they're derived from that same detailed
+      // summary's markdown (see deriveMarkedItemsFromSummary), so they can
+      // never disagree with what the canvas shows.
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
-      const markedItemsPromise = this.generateMarkedItemsList(call, formattedTranscript);
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -161,18 +272,11 @@ class NoteTakerTranscriptService {
         }
         return labelIds;
       });
-      const saveMarkedItemsPromise = markedItemsPromise.then(async (markedItems) => {
-        if (markedItems.length > 0) {
-          await this.finalizeCallUpdates(call, { markedItems });
-        }
-        return markedItems;
-      });
 
       const [, detailedSummary] = await Promise.all([
         summaryPromise,
         detailedSummaryPromise,
         saveLabelsPromise,
-        saveMarkedItemsPromise,
       ]);
       await this.finalizeCallUpdates(call, {
         metadata: {
@@ -180,6 +284,7 @@ class NoteTakerTranscriptService {
           detailedSummaryCanvasId: detailedSummary?.canvasId,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
+        markedItems: detailedSummary?.markedItems,
       });
       await this.queueVespaIndexing(call);
     } finally {
@@ -208,16 +313,12 @@ class NoteTakerTranscriptService {
     );
     if (!detailedSummary) return null;
 
-    const currentMetadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : {};
-    await repositories.calls.update(call.id, {
+    await this.finalizeCallUpdates(call, {
       metadata: {
-        ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
+      markedItems: detailedSummary.markedItems,
     });
 
     return {
@@ -528,7 +629,11 @@ class NoteTakerTranscriptService {
           return null;
         }
 
-        return { canvasId, summaryTemplateId: generated.template.id };
+        return {
+          canvasId,
+          summaryTemplateId: generated.template.id,
+          markedItems: deriveMarkedItemsFromSummary(generated.summary, citationCtx),
+        };
       }
 
       const SYNC_INTERVAL_MS = 300;
@@ -703,7 +808,11 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      return { canvasId: newCanvasId, summaryTemplateId: generated.template.id };
+      return {
+        canvasId: newCanvasId,
+        summaryTemplateId: generated.template.id,
+        markedItems: deriveMarkedItemsFromSummary(generated.summary, citationCtx),
+      };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',
@@ -793,22 +902,6 @@ class NoteTakerTranscriptService {
       }
       throw error;
     }
-  }
-
-  /**
-   * Generate key decisions/action items, each anchored to a transcript
-   * timestamp. Returns [] on any failure or when nothing qualifies.
-   */
-  private async generateMarkedItemsList(call: Call, formattedTranscript: string): Promise<MarkedItem[]> {
-    const callId = call.externalId;
-    return transcriptService.generateMarkedItems(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_marked_items_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      return [] as MarkedItem[];
-    });
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized
