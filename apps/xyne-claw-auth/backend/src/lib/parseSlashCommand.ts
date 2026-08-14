@@ -16,7 +16,7 @@
 export type ProviderOverride = { provider: string; model?: string };
 
 export type SlashCommand =
-  | { kind: "goalStart"; condition: string; providerOverride?: ProviderOverride }
+  | { kind: "goalStart"; condition: string; providerOverride?: ProviderOverride; maxTurns?: number }
   | { kind: "goalStatus" }
   | { kind: "goalClear" }
   // `/clear` — wipe this thread's agent session (forget prior context).
@@ -54,6 +54,11 @@ const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 // /stop//help//clear cannot be prose.
 const TRAILING_COMMAND_TOKEN = /(?:^|\s)(\/(?:stop|help|clear))\s*$/i;
 const GOAL_OVERRIDABLE_PROVIDERS = new Set(["spaces", "litellm", "claude", "codex", "copilot"]);
+// Hard ceiling for a user-supplied `/goal maxTurns=N`. When the option is
+// absent the repo default (GOAL_MAX_TURNS_DEFAULT env, default 5) still
+// applies. Anything above this cap is clamped down — a user-configured loop
+// must never be able to schedule unbounded, cost-bearing agent turns.
+const GOAL_MAX_TURNS_CAP = 20;
 
 export function parseSlashCommand(input: string | undefined | null): SlashCommand | null {
   if (!input) return null;
@@ -139,6 +144,7 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
       kind: "goalStart",
       condition: condition.slice(0, 2_000),
       ...(parsed.providerOverride ? { providerOverride: parsed.providerOverride } : {}),
+      ...(parsed.maxTurns != null ? { maxTurns: parsed.maxTurns } : {}),
     };
   }
   return null;
@@ -147,9 +153,10 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
 /** Extract the same provider/model tokens as `/experiment` while leaving the
  * remaining text as the goal's exit condition. A model-only override uses the
  * Spaces provider, matching `/experiment`'s default. */
-function parseGoalStart(raw: string): { condition: string; providerOverride?: ProviderOverride } {
+function parseGoalStart(raw: string): { condition: string; providerOverride?: ProviderOverride; maxTurns?: number } {
   let provider: string | undefined;
   let model: string | undefined;
+  let maxTurns: number | undefined;
   const conditionParts: string[] = [];
   for (const part of raw.trim().split(/\s+/)) {
     const match = /^([^=]+)=(.*)$/u.exec(part);
@@ -166,6 +173,15 @@ function parseGoalStart(raw: string): { condition: string; providerOverride?: Pr
       else conditionParts.push(part);
       continue;
     }
+    if (key === "maxturns" || key === "max_turns" || key === "turns") {
+      const n = Number.parseInt(match?.[2] ?? "", 10);
+      // Positive integers only; clamp to the hard cap. Junk (maxturns=abc)
+      // is preserved as goal text rather than silently coerced — mirrors
+      // the provider/model handling above.
+      if (Number.isInteger(n) && n > 0) maxTurns = Math.min(n, GOAL_MAX_TURNS_CAP);
+      else conditionParts.push(part);
+      continue;
+    }
     conditionParts.push(part);
   }
   const condition = conditionParts.join(" ").replace(/^focus=/i, "").trim();
@@ -173,5 +189,6 @@ function parseGoalStart(raw: string): { condition: string; providerOverride?: Pr
   return {
     condition,
     ...(resolvedProvider ? { providerOverride: { provider: resolvedProvider, ...(model ? { model } : {}) } } : {}),
+    ...(maxTurns != null ? { maxTurns } : {}),
   };
 }
