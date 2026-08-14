@@ -61,7 +61,7 @@ interface EnterpriseRagAdapterPayload extends EnterpriseRagDocumentInput {
 
 export interface EnterpriseRagIngestResult {
   success: true;
-  status: 'queued' | 'duplicate';
+  status: 'inserted' | 'duplicate';
   benchmarkDocId: string;
   sourceType: EnterpriseRagSourceType;
   classification: EnterpriseRagIngestionPath;
@@ -238,7 +238,7 @@ const feedConversation = async (
     threadSenders: [],
   };
   await vespaService.vespaClient.insert(fields as never, insertOpts(messageSchema));
-  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [messageSchema], queueJobs: [] };
+  return { status: 'inserted', entityIds: [payload.syntheticId], schemas: [messageSchema], queueJobs: [] };
 };
 
 const feedMail = async (
@@ -269,7 +269,7 @@ const feedMail = async (
     generatedTags: [],
   };
   await vespaService.vespaClient.insert(fields as never, insertOpts(mailSchema));
-  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [mailSchema], queueJobs: [] };
+  return { status: 'inserted', entityIds: [payload.syntheticId], schemas: [mailSchema], queueJobs: [] };
 };
 
 const feedTicket = async (
@@ -329,7 +329,7 @@ const feedTicket = async (
     childTicketXyneIds: [],
   };
   await vespaService.vespaClient.insert(fields as never, insertOpts(ticketSchema));
-  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [ticketSchema], queueJobs: [] };
+  return { status: 'inserted', entityIds: [payload.syntheticId], schemas: [ticketSchema], queueJobs: [] };
 };
 
 const feedFile = async (
@@ -365,7 +365,7 @@ const feedFile = async (
     channelRef: channelRefId(channelId),
   };
   await vespaService.vespaClient.insert(fields as never, insertOpts(fileSchema));
-  return { status: 'queued', entityIds: [payload.syntheticId], schemas: [fileSchema], queueJobs: [] };
+  return { status: 'inserted', entityIds: [payload.syntheticId], schemas: [fileSchema], queueJobs: [] };
 };
 
 export const ingestEnterpriseRagDocument = async (
@@ -373,6 +373,36 @@ export const ingestEnterpriseRagDocument = async (
   context: EnterpriseRagContext,
 ): Promise<EnterpriseRagIngestResult> => {
   const payload = mapEnterpriseRagRow(input);
+
+  const schemaForPath =
+    payload.ingestionPath === 'conversation' ? messageSchema
+    : payload.ingestionPath === 'mail' ? mailSchema
+    : payload.ingestionPath === 'ticket' ? ticketSchema
+    : fileSchema;
+
+  try {
+    const existing = await vespaService.vespaClient.getDocument({
+      docId: payload.syntheticId,
+      schema: schemaForPath,
+      namespace: VESPA_NAMESPACE,
+    });
+    if (existing) {
+      return {
+        success: true,
+        status: 'duplicate',
+        benchmarkDocId: payload.docId,
+        sourceType: payload.sourceType,
+        classification: payload.ingestionPath,
+        ingestionPath: payload.ingestionPath,
+        entityIds: [payload.syntheticId],
+        schemas: [schemaForPath],
+        queueJobs: [],
+      };
+    }
+  } catch {
+    // Document doesn't exist — proceed with insert
+  }
+
   logger.info('[EnterpriseRAG] Ingesting document (direct Vespa)', {
     docId: payload.docId,
     syntheticId: payload.syntheticId,
