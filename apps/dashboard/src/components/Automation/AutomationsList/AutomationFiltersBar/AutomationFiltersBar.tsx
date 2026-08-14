@@ -19,10 +19,13 @@ import { cn } from '../../../../utils/classNames';
 import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
 import { useAllChannels } from '../../../../hooks/useChannels';
 import { useUserSearch, useUsersById } from '../../../../hooks/useUsers';
+import type { Automation } from '../../Automation.types';
 import {
   TRIGGER_TYPE_OPTIONS,
   STATUS_OPTIONS,
   DEFAULT_AUTOMATION_FILTERS,
+  countAutomationsByStatus,
+  countAutomationsByTriggerType,
   hasActiveFilters,
   type AutomationDateField,
   type AutomationFilters,
@@ -33,6 +36,7 @@ interface AutomationFiltersBarProps {
   filters: AutomationFilters;
   onChange: (next: AutomationFilters) => void;
   onClearQuery: () => void;
+  items: Automation[];
 }
 
 const DATE_FIELD_OPTIONS: { value: AutomationDateField; label: string }[] = [
@@ -80,6 +84,7 @@ interface ChecklistOption<T extends string> {
   icon?: React.ReactNode;
   subtitle?: string | null;
   isDeactivated?: boolean;
+  count?: number;
 }
 
 /** Shared multi-select checklist popover body — fixed-option (Trigger/Status) and entity (Channel/Created by) filters alike. */
@@ -149,6 +154,11 @@ function OptionsChecklist<T extends string>({
                   </span>
                 )}
               </span>
+              {option.count !== undefined && (
+                <span className='shrink-0 text-[11px] tabular-nums text-muted-foreground'>
+                  {option.count}
+                </span>
+              )}
               {isSelected && <Check className='size-4 shrink-0 text-muted-foreground' />}
             </button>
           );
@@ -222,6 +232,7 @@ export function AutomationFiltersBar({
   filters,
   onChange,
   onClearQuery,
+  items,
 }: AutomationFiltersBarProps): React.ReactElement {
   const [openFilter, setOpenFilter] = useState<FilterKey | null>(null);
   const [channelSearch, setChannelSearch] = useState('');
@@ -230,6 +241,23 @@ export function AutomationFiltersBar({
 
   const channelOptions = useChannelOptions(channelSearch, filters.channelIds);
   const createdByOptions = useCreatedByOptions(createdBySearch, filters.createdByUserIds);
+
+  const triggerCounts = useMemo(
+    () => countAutomationsByTriggerType(items, query, filters),
+    [items, query, filters],
+  );
+  const statusCounts = useMemo(
+    () => countAutomationsByStatus(items, query, filters),
+    [items, query, filters],
+  );
+  const triggerOptions = useMemo(
+    () => TRIGGER_TYPE_OPTIONS.map(o => ({ ...o, count: triggerCounts[o.value] ?? 0 })),
+    [triggerCounts],
+  );
+  const statusOptions = useMemo(
+    () => STATUS_OPTIONS.map(o => ({ ...o, count: statusCounts[o.value] ?? 0 })),
+    [statusCounts],
+  );
 
   const popover = (key: FilterKey, trigger: React.ReactNode, children: React.ReactNode) => (
     <Popover
@@ -257,7 +285,7 @@ export function AutomationFiltersBar({
           data-track-name='filter-trigger'
         />,
         <OptionsChecklist
-          options={TRIGGER_TYPE_OPTIONS}
+          options={triggerOptions}
           selectedValues={filters.triggerTypes}
           onChange={values => onChange({ ...filters, triggerTypes: values })}
         />,
@@ -273,7 +301,7 @@ export function AutomationFiltersBar({
           data-track-name='filter-status'
         />,
         <OptionsChecklist
-          options={STATUS_OPTIONS}
+          options={statusOptions}
           selectedValues={filters.statuses}
           onChange={values => onChange({ ...filters, statuses: values })}
         />,

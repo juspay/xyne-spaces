@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, GitCompare } from 'lucide-react';
+import { ArrowLeft, GitCompare, Info } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
@@ -73,6 +73,16 @@ export function VersionHistory({
           </Button>
         )}
       </div>
+
+      {versions.length > 0 && (
+        <div className='flex items-start gap-2 border-b border-border bg-muted/30 px-6 py-2.5 text-xs text-muted-foreground'>
+          <Info className='mt-0.5 size-3.5 flex-shrink-0' aria-hidden='true' />
+          <span>
+            To bring back an older version, open it below and use <strong>Clone</strong> — that
+            starts a new proposal seeded with that version&apos;s config.
+          </span>
+        </div>
+      )}
 
       <div role='list' aria-label='Automation versions' className='flex-1 overflow-y-auto'>
         {isError ? (

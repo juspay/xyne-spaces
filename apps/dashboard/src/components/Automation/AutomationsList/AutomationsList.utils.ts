@@ -1,4 +1,4 @@
-import type { AutomationStatus } from '../Automation.types';
+import type { Automation, AutomationStatus } from '../Automation.types';
 
 type CatalogLike = { type: string; name: string };
 
@@ -65,6 +65,33 @@ export function statusPillClasses(status: AutomationStatus): string {
     default:
       return 'bg-muted text-muted-foreground border-border';
   }
+}
+
+export type AutomationSortField = 'updatedAt' | 'createdAt' | 'name' | 'status';
+export type AutomationSortDirection = 'asc' | 'desc';
+
+export interface AutomationSort {
+  field: AutomationSortField;
+  direction: AutomationSortDirection;
+}
+
+export const DEFAULT_AUTOMATION_SORT: AutomationSort = { field: 'updatedAt', direction: 'desc' };
+
+export function sortAutomations(list: Automation[], sort: AutomationSort): Automation[] {
+  const dir = sort.direction === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => {
+    switch (sort.field) {
+      case 'name':
+        return a.name.localeCompare(b.name) * dir;
+      case 'status':
+        return a.status.localeCompare(b.status) * dir;
+      case 'createdAt':
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      case 'updatedAt':
+      default:
+        return (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()) * dir;
+    }
+  });
 }
 
 export function formatRelative(iso: string | null | undefined): string {

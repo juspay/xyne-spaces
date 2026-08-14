@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Archive,
+  ArrowUpDown,
   Check,
   Copy,
   History,
@@ -21,6 +22,13 @@ import { Button } from '../../ui/Button/Button';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Input from '../../ui/Input/Input';
 import { Popover } from '../../ui/Popover/Popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/Select/Select';
 import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -37,7 +45,16 @@ import type { Automation } from '../Automation.types';
 import { AutomationStatusValues, isLiveStatus } from '../Automation.types';
 import { workflowToAutomation } from '../automation.adapter';
 import type { AutomationsListProps } from './AutomationsList.types';
-import { formatRelative, statusPillClasses, summarizeAutomation } from './AutomationsList.utils';
+import {
+  DEFAULT_AUTOMATION_SORT,
+  formatRelative,
+  sortAutomations,
+  statusPillClasses,
+  summarizeAutomation,
+  type AutomationSort,
+  type AutomationSortDirection,
+  type AutomationSortField,
+} from './AutomationsList.utils';
 import { AutomationFiltersBar } from './AutomationFiltersBar/AutomationFiltersBar';
 import {
   DEFAULT_AUTOMATION_FILTERS,
@@ -61,6 +78,7 @@ export function AutomationsList({
       ? { ...DEFAULT_AUTOMATION_FILTERS, channelIds: initialChannelIds }
       : DEFAULT_AUTOMATION_FILTERS,
   );
+  const [sort, setSort] = useState<AutomationSort>(DEFAULT_AUTOMATION_SORT);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
@@ -158,8 +176,8 @@ export function AutomationsList({
     void navigate(`/automations/new?fork=${item.id}`);
   };
   const filtered = useMemo(
-    () => filterAutomations(visibleItems, query, filters),
-    [visibleItems, query, filters],
+    () => sortAutomations(filterAutomations(visibleItems, query, filters), sort),
+    [visibleItems, query, filters, sort],
   );
 
   const hasAnyFilter = hasActiveFilters(query, filters);
@@ -199,16 +217,27 @@ export function AutomationsList({
             New automation
           </Button>
         </div>
-        <AutomationFiltersBar
-          query={query}
-          filters={filters}
-          onChange={setFilters}
-          onClearQuery={() => setQuery('')}
-        />
+        <div className='flex items-start justify-between gap-3'>
+          <AutomationFiltersBar
+            query={query}
+            filters={filters}
+            onChange={setFilters}
+            onClearQuery={() => setQuery('')}
+            items={visibleItems}
+          />
+          <SortDropdown value={sort} onChange={setSort} />
+        </div>
       </div>
 
       <div className='flex-1 overflow-y-auto bg-muted/30'>
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 px-6 py-6'>
+          {!isLoading && filtered.length > 0 && (
+            <p className='text-xs text-muted-foreground'>
+              {filtered.length === visibleItems.length
+                ? `${filtered.length} ${filtered.length === 1 ? 'automation' : 'automations'}`
+                : `${filtered.length} of ${visibleItems.length} automations`}
+            </p>
+          )}
           {isLoading && visibleItems.length === 0 ? (
             <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>
               <Loader2 className='mr-2 size-4 animate-spin' />
@@ -352,6 +381,61 @@ export function AutomationsList({
         </div>
       </Dialog>
     </div>
+  );
+}
+
+const SORT_OPTIONS: {
+  value: string;
+  field: AutomationSortField;
+  direction: AutomationSortDirection;
+  label: string;
+}[] = [
+  {
+    value: 'updatedAt-desc',
+    field: 'updatedAt',
+    direction: 'desc',
+    label: 'Last updated (newest)',
+  },
+  { value: 'updatedAt-asc', field: 'updatedAt', direction: 'asc', label: 'Last updated (oldest)' },
+  { value: 'createdAt-desc', field: 'createdAt', direction: 'desc', label: 'Created (newest)' },
+  { value: 'createdAt-asc', field: 'createdAt', direction: 'asc', label: 'Created (oldest)' },
+  { value: 'name-asc', field: 'name', direction: 'asc', label: 'Name (A–Z)' },
+  { value: 'name-desc', field: 'name', direction: 'desc', label: 'Name (Z–A)' },
+  { value: 'status-asc', field: 'status', direction: 'asc', label: 'Status' },
+];
+
+function SortDropdown({
+  value,
+  onChange,
+}: {
+  value: AutomationSort;
+  onChange: (next: AutomationSort) => void;
+}): React.ReactElement {
+  const current = `${value.field}-${value.direction}`;
+  return (
+    <Select
+      value={current}
+      onValueChange={next => {
+        const opt = SORT_OPTIONS.find(o => o.value === next);
+        if (opt) onChange({ field: opt.field, direction: opt.direction });
+      }}
+    >
+      <SelectTrigger
+        size='sm'
+        className='h-8 flex-shrink-0 gap-1.5 text-xs'
+        aria-label='Sort automations'
+      >
+        <ArrowUpDown className='size-3.5' aria-hidden='true' />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align='end'>
+        {SORT_OPTIONS.map(opt => (
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

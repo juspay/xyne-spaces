@@ -146,6 +146,28 @@ export function filterAutomations(
   });
 }
 
+export function countAutomationsByTriggerType(
+  list: Automation[],
+  query: string,
+  filters: AutomationFilters,
+): Partial<Record<WorkflowEventType, number>> {
+  const base = filterAutomations(list, query, { ...filters, triggerTypes: [] });
+  const counts: Partial<Record<WorkflowEventType, number>> = {};
+  for (const a of base) counts[a.eventType] = (counts[a.eventType] ?? 0) + 1;
+  return counts;
+}
+
+export function countAutomationsByStatus(
+  list: Automation[],
+  query: string,
+  filters: AutomationFilters,
+): Partial<Record<AutomationStatus, number>> {
+  const base = filterAutomations(list, query, { ...filters, statuses: [] });
+  const counts: Partial<Record<AutomationStatus, number>> = {};
+  for (const a of base) counts[a.status] = (counts[a.status] ?? 0) + 1;
+  return counts;
+}
+
 /** Order-independent equality — used to check whether `statuses` still matches the default set. */
 function sameStatusSet(a: AutomationStatus[], b: AutomationStatus[]): boolean {
   if (a.length !== b.length) return false;
