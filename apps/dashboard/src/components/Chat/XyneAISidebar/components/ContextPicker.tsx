@@ -3,7 +3,7 @@ import { Command } from 'cmdk';
 import { FileText, Hashtag, MicOn, PhoneDefault, TicketToken } from '@xyne/icons';
 import { Hash, Loader2, Lock, Users } from 'lucide-react';
 import type { Channel } from '@xyne/shared';
-import { ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { useSearchMetrics } from '../../../../hooks/useSearchMetrics';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
@@ -163,6 +163,7 @@ export const ContextPicker = ({
       channel => visibleAllChannels.find(vc => vc.id === channel.id) ?? { ...channel },
     ) as VisibleChannel[];
     const grouped = groupChannelsByScope(visibleChannels, allChannelsUserStatus);
+    const deskChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
 
     const sortByActivity = (list: VisibleChannel[]): VisibleChannel[] =>
       [...list].sort(
@@ -183,7 +184,7 @@ export const ContextPicker = ({
         searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
       });
     });
-    sortByActivity(grouped.channels).forEach(channel => {
+    sortByActivity([...grouped.channels, ...deskChannels]).forEach(channel => {
       result.push({
         channel,
         category: ChannelCategory.CHANNELS,

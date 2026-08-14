@@ -27,7 +27,7 @@ export function LibraryIconTile({
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-normal shadow-sm',
+        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-medium shadow-sm',
         TILE_SIZE[size],
 
         color ? 'text-white' : 'border border-border bg-card text-muted-foreground',
@@ -66,7 +66,7 @@ export interface LibraryCardProps {
   testId?: string;
   icon: ReactNode;
   name: string;
-  meta?: string | undefined;
+  meta?: ReactNode | string | undefined;
   statusDot?: ReactNode;
   description?: string | undefined;
   dimmed?: boolean;
@@ -98,9 +98,13 @@ export function LibraryCard({
             {name}
           </span>
           {meta ? (
-            <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
-              {meta}
-            </span>
+            typeof meta === 'string' ? (
+              <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
+                {meta}
+              </span>
+            ) : (
+              meta
+            )
           ) : null}
           {statusDot}
         </div>

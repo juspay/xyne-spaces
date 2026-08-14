@@ -149,6 +149,28 @@ const mergeAgents = (contributions: DeskMetricsContribution[]): DeskMetricsAgent
     .sort((a, b) => b.assigned - a.assigned || b.emailReplies - a.emailReplies);
 };
 
+const mergeTagCategories = (contributions: DeskMetricsContribution[]): DeskMetricsResponse['tagCategories'] => {
+  const totals = new Map<string, number>();
+  for (const { metrics } of contributions) {
+    for (const row of metrics.tagCategories) {
+      totals.set(row.tagCategory, (totals.get(row.tagCategory) ?? 0) + row.count);
+    }
+  }
+  return [...totals.entries()].map(([tagCategory, count]) => ({ tagCategory, count })).sort((a, b) => b.count - a.count);
+};
+
+const mergeTagBreakdown = (contributions: DeskMetricsContribution[]): DeskMetricsResponse['tagBreakdown'] => {
+  const totals = new Map<string, { tag: string; tagCategory: string; count: number }>();
+  for (const { metrics } of contributions) {
+    for (const row of metrics.tagBreakdown) {
+      const key = `${row.tagCategory}::${row.tag}`;
+      const existing = totals.get(key);
+      totals.set(key, { tag: row.tag, tagCategory: row.tagCategory, count: (existing?.count ?? 0) + row.count });
+    }
+  }
+  return [...totals.values()].sort((a, b) => b.count - a.count);
+};
+
 const mergeTickets = (contributions: DeskMetricsContribution[]): DeskMetricsTicketRow[] =>
   contributions
     .flatMap(({ metrics }) => metrics.tickets)
@@ -224,6 +246,8 @@ export const aggregateDeskMetrics = (
       'priority',
     ),
     trend: mergeTrend(contributions),
+    tagCategories: mergeTagCategories(contributions),
+    tagBreakdown: mergeTagBreakdown(contributions),
     tickets: mergeTickets(contributions),
     agents: mergeAgents(contributions),
     perDesk: contributions

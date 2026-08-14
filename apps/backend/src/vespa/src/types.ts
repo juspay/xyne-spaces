@@ -293,6 +293,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   assignedToName: string;
   closedByName: string;
   projectName: string;
+  projectCode: string;
   ticketMentions: string[];
   threadMentions: string[];
   threadSenders: string[];
