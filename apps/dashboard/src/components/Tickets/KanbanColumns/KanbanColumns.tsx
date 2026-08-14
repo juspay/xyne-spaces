@@ -687,7 +687,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         );
       })}
       {onResetOrder && hasSavedOrder && (
-        <div className='flex items-center self-start mt-2 shrink-0'>
+        <div className='sticky right-0 flex items-center self-start mt-2 shrink-0 bg-background/80 backdrop-blur-sm z-20'>
           <Button
             variant='ghost'
             size='sm'
