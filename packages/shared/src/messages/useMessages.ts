@@ -204,7 +204,12 @@ function useChannelMessagesImpl(
     queries.channelConversationsPaginatedV3({
       channelId,
       isMember,
-      start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
+      // Include conversationId (the PK) so the cursor is a complete (createdAt, conversationId)
+      // sort key. A createdAt-only cursor is ambiguous on ties and triggers the Zero
+      // "Bound should be set" crash on the backward (newer-than-anchor) subscription.
+      start: inViewAnchor
+        ? { createdAt: inViewAnchor.createdAt, conversationId: inViewAnchor.conversationId }
+        : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: pageSize,
     }),
