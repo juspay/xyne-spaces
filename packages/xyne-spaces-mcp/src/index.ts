@@ -31,19 +31,38 @@ import {
 } from "./claw.js"
 import {
   queryTickets,
+  queryTicketDetail,
   queryMessages,
   queryMessageDetail,
   queryChannels,
+  queryChannelParticipants,
   queryConversations,
   queryUsers,
   queryUserActivity,
   queryProjects,
   queryBoards,
+  queryBoardStages,
+  queryCalls,
+  queryCanvases,
+  querySubTickets,
+  queryMyDrafts,
+  queryEmails,
+  queryNotifications,
+  queryWhoami,
 } from "./query.js"
 
 // ── Tool Definitions ─────────────────────────────────────────────────
 
 const tools: Tool[] = [
+  {
+    name: "spaces-whoami",
+    description:
+      "Identify the current Spaces user — name, email, UserID, and WorkspaceID. " +
+      "Call this FIRST whenever a request involves 'me', 'my', 'mine', or 'assigned to me': " +
+      "no other tool reveals your own UserID, and filters like assignedTo or createdBy need it. " +
+      "Cheap and cached, so calling it early costs nothing.",
+    inputSchema: { type: "object", properties: {} },
+  },
   {
     name: "spaces-search",
     description:
@@ -107,6 +126,67 @@ const tools: Tool[] = [
         limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max tickets (default 20)" },
         offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
       },
+    },
+  },
+  {
+    name: "spaces-ticket-detail",
+    description:
+      "Read one ticket in full — description, status, priority, stage, assignee, and its sub-tickets. " +
+      "Accepts either the TicketID (cuid) or the human key like JUSPROD-1234. " +
+      "Use this before spaces-update-ticket so you know the current state you are changing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket: { type: "string", description: "TicketID or ticket key (e.g. JUSPROD-1234)" },
+      },
+      required: ["ticket"],
+    },
+  },
+  {
+    name: "spaces-update-ticket",
+    description:
+      "Update an existing ticket: status, priority, assignee, stage, title, description, ETA, or tags. " +
+      "Only the fields you pass are changed. To move a ticket between stages, first call " +
+      "spaces-board-stages for its board and pass a stage NAME from that list — an unknown stage is rejected. " +
+      "Use spaces-whoami to get your own UserID for assigneeId, or spaces-users to find someone else's.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticketId: { type: "string", description: "TicketID (cuid) from spaces-tickets or spaces-ticket-detail" },
+        status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "New status" },
+        priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "New priority" },
+        assigneeId: { type: "string", description: "UserID to assign the ticket to" },
+        stage: { type: "string", description: "Stage NAME from spaces-board-stages" },
+        title: { type: "string", description: "New title" },
+        description: { type: "string", description: "New description" },
+        eta: { type: "string", description: "Due date as an ISO 8601 string" },
+        tags: { type: "array", items: { type: "string" }, description: "Replaces the ticket's tags" },
+      },
+      required: ["ticketId"],
+    },
+  },
+  {
+    name: "spaces-subtickets",
+    description: "List the sub-tickets of a ticket, with their stage and assignee. Use the parent's TicketID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticketId: { type: "string", description: "Parent TicketID" },
+      },
+      required: ["ticketId"],
+    },
+  },
+  {
+    name: "spaces-board-stages",
+    description:
+      "List a board's stages in workflow order, with the ticket status each implies and whether entry " +
+      "needs approval. Required before moving a ticket with spaces-update-ticket, which takes a stage name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        boardId: { type: "string", description: "BoardID from spaces-boards or spaces-ticket-detail" },
+      },
+      required: ["boardId"],
     },
   },
   {
@@ -188,6 +268,114 @@ const tools: Tool[] = [
         content: { type: "string", description: "The opening message content" },
       },
       required: ["channelId", "content"],
+    },
+  },
+  {
+    name: "spaces-channel-participants",
+    description:
+      "List who is in a channel, with their role and UserID. Use this to find the right person to " +
+      "assign a ticket to or mention, when you know the channel but not the people.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channelId: { type: "string", description: "ChannelID from spaces-channels" },
+        limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max participants (default 50)" },
+      },
+      required: ["channelId"],
+    },
+  },
+  {
+    name: "spaces-add-reaction",
+    description:
+      "Add an emoji reaction to a message. Use the messageId from spaces-messages or spaces-activity. " +
+      "The emoji name is the bare name without colons, e.g. 'thumbsup' or 'eyes'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: { type: "string", description: "The messageId to react to" },
+        emojiName: { type: "string", description: "Emoji name without colons, e.g. 'thumbsup'" },
+      },
+      required: ["messageId", "emojiName"],
+    },
+  },
+  {
+    name: "spaces-remove-reaction",
+    description: "Remove your own emoji reaction from a message. Only affects your reaction, not other people's.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        messageId: { type: "string", description: "The messageId to un-react to" },
+        emojiName: { type: "string", description: "Emoji name without colons, e.g. 'thumbsup'" },
+      },
+      required: ["messageId", "emojiName"],
+    },
+  },
+  {
+    name: "spaces-calls",
+    description:
+      "List calls — scheduled, active, or past — with organizer, timing, join link, and CallID. " +
+      "Filter by status or restrict to one channel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter by call status (e.g. SCHEDULED, ONGOING, ENDED)" },
+        channelId: { type: "string", description: "Only calls in this ChannelID" },
+        limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max calls (default 20)" },
+      },
+    },
+  },
+  {
+    name: "spaces-canvases",
+    description:
+      "List canvas documents, newest first, with author and CanvasID. Filter by channel or project. " +
+      "Canvases marked collaborative are live-edited by a realtime server.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channelId: { type: "string", description: "Only canvases in this ChannelID" },
+        projectId: { type: "string", description: "Only canvases in this project" },
+        limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max canvases (default 20)" },
+      },
+    },
+  },
+  {
+    name: "spaces-emails",
+    description:
+      "List emails tied to a conversation or channel, with sender, recipients, subject, and body preview. " +
+      "Spaces threads can be backed by email, so this shows what was actually sent or received.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversationId: { type: "string", description: "Only emails in this ConversationID" },
+        channelId: { type: "string", description: "Only emails in this ChannelID" },
+        limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max emails (default 20)" },
+      },
+    },
+  },
+  {
+    name: "spaces-my-drafts",
+    description:
+      "List your own unsent message drafts. Resolves your identity internally — no user id needed. " +
+      "Drafts are read-only here; to actually post the text use spaces-send-message.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max drafts (default 20)" },
+      },
+    },
+  },
+  {
+    name: "spaces-notifications",
+    description:
+      "List your own notifications, newest first. Resolves your identity internally. " +
+      "This is distinct from spaces-activity: notifications are delivery records (what was pushed to you), " +
+      "while activity is the mention/reply/assignment feed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter by status (e.g. UNREAD, READ)" },
+        limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max notifications (default 20)" },
+      },
     },
   },
   {
@@ -542,6 +730,96 @@ async function handleToolCall(
         limit: args.limit as number | undefined,
         offset: args.offset as number | undefined,
       })
+    }
+
+    case "spaces-whoami": {
+      return queryWhoami()
+    }
+
+    case "spaces-ticket-detail": {
+      return queryTicketDetail(args.ticket as string)
+    }
+
+    case "spaces-update-ticket": {
+      // Only forward what the caller actually set — the backend treats a present
+      // key as an intent to change, so passing undefined would clear fields.
+      const body: Record<string, unknown> = {}
+      for (const key of ["status", "priority", "title", "description", "eta", "tags", "stage"]) {
+        if (args[key] !== undefined) body[key] = args[key]
+      }
+      if (args.assigneeId !== undefined) body["assigneeId"] = args.assigneeId
+
+      if (Object.keys(body).length === 0) {
+        throw new Error("Nothing to update — pass at least one field besides ticketId.")
+      }
+
+      await spacesFetch(`/ticket/${encodeURIComponent(args.ticketId as string)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      })
+
+      const changed = Object.keys(body).join(", ")
+      return `Ticket ${args.ticketId} updated (${changed}).\n\nRe-read it with spaces-ticket-detail to confirm.`
+    }
+
+    case "spaces-subtickets": {
+      return querySubTickets(args.ticketId as string)
+    }
+
+    case "spaces-board-stages": {
+      return queryBoardStages(args.boardId as string)
+    }
+
+    case "spaces-channel-participants": {
+      return queryChannelParticipants(args.channelId as string, (args.limit as number) ?? 50)
+    }
+
+    case "spaces-add-reaction": {
+      await spacesFetch(`/message/${encodeURIComponent(args.messageId as string)}/reactions`, {
+        method: "POST",
+        body: JSON.stringify({ emojiName: args.emojiName }),
+      })
+      return `Reacted :${args.emojiName}: to message ${args.messageId}.`
+    }
+
+    case "spaces-remove-reaction": {
+      await spacesFetch(
+        `/message/${encodeURIComponent(args.messageId as string)}/reactions/${encodeURIComponent(args.emojiName as string)}`,
+        { method: "DELETE" }
+      )
+      return `Removed :${args.emojiName}: from message ${args.messageId}.`
+    }
+
+    case "spaces-calls": {
+      return queryCalls(
+        args.status as string | undefined,
+        args.channelId as string | undefined,
+        (args.limit as number) ?? 20
+      )
+    }
+
+    case "spaces-canvases": {
+      return queryCanvases(
+        args.channelId as string | undefined,
+        args.projectId as string | undefined,
+        (args.limit as number) ?? 20
+      )
+    }
+
+    case "spaces-emails": {
+      return queryEmails(
+        args.conversationId as string | undefined,
+        args.channelId as string | undefined,
+        (args.limit as number) ?? 20
+      )
+    }
+
+    case "spaces-my-drafts": {
+      return queryMyDrafts((args.limit as number) ?? 20)
+    }
+
+    case "spaces-notifications": {
+      return queryNotifications(args.status as string | undefined, (args.limit as number) ?? 20)
     }
 
     case "spaces-messages": {

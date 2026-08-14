@@ -22,6 +22,16 @@ interface TokenData {
 let cachedToken: TokenData | undefined
 
 /**
+ * In-flight authorization, shared by concurrent callers.
+ *
+ * The desktop app allows only one consent dialog at a time and answers 429 to
+ * anything that arrives while one is open. Without this, an agent invoking
+ * several tools in parallel would fire a request per tool and all but the first
+ * would fail.
+ */
+let pendingAuth: Promise<string> | undefined
+
+/**
  * Get a valid access token, requesting authorization if needed.
  */
 export async function getAccessToken(): Promise<string> {
@@ -30,6 +40,15 @@ export async function getAccessToken(): Promise<string> {
     return cachedToken.accessToken
   }
 
+  if (pendingAuth) return pendingAuth
+
+  pendingAuth = requestAuthorization().finally(() => {
+    pendingAuth = undefined
+  })
+  return pendingAuth
+}
+
+async function requestAuthorization(): Promise<string> {
   // Request new authorization
   const response = await fetch(`${BASE}/auth/request`, {
     method: "POST",

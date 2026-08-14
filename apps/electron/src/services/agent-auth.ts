@@ -108,7 +108,7 @@ class AgentAuthService {
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Set CORS headers for localhost only
     res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
@@ -178,6 +178,50 @@ class AgentAuthService {
             req,
             res,
             `/api/channels/${encodeURIComponent(channelId)}/conversations`,
+          );
+        }
+      } else if (req.method === 'GET' && url.pathname === '/auth/me') {
+        // Identity for local agents. The Prisma AST behind /interact has no way to
+        // reference "the caller", so this is the only route by which an agent can
+        // learn its own user id — without it, every "assigned to me" query is a guess.
+        await this.handleProxy(req, res, 'GET', '/api/v2/auth/me');
+      } else if (req.method === 'PATCH' && url.pathname.startsWith('/ticket/')) {
+        const ticketId = url.pathname.slice('/ticket/'.length);
+        if (!ticketId || ticketId.includes('/')) {
+          this.sendJson(res, 400, { error: 'Invalid ticketId' });
+        } else {
+          await this.handleProxy(req, res, 'PATCH', `/api/tickets/${encodeURIComponent(ticketId)}`);
+        }
+      } else if (
+        req.method === 'POST' &&
+        url.pathname.startsWith('/message/') &&
+        url.pathname.endsWith('/reactions')
+      ) {
+        const messageId = url.pathname.slice('/message/'.length, -'/reactions'.length);
+        if (!messageId || messageId.includes('/')) {
+          this.sendJson(res, 400, { error: 'Invalid messageId' });
+        } else {
+          await this.handleProxy(
+            req,
+            res,
+            'POST',
+            `/api/messages/${encodeURIComponent(messageId)}/reactions`,
+          );
+        }
+      } else if (
+        req.method === 'DELETE' &&
+        url.pathname.startsWith('/message/') &&
+        url.pathname.includes('/reactions/')
+      ) {
+        const [messageId, emojiName] = url.pathname.slice('/message/'.length).split('/reactions/');
+        if (!messageId || !emojiName || messageId.includes('/')) {
+          this.sendJson(res, 400, { error: 'Invalid messageId or emojiName' });
+        } else {
+          await this.handleProxy(
+            req,
+            res,
+            'DELETE',
+            `/api/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(emojiName)}`,
           );
         }
       } else if (req.method === 'POST' && url.pathname === '/ticket/create') {
@@ -913,6 +957,25 @@ class AgentAuthService {
     res: ServerResponse,
     backendPath: string
   ): Promise<void> {
+    return this.handleProxy(req, res, 'POST', backendPath);
+  }
+
+  /**
+   * Method-aware variant of the write proxy.
+   *
+   * GET and DELETE carry no body, so body parsing is skipped for them — parseBody
+   * rejects on an empty stream, which would turn every such request into a 400.
+   *
+   * `backendPath` is always built from a literal in the route table above, never
+   * taken from the request, so this stays an explicit vocabulary rather than an
+   * open passthrough to arbitrary backend paths.
+   */
+  private async handleProxy(
+    req: IncomingMessage,
+    res: ServerResponse,
+    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
+    backendPath: string
+  ): Promise<void> {
     // 1. Validate agent token
     const token = this.extractToken(req);
     if (!token || !this.validateToken(token)) {
@@ -920,18 +983,21 @@ class AgentAuthService {
       return;
     }
 
-    // 2. Parse request body
+    // 2. Parse request body (only for methods that carry one)
+    const expectsBody = method === 'POST' || method === 'PATCH' || method === 'PUT';
     let body: any;
-    try {
-      body = await this.parseBody(req);
-    } catch {
-      this.sendJson(res, 400, { error: 'Bad request: invalid JSON body' });
-      return;
-    }
+    if (expectsBody) {
+      try {
+        body = await this.parseBody(req);
+      } catch {
+        this.sendJson(res, 400, { error: 'Bad request: invalid JSON body' });
+        return;
+      }
 
-    if (!body || typeof body !== 'object') {
-      this.sendJson(res, 400, { error: 'Bad request: body must be a JSON object' });
-      return;
+      if (!body || typeof body !== 'object') {
+        this.sendJson(res, 400, { error: 'Bad request: body must be a JSON object' });
+        return;
+      }
     }
 
     try {
@@ -942,25 +1008,25 @@ class AgentAuthService {
         return;
       }
 
-      // 4. Forward POST to backend
+      // 4. Forward to backend
       const backendUrl = `${config.BACKEND_URL}${backendPath}`;
-      log.info(`[AgentAuth] Proxying POST to ${backendUrl}`);
+      log.info(`[AgentAuth] Proxying ${method} to ${backendUrl}`);
 
       const backendResponse = await this.makeBackendRequest({
         url: backendUrl,
-        method: 'POST',
+        method,
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        data: body
+        ...(expectsBody ? { data: body } : {})
       });
 
       // 5. Return backend response
       res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(backendResponse.data));
     } catch (error: any) {
-      log.error(`[AgentAuth] Proxy POST to ${backendPath} failed:`, error);
+      log.error(`[AgentAuth] Proxy ${method} to ${backendPath} failed:`, error);
       this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
     }
   }
