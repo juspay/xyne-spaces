@@ -2,9 +2,9 @@
  * Remembers which recordings the user has asked a summary for.
  *
  * The summary is generated server-side and can take minutes, so the request has to
- * outlive the screen: leaving and coming back must show the skeleton again rather
- * than offering the button a second time. Entries expire so a summary that never
- * arrives cannot strand the skeleton forever.
+ * outlive the screen within the current browser session: leaving and coming back
+ * must show the skeleton again rather than offering the button a second time.
+ * Entries expire so a summary that never arrives cannot strand the skeleton forever.
  */
 
 const STORAGE_KEY = 'xyne:recording-summary-requested';
@@ -20,25 +20,22 @@ type RequestMap = Record<string, SummaryRequestState>;
 
 const normalizeProgress = (progress: number): number => Math.min(96, Math.max(0, progress));
 
-// Reads all pending summary-generation states from the local-storage key
+// Reads all pending summary-generation states from the session-storage key.
 const read = (): RequestMap => {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? '{}');
     if (!parsed || typeof parsed !== 'object') return {};
 
     const requests: RequestMap = {};
     const now = Date.now();
     for (const [recordingId, value] of Object.entries(parsed as Record<string, unknown>)) {
-      // Previous versions stored only the request timestamp.
       const request =
-        typeof value === 'number'
-          ? { requestedAt: value, progress: 0 }
-          : value &&
-              typeof value === 'object' &&
-              typeof (value as Partial<SummaryRequestState>).requestedAt === 'number' &&
-              typeof (value as Partial<SummaryRequestState>).progress === 'number'
-            ? (value as SummaryRequestState)
-            : null;
+        value &&
+        typeof value === 'object' &&
+        typeof (value as Partial<SummaryRequestState>).requestedAt === 'number' &&
+        typeof (value as Partial<SummaryRequestState>).progress === 'number'
+          ? (value as SummaryRequestState)
+          : null;
 
       if (request && now - request.requestedAt < REQUEST_TTL_MS) {
         requests[recordingId] = {
@@ -56,7 +53,7 @@ const read = (): RequestMap => {
 
 const write = (map: RequestMap): void => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
     // Unavailable storage only costs the skeleton its persistence.
   }
