@@ -191,6 +191,7 @@ export async function handleSlashCommandBeforeRun(args: {
       kind: "goalStatusReply",
       replyToUser:
         `**/goal status** — turn ${goal.turnCount}/${goal.maxTurns}` +
+        (goal.commandSlug ? ` · via /${goal.commandSlug}` : "") +
         (goal.maxWallClockMs != null ? ` · budget ${formatDurationMs(goal.maxWallClockMs)}` : "") +
         (goal.lastReason ? ` · last: ${goal.lastReason}` : "") +
         `\n_${condPreview}_`,
@@ -241,6 +242,7 @@ export async function persistGoalStart(args: {
   runPayload: Prisma.InputJsonValue;
   maxTurns?: number;
   maxWallClockMs?: number;
+  commandSlug?: string | null;
 }): Promise<void> {
   await activeGoalRepository.startOrReplace(args);
 }

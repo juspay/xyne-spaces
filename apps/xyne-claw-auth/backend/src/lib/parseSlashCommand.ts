@@ -13,6 +13,8 @@
  * as `/goal status`.
  */
 
+import { RESERVED_COMMAND_SLUGS } from "./commandRegistry.js";
+
 export type ProviderOverride = { provider: string; model?: string };
 
 export type SlashCommand =
@@ -34,7 +36,20 @@ export type SlashCommand =
   | { kind: "help" }
   // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
   | { kind: "fastMode"; enabled: boolean }
-  | { kind: "fastModeUsage" };
+  | { kind: "fastModeUsage" }
+  // `/command` registry — define/list/show/delete org-scoped custom commands.
+  | { kind: "commandList" }
+  | { kind: "commandShow"; slug: string }
+  | { kind: "commandDelete"; slug: string }
+  | {
+      kind: "commandDefine";
+      slug: string;
+      template: string;
+      description?: string;
+      providerOverride?: ProviderOverride;
+      maxTurns?: number;
+      maxWallClockMs?: number;
+    };
 
 // Strip a sequence of leading `@<token>` mentions so /goal works even when
 // the message addresses an agent first (e.g. `@Xyne Doctor /goal count to 10`).
@@ -148,6 +163,13 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
     return { kind: "compact", instructions: trimmed.slice("/compact ".length).trim().slice(0, 2_000) };
   }
 
+  if (lower === "/command" || lower === "/commands" || lower === "/command list") {
+    return { kind: "commandList" };
+  }
+  if (lower.startsWith("/command ")) {
+    return parseCommandMgmt(trimmed.slice("/command ".length));
+  }
+
   if (lower === "/stop" || lower === "/goal clear") {
     return { kind: "goalClear" };
   }
@@ -222,4 +244,116 @@ function parseGoalStart(raw: string): { condition: string; providerOverride?: Pr
     ...(maxTurns != null ? { maxTurns } : {}),
     ...(maxWallClockMs != null ? { maxWallClockMs } : {}),
   };
+}
+
+// ── /command registry parsing ──────────────────────────────────────────────
+// `/command list` · `/command show <slug>` · `/command delete <slug>` ·
+// `/command define <slug> [key=val …] <template…>`. Slug validity + reserved
+// checks are enforced downstream (validateCommandSlug) so the webhook can post a
+// helpful error; here we only extract structure.
+function parseCommandMgmt(rest: string): SlashCommand | null {
+  const trimmed = rest.trim();
+  const firstTok = /^(\S+)/.exec(trimmed);
+  const sub = (firstTok?.[1] ?? "").toLowerCase();
+  const afterSub = trimmed.slice(firstTok?.[1]?.length ?? 0).trim();
+
+  if (sub === "" || sub === "list" || sub === "ls") return { kind: "commandList" };
+  if (sub === "show" || sub === "get") {
+    const slug = (/^(\S+)/.exec(afterSub)?.[1] ?? "").toLowerCase();
+    return slug ? { kind: "commandShow", slug } : null;
+  }
+  if (sub === "delete" || sub === "remove" || sub === "rm") {
+    const slug = (/^(\S+)/.exec(afterSub)?.[1] ?? "").toLowerCase();
+    return slug ? { kind: "commandDelete", slug } : null;
+  }
+  if (sub === "define" || sub === "set" || sub === "add" || sub === "create") {
+    return parseCommandDefine(afterSub);
+  }
+  return null;
+}
+
+// `/command define <slug> [key=val …] <template…>`. Leading key=value tokens
+// (provider/model/maxTurns/maxTime/desc) are consumed as options; the first
+// non-option token begins the template, which keeps its original spacing from
+// there. Budgets are clamped to the same hard caps /goal uses, so a custom
+// command can never exceed the /goal ceilings.
+function parseCommandDefine(afterSub: string): SlashCommand | null {
+  let s = afterSub.trim();
+  const slugMatch = /^(\S+)\s*/.exec(s);
+  if (!slugMatch) return null;
+  const slug = (slugMatch[1] ?? "").toLowerCase();
+  s = s.slice(slugMatch[0].length);
+
+  let provider: string | undefined;
+  let model: string | undefined;
+  let maxTurns: number | undefined;
+  let maxWallClockMs: number | undefined;
+  let description: string | undefined;
+
+  for (;;) {
+    const m = /^(\S+?)=(\S*)\s*/.exec(s);
+    if (!m) break;
+    const key = (m[1] ?? "").toLowerCase();
+    const val = m[2] ?? "";
+    if (key === "provider") {
+      if (!GOAL_OVERRIDABLE_PROVIDERS.has(val.toLowerCase())) break;
+      provider = val.toLowerCase();
+    } else if (key === "model") {
+      if (!val) break;
+      model = val;
+    } else if (key === "maxturns" || key === "max_turns" || key === "turns") {
+      const n = Number.parseInt(val, 10);
+      if (!(Number.isInteger(n) && n > 0)) break;
+      maxTurns = Math.min(n, GOAL_MAX_TURNS_CAP);
+    } else if (
+      key === "maxtime" || key === "max_time" || key === "maxwallclock" ||
+      key === "timeout" || key === "deadline"
+    ) {
+      const ms = parseDurationMs(val);
+      if (ms == null) break;
+      maxWallClockMs = Math.min(ms, GOAL_MAX_WALL_CLOCK_MS_CAP);
+    } else if (key === "desc" || key === "description") {
+      description = val;
+    } else {
+      break;
+    }
+    s = s.slice(m[0].length);
+  }
+
+  const template = s.trim().slice(0, 2_000);
+  if (!slug || !template) return null;
+
+  const resolvedProvider = provider ?? (model ? "spaces" : undefined);
+  return {
+    kind: "commandDefine",
+    slug,
+    template,
+    ...(description ? { description } : {}),
+    ...(resolvedProvider
+      ? { providerOverride: { provider: resolvedProvider, ...(model ? { model } : {}) } }
+      : {}),
+    ...(maxTurns != null ? { maxTurns } : {}),
+    ...(maxWallClockMs != null ? { maxWallClockMs } : {}),
+  };
+}
+
+/**
+ * Extract a custom-command invocation `/<slug> <input>` from a raw message.
+ * Returns null unless the WHOLE message (after leading @mentions) is a single
+ * `/<slug>` token optionally followed by args, and the slug is not a built-in.
+ * The caller resolves <slug> against the org's registry; a miss falls through
+ * to normal processing. Start-anchored + reserved-slug filtered, so prose that
+ * merely contains a slash is never hijacked.
+ */
+export function extractCustomCommandInvocation(
+  input: string | undefined | null,
+): { slug: string; input: string } | null {
+  if (!input) return null;
+  const trimmed = input.trim().replace(LEADING_MENTIONS, "");
+  if (trimmed[0] !== "/") return null;
+  const m = /^\/([a-z][a-z0-9_-]{1,31})(?:\s+([\s\S]*))?$/iu.exec(trimmed);
+  if (!m) return null;
+  const slug = (m[1] ?? "").toLowerCase();
+  if (RESERVED_COMMAND_SLUGS.has(slug)) return null;
+  return { slug, input: (m[2] ?? "").trim() };
 }
