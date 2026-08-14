@@ -12,6 +12,7 @@ import {
   ChannelScopeType,
   ChannelAddUserPolicy,
   ChannelSortOrder,
+  ChannelFilterMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -1289,6 +1290,7 @@ export const mutators = defineMutators({
           id: userStatus.id,
           sectionId,
           sectionPosition: sectionId ? position : null,
+          ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
       },
@@ -5595,6 +5597,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           visibility: visibility || CanvasVisibility.PRIVATE,
           isTemplate: false,
+          isArchived: false,
           isCollaborative: false,
           docType: DocType.Canvas,
           lastEditedBy: ctx.userID,
@@ -5734,6 +5737,46 @@ export const mutators = defineMutators({
 
       await tx.mutate.canvases.delete({ id });
     }),
+    archiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can archive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: true,
+        });
+      },
+    ),
+    unarchiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can unarchive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: false,
+        });
+      },
+    ),
     addParticipants: defineMutator(
       z.object({
         canvasId: z.string(),
@@ -6832,9 +6875,14 @@ export const mutators = defineMutators({
         isCollapsed: z.boolean().optional(),
         position: z.string().optional(),
         sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
+        filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { id, name, emoji, isCollapsed, position, sortOrder, filterMode, timestamp },
+      }) => {
         const section = await tx.run(
           zql.channel_sections.where('id', id).where('userId', ctx.userID).where('isDeleted', false).one(),
         );
@@ -6861,6 +6909,7 @@ export const mutators = defineMutators({
           ...(isCollapsed !== undefined && { isCollapsed }),
           ...(position !== undefined && { position }),
           ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
+          ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
           updatedAt: timestamp,
         });
       },
@@ -9016,6 +9065,54 @@ export const mutators = defineMutators({
     ),
   },
   userPreference: {
+    setSidebarGroupPreference: defineMutator(
+      z.object({
+        id: z.string(),
+        group: z.enum(['starred', 'channels', 'dms']),
+        filterMode: z.nativeEnum(ChannelFilterMode).optional(),
+        sortOrder: z.nativeEnum(ChannelSortOrder).optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, group, filterMode, sortOrder, timestamp } }) => {
+        const filterField = {
+          starred: 'starredFilterMode',
+          channels: 'channelFilterMode',
+          dms: 'dmFilterMode',
+        }[group];
+        const sortField = {
+          starred: 'starredSortOrder',
+          channels: 'channelSortOrder',
+          dms: 'dmSortOrder',
+        }[group];
+        const fields = {
+          ...(filterMode !== undefined && { [filterField]: filterMode }),
+          ...(sortOrder !== undefined && { [sortField]: sortOrder }),
+        };
+        const existing = await tx.run(zql.user_preferences.where('userId', ctx.userID).one());
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            ...fields,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            showThreadTags: false,
+            ...fields,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
     setChannelSortOrder: defineMutator(
       z.object({
         id: z.string(),
@@ -11342,7 +11439,11 @@ export const mutators = defineMutators({
       },
     ),
     disable: defineMutator(
-      z.object({ id: z.string(), timestamp: z.number() }),
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+        cancelQueued: z.boolean().optional(),
+      }),
       async ({ tx, args: { id, timestamp } }) => {
         const existing = await tx.run(zql.workflows.where('id', id).one());
         if (!existing || existing.workflowType !== 'Automations') {

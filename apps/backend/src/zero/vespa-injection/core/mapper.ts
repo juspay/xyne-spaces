@@ -647,7 +647,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     }),
     db.project.findUnique({
       where: { id: args.projectId },
-      select: { name: true }
+      select: { name: true, code: true }
     }),
     db.user.findUnique({
       where: { id: args.createdBy },
@@ -745,6 +745,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     assignedToName: assignedToUser?.name || '',
     closedByName: closedByUser?.name || '',
     projectName: project?.name || '',
+    projectCode: project?.code || '',
     ticketMentions: descriptionMentions?.map(v => v.username) || [],
     threadMentions: threadMentions,
     threadSenders: threadSenders,

@@ -47,6 +47,30 @@ function continuationJobId(sourceId: string, deltaLink: string): string {
   return `microsoft-calendar-incremental-${sourceId}-${cursorHash}`;
 }
 
+/**
+ * Bull refuses to create a new job when a job with the same jobId already
+ * exists in a terminal state (failed/completed) that hasn't been removed.
+ * Since our jobIds are deterministic per sourceId (by design, to serialize
+ * access to the Microsoft delta cursor), a single exhausted-retries failure
+ * would otherwise permanently block every future sync for that source.
+ * Clear out any dead job for this id before adding a fresh one.
+ */
+async function clearDeadJobForReenqueue(queue: Bull.Queue, jobId: string): Promise<void> {
+  try {
+    const existing = await queue.getJob(jobId);
+    if (!existing) return;
+    if ((await existing.isFailed()) || (await existing.isCompleted())) {
+      await existing.remove();
+      logger.warn(`${TAG} Cleared stale job before re-enqueue`, { jobId });
+    }
+  } catch (err) {
+    logger.warn(`${TAG} Failed to check/clear stale job before re-enqueue`, {
+      jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 async function resolveSourceId(jobData: CalendarSyncJobData): Promise<string> {
   if (jobData.sourceId) return jobData.sourceId;
   throw new Error(
@@ -319,8 +343,10 @@ class MicrosoftCalendarSyncQueue {
         throw err;
       }
       if (continuation) {
+        const continuationId = continuationJobId(continuation.sourceId, continuation.deltaLink);
+        await clearDeadJobForReenqueue(queue, continuationId);
         await queue.add('incremental-sync', continuation, {
-          jobId: continuationJobId(continuation.sourceId, continuation.deltaLink),
+          jobId: continuationId,
           delay: 0,
         });
       }
@@ -341,23 +367,23 @@ class MicrosoftCalendarSyncQueue {
 
   async enqueueManualSync(sourceId: string): Promise<void> {
     const queue = await this.ensureQueue();
+    const jobId = `microsoft-calendar-manual-${sourceId}`;
+    await clearDeadJobForReenqueue(queue, jobId);
     await queue.add(
       'manual-sync',
       { sourceId },
-      {
-        jobId: `microsoft-calendar-manual-${sourceId}`,
-      }
+      { jobId }
     );
   }
 
   async enqueueIncrementalSync(sourceId: string): Promise<void> {
     const queue = await this.ensureQueue();
+    const jobId = `microsoft-calendar-incremental-${sourceId}`;
+    await clearDeadJobForReenqueue(queue, jobId);
     await queue.add(
       'incremental-sync',
       { sourceId },
-      {
-        jobId: `microsoft-calendar-incremental-${sourceId}`,
-      }
+      { jobId }
     );
   }
 

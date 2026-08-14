@@ -66,6 +66,20 @@ type LobbyAction =
 
 const initialState: LobbyState = { stage: 'LOADING' };
 
+function getInternalCallUrl(externalId: string, workspaceId: string): string {
+  const configuredBaseUrl = import.meta.env['VITE_INTERNAL_DASHBOARD_BASE_URL'] as
+    | string
+    | undefined;
+  const dashboardBaseUrl =
+    configuredBaseUrl?.trim() ||
+    (import.meta.env.DEV ? 'http://localhost:5173' : window.location.origin);
+
+  return new URL(
+    `/${encodeURIComponent(workspaceId)}/call/${encodeURIComponent(externalId)}`,
+    dashboardBaseUrl,
+  ).toString();
+}
+
 function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
   switch (action.type) {
     case 'SET_LOADING':
@@ -133,7 +147,7 @@ export function ExternalLobbyPage() {
   const [camDenied, setCamDenied] = useState(false);
 
   // -------------------------------------------------------------------------
-  // 1. Load call info
+  // 1. Load call info through the existing lobby route
   // -------------------------------------------------------------------------
   const callInfoQuery = useQuery({
     queryKey: ['call-lobby-info', externalId],
@@ -141,6 +155,8 @@ export function ExternalLobbyPage() {
     enabled: !!externalId && state.stage === 'LOADING',
     retry: false,
   });
+
+  const internalRouteAttemptRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!callInfoQuery.isSuccess || state.stage !== 'LOADING') return;
@@ -150,9 +166,30 @@ export function ExternalLobbyPage() {
     } else if (result === 'ended') {
       dispatch({ type: 'SET_CALL_ENDED' });
     } else {
-      dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
+      if (!externalId || internalRouteAttemptRef.current === externalId) return;
+      internalRouteAttemptRef.current = externalId;
+
+      let cancelled = false;
+      void callLobbyService
+        .resolveInternalRoute(externalId)
+        .then(resolution => {
+          if (cancelled) return;
+          if (resolution.result === 'internal') {
+            window.location.replace(getInternalCallUrl(externalId, resolution.workspaceId));
+            return;
+          }
+          dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
+        })
+        .catch(() => {
+          if (!cancelled) dispatch({ type: 'SET_PRE_JOIN', callInfo: result });
+        });
+
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [callInfoQuery.isSuccess, callInfoQuery.data, state.stage]);
+    return undefined;
+  }, [callInfoQuery.isSuccess, callInfoQuery.data, state.stage, externalId]);
 
   useEffect(() => {
     if (callInfoQuery.isError && state.stage === 'LOADING') {

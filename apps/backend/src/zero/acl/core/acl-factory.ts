@@ -13,6 +13,7 @@ import { CanvasesACL } from '../tables/canvases-acl';
 import { ChannelParticipantsACL } from '../tables/channel-participants-acl';
 import { ChannelStatsACL } from '../tables/channel-stats-acl';
 import { ChannelsACL } from '../tables/channels-acl';
+import { ChannelBoardMappingsACL } from '../tables/channel-board-mappings-acl';
 import { ConversationParticipantsACL } from '../tables/conversation-participants-acl';
 import { ConversationsACL } from '../tables/conversations-acl';
 import { MessageAttachmentsACL } from '../tables/message-attachments-acl';
@@ -223,6 +224,8 @@ export class ACLFactory {
         return new ChannelStatsACL(ctx);
       case 'channels':
         return new ChannelsACL(ctx);
+      case 'channel_board_mappings':
+        return new ChannelBoardMappingsACL(ctx);
       case 'conversation_participants':
         return new ConversationParticipantsACL(ctx);
       case 'conversations':

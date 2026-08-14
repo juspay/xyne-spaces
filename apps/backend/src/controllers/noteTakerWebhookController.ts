@@ -2,13 +2,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { RecordingType, CallType } from '@xyne/shared';
 import type { WebhookEvent } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { callRecordingService } from '@/services/callRecordingService';
+import { livekitService } from '@/services/liveKitService';
 import { emitCallStarted, emitCallEnded } from '@/automations/triggers/call.trigger';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Deferred the same way as the conversation-based flow's fallback reconcile —
 // see livekitWebhookController's former room_finished comment for the full
@@ -105,17 +106,58 @@ class NoteTakerWebhookController {
     }
 
     const callId = uuidv4();
-    const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=AUDIO`;
+    const roomLink = buildCallInviteUrl(roomName);
 
-    const call = await noteTakerCallRepository.createCall({
-      callId,
-      roomName,
-      workspaceId,
-      createdBy,
-      notesCanvasId,
-      roomLink,
-      now: new Date(),
-    });
+    let call;
+    try {
+      call = await noteTakerCallRepository.createCall({
+        callId,
+        roomName,
+        workspaceId,
+        createdBy,
+        notesCanvasId,
+        roomLink,
+        now: new Date(),
+      });
+    } catch (error) {
+      // The recorder UI has already connected by the time this webhook arrives.
+      // Do not let it continue as a ghost recording: there is no Call row to
+      // associate its transcript, audio, or eventual stop event with.
+      logger.error('[NoteTaker Webhook] call_record_creation_failed', {
+        room: roomName,
+        workspaceId,
+        createdBy,
+        error,
+      });
+
+      try {
+        await livekitService.notifyRecordingStartFailure(roomName);
+        // Give the metadata event a brief opportunity to reach the connected
+        // recorder so it can show the specific save-failure message.
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (notificationError) {
+        // Notification is best-effort. A failure must never prevent teardown of
+        // the ghost room below.
+        logger.error('[NoteTaker Webhook] recording_start_failure_notification_failed', {
+          room: roomName,
+          error: notificationError,
+        });
+      }
+
+      try {
+        await livekitService.deleteRoom(roomName);
+        logger.info('[NoteTaker Webhook] ghost_recording_terminated', {
+          room: roomName,
+          reason: 'call_record_creation_failed',
+        });
+      } catch (deleteError) {
+        logger.error('[NoteTaker Webhook] ghost_recording_termination_failed', {
+          room: roomName,
+          error: deleteError,
+        });
+      }
+      return;
+    }
 
     logger.info(`[NoteTaker Webhook] Created note taker call record for ${roomName}`, {
       callId: call.id,

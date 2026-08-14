@@ -22,6 +22,7 @@ export interface DeskMetricsTicketRow {
   csatScore: number | null; // 1..5
   csatRating: string | null; // GOOD | BAD
   customFields: Record<string, string> | null; // form field name → value; only fields with non-empty values included
+  tags: Array<{ tagCategory: string; tag: string }> | null; // desk-email tags from the ticket's conversation
 }
 
 /** Ticket metrics use current ownership; emailReplies uses the sending actor. */
@@ -66,6 +67,10 @@ export interface DeskMetricsResponse {
   priority: Array<{ priority: string; count: number }>;
   /** Daily opened vs closed counts for the trend chart. */
   trend: Array<{ date: string; opened: number; closed: number }>;
+  /** Tag category breakdown — count of distinct tickets per category. Level-1 "By Tags" chart data. */
+  tagCategories: Array<{ tagCategory: string; count: number }>;
+  /** Per-tag breakdown across all categories — Level-2/3 "By Tags" chart data. */
+  tagBreakdown: Array<{ tag: string; tagCategory: string; count: number }>;
   tickets: DeskMetricsTicketRow[];
   agents: DeskMetricsAgentRow[];
 }

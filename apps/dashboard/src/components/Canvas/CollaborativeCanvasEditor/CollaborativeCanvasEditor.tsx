@@ -71,6 +71,8 @@ import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 import { CanvasRole } from '@xyne/shared';
 import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
+import { AnimatePresence } from 'framer-motion';
+
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
@@ -642,7 +644,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
-        <div className='flex min-h-0 flex-1 overflow-hidden'>
+        <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
             style={{
@@ -684,22 +686,24 @@ export const CollaborativeCanvasEditor = forwardRef<
             </div>
           </div>
 
-          {isCommentsOpen && (
-            <CanvasCommentsPanel
-              canvasId={canvasId}
-              canvasTitle={title}
-              channelId={channelId}
-              activeBlockId={activeCommentBlockId}
-              activeThreadId={activeCommentThreadId}
-              activeAnchor={activeCommentAnchor}
-              editable={editable && !isReadOnly}
-              onClose={() => setIsCommentsOpen(false)}
-              onSelectBlock={focusCommentBlock}
-              onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
-              onCreateThreadFailed={removeCommentAnchorStyle}
-            />
-          )}
+          <AnimatePresence>
+            {isCommentsOpen && (
+              <CanvasCommentsPanel
+                canvasId={canvasId}
+                canvasTitle={title}
+                channelId={channelId}
+                activeBlockId={activeCommentBlockId}
+                activeThreadId={activeCommentThreadId}
+                activeAnchor={activeCommentAnchor}
+                editable={editable && !isReadOnly}
+                onClose={() => setIsCommentsOpen(false)}
+                onSelectBlock={focusCommentBlock}
+                onBeforeCreateThread={applyCommentAnchorStyle}
+                onCreateThreadCreated={clearActiveCommentAnchor}
+                onCreateThreadFailed={removeCommentAnchorStyle}
+              />
+            )}
+          </AnimatePresence>
 
           {inlineCommentThread && (
             <CanvasInlineCommentThread

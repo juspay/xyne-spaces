@@ -238,7 +238,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               handleEmojiOpenChange(false);
             }}
             customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: false }}
+            previewConfig={{ showPreview: true }}
           />
         </Popover>
       )}

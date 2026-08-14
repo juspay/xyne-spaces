@@ -89,12 +89,16 @@ async function main(): Promise<void> {
     throw new Error('This local-development script cannot run with NODE_ENV=production.');
   }
 
-  const email = (process.argv[2] ?? '').trim().toLowerCase();
-  let password = process.argv[3] ?? process.env.MEMBER_LOGIN_PASSWORD ?? '';
-  const name = (process.argv[4] ?? '').trim() || deriveName(email) || 'Member';
+  const args = process.argv.slice(2);
+  const isAdmin = args.includes('--admin');
+  const filteredArgs = args.filter((arg) => arg !== '--admin');
+
+  const email = (filteredArgs[0] ?? '').trim().toLowerCase();
+  let password = filteredArgs[1] ?? process.env.MEMBER_LOGIN_PASSWORD ?? '';
+  const name = (filteredArgs[2] ?? '').trim() || deriveName(email) || (isAdmin ? 'Admin' : 'Member');
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error('Usage: npx tsx scripts/create-member-login.ts <email> [password] [name]');
+    throw new Error('Usage: npx tsx scripts/create-member-login.ts <email> [password] [name] [--admin]');
   }
   if (!password) {
     password = await promptForPassword('Password: ');
@@ -118,26 +122,40 @@ async function main(): Promise<void> {
   // Mirrors the MEMBER entries in src/services/permissionMatrix.ts without
   // importing that service and starting unrelated backend infrastructure.
   const expectedPermissions = MEMBER_PERMISSIONS;
+
+  // For admin users, fetch ALL resources; for members, fetch only MEMBER_PERMISSIONS resources
   const resources = await prisma.resource.findMany({
-    where: {
+    where: isAdmin ? {} : {
       name: { in: expectedPermissions.map(({ resourceName }) => resourceName) },
     },
     select: { id: true, name: true },
   });
   const resourcesByName = new Map(resources.map((resource) => [resource.name, resource.id]));
-  const missingResources = expectedPermissions.filter(
-    ({ resourceName }) => !resourcesByName.has(resourceName)
-  );
-  if (missingResources.length > 0) {
-    console.warn(
-      `Skipping MEMBER resources not present in this database: ${missingResources
-        .map(({ resourceName }) => resourceName)
-        .join(', ')}.`
+
+  let grantablePermissions: Array<{ resourceName: string; accessType: string }>;
+
+  if (isAdmin) {
+    // For admin users, grant ADMIN access to all available resources
+    grantablePermissions = resources.map((resource) => ({
+      resourceName: resource.name,
+      accessType: 'ADMIN',
+    }));
+    console.log(`Granting ADMIN access to ${grantablePermissions.length} resources`);
+  } else {
+    const missingResources = expectedPermissions.filter(
+      ({ resourceName }) => !resourcesByName.has(resourceName)
+    );
+    if (missingResources.length > 0) {
+      console.warn(
+        `Skipping MEMBER resources not present in this database: ${missingResources
+          .map(({ resourceName }) => resourceName)
+          .join(', ')}.`
+      );
+    }
+    grantablePermissions = expectedPermissions.filter(({ resourceName }) =>
+      resourcesByName.has(resourceName)
     );
   }
-  const grantablePermissions = expectedPermissions.filter(({ resourceName }) =>
-    resourcesByName.has(resourceName)
-  );
 
   const [existingOrgMember, existingUser] = await Promise.all([
     prisma.orgMember.findUnique({ where: { email } }),
@@ -161,37 +179,42 @@ async function main(): Promise<void> {
   const passwordHash = await hashPassword(password);
 
   if (existingOrgMember && existingUser) {
-    const isMatchingMember =
+    const expectedOrgRole = isAdmin ? OrgRole.ADMIN : OrgRole.MEMBER;
+    const expectedWorkspaceRole = isAdmin ? WorkspaceRole.ADMIN : WorkspaceRole.MEMBER;
+
+    const isMatchingAccount =
       existingOrgMember.memberId === existingUser.orgMemberId &&
       existingOrgMember.orgId === workspace.orgId &&
-      existingOrgMember.role === OrgRole.MEMBER &&
+      existingOrgMember.role === expectedOrgRole &&
       existingOrgMember.leftAt === null &&
-      existingUser.role === WorkspaceRole.MEMBER &&
+      existingUser.role === expectedWorkspaceRole &&
       existingUser.authProvider === AuthProvider.EMAIL &&
       existingUser.status === UserStatus.ACTIVE &&
       existingUser.leftAt === null;
 
-    if (!isMatchingMember) {
+    if (!isMatchingAccount) {
       throw new Error(
-        `${email} already exists but is not an active EMAIL/MEMBER account in ${DEFAULT_WORKSPACE_NAME}.`
+        `${email} already exists but is not an active EMAIL/${isAdmin ? 'ADMIN' : 'MEMBER'} account in ${DEFAULT_WORKSPACE_NAME}.`
       );
     }
 
-    const [adminAccessCount, adminGroupCount] = await Promise.all([
-      prisma.resourceAccess.count({
-        where: { userId: existingUser.id, accessType: 'ADMIN' },
-      }),
-      prisma.userGroupMapping.count({
-        where: {
-          userId: existingUser.id,
-          userGroup: { name: 'ADMIN' },
-        },
-      }),
-    ]);
-    if (adminAccessCount > 0 || adminGroupCount > 0) {
-      throw new Error(
-        `${email} already has admin access. Refusing to reset or relabel the account.`
-      );
+    if (!isAdmin) {
+      const [adminAccessCount, adminGroupCount] = await Promise.all([
+        prisma.resourceAccess.count({
+          where: { userId: existingUser.id, accessType: 'ADMIN' },
+        }),
+        prisma.userGroupMapping.count({
+          where: {
+            userId: existingUser.id,
+            userGroup: { name: 'ADMIN' },
+          },
+        }),
+      ]);
+      if (adminAccessCount > 0 || adminGroupCount > 0) {
+        throw new Error(
+          `${email} already has admin access. Refusing to reset or relabel the account.`
+        );
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -219,14 +242,14 @@ async function main(): Promise<void> {
       }
     });
     userId = existingUser.id;
-    console.log(`Updated the password for existing MEMBER account ${email}.`);
+    console.log(`Updated the password for existing ${isAdmin ? 'ADMIN' : 'MEMBER'} account ${email}.`);
   } else {
     const createdUser = await prisma.$transaction(async (tx) => {
       const orgMember = await tx.orgMember.create({
         data: {
           email,
           orgId: workspace.orgId,
-          role: OrgRole.MEMBER,
+          role: isAdmin ? OrgRole.ADMIN : OrgRole.MEMBER,
           passwordHash,
         },
       });
@@ -239,7 +262,7 @@ async function main(): Promise<void> {
           providerUserId: `email-${email}`,
           status: UserStatus.ACTIVE,
           workspaceId: workspace.id,
-          role: WorkspaceRole.MEMBER,
+          role: isAdmin ? WorkspaceRole.ADMIN : WorkspaceRole.MEMBER,
           orgMemberId: orgMember.memberId,
         },
       });
@@ -258,7 +281,7 @@ async function main(): Promise<void> {
       return user;
     });
     userId = createdUser.id;
-    console.log(`Created MEMBER account ${email}.`);
+    console.log(`Created ${isAdmin ? 'ADMIN' : 'MEMBER'} account ${email}.`);
   }
 
   const accessRows = await prisma.resourceAccess.findMany({
@@ -278,18 +301,21 @@ async function main(): Promise<void> {
 
   if (missingPermissions.length > 0) {
     throw new Error(
-      `MEMBER permissions are incomplete: ${missingPermissions
+      `${isAdmin ? 'ADMIN' : 'MEMBER'} permissions are incomplete: ${missingPermissions
         .map(({ resourceName, accessType }) => `${resourceName}:${accessType}`)
         .join(', ')}. Run scripts/seed-acl.ts and retry.`
     );
   }
-  if (hasAdminAccess) {
+  if (!isAdmin && hasAdminAccess) {
     throw new Error('Safety check failed: the account has direct ADMIN access.');
   }
+  if (isAdmin && !hasAdminAccess) {
+    throw new Error('Safety check failed: the admin account does not have ADMIN access.');
+  }
 
-  console.log(`Member login is ready for ${DEFAULT_WORKSPACE_NAME}.`);
+  console.log(`${isAdmin ? 'Admin' : 'Member'} login is ready for ${DEFAULT_WORKSPACE_NAME}.`);
   console.log(`Email: ${email}`);
-  console.log('Role: MEMBER (non-admin)');
+  console.log(`Role: ${isAdmin ? 'ADMIN' : 'MEMBER (non-admin)'}`);
 }
 
 main()
