@@ -27,7 +27,6 @@ import {
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
-import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { setOnboardingCookie } from '@/utils/onboardingCookie';
 
 /**
@@ -1513,18 +1512,6 @@ export class AuthV2Controller {
         workspaceId,
         authProvider: provider,
       });
-
-      if (isNewUser) {
-        try {
-          await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
-        } catch (error) {
-          logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
-            userId: workspaceUser.id,
-            workspaceId,
-            error,
-          });
-        }
-      }
 
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {

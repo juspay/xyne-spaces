@@ -222,6 +222,17 @@ export class UserService {
         `Created new user: ${user.email} (${user.id}) without assigning to a default group.`
       );
 
+      try {
+        await aiProvisioningService.enqueueUserSync(user.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI user provisioning for created user', {
+          userId: user.id,
+          workspaceId: user.workspaceId,
+          orgMemberId: user.orgMemberId,
+          error,
+        });
+      }
+
       // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
       await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, user.workspaceId);
 
@@ -900,6 +911,17 @@ export class UserService {
           orgMember: { connect: { memberId: orgMember.memberId } },
         }
       });
+
+      try {
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI user provisioning for workspace user', {
+          userId: workspaceUser.id,
+          workspaceId: workspaceUser.workspaceId,
+          orgMemberId: workspaceUser.orgMemberId,
+          error,
+        });
+      }
 
       // Grant permissions based on invitation role (fixes V2 auth zero-permissions bug)
       await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role as WorkspaceRole, userData.workspaceId);

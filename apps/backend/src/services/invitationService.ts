@@ -64,6 +64,20 @@ export class InvitationService {
     return OrgRole.MEMBER;
   }
 
+  private async markInvitationAccepted(tx: TxClient, invitationId: string): Promise<void> {
+    const result = await tx.invitation.updateMany({
+      where: {
+        invitationId,
+        acceptedAt: null,
+      },
+      data: { acceptedAt: new Date() },
+    });
+
+    if (result.count !== 1) {
+      throw new Error('Invitation has already been accepted');
+    }
+  }
+
   /**
    * Create a new invitation
    */
@@ -721,6 +735,11 @@ export class InvitationService {
       throw new Error('Email does not match the invitation');
     }
 
+    if (invitation.acceptedAt) {
+      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitationId} was already accepted at ${invitation.acceptedAt.toISOString()}`);
+      throw new Error('Invitation has already been accepted');
+    }
+
     logger.info(`[DEBUG] [acceptInvitation] Invitation valid. workspaceId=${invitation.workspaceId} orgId=${invitation.orgId ?? 'null'} role=${invitation.role}`);
 
     // Resolve orgId before user creation so a COMMUNITY_MEMBER org row can be
@@ -753,11 +772,8 @@ export class InvitationService {
 
     if (!existingWorkspaceUser && invitation.role === 'GUEST') {
       const guestResult = await this.prisma.$transaction(async (tx) => {
+        await this.markInvitationAccepted(tx, invitationId);
         const result = await this.handleGuestAcceptance(invitation, userData, tx);
-        await tx.invitation.update({
-          where: { invitationId },
-          data: { acceptedAt: new Date() },
-        });
         return result;
       });
       newWorkspaceUser = guestResult.user;
@@ -777,6 +793,7 @@ export class InvitationService {
         }
 
         const guestResult = await this.prisma.$transaction(async (tx) => {
+          await this.markInvitationAccepted(tx, invitationId);
           const reactivatedUser = await tx.user.update({
             where: { id: existingWorkspaceUser.id },
             data: {
@@ -785,10 +802,6 @@ export class InvitationService {
             },
           });
           const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
-          await tx.invitation.update({
-            where: { invitationId },
-            data: { acceptedAt: new Date() },
-          });
           return { user: reactivatedUser, redirectPath: path };
         });
         newWorkspaceUser = guestResult.user;
@@ -797,6 +810,7 @@ export class InvitationService {
       } else {
         // User exists - reactivate + orgMember upsert + invitation accept in one transaction
         newWorkspaceUser = await this.prisma.$transaction(async (tx) => {
+          await this.markInvitationAccepted(tx, invitationId);
           const reactivatedUser = await tx.user.update({
             where: { id: existingWorkspaceUser.id },
             data: {
@@ -822,11 +836,6 @@ export class InvitationService {
             });
           }
 
-          await tx.invitation.update({
-            where: { invitationId },
-            data: { acceptedAt: new Date() },
-          });
-
           return reactivatedUser;
         });
         logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
@@ -838,6 +847,7 @@ export class InvitationService {
       }
 
       newWorkspaceUser = await this.prisma.$transaction(async (tx) => {
+        await this.markInvitationAccepted(tx, invitationId);
         const existingOrgMember = await tx.orgMember.findUnique({
           where: { email: userData.email.toLowerCase() },
           select: { memberId: true, role: true },
@@ -892,11 +902,6 @@ export class InvitationService {
           },
         });
         logger.info(`[DEBUG] [acceptInvitation] Created new workspace user id=${createdUser.id}`);
-
-        await tx.invitation.update({
-          where: { invitationId },
-          data: { acceptedAt: new Date() },
-        });
 
         return createdUser;
       });
