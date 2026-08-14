@@ -156,6 +156,7 @@ import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailCompo
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
+import { AppThread, AppComposer } from '../../components/xyne-desk/AppThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
@@ -4763,9 +4764,10 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ||
-                  channel?.type === ChannelType.APP ||
-                  channel?.type === ChannelType.SOCIAL_MEDIA ? (
+                  {channel?.type === ChannelType.APP ? (
+                    <AppThread messages={emails} ticketId={ticket?.id} />
+                  ) : channel?.type === ChannelType.SLACK ||
+                    channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
@@ -4804,14 +4806,23 @@ export const SupportTicketDetail = ({
                     trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              ) : channel?.type === ChannelType.APP ? (
+                conversationId ? (
+                  <AppComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    replyToName={initiator?.name ?? null}
+                    recordOnly={!outboundConfigured}
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SLACK ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
-                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
+                    variant='slack'
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (
