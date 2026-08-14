@@ -19,10 +19,6 @@ export class TicketActivitiesACL extends BaseQueryACL<'ticket_activities'> {
       );
     }
 
-    // Single-channel queries (args.channelId): the access decision is
-    // row-invariant, so the channel check resolves ONCE per hydration (scalar);
-    // the ticket probe stays per row and is re-anchored to the same channel via
-    // tickets.channelId.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query.whereExists('ticket', (t) =>

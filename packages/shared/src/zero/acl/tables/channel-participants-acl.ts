@@ -19,10 +19,6 @@ export class ChannelParticipantsACL extends BaseQueryACL<'channel_participants'>
       );
     }
 
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the channel-access half of the OR is row-invariant, so it resolves ONCE
-    // per hydration (scalar); the caller's-own-row half stays a cheap column
-    // compare per row.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query.where(({ or, cmp, exists }) =>

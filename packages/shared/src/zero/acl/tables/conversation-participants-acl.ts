@@ -29,9 +29,6 @@ export class ConversationParticipantsACL extends BaseQueryACL<'conversation_part
       );
     }
 
-    // Single-channel queries: this ACL grants MEMBERS only (no public branch),
-    // so the row-invariant check is always the member shape — resolved ONCE
-    // per hydration (scalar) instead of per-row participant probes.
     const { channelId } = channelAccessArgs(args);
     if (channelId) {
       return query.where(({ or, exists }) =>

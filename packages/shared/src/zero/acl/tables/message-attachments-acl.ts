@@ -29,9 +29,6 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
         );
     }
 
-    // Fast path (uniform with ConversationsACL): a channel-scoped query has a
-    // row-invariant access decision — resolved ONCE per hydration via scalar
-    // exists instead of per-attachment channel/participant probes.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query

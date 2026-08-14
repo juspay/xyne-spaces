@@ -36,11 +36,6 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
       );
     });
 
-    // Fast paths (uniform with ConversationsACL): single-channel /
-    // single-conversation queries have a row-invariant access decision — the
-    // scalar exists resolves it ONCE per hydration instead of probing
-    // channel/participants per message row. Falls back to the per-row EXISTS
-    // when not resolvable.
     const { channelId, isMember } = channelAccessArgs(args);
     const conversationId = args?.conversationId as string | undefined;
 

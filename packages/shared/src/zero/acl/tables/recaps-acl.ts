@@ -30,10 +30,6 @@ export class RecapsACL extends BaseQueryACL<'recaps'> {
     // Base recaps (userId IS NULL): only visible when their channel is in the caller's
     // workspace AND the channel is PUBLIC or the caller is a participant.
     // Custom recaps (userId = userID): only visible to the owning user.
-
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the access decision is row-invariant, so the channel check resolves ONCE
-    // per hydration (scalar) instead of per-row channel/participant probes.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query.where(({ or, cmp, and, exists }) =>

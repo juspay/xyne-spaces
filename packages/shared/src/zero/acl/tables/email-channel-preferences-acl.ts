@@ -15,11 +15,6 @@ export class EmailChannelPreferencesACL extends BaseQueryACL<'email_channel_pref
       return denyGuestSelect(query, 'channelId');
     }
 
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the access decision is row-invariant, so it resolves ONCE per hydration
-    // (scalar) instead of per-row channel/participant probes. isMember only
-    // picks the skinnier verified shape; access is always verified against
-    // ctx.userID.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);

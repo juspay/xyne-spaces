@@ -24,9 +24,6 @@ export class DelayedMessagesACL extends BaseQueryACL<'delayed_messages'> {
         );
     }
 
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the access decision is row-invariant, so it resolves ONCE per hydration
-    // (scalar) instead of per-row channel/participant probes.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query

@@ -39,10 +39,6 @@ export class CallsACL extends BaseQueryACL<'calls'> {
       );
     }
 
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the channel arm grants MEMBERS only (no public branch) and is
-    // row-invariant, so it resolves ONCE per hydration (scalar); the other OR
-    // arms (creator, shares, call participants) stay per row.
     const { channelId } = channelAccessArgs(args);
     if (channelId) {
       return query.where(({ or, cmp, exists }) =>

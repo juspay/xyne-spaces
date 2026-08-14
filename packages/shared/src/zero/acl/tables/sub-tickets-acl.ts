@@ -30,11 +30,6 @@ export class SubTicketsACL extends BaseQueryACL<'sub_tickets'> {
     // mapped to a parent ticket (mappedTicketId is null — a valid state) OR the caller can
     // access the mapped ticket's channel (PUBLIC, or a participant). Without the null branch,
     // unmapped sub-tickets would be hidden from everyone.
-
-    // Single-channel queries (args.channelId): the access decision is
-    // row-invariant, so the channel check resolves ONCE per hydration (scalar);
-    // the mappedTicket probe stays per row and is re-anchored to the same
-    // channel via tickets.channelId.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query

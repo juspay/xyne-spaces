@@ -17,9 +17,6 @@ export class ConversationLabelMappingsACL extends BaseQueryACL<'conversation_lab
     query: Query<'conversation_label_mappings', Schema, TReturn>,
     args?: SelectArgs,
   ): Query<'conversation_label_mappings', Schema, TReturn> {
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the access decision is row-invariant, so it resolves ONCE per hydration
-    // (scalar) instead of per-row channel/participant probes.
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);

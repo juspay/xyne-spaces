@@ -29,10 +29,6 @@ export class CanvasFoldersACL extends BaseQueryACL<'canvas_folders'> {
     // - channel folders (channelId set) require membership of that channel,
     // - project folders (channelId null, projectId set) require membership of a project channel,
     // - personal folders (both null) are limited to the creator.
-
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the channel arm grants MEMBERS only and is row-invariant, so it resolves
-    // ONCE per hydration (scalar); the creator and project arms stay per row.
     const { channelId } = channelAccessArgs(args);
     if (channelId) {
       return query

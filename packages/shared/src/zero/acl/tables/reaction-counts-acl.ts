@@ -23,10 +23,6 @@ export class ReactionCountsACL extends BaseQueryACL<'reaction_counts'> {
       );
     }
 
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the access decision is row-invariant, so the channel check resolves ONCE
-    // per hydration (scalar); message->conversation correlation probes remain
-    // per row (indexed point lookups).
     const { channelId, isMember } = channelAccessArgs(args);
     if (channelId) {
       return query.whereExists('message', (messageQ) =>

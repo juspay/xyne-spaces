@@ -21,12 +21,6 @@ export class ConversationsACL extends BaseQueryACL<'conversations'> {
     }
 
     const { channelId, isMember } = channelAccessArgs(args);
-
-    // Single-channel queries (args.channelId matches the query's own filter):
-    // the access decision is row-invariant, so the whole check resolves ONCE
-    // per hydration (scalar), instead of per-row channel/participant probes.
-    // isMember only picks the skinnier verified shape; access is always
-    // verified against ctx.userID.
     if (channelId) {
       return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
