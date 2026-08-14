@@ -23,6 +23,7 @@ import {
   processNumericMetric,
   processTimeSeriesData,
   processMessagesExchangedData,
+  processCallsData,
   processCurrentActiveUsersData,
   calculateMessagesPerUser,
   createTimeRangeParams,
@@ -228,6 +229,14 @@ const AnalyticsScreen = (): ReactElement => {
     messagesLoading,
     usersError,
     messagesError,
+    timeRangeParams.groupBy,
+  );
+
+  // Calls and recordings arrive in one payload - they differ only by callType
+  const processedCalls = processCallsData(
+    callsData?.data,
+    callsLoading,
+    callsError,
     timeRangeParams.groupBy,
   );
 
@@ -453,12 +462,7 @@ const AnalyticsScreen = (): ReactElement => {
                     : {})}
                 />
               </div>
-            </div>
-          </div>
-
-          {/* Third Content Section */}
-          <div id='analytics-section-3' className='rounded-lg border border-border overflow-hidden'>
-            <div id='analytics-section-3-container' className='flex flex-col md:flex-row'>
+              <div className='border-t md:border-t-0 md:border-r border-border'></div>
               <div className='flex-1'>
                 <StatCard
                   title='Messages Today'
@@ -479,7 +483,12 @@ const AnalyticsScreen = (): ReactElement => {
                     : {})}
                 />
               </div>
-              <div className='border-t md:border-t-0 md:border-r border-border'></div>
+            </div>
+          </div>
+
+          {/* Third Content Section */}
+          <div id='analytics-section-3' className='rounded-lg border border-border overflow-hidden'>
+            <div id='analytics-section-3-container' className='flex flex-col md:flex-row'>
               {/* Users Onboarded - commented out, replaced by Total Duration of Calls */}
               {/* <div className='flex-1'>
               <StatCard
@@ -520,16 +529,35 @@ const AnalyticsScreen = (): ReactElement => {
                 })()}
               </div>
               <div className='border-t md:border-t-0 md:border-r border-border'></div>
+              {/* Calls and recordings come from one payload, split by callType (HEADLESS = recording) */}
               <div className='flex-1'>
                 <StatCard
                   title='Number of Calls'
-                  value={processNumericMetric(callsData?.data, callsLoading, callsError)}
+                  value={processNumericMetric(
+                    processedCalls.calls,
+                    processedCalls.isLoading,
+                    processedCalls.error,
+                  )}
                   subtitle={subtitle}
                   variant={StatCardVariant.LINE}
-                  {...(Array.isArray(callsData?.data)
-                    ? {
-                        chartData: processTimeSeriesData(callsData.data, timeRangeParams.groupBy),
-                      }
+                  {...(processedCalls.callsChartData.length > 0
+                    ? { chartData: processedCalls.callsChartData }
+                    : {})}
+                />
+              </div>
+              <div className='border-t md:border-t-0 md:border-r border-border'></div>
+              <div className='flex-1'>
+                <StatCard
+                  title='Number of Recordings'
+                  value={processNumericMetric(
+                    processedCalls.recordings,
+                    processedCalls.isLoading,
+                    processedCalls.error,
+                  )}
+                  subtitle={subtitle}
+                  variant={StatCardVariant.LINE}
+                  {...(processedCalls.recordingsChartData.length > 0
+                    ? { chartData: processedCalls.recordingsChartData }
                     : {})}
                 />
               </div>
