@@ -27,6 +27,38 @@ import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsC
 import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
 
 const PAGE_SIZE = 10;
+const THREAD_LIST_SORT_STORAGE_PREFIX = 'xyne:user-threads-sort';
+
+interface ThreadListSortSelection {
+  userId: string;
+  sortMode: ThreadListSort;
+}
+
+const threadListSortStorageKey = (userId: string): string =>
+  `${THREAD_LIST_SORT_STORAGE_PREFIX}:${userId}`;
+
+const readStoredThreadListSort = (userId: string | undefined): ThreadListSort => {
+  if (!userId || typeof window === 'undefined') return 'sections';
+
+  try {
+    const storedSortMode = window.localStorage.getItem(threadListSortStorageKey(userId));
+    return storedSortMode === 'sections' || storedSortMode === 'recent'
+      ? storedSortMode
+      : 'sections';
+  } catch {
+    return 'sections';
+  }
+};
+
+const persistThreadListSort = (userId: string, sortMode: ThreadListSort): void => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(threadListSortStorageKey(userId), sortMode);
+  } catch {
+    // localStorage unavailable/full — keep the selection for this session.
+  }
+};
 
 // Optimize ThreadRow with memo to prevent unnecessary re-renders of existing rows
 // during scrolling or when new data loads at the bottom.
@@ -129,7 +161,11 @@ const UserThreads = (): ReactElement => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<ThreadListSort>('sections');
+  const userId = user?.id;
+  const persistedSortMode = useMemo(() => readStoredThreadListSort(userId), [userId]);
+  const [sortSelection, setSortSelection] = useState<ThreadListSortSelection | null>(null);
+  const sortMode =
+    sortSelection && sortSelection.userId === userId ? sortSelection.sortMode : persistedSortMode;
   const hasConversations = allConversations.length > 0;
   const seenConversationIdsRef = useRef(new Set<string>());
   const nextCursorRef = useRef<string | null>(null);
@@ -137,6 +173,16 @@ const UserThreads = (): ReactElement => {
   const isLoadingRef = useRef(false);
   const generationRef = useRef(0);
   const requestAbortRef = useRef<AbortController | null>(null);
+
+  const handleSortModeChange = useCallback(
+    (nextSortMode: ThreadListSort): void => {
+      if (!userId) return;
+
+      setSortSelection({ userId, sortMode: nextSortMode });
+      persistThreadListSort(userId, nextSortMode);
+    },
+    [userId],
+  );
 
   const loadNextUniquePage = useCallback(
     async (startCursor: string | null, generation: number, initialLoad: boolean): Promise<void> => {
@@ -316,7 +362,7 @@ const UserThreads = (): ReactElement => {
           <div className='inline-flex items-center rounded-md border border-border p-0.5 text-sm'>
             <button
               type='button'
-              onClick={(): void => setSortMode('sections')}
+              onClick={(): void => handleSortModeChange('sections')}
               className={`rounded px-2.5 py-1 transition-colors ${
                 sortMode === 'sections'
                   ? 'bg-muted font-medium text-foreground'
@@ -330,7 +376,7 @@ const UserThreads = (): ReactElement => {
             </button>
             <button
               type='button'
-              onClick={(): void => setSortMode('recent')}
+              onClick={(): void => handleSortModeChange('recent')}
               className={`rounded px-2.5 py-1 transition-colors ${
                 sortMode === 'recent'
                   ? 'bg-muted font-medium text-foreground'
