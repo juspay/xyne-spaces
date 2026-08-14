@@ -22,6 +22,7 @@ import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -452,7 +453,7 @@ class LiveKitWebhookController {
         const callId = uuidv4();
 
         // Construct room link
-        const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=${callType}`;
+        const roomLink = buildCallInviteUrl(roomName);
 
         // Use repository method to create call with all related records atomically
         // If this transaction fails the LiveKit room is already live with no DB record — a

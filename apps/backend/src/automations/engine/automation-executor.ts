@@ -19,6 +19,7 @@ import { automationContextStorage } from './automation-context-storage';
 import { PauseStep } from './pause-step';
 import {
   AUTOMATION_WORKFLOW_TYPE,
+  mayDrainInFlight,
   parseAutomationConfig,
   parseAutomationMetadata,
   readAutomationMeta,
@@ -94,10 +95,15 @@ export class AutomationExecutor {
       );
       return undefined;
     }
-    if (workflow.status !== AutomationStatus.ACTIVE) {
+    if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.CANCELLED },
+      });
       logger.info(
-        `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — running captured config for ${executionId}`,
+        `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — run ${executionId} CANCELLED`,
       );
+      return undefined;
     }
 
     const config = parseAutomationConfig(workflow.context);

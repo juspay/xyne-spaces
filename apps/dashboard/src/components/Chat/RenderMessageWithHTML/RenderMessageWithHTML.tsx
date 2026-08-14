@@ -1,4 +1,4 @@
-import React, { JSX, useEffect, useMemo, useState } from 'react';
+import React, { JSX, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
@@ -10,8 +10,8 @@ import {
   Ticket as TicketIcon,
   Users,
   Clock,
+  Phone,
 } from 'lucide-react';
-import { highlightCodeBlocks } from './utils';
 import {
   getAnchorTargetProps,
   getInternalLinkLabel,
@@ -26,6 +26,7 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
+import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
@@ -47,6 +48,7 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
+import { callLobbyService } from '../../../services/Call/callLobbyService';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -65,16 +67,14 @@ const MAX_HTML_LENGTH = 100000;
 
 const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 
-const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
-const CODE_BLOCK_PREVIEW_LINES = 10;
-const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 24 + 32;
-
 const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   switch (kind) {
     case 'ticket':
       return <TicketIcon className='h-3.5 w-3.5' />;
     case 'canvas':
       return <FileText className='h-3.5 w-3.5' />;
+    case 'call':
+      return <Phone className='h-3.5 w-3.5' />;
     default:
       return <MessageSquare className='h-3.5 w-3.5' />;
   }
@@ -105,7 +105,8 @@ export const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const copyHref = withWorkspacePrefix(resolvedHref, workspaceId);
+  const copyHref =
+    parsedLink?.kind === 'call' ? resolvedHref : withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
   const { userID } = useAuthContextValues();
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
@@ -118,12 +119,38 @@ export const InternalXyneLink = ({
   });
   const [copied, setCopied] = useState(false);
 
+  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
+    onClick?.(event);
+    if (event.defaultPrevented) return;
+    if (parsedLink?.kind !== 'call' || !parsedLink.callId) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+    event.preventDefault();
+    void callLobbyService
+      .resolveInternalRoute(parsedLink.callId)
+      .then(resolution => {
+        if (resolution.result === 'internal') {
+          window.location.assign(
+            `/${encodeURIComponent(resolution.workspaceId)}/call/${encodeURIComponent(parsedLink.callId!)}`,
+          );
+          return;
+        }
+
+        // Users without a valid session for the call's workspace enter through
+        // the external lobby in the same Spaces tab.
+        window.location.assign(resolvedHref);
+      })
+      .catch(() => {
+        window.location.assign(resolvedHref);
+      });
+  };
+
   if (!resolvedHref || !parsedLink) {
     return (
       <a
         href={href}
         className={className}
-        onClick={onClick}
+        onClick={handleOpen}
         data-track-category='MESSAGE'
         data-track-name='OPEN_MESSAGE_LINK'
         {...props}
@@ -164,7 +191,7 @@ export const InternalXyneLink = ({
       <a
         href={href}
         className={className}
-        onClick={onClick}
+        onClick={handleOpen}
         data-track-category='MESSAGE'
         data-track-name='OPEN_INTERNAL_LINK'
         data-track-metadata={JSON.stringify({ href: copyHref, kind: parsedLink.kind })}
@@ -190,14 +217,14 @@ export const InternalXyneLink = ({
   return (
     <span className='group/internal-link inline-flex items-center gap-1.5 align-baseline max-w-full'>
       {parsedLink.kind === 'canvas' ? (
-        <CanvasLink href={href} className={linkClassName} onClick={onClick} {...props}>
+        <CanvasLink href={href} className={linkClassName} onClick={handleOpen} {...props}>
           {linkContent}
         </CanvasLink>
       ) : (
         <a
           href={resolvedHref}
           className={linkClassName}
-          onClick={onClick}
+          onClick={handleOpen}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
@@ -535,7 +562,11 @@ function CollapsibleConversationHistory({
   );
 }
 
-function CopyableCodeBlock({
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
+const CODE_BLOCK_PREVIEW_LINES = 20;
+const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 20 + 16;
+
+function MessageCodeBlock({
   children,
   codeText,
 }: {
@@ -543,15 +574,15 @@ function CopyableCodeBlock({
   codeText: string;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
-  const resetTimerRef = React.useRef<number | undefined>(undefined);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const resetTimerRef = useRef<number | undefined>(undefined);
 
-  useEffect(() => {
-    return () => {
-      if (resetTimerRef.current !== undefined) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-    };
-  }, []);
+  useEffect(
+    () => (): void => {
+      if (resetTimerRef.current !== undefined) window.clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
 
   const handleCopy = (): void => {
     void copyTextToClipboard(codeText)
@@ -564,72 +595,70 @@ function CopyableCodeBlock({
       });
   };
 
+  const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
+  const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+
   return (
-    <div className='group/code-block relative'>
+    <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
+      <div
+        className='relative overflow-hidden'
+        style={
+          collapsible && !isExpanded
+            ? { maxHeight: `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px` }
+            : undefined
+        }
+      >
+        {children}
+        {collapsible && (
+          <div
+            className={
+              isExpanded
+                ? 'flex justify-center pb-2'
+                : 'pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pt-8 pb-3'
+            }
+            style={
+              isExpanded
+                ? undefined
+                : {
+                    backgroundImage: 'linear-gradient(to bottom, transparent, hsl(var(--muted)))',
+                  }
+            }
+          >
+            <button
+              type='button'
+              onClick={() => setIsExpanded(prev => !prev)}
+              className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_CODE_BLOCK'
+              data-track-metadata={JSON.stringify({ isExpanded, lineCount: lines })}
+            >
+              <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
+              <span>{isExpanded ? 'Show less' : `Show more (${lines} lines)`}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
       <button
         type='button'
         onClick={handleCopy}
-        className='absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md border border-muted-foreground/30 bg-background/90 px-2 text-xs font-medium text-muted-foreground opacity-100 shadow-sm transition-opacity hover:bg-muted hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
+        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-sm transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
         aria-label='Copy code snippet'
         title='Copy code snippet'
         data-track-category='MESSAGE'
         data-track-name='COPY_CODE_SNIPPET'
       >
-        {copied ? (
-          <>
-            <Check className='h-3 w-3 text-green-600' />
-            <span>Copied</span>
-          </>
-        ) : (
-          <>
-            <Copy className='h-3 w-3' />
-            <span>Copy</span>
-          </>
-        )}
+        <span className='flex items-center justify-center p-1'>
+          {copied ? (
+            <CopyCopied size={16} className='text-status-success' />
+          ) : (
+            <CopyDefault size={16} />
+          )}
+        </span>
       </button>
       <span aria-live='polite' className='sr-only'>
         {copied ? 'Code snippet copied to clipboard' : ''}
       </span>
-      {children}
-    </div>
-  );
-}
-
-function CollapsibleCodeBlock({
-  children,
-  keyPrefix,
-  lineCount,
-}: {
-  children: React.ReactNode;
-  keyPrefix: string;
-  lineCount: number;
-}): JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const toggleExpanded = (): void => {
-    setIsExpanded(prev => !prev);
-  };
-
-  return (
-    <div className='collapsible-code-block relative' key={`${keyPrefix}-collapsible-code`}>
-      <div
-        className='relative overflow-hidden'
-        style={{
-          maxHeight: isExpanded ? 'none' : `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px`,
-        }}
-      >
-        {children}
-        <button
-          type='button'
-          onClick={toggleExpanded}
-          className='absolute bottom-4 right-3 z-10 rounded-md border border-muted-foreground/30 bg-background px-2 py-1 text-xs font-medium text-primary shadow-sm hover:bg-muted hover:text-primary/80 cursor-pointer'
-          data-track-category='MESSAGE'
-          data-track-name='TOGGLE_CODE_BLOCK'
-          data-track-metadata={JSON.stringify({ isExpanded, lineCount })}
-        >
-          {isExpanded ? 'Collapse' : `Expand (${lineCount} lines)`}
-        </button>
-      </div>
     </div>
   );
 }
@@ -790,32 +819,19 @@ const handleTableElement = (
   const tableHandlers: Record<string, TableElementHandler> = {
     table: (_el, props, children, idx, keyPrefix) => {
       const { key: _key, ...restProps } = props;
-      const existingClass = (restProps['className'] as string) || '';
-      const tableProps = {
-        ...restProps,
-        className: cn('border border-border border-collapse w-full my-2', existingClass),
-      };
       return {
-        props: tableProps,
+        props: restProps,
         wrapper: (
-          <div key={`${keyPrefix}-table-wrapper-${idx}`} className='overflow-x-auto'>
-            <table {...(tableProps as React.TableHTMLAttributes<HTMLTableElement>)}>
+          <div key={`${keyPrefix}-table-wrapper-${idx}`} className='overflow-x-auto max-w-full'>
+            <table {...(restProps as React.TableHTMLAttributes<HTMLTableElement>)}>
               {children}
             </table>
           </div>
         ),
       };
     },
-    thead: (_el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      return { props: { ...props, className: cn('bg-muted/50', existingClass) } };
-    },
     td: (el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      const newProps: Record<string, unknown> = {
-        ...props,
-        className: cn('border border-border px-3 py-2 text-left', existingClass),
-      };
+      const newProps: Record<string, unknown> = { ...props };
       const colspan = el.getAttribute('colspan');
       const rowspan = el.getAttribute('rowspan');
       if (colspan) {
@@ -829,14 +845,7 @@ const handleTableElement = (
       return { props: newProps };
     },
     th: (el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      const newProps: Record<string, unknown> = {
-        ...props,
-        className: cn(
-          'border border-border px-3 py-2 text-left font-semibold bg-muted/50',
-          existingClass,
-        ),
-      };
+      const newProps: Record<string, unknown> = { ...props };
       const colspan = el.getAttribute('colspan');
       const rowspan = el.getAttribute('rowspan');
       if (colspan) {
@@ -848,15 +857,6 @@ const handleTableElement = (
         if (!isNaN(row)) newProps['rowSpan'] = row;
       }
       return { props: newProps };
-    },
-    tr: (_el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      return {
-        props: {
-          ...props,
-          className: cn('border-b border-border last:border-b-0', existingClass),
-        },
-      };
     },
   };
 
@@ -1335,27 +1335,11 @@ const parseNode = (
 
   if (tag === 'pre') {
     const codeText = el.textContent ?? '';
-    const lineCount = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
-    const preElement = React.createElement(tag, props, ...children);
-    const copyablePre = (
-      <CopyableCodeBlock key={`${keyPrefix}-copyable-pre-${idx}`} codeText={codeText}>
-        {preElement}
-      </CopyableCodeBlock>
+    return (
+      <MessageCodeBlock key={`${keyPrefix}-code-block-${idx}`} codeText={codeText}>
+        {React.createElement(tag, props, ...children)}
+      </MessageCodeBlock>
     );
-
-    if (lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD) {
-      return (
-        <CollapsibleCodeBlock
-          key={`${keyPrefix}-collapsible-pre-${idx}`}
-          keyPrefix={`${keyPrefix}-${idx}`}
-          lineCount={lineCount}
-        >
-          {copyablePre}
-        </CollapsibleCodeBlock>
-      );
-    }
-
-    return copyablePre;
   }
 
   return React.createElement(tag, props, ...children);
@@ -1393,20 +1377,6 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
       sanitizeDomTree(doc.body);
 
       trimBoundaryWhitespace(doc.body);
-
-      try {
-        const highlightedHTML = highlightCodeBlocks(doc.body.innerHTML);
-        const tempDoc = new DOMParser().parseFromString(highlightedHTML, 'text/html');
-        while (doc.body.firstChild) {
-          doc.body.removeChild(doc.body.firstChild);
-        }
-        // This moves nodes from tempDoc.body to doc.body without string parsing
-        while (tempDoc.body.firstChild) {
-          doc.body.appendChild(tempDoc.body.firstChild);
-        }
-      } catch {
-        // If highlighting fails, leave content as-is (already sanitized)
-      }
 
       const nodes: React.ReactNode[] = [];
       let idx = 0;

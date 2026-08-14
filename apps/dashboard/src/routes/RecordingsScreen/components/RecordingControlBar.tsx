@@ -5,7 +5,7 @@
 
 import { ReactElement, useEffect, useState, useRef } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
-import { formatElapsedTime } from '../../../utils/recordingUtils';
+import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import { Waveform } from '../../../utils/recordingWaveform';
 
 /**
@@ -35,6 +35,8 @@ interface RecordingControlBarProps {
   isPaused: boolean;
   isStarting: boolean;
   startTime: number | null;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
   onStart: () => void;
   onStop: () => void;
   onPause: () => void;
@@ -46,6 +48,8 @@ export function RecordingControlBar({
   isPaused,
   isStarting,
   startTime,
+  pauseStartedAt,
+  accumulatedPausedMs,
   onStart,
   onStop,
   onPause,
@@ -55,11 +59,13 @@ export function RecordingControlBar({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (isRecording && !isPaused && startTime) {
-      setElapsed(Date.now() - startTime);
-      intervalRef.current = setInterval(() => {
-        setElapsed(Date.now() - startTime);
-      }, 1000);
+    if (isRecording && startTime) {
+      setElapsed(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
+      if (!isPaused) {
+        intervalRef.current = setInterval(() => {
+          setElapsed(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
+        }, 1000);
+      }
     }
 
     return (): void => {
@@ -68,7 +74,7 @@ export function RecordingControlBar({
         intervalRef.current = null;
       }
     };
-  }, [isRecording, isPaused, startTime]);
+  }, [isRecording, isPaused, startTime, pauseStartedAt, accumulatedPausedMs]);
 
   const isMobileWeb = useMobileWebPadding();
   // MOBILE_NAV_H ≈ height of the MobileNavbar pill (44 px items + py-2 + bottom-2)

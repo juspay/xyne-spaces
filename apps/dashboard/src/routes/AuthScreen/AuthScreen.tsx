@@ -6,7 +6,6 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
-import { indexedDBService } from '../../services/indexedDBService';
 import GoogleLogo from '../../assets/icons/GoogleLogo';
 import { MicrosoftLogo } from '../../assets/icons/MicrosoftLogo';
 import { Loader2, Building2, ArrowRight } from 'lucide-react';
@@ -14,7 +13,6 @@ import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
-import { dropAllDatabases } from '@rocicorp/zero';
 import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
 
@@ -222,9 +220,6 @@ const AuthScreen = (): ReactElement | null => {
   useEffect(() => {
     if (isAuthenticated) {
       localStorage.removeItem('enrollment_completed');
-    } else {
-      void indexedDBService.dropAllUserDatabases();
-      void dropAllDatabases();
     }
   }, [isAuthenticated]);
 

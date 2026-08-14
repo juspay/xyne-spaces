@@ -25,6 +25,9 @@ export interface StreamOverrides {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
+  /** Single search + single answer pass instead of the full agentic tool
+   *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
+  instant?: boolean;
   researchContext?: ResearchContext | null;
   ticketIds?: string[];
   canvasIds?: string[];
@@ -49,6 +52,7 @@ interface UseXyneAIStreamParams {
   collectionIds?: string[];
   fileIds?: string[];
   createCanvasEnabled?: boolean;
+  instant?: boolean;
   isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
   ticketIds?: string[];
@@ -114,6 +118,7 @@ export const useXyneAIStream = ({
   collectionIds,
   fileIds,
   createCanvasEnabled = false,
+  instant = false,
   isV2 = false,
   channelId,
   ticketIds,
@@ -284,6 +289,7 @@ export const useXyneAIStream = ({
         ov && 'deepResearchEnabled' in ov ? !!ov.deepResearchEnabled : deepResearchEnabled;
       const eCreateCanvasEnabled =
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
+      const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
@@ -405,6 +411,7 @@ export const useXyneAIStream = ({
           webSearchEnabled: eWebSearchEnabled,
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
+          instant: eInstant,
           researchContext: eResearchContext,
           attachments,
           parentMessageId,
@@ -442,6 +449,7 @@ export const useXyneAIStream = ({
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
+      instant,
       isV2,
       syncMessagesRef,
       ticketIds,

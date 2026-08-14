@@ -22,4 +22,8 @@ export class SummaryTemplateRepository {
   update(id: string, data: Prisma.SummaryTemplateUncheckedUpdateInput): Promise<SummaryTemplate> {
     return this.db.summaryTemplate.update({ where: { id }, data });
   }
+
+  delete(id: string): Promise<SummaryTemplate> {
+    return this.db.summaryTemplate.delete({ where: { id } });
+  }
 }
