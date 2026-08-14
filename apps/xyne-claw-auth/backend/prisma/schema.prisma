@@ -1783,6 +1783,7 @@ model ActiveGoal {
   turnCount      Int      @default(0) /// Turns completed so far
   maxTurns       Int      @default(5) /// Hard cap, enforced by relooper. Default 5: covers worker → audit → 1-2 fix cycles. Longer loops tend to burn LLM cost on judge-driven rabbit holes (e.g. judge falsely flagging missing attachments).
   maxWallClockMs Int? /// Optional wall-clock budget (ms) measured from createdAt; enforced by relooper alongside maxTurns. Null = no time cap (legacy/default). Second mandatory ceiling for user-configured loops.
+  commandSlug    String? /// Registered custom-command slug that started this loop, if any (observability). Null = a typed /goal.
   lastTurnResult String? /// Most recent worker output (≤ 4KB stored)
   lastReason     String? /// Last boss reason or terminal reason
   runPayload     Json /// Stashed first-turn /run inputs to replay
@@ -1801,6 +1802,30 @@ model ActiveGoal {
   @@index([status, updatedAt])
   @@index([orgId])
   @@map("active_goals")
+}
+
+/// Org-scoped custom slash command — a saved, parameterized /goal loop.
+/// Invoked as /<slug> <input>; the webhook renders `template` (with {input}
+/// substituted) into a goal condition and boots the same worker -> judge ->
+/// audit loop /goal uses. Budgets are clamped to the /goal caps at define time.
+model CommandDefinition {
+  id             String   @id @default(cuid())
+  orgId          String
+  slug           String /// Invoked as /<slug>; unique within an org
+  description    String?
+  template       String /// Goal-condition template; {input} is replaced by the user's invocation text
+  provider       String? /// Optional provider override (same allowlist as /goal)
+  model          String? /// Optional model override
+  maxTurns       Int? /// Optional turn ceiling (clamped to the /goal cap at define time)
+  maxWallClockMs Int? /// Optional wall-clock budget in ms (clamped to the /goal cap at define time)
+  enabled        Boolean  @default(true)
+  createdBy      String /// Spaces userId that defined it
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+  @@map("command_definitions")
 }
 
 model ExperimentRun {

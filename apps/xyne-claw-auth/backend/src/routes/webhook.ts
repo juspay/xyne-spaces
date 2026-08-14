@@ -33,7 +33,10 @@ import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/m
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
-import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { parseSlashCommand, extractCustomCommandInvocation, type SlashCommand } from "../lib/parseSlashCommand.js";
+import { renderCommandToGoalStart, validateCommandSlug } from "../lib/commandRegistry.js";
+import { commandDefinitionRepository } from "../repositories/commandDefinitionRepository.js";
+import { formatDurationMs } from "../services/loopBudget.js";
 import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
 import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
 import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
@@ -1535,8 +1538,132 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Without this, autoGoal turns "/stop" into "/goal … /stop" (a new goal),
   // making the thread impossible to stop.
   const rawSlash = parseSlashCommand(userText);
+
+  // ── /command registry management (define / list / show / delete) ─────────
+  // Org-scoped reads/writes that short-circuit before any run. Any workspace
+  // member may manage custom commands; budgets are hard-capped by the parser,
+  // so a definition can never exceed the /goal ceilings.
+  if (
+    rawSlash &&
+    (rawSlash.kind === "commandList" ||
+      rawSlash.kind === "commandShow" ||
+      rawSlash.kind === "commandDelete" ||
+      rawSlash.kind === "commandDefine") &&
+    agent.orgId
+  ) {
+    const cmd = rawSlash;
+    const orgId = agent.orgId;
+    const reply = (markdownText: string) =>
+      spacesAppFetch(
+        "/chat/postMessage",
+        {
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          markdownText,
+          userId: agent.spacesAppUserId,
+          metadata: { contentFormat: "markdown" },
+        },
+        agent.appToken,
+      ).catch((err) => {
+        log.warn("Failed to post /command reply", { error: err instanceof Error ? err.message : String(err) });
+      });
+    const budgetSuffix = (d: { maxTurns: number | null; maxWallClockMs: number | null }): string => {
+      const bits: string[] = [];
+      if (d.maxTurns != null) bits.push(`maxTurns=${d.maxTurns}`);
+      if (d.maxWallClockMs != null) bits.push(`maxTime=${formatDurationMs(d.maxWallClockMs)}`);
+      return bits.length ? ` \u00b7 ${bits.join(" ")}` : "";
+    };
+
+    if (cmd.kind === "commandList") {
+      const defs = await commandDefinitionRepository.listByOrg(orgId).catch(() => []);
+      if (defs.length === 0) {
+        await reply(
+          "No custom commands defined for this workspace yet.\n" +
+            "Create one: `/command define <slug> [maxTurns=8] [maxTime=1h] [model=open-large] <template with {input}>`",
+        );
+      } else {
+        const lines = defs.map((d: { slug: string; template: string; maxTurns: number | null; maxWallClockMs: number | null }) => {
+          const preview = d.template.length > 100 ? `${d.template.slice(0, 97)}\u2026` : d.template;
+          return `- \`/${d.slug}\`${budgetSuffix(d)} \u2014 ${preview}`;
+        });
+        await reply([`**Custom commands** (${defs.length})`, ...lines].join("\n"));
+      }
+    } else if (cmd.kind === "commandShow") {
+      const def = await commandDefinitionRepository.findByOrgAndSlug(orgId, cmd.slug).catch(() => null);
+      if (!def) {
+        await reply(`No custom command \`/${cmd.slug}\` in this workspace.`);
+      } else {
+        await reply(
+          [
+            `**/${def.slug}**${budgetSuffix(def)}`,
+            def.provider
+              ? `provider: ${def.provider}${def.model ? ` \u00b7 model: ${def.model}` : ""}`
+              : def.model
+                ? `model: ${def.model}`
+                : "",
+            "```",
+            def.template,
+            "```",
+          ]
+            .filter((l) => l !== "")
+            .join("\n"),
+        );
+      }
+    } else if (cmd.kind === "commandDelete") {
+      const res = await commandDefinitionRepository.remove(orgId, cmd.slug).catch(() => ({ count: 0 }));
+      await reply(res.count > 0 ? `Deleted \`/${cmd.slug}\`.` : `No custom command \`/${cmd.slug}\` to delete.`);
+    } else {
+      const valid = validateCommandSlug(cmd.slug);
+      if (!valid.ok) {
+        await reply(`Couldn't define that command: ${valid.reason}`);
+      } else {
+        try {
+          await commandDefinitionRepository.upsert({
+            orgId,
+            slug: valid.slug,
+            template: cmd.template,
+            description: cmd.description ?? null,
+            provider: cmd.providerOverride?.provider ?? null,
+            model: cmd.providerOverride?.model ?? null,
+            maxTurns: cmd.maxTurns ?? null,
+            maxWallClockMs: cmd.maxWallClockMs ?? null,
+            createdBy: payload.userId,
+          });
+          await reply(
+            `Defined \`/${valid.slug}\`${budgetSuffix({ maxTurns: cmd.maxTurns ?? null, maxWallClockMs: cmd.maxWallClockMs ?? null })}. ` +
+              `Anyone in the workspace can now run \`/${valid.slug}\` <input>.`,
+          );
+        } catch (err) {
+          log.warn("Failed to persist /command define", { error: err instanceof Error ? err.message : String(err) });
+          await reply(`Couldn't save \`/${valid.slug}\` \u2014 please try again.`);
+        }
+      }
+    }
+    return;
+  }
+
+  // ── custom command invocation: `/<slug> <input>` \u2192 a bounded /goal boot ──
+  // When the message isn't a built-in, it may be an org-registered custom
+  // command (a saved, parameterized /goal). Resolve it to a goalStart so it
+  // reuses the exact worker -> judge -> audit loop, budgets, and persistence.
+  let customCommandSlug: string | null = null;
+  let customBoot: SlashCommand | null = null;
+  if (!rawSlash && agent.orgId) {
+    const inv = extractCustomCommandInvocation(userText);
+    if (inv) {
+      const def = await commandDefinitionRepository
+        .findByOrgAndSlug(agent.orgId, inv.slug)
+        .catch(() => null);
+      if (def && def.enabled) {
+        customBoot = renderCommandToGoalStart(def, inv.input);
+        customCommandSlug = def.slug;
+      }
+    }
+  }
+
   const slash =
     rawSlash ??
+    customBoot ??
     (autoGoalEnabled && !immediateTaskCommand ? parseSlashCommand(`/goal ${userText}`) : null);
   const experimentCommand = parseExperimentCommand(userText);
 
@@ -1802,6 +1929,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "**Slash commands**",
         "- `/goal <condition>` — work autonomously until the condition is met · options: `model=<name>` `provider=<name>` `maxTurns=<1-20>` `maxTime=<30m|2h>`",
         "- `/goal status` — show the active goal",
+        "- `/command define <slug> [maxTurns=…] [maxTime=…] [model=…] <template with {input}>` — save a custom command · `/command list` · `/command show <slug>` · `/command delete <slug>`",
         "- `/experiment <duration> [focus...]` — explore until the deadline · `/experiment status` · `/experiment stop`",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
@@ -3017,6 +3145,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           condition: pendingGoalStart.condition,
           ...(pendingGoalStart.maxTurns != null ? { maxTurns: pendingGoalStart.maxTurns } : {}),
           ...(pendingGoalStart.maxWallClockMs != null ? { maxWallClockMs: pendingGoalStart.maxWallClockMs } : {}),
+          ...(customCommandSlug ? { commandSlug: customCommandSlug } : {}),
           // dispatchPayload is JSON-safe by construction (strings / arrays /
           // plain objects only); the cast satisfies Prisma's InputJsonValue
           // brand which doesn't accept Record<string, unknown> directly.
