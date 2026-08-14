@@ -126,7 +126,7 @@ function extractCleanTextFromFlowJson(content: string): string {
  * component tree (suitable for mention scanning and notification preview).
  * Returns null for non-flow-json content.
  */
-function getFlowJsonContentForNotification(content: string): string | null {
+export function getFlowJsonContentForNotification(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   return extractCleanTextFromFlowJson(content) || null;
 }
@@ -144,7 +144,7 @@ function getFlowJsonRawTextForMentions(content: string): string | null {
  * node. Currently handles the `plan` component; returns null for other flows so
  * the caller keeps its existing extraction.
  */
-function getFlowCardNotificationLabel(content: string): string | null {
+export function getFlowCardNotificationLabel(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   const attrMatch = content.match(/data-flow-json="([^"]+)"/);
   if (!attrMatch) return null;

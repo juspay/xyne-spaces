@@ -31,6 +31,10 @@ import {
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import {
+  getFlowCardNotificationLabel,
+  getFlowJsonContentForNotification,
+} from '@/zero/side-effects/tables/messages-handler';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -441,8 +445,17 @@ export const mapMessage = async (
     }),
   ])
 
+  // Bot/flow messages store their real content inside a `data-flow-json`
+  // attribute; a plain HTML->text conversion only sees the literal "Flow JSON"
+  // placeholder node. Reuse the notification path's FlowJSON extractors so the
+  // index gets the real text (card label -> clean component text). Both helpers
+  // return null for non-flow content, so normal messages keep the exact existing
+  // extractPlainTextFromHtml path unchanged.
+  const flowText =
+    getFlowCardNotificationLabel(args.content || '') ??
+    getFlowJsonContentForNotification(args.content || '')
   const messageContent =
-    extractPlainTextFromHtml(args.content || '') || ''
+    flowText ?? (extractPlainTextFromHtml(args.content || '') || '')
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
