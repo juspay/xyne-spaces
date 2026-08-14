@@ -32,7 +32,6 @@ import {
   UserSubmenu,
   UserGroupSubmenu,
 } from '../../Tickets/TicketFilters/Submenus';
-import { tagsConfigApi } from '../../../api/tagsConfigApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
 import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
 import {
@@ -47,6 +46,7 @@ import {
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
+  type LegendProps,
 } from 'recharts';
 import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
@@ -90,43 +90,18 @@ export interface DeskMetricsDashboardProps {
   availableStages?: readonly DeskMetricsStageOption[];
 }
 
-/** Fetches tags for all selected channels and shows a deduplicated checklist filtered to one category. */
+/** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
 const TagsInCategorySubmenu = ({
-  channelIds,
+  availableTags,
   category,
   selectedTags,
   onChange,
 }: {
-  channelIds: string[];
+  availableTags: string[];
   category: string;
   selectedTags: string[];
   onChange: (tags: string[]) => void;
 }): ReactElement => {
-  const [available, setAvailable] = React.useState<string[]>([]);
-  const [loading, setLoading] = React.useState(false);
-
-  React.useEffect(() => {
-    setLoading(true);
-    void Promise.all(channelIds.map(id => tagsConfigApi.getAllGeneratedTags(id).catch(() => [])))
-      .then(results => {
-        // Deduplicate by "category:tag" key across all channels
-        const seen = new Set<string>();
-        const tags: string[] = [];
-        for (const items of results) {
-          for (const item of items) {
-            if (item.category !== category) continue;
-            const key = `${item.category}:${item.tag}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              tags.push(key);
-            }
-          }
-        }
-        setAvailable(tags);
-      })
-      .finally(() => setLoading(false));
-  }, [channelIds.join(','), category]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const toggle = (tagKey: string): void => {
     onChange(
       selectedTags.includes(tagKey)
@@ -141,13 +116,11 @@ const TagsInCategorySubmenu = ({
         {category}
       </div>
       <div className='max-h-72 overflow-y-auto p-1'>
-        {loading ? (
-          <div className='p-6 text-center text-sm text-muted-foreground'>Loading…</div>
-        ) : available.length === 0 ? (
+        {availableTags.length === 0 ? (
           <div className='p-6 text-center text-sm text-muted-foreground'>No tags available</div>
         ) : (
           <div className='space-y-0.5'>
-            {available.map(tagKey => {
+            {availableTags.map(tagKey => {
               const tagName = tagKey.slice(category.length + 1);
               const isSelected = selectedTags.includes(tagKey);
               return (
@@ -1152,8 +1125,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     color: PRIORITY_COLORS[p.priority] ?? '#94a3b8',
   }));
 
-  const activeTagCategory = selectedTagCategory;
-
   const tagCategoryData = useMemo(() => {
     const cats = data?.tagCategories ?? [];
     const top = cats.slice(0, 9);
@@ -1174,12 +1145,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   }, [data?.tagCategories]);
 
   const tagBreakdownData = useMemo(() => {
-    let rows = activeTagCategory
-      ? (data?.tagBreakdown ?? []).filter(tb => tb.tagCategory === activeTagCategory)
+    let rows = selectedTagCategory
+      ? (data?.tagBreakdown ?? []).filter(tb => tb.tagCategory === selectedTagCategory)
       : (data?.tagBreakdown ?? []);
     if (selectedTagValues.length > 0) {
-      const tagSet = new Set(selectedTagValues.map(tv => tv.slice(tv.indexOf(':') + 1)));
-      rows = rows.filter(tb => tagSet.has(tb.tag));
+      const tagSet = new Set(selectedTagValues);
+      rows = rows.filter(tb => tagSet.has(`${tb.tagCategory}:${tb.tag}`));
     }
     // When specific tags are selected (Level 3), show all of them — user explicitly chose them.
     // Otherwise cap at top 9 + Others to keep the chart readable.
@@ -1205,7 +1176,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       });
     }
     return result;
-  }, [data?.tagBreakdown, activeTagCategory, selectedTagValues]);
+  }, [data?.tagBreakdown, selectedTagCategory, selectedTagValues]);
 
   const trendData = useMemo(
     () => (data?.trend ?? []).map(d => ({ ...d, label: formatTrendLabel(d.date, isHourly) })),
@@ -1771,7 +1742,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               onOpenAutoFocus={event => event.preventDefault()}
                             >
                               <TagsInCategorySubmenu
-                                channelIds={selectedDeskIds}
+                                availableTags={(data?.tagBreakdown ?? [])
+                                  .filter(tb => tb.tagCategory === selectedTagCategory)
+                                  .map(tb => `${tb.tagCategory}:${tb.tag}`)}
                                 category={selectedTagCategory}
                                 selectedTags={selectedTagValues}
                                 onChange={setSelectedTagValues}
@@ -2247,8 +2220,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                           {chartView === 'assignee' && 'Tickets by assignee'}
                           {chartView === 'tags' &&
-                            (activeTagCategory
-                              ? `Tags in "${activeTagCategory}"`
+                            (selectedTagCategory
+                              ? `Tags in "${selectedTagCategory}"`
                               : 'Tickets by tag category')}
                         </div>
                         <div className='flex items-center gap-2'>
@@ -2444,7 +2417,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
                       {chartView === 'tags' &&
                         (() => {
-                          const chartData = activeTagCategory ? tagBreakdownData : tagCategoryData;
+                          const chartData = selectedTagCategory
+                            ? tagBreakdownData
+                            : tagCategoryData;
                           return chartData.length === 0 ? (
                             <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
                               No tag data in range
@@ -2471,7 +2446,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                     layout='vertical'
                                     align='right'
                                     verticalAlign='middle'
-                                    content={renderTagLegend as never}
+                                    content={renderTagLegend as NonNullable<LegendProps['content']>}
                                   />
                                 </PieChart>
                               </ResponsiveContainer>
@@ -2516,8 +2491,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
                 {expandedChart === 'assignee' && 'Tickets by assignee'}
                 {expandedChart === 'tags' &&
-                  (activeTagCategory
-                    ? `Tags in "${activeTagCategory}"`
+                  (selectedTagCategory
+                    ? `Tags in "${selectedTagCategory}"`
                     : 'Tickets by tag category')}
               </h2>
               <button
@@ -2626,7 +2601,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ))}
               {expandedChart === 'tags' &&
                 (() => {
-                  const chartData = activeTagCategory ? tagBreakdownData : tagCategoryData;
+                  const chartData = selectedTagCategory ? tagBreakdownData : tagCategoryData;
                   return chartData.length === 0 ? (
                     <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
                       No tag data in range
@@ -2652,7 +2627,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           layout='vertical'
                           align='right'
                           verticalAlign='middle'
-                          content={renderTagLegend as never}
+                          content={renderTagLegend as NonNullable<LegendProps['content']>}
                         />
                       </PieChart>
                     </ResponsiveContainer>
