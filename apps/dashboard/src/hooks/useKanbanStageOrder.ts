@@ -56,6 +56,20 @@ export function useKanbanStageOrder(scopeKey?: string | null) {
     setOrder(scopeKey ? (readAll()[scopeKey] ?? null) : null);
   }, [scopeKey]);
 
+  // Cross-tab synchronization: when another tab writes to the shared
+  // localStorage key, re-read the current scope's order so both tabs stay
+  // in sync without a manual refresh.
+  useEffect(() => {
+    if (!scopeKey) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === KANBAN_STAGE_ORDER_KEY) {
+        setOrder(readAll()[scopeKey] ?? null);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [scopeKey]);
+
   const save = useCallback(
     (next: string[] | null) => {
       if (!scopeKey) return;

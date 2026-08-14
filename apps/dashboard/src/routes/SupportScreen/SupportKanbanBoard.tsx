@@ -425,8 +425,9 @@ export const SupportKanbanBoard = ({
   // Per-user column reorder — persisted per desk channel in localStorage.
   // channelId is always available (from the URL) and unique per desk, so each
   // desk channel gets its own independent column order even if multiple desks
-  // share the same board.
-  const columnOrderScope = channelId;
+  // share the same board. The `desk:` prefix namespaces the scope key so it
+  // won't collide with future board:/project: scopes in the same storage map.
+  const columnOrderScope = channelId ? `desk:${channelId}` : null;
   const {
     orderedStages: orderedDeskStages,
     handleReorder: handleReorderDeskStages,

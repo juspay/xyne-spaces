@@ -71,6 +71,7 @@ export function useKanbanColumnReorder(stages: Stage[], scopeKey?: string | null
       logger.info(Event.KANBAN_COLUMN_REORDERED, {
         scopeKey,
         stageCount: next.length,
+        method: 'drag',
       });
     },
     [orderedStages, saveOrder, scopeKey],
@@ -86,16 +87,21 @@ export function useKanbanColumnReorder(stages: Stage[], scopeKey?: string | null
       const currentOrder = orderedStages.map(s => s.id);
       const index = currentOrder.indexOf(stageId);
       if (index === -1) return;
-      const swapIndex = direction === 'left' ? index - 1 : index + 1;
-      if (swapIndex < 0 || swapIndex >= currentOrder.length) return;
-      const next = [...currentOrder];
-      const tmp = next[index]!;
-      next[index] = next[swapIndex]!;
-      next[swapIndex] = tmp;
+      // Use the same remove-then-insert semantics as drag so keyboard and
+      // drag produce identical results. After removing the stage, elements
+      // before it keep their index; elements after shift left by one.
+      //  - Move left:  insert before the left neighbor (index - 1 in `next`).
+      //  - Move right: insert after the right neighbor  (index + 1 in `next`).
+      if (direction === 'left' && index === 0) return;
+      if (direction === 'right' && index >= currentOrder.length - 1) return;
+      const next = currentOrder.filter(id => id !== stageId);
+      const insertAt = direction === 'left' ? index - 1 : index + 1;
+      next.splice(insertAt, 0, stageId);
       saveOrder(next);
       logger.info(Event.KANBAN_COLUMN_REORDERED, {
         scopeKey,
         stageCount: next.length,
+        method: 'keyboard',
       });
     },
     [orderedStages, saveOrder, scopeKey],
