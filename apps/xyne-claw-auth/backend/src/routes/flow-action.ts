@@ -22,7 +22,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -1153,7 +1153,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             continue;
           }
           const selected = prompt.type === "multiple_choice" ? (Array.isArray(answer) ? answer : []) : (typeof answer === "string" ? [answer] : []);
-          if ((required && selected.length === 0 && !hasNote) || selected.some(value => typeof value !== "string" || !prompt.options?.includes(value))) {
+          if ((required && selected.length === 0 && !hasNote) || selected.some(value => typeof value !== "string" || !prompt.options?.some(option => userQuestionOptionLabel(option) === value))) {
             res.status(400).json({ type: "error", message: `Please choose a valid answer for: ${prompt.question}` } satisfies AppActionResponse);
             return;
           }

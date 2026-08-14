@@ -95,7 +95,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildCodeFlow, buildDiffFlow, buildChartFlow, buildPrFlow, prScreenId, isTwinDelivery, isUiWidget } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTicketProposalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildCodeFlow, buildDiffFlow, buildChartFlow, buildPrFlow, prScreenId, isTwinDelivery, isUiWidget } from "xyne-claw-shared";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
@@ -1100,6 +1100,9 @@ export async function fetchConversationHistory(
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
 
+type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -1223,7 +1226,7 @@ async function postWriteApprovalAction(args: {
   const spacesAppId = ctx.spacesAppId ?? "";
   const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
 
-  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+  const cardAction = {
     serverType: pendingActionPayload.serverType,
     tool: pendingActionPayload.tool,
     params,
@@ -1232,7 +1235,24 @@ async function postWriteApprovalAction(args: {
     agentSlug,
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-  }), spacesAppId);
+  };
+
+  const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
+  const writeFlow = withSpacesAppId(
+    pendingActionPayload.tool === "spaces-create-ticket" && ticketTitle
+      ? buildTicketProposalFlow({
+          title: ticketTitle,
+          ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
+            ? { priority: params["priority"] as TicketCardPriority }
+            : {}),
+          ...(typeof params["eta"] === "string" && params["eta"] ? { eta: params["eta"] } : {}),
+          ...(typeof params["assignedTo"] === "string" && params["assignedTo"]
+            ? { assigneeId: params["assignedTo"] }
+            : {}),
+        }, cardAction)
+      : buildWriteApprovalFlow(actionDesc, cardAction),
+    spacesAppId,
+  );
 
   // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field

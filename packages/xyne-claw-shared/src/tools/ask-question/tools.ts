@@ -1,8 +1,20 @@
 import crypto from "node:crypto";
 import type { ToolDefinition, UserQuestion, UserQuestionType } from "../types.js";
+import { userQuestionOptionLabel, type UserQuestionOption } from "../../types/ui-widget.js";
 import { publishUiWidget } from "../ui-widget.js";
 
 const SKIP_QUESTION_OPTION = "Skip this question";
+
+/** Accepts a plain label or `{ label, description }`; drops blank entries. */
+function normalizeOption(option: unknown): string | UserQuestionOption | null {
+  if (typeof option === "string") return option.trim() || null;
+  if (!option || typeof option !== "object") return null;
+  const raw = option as Record<string, unknown>;
+  const label = typeof raw["label"] === "string" ? raw["label"].trim() : "";
+  if (!label) return null;
+  const description = typeof raw["description"] === "string" ? raw["description"].trim() : "";
+  return description ? { label, description } : label;
+}
 
 export const ASK_QUESTION_CONFIG_SCHEMA = {
   CLAW_AUTH_URL: {
@@ -21,7 +33,9 @@ export const askUserQuestion: ToolDefinition = {
     "Do not use it for facts you can determine with available context or tools. Batch related, independent questions " +
     "into one card (1-8 questions) instead of asking them one at a time. Each question needs `question` and `type`: " +
     "`single_choice` for exactly one option, `multiple_choice` for one or more options, or `open_ended` for free text. " +
-    "Choice questions require 2-8 concise `options`; open-ended questions must not include options. Use a short, " +
+    "Choice questions require 2-8 concise `options`; open-ended questions must not include options. Each option is " +
+    "either a label string or `{ label, description }` — prefer the object form and give every option a short " +
+    "description explaining the trade-off, since the UI renders it as a second line under the label. Use a short, " +
     "The UI adds a default 'Skip this question' response, so do not add your own skip option. " +
     "human-readable `label` for the question tab (for example, 'Version scope') and an optional stable `id`; when " +
     "id is omitted, q1, q2, etc. are generated. Set `required: false` only when the question is genuinely optional. " +
@@ -38,7 +52,7 @@ export const askUserQuestion: ToolDefinition = {
         type: "array",
         description: "One or more questions to ask together (at most 8).",
         items: { type: "object", properties: {
-          id: { type: "string" }, label: { type: "string" }, question: { type: "string" }, type: { type: "string", description: "single_choice, multiple_choice, or open_ended" }, options: { type: "array", items: { type: "string" } }, required: { type: "boolean" }, placeholder: { type: "string" },
+          id: { type: "string" }, label: { type: "string" }, question: { type: "string" }, type: { type: "string", description: "single_choice, multiple_choice, or open_ended" }, options: { type: "array", description: "Each option is either a plain label string, or { label, description } to show a one-line explanation under the label.", items: { oneOf: [{ type: "string" }, { type: "object", properties: { label: { type: "string" }, description: { type: "string" } }, required: ["label"] }] } }, required: { type: "boolean" }, placeholder: { type: "string" },
         }, required: ["question", "type"] },
       },
     },
@@ -54,11 +68,11 @@ export const askUserQuestion: ToolDefinition = {
       const raw = rawQuestions[index] as Record<string, unknown>;
       const question = typeof raw?.["question"] === "string" ? raw["question"].trim() : "";
       const type = raw?.["type"] as UserQuestionType;
-      const options = Array.isArray(raw?.["options"]) ? raw["options"].filter((option): option is string => typeof option === "string" && option.trim().length > 0).map(option => option.trim()) : undefined;
+      const options = Array.isArray(raw?.["options"]) ? (raw["options"] as unknown[]).map(normalizeOption).filter((option): option is string | UserQuestionOption => option !== null) : undefined;
       if (!question || !validTypes.includes(type)) return `Error: question ${index + 1} needs a prompt and a valid type.`;
       if (type !== "open_ended" && (!options || options.length < 2 || options.length > 8)) return `Error: ${type} question ${index + 1} needs 2-8 options.`;
       if (type === "open_ended" && options?.length) return `Error: open_ended question ${index + 1} must not include options.`;
-      questions.push({ id: typeof raw["id"] === "string" && raw["id"].trim() ? raw["id"].trim() : `q${index + 1}`, ...(typeof raw["label"] === "string" && raw["label"].trim() ? { label: raw["label"].trim() } : {}), question, type, ...(options ? { options: options.includes(SKIP_QUESTION_OPTION) ? options : [...options, SKIP_QUESTION_OPTION] } : {}), ...(typeof raw["required"] === "boolean" ? { required: raw["required"] } : {}), ...(type === "open_ended" && typeof raw["placeholder"] === "string" ? { placeholder: raw["placeholder"] } : {}) });
+      questions.push({ id: typeof raw["id"] === "string" && raw["id"].trim() ? raw["id"].trim() : `q${index + 1}`, ...(typeof raw["label"] === "string" && raw["label"].trim() ? { label: raw["label"].trim() } : {}), question, type, ...(options ? { options: options.some(option => userQuestionOptionLabel(option) === SKIP_QUESTION_OPTION) ? options : [...options, SKIP_QUESTION_OPTION] } : {}), ...(typeof raw["required"] === "boolean" ? { required: raw["required"] } : {}), ...(type === "open_ended" && typeof raw["placeholder"] === "string" ? { placeholder: raw["placeholder"] } : {}) });
     }
     if (new Set(questions.map(question => question.id)).size !== questions.length) return "Error: each question id must be unique.";
 

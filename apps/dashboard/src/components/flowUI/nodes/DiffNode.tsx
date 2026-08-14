@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
-import { MaximizeFourArrow, MultipleCrossCancelDefault } from '@xyne/icons';
+import { GitCompare, MaximizeFourArrow } from '@xyne/icons';
 import type { DiffProps, FlowComponent } from '@xyne/shared';
-import Dialog from '../../ui/Dialog';
+import { useFlow } from '../FlowContext';
 import { ArtifactRenderBoundary } from './ArtifactRenderBoundary';
 import { useDiffsTheme } from './useDiffsTheme';
+import { InsideWidgetPreviewContext, WidgetPreview } from './WidgetPreview';
 
 function diffStat(patch: string): { added: number; removed: number } {
   let added = 0;
@@ -35,6 +36,10 @@ export const DiffNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
   const props = node.props as DiffProps | undefined;
   const [expanded, setExpanded] = useState(false);
   const themeOptions = useDiffsTheme();
+  const { conversationId } = useFlow();
+  // A copy of this card lives inside its own widget-preview thread panel; hide the
+  // Maximize there so it can't open a nested preview.
+  const insidePreview = useContext(InsideWidgetPreviewContext);
   const stat = useMemo(() => diffStat(props?.patch ?? ''), [props?.patch]);
 
   if (!props?.patch || !props.path) return null;
@@ -47,23 +52,27 @@ export const DiffNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
     overflow: 'scroll' as const,
   };
 
+  const patchView = (
+    <ArtifactRenderBoundary fallbackText={patch}>
+      <PatchDiff patch={patch} options={diffOptions} disableWorkerPool />
+    </ArtifactRenderBoundary>
+  );
+
   return (
-    <>
-      <section
-        className='flow-artifact-wide flex w-full flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
-        style={node.style}
-      >
-        <div className='flex items-center justify-between gap-2 px-4 pb-2 pt-4'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
-              Diff
-            </span>
-            <span className='truncate font-mono text-xs text-foreground' title={path}>
-              {path}
-            </span>
-          </div>
-          <div className='flex shrink-0 items-center gap-2'>
-            <DiffStat added={stat.added} removed={stat.removed} />
+    <section
+      className='flow-artifact-wide flex w-full flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
+      style={node.style}
+    >
+      <div className='flex items-center justify-between gap-2 px-4 py-3'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <GitCompare size={16} aria-label='Diff' className='shrink-0 text-muted-foreground' />
+          <span className='truncate font-mono text-xs text-foreground' title={path}>
+            {path}
+          </span>
+        </div>
+        <div className='flex shrink-0 items-center gap-2'>
+          <DiffStat added={stat.added} removed={stat.removed} />
+          {!insidePreview && (
             <button
               type='button'
               onClick={() => setExpanded(true)}
@@ -74,49 +83,34 @@ export const DiffNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
             >
               <MaximizeFourArrow size={16} className='shrink-0' />
             </button>
-          </div>
+          )}
         </div>
+      </div>
 
-        <div className='max-h-[420px] overflow-auto border-t border-border text-xs'>
-          <ArtifactRenderBoundary fallbackText={patch}>
-            <PatchDiff patch={patch} options={diffOptions} disableWorkerPool />
-          </ArtifactRenderBoundary>
-        </div>
-      </section>
+      <div className='max-h-[420px] overflow-auto border-t border-border text-xs [--diffs-gap-inline:16px]'>
+        {patchView}
+      </div>
 
-      <Dialog
+      <WidgetPreview
         open={expanded}
         onOpenChange={setExpanded}
+        idPrefix='diff-preview'
+        label='Diff'
         title={path}
         description='Proposed change'
-        className='max-w-4xl overflow-hidden'
+        conversationId={conversationId ?? undefined}
+        tracking={{ category: 'DIFF_ARTIFACT', closeName: 'CLOSE_DIFF_PREVIEW' }}
       >
-        <div className='flex flex-col'>
-          <div className='flex items-center justify-between gap-3 px-5 py-4 pb-0'>
-            <div className='flex min-w-0 items-center gap-2'>
-              <span className='truncate font-mono text-sm text-foreground' title={path}>
-                {path}
-              </span>
-              <DiffStat added={stat.added} removed={stat.removed} />
-            </div>
-            <button
-              type='button'
-              onClick={() => setExpanded(false)}
-              aria-label='Close'
-              className='rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              data-track-category='DIFF_ARTIFACT'
-              data-track-name='CLOSE_DIFF_DIALOG'
-            >
-              <MultipleCrossCancelDefault size={18} />
-            </button>
-          </div>
-          <div className='max-h-[70vh] overflow-auto px-5 py-4 text-xs'>
-            <ArtifactRenderBoundary fallbackText={patch}>
-              <PatchDiff patch={patch} options={diffOptions} disableWorkerPool />
-            </ArtifactRenderBoundary>
-          </div>
+        <div className='flex min-w-0 items-center justify-between gap-2'>
+          <span className='truncate font-mono text-sm text-foreground' title={path}>
+            {path}
+          </span>
+          <DiffStat added={stat.added} removed={stat.removed} />
         </div>
-      </Dialog>
-    </>
+        <div className='overflow-auto rounded-xl border border-border text-xs [--diffs-gap-inline:16px]'>
+          {patchView}
+        </div>
+      </WidgetPreview>
+    </section>
   );
 };

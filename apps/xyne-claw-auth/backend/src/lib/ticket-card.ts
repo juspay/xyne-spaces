@@ -24,6 +24,8 @@ export async function fetchTicketForCard(
       statusV2?: string;
       priority?: string;
       eta?: string | null;
+      stageName?: string | null;
+      assignedTo?: string | null;
       workspaceId?: string;
       channelId?: string;
       conversationId?: string;
@@ -37,10 +39,15 @@ export async function fetchTicketForCard(
 
     return {
       xyneId: data.xyneId,
+      ticketId: data.id,
       title: data.title,
       status,
       priority,
+      ...(data.stageName ? { stageName: data.stageName } : {}),
       ...(data.eta ? { eta: data.eta } : {}),
+      channelId: data.channelId,
+      conversationId: data.conversationId,
+      ...(data.assignedTo ? { assigneeId: data.assignedTo } : {}),
       url: `/${encodeURIComponent(data.workspaceId)}/chat/dir/${encodeURIComponent(data.channelId)}?${new URLSearchParams(
         { tab: "tickets", ticketId: data.id, conversationId: data.conversationId },
       ).toString()}`,

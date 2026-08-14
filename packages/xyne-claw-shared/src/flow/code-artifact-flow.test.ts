@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChartFlow, buildCodeFlow, buildDiffFlow, buildTicketFlow } from "./builder.js";
+import { buildChartFlow, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow } from "./builder.js";
 
 describe("buildCodeFlow", () => {
   it("emits one static code component with no action surface", () => {
@@ -84,6 +84,63 @@ describe("buildTicketFlow", () => {
       priority: "LOW",
       url: "/chat/dir/c1/conv1/tkt2",
     });
+    expect(flow.components[0]?.props).not.toHaveProperty("eta");
+  });
+});
+
+describe("buildTicketProposalFlow", () => {
+  const action = {
+    serverType: "xyne-spaces",
+    tool: "spaces-create-ticket",
+    params: { title: "Fix Android push" },
+    userId: "u1",
+    signature: "sig",
+    agentSlug: "agent",
+    channelId: "c1",
+    conversationId: "conv1",
+  };
+
+  it("emits a proposed ticket card with the write-approval actions and no xyneId", () => {
+    const flow = buildTicketProposalFlow(
+      {
+        title: "Fix Android push: stale FCM token after SDK bump",
+        priority: "HIGH",
+        eta: "2026-02-02T00:00:00.000Z",
+        assigneeId: "user-1",
+      },
+      action,
+    );
+
+    expect(flow.components).toHaveLength(1);
+    expect(flow.components[0]).toMatchObject({
+      id: "ticket",
+      type: "ticket",
+      props: {
+        phase: "proposed",
+        status: "TODO",
+        priority: "HIGH",
+        assigneeId: "user-1",
+        approveAction: { type: "submit", actionId: "approve-write" },
+        approveContinueAction: { type: "submit", actionId: "approve-continue" },
+        declineAction: { type: "submit", actionId: "decline-write" },
+      },
+    });
+    expect(flow.components[0]?.props).not.toHaveProperty("xyneId");
+    expect(flow.components[0]?.props).not.toHaveProperty("url");
+  });
+
+  it("carries the same action data as the generic write-approval card", () => {
+    const flow = buildTicketProposalFlow({ title: "No due date" }, action);
+    expect(flow.data).toMatchObject({
+      actionType: "write",
+      serverType: "xyne-spaces",
+      tool: "spaces-create-ticket",
+      params: JSON.stringify(action.params),
+      userId: "u1",
+      signature: "sig",
+      agentSlug: "agent",
+    });
+    expect(flow.components[0]?.props).toMatchObject({ priority: "MEDIUM" });
     expect(flow.components[0]?.props).not.toHaveProperty("eta");
   });
 });
