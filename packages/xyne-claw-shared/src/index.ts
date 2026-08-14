@@ -17,8 +17,9 @@ export {
   formatSkillDiffForCard,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,
+  authorizeSkillFileUpdate,
 } from "./skill-diff/index.js";
-export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz } from "./skill-diff/index.js";
+export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
 export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";

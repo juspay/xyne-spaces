@@ -309,3 +309,33 @@ export function authorizeSkillUpdateApproval(params: {
   }
   return { ok: true };
 }
+
+export type SkillFileUpdateAuthz = { ok: true } | { ok: false; code: 403; reason: string };
+
+/**
+ * Authorize a DIRECT file upload/replace on a skill — the dashboard "Edit"
+ * upload that hits `PUT /:slug/files`.
+ *
+ * Trust model mirrors {@link authorizeSkillUpdateApproval}:
+ *   • a CLAW_ADMIN may edit any skill's files;
+ *   • the skill's recorded owner may edit their OWN skill's files, whether the
+ *     skill is `personal` OR `global`.
+ *
+ * A global skill's owner can already self-approve an `update-skill` proposal
+ * (see authorizeSkillUpdateApproval), so gating the equivalent direct edit on
+ * `scope === "personal"` locked owners out of their own global skill for no
+ * added safety. A skill with no `ownerUserId` has no owner, so only an admin
+ * qualifies.
+ */
+export function authorizeSkillFileUpdate(params: {
+  ownerUserId: string | null;
+  callerUserId: string;
+  callerIsAdmin: boolean;
+}): SkillFileUpdateAuthz {
+  if (params.callerIsAdmin) return { ok: true };
+  const isOwner = !!params.ownerUserId && params.ownerUserId === params.callerUserId;
+  if (!isOwner) {
+    return { ok: false, code: 403, reason: "Only the skill owner or a CLAW_ADMIN can update files" };
+  }
+  return { ok: true };
+}
