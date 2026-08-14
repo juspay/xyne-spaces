@@ -31,6 +31,7 @@ import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import {
   ArrowLeft,
+  Archive,
   CheckCircle,
   GitCompare,
   Loader2,
@@ -446,6 +447,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             createdBy: user?.id || '',
             visibility: CanvasVisibility.PRIVATE,
             isTemplate: false,
+            isArchived: false,
             isCollaborative: true,
             isStarred: false,
             createdAt: now,
@@ -582,6 +584,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     selectedCanvas?.accessLevel === CanvasRole.EDITOR ||
     selectedCanvas?.accessLevel === CanvasRole.OWNER ||
     selectedCanvas?.createdBy === user?.id;
+  const canArchiveSelectedCanvas = selectedCanvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -616,6 +619,46 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     canvas: selectedCanvas,
     onCreated: handleVersionCopyCreated,
   });
+
+  const handleArchiveToggleCanvas = useCallback(
+    (canvas: Canvas) => {
+      const nextIsArchived = !canvas.isArchived;
+
+      void (async (): Promise<void> => {
+        try {
+          const result = z.mutate(
+            nextIsArchived
+              ? mutators.canvas.archiveCanvas({ canvasId: canvas.id })
+              : mutators.canvas.unarchiveCanvas({ canvasId: canvas.id }),
+          );
+          const serverResult = await result.server;
+
+          if (serverResult.type === 'error') {
+            throw new Error(
+              serverResult.error.message ||
+                `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas`,
+            );
+          }
+
+          setSelectedCanvas(current =>
+            current?.id === canvas.id ? { ...current, isArchived: nextIsArchived } : current,
+          );
+          toast.success(nextIsArchived ? 'Canvas archived' : 'Canvas unarchived');
+        } catch (error) {
+          const fallback = `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas. Please try again.`;
+          toast.error('Error', {
+            description: error instanceof Error ? error.message : fallback,
+          });
+        }
+      })();
+    },
+    [z],
+  );
+
+  const handleUnarchiveSelectedCanvas = useCallback((): void => {
+    if (!selectedCanvas) return;
+    handleArchiveToggleCanvas({ ...selectedCanvas, isArchived: true });
+  }, [handleArchiveToggleCanvas, selectedCanvas]);
 
   useEffect(() => {
     canEditRef.current = canEdit;
@@ -1391,6 +1434,30 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               <div className='hidden h-[27px] shrink-0 bg-background md:block' />
             )}
 
+            {selectedCanvas?.isArchived && (
+              <div
+                className='flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 md:px-4'
+                data-testid='canvas-archived-banner'
+              >
+                <div className='flex min-w-0 items-center gap-2'>
+                  <Archive size={16} className='shrink-0 text-amber-700' />
+                  <span className='truncate font-medium'>This canvas is archived</span>
+                </div>
+                {canArchiveSelectedCanvas && (
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={handleUnarchiveSelectedCanvas}
+                    data-track-category='CANVAS'
+                    data-track-name='UNARCHIVE_CANVAS_FROM_BANNER'
+                    data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                  >
+                    Unarchive
+                  </Button>
+                )}
+              </div>
+            )}
+
             {previewVersion && (
               <div className='flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/50 px-3 py-2 text-sm md:px-4'>
                 <div className='min-w-0 text-muted-foreground'>
@@ -1558,6 +1625,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 };
                 void deleteCanvas();
               }}
+              onArchiveToggle={handleArchiveToggleCanvas}
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
               paginated={true}

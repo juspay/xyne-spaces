@@ -29,6 +29,7 @@ import {
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
   ArrowLeft,
+  Archive,
   Folder,
   FolderPlus,
   GitCompare,
@@ -122,6 +123,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const { filter: activeFilter, setFilter: setActiveFilter } = usePersistedCanvasPreferences();
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
@@ -129,6 +131,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     queries.hierarchyCanvases({
       scope: 'channel',
       channelId,
+      onlyArchived: onlyArchivedCanvases,
     }),
     { enabled: view === 'list' },
   );
@@ -142,8 +145,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     [canvasList],
   );
   const canvases = useMemo(
-    () => filterExcludedCallGeneratedCanvases(canvasItems, excludeCallGeneratedCanvases),
-    [canvasItems, excludeCallGeneratedCanvases],
+    () =>
+      filterExcludedCallGeneratedCanvases(
+        canvasItems.filter(canvas =>
+          onlyArchivedCanvases ? canvas.isArchived : !canvas.isArchived,
+        ),
+        excludeCallGeneratedCanvases,
+      ),
+    [canvasItems, excludeCallGeneratedCanvases, onlyArchivedCanvases],
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
@@ -237,6 +246,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     canvas?.createdBy === user?.id ||
     effectiveAccessLevel === CanvasRole.EDITOR ||
     effectiveAccessLevel === CanvasRole.OWNER;
+  const canArchiveCanvas = canvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -460,6 +470,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         createdBy: user?.id || '',
         visibility: CanvasVisibility.PRIVATE,
         isTemplate: false,
+        isArchived: false,
         isCollaborative: true,
         isStarred: false,
         createdAt: now,
@@ -533,6 +544,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         createdBy: user?.id || '',
         visibility: CanvasVisibility.PRIVATE,
         isTemplate: false,
+        isArchived: false,
         isCollaborative: true,
         isStarred: false,
         createdAt: now,
@@ -637,6 +649,46 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     },
     [z],
   );
+
+  const handleArchiveToggleCanvas = useCallback(
+    (selected: Canvas) => {
+      const nextIsArchived = !selected.isArchived;
+
+      void (async (): Promise<void> => {
+        try {
+          const result = z.mutate(
+            nextIsArchived
+              ? mutators.canvas.archiveCanvas({ canvasId: selected.id })
+              : mutators.canvas.unarchiveCanvas({ canvasId: selected.id }),
+          );
+          const serverResult = await result.server;
+
+          if (serverResult.type === 'error') {
+            throw new Error(
+              serverResult.error.message ||
+                `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas`,
+            );
+          }
+
+          setCanvas(current =>
+            current?.id === selected.id ? { ...current, isArchived: nextIsArchived } : current,
+          );
+          toast.success(nextIsArchived ? 'Canvas archived' : 'Canvas unarchived');
+        } catch (error) {
+          const fallback = `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas. Please try again.`;
+          toast.error('Error', {
+            description: error instanceof Error ? error.message : fallback,
+          });
+        }
+      })();
+    },
+    [z],
+  );
+
+  const handleUnarchiveCurrentCanvas = useCallback((): void => {
+    if (!canvas) return;
+    handleArchiveToggleCanvas({ ...canvas, isArchived: true });
+  }, [canvas, handleArchiveToggleCanvas]);
 
   const handleContentChange = (blocks: PartialBlock[]): void => {
     latestContentRef.current = blocks;
@@ -778,6 +830,16 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </div>
               </Tooltip>
+              <Tooltip content='Only archived' className='px-2 py-1 text-[10px]'>
+                <div className='flex origin-left scale-90 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground'>
+                  <Archive size={14} />
+                  <Switch
+                    id='only-archived-channel-canvases'
+                    checked={onlyArchivedCanvases}
+                    onCheckedChange={setOnlyArchivedCanvases}
+                  />
+                </div>
+              </Tooltip>
               <Button
                 variant='outline'
                 size='sm'
@@ -839,6 +901,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               isCreatingCanvas={isCreatingCanvas}
               showStarredOnly={showStarredOnly}
               onToggleStar={handleToggleStar}
+              onArchiveToggle={handleArchiveToggleCanvas}
             />
           </div>
         </div>
@@ -1097,6 +1160,30 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 </Button>
               )}
             </div>
+          </div>
+        )}
+
+        {canvas?.isArchived && (
+          <div
+            className='mx-2 mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 md:mx-4'
+            data-testid='channel-canvas-archived-banner'
+          >
+            <div className='flex min-w-0 items-center gap-2'>
+              <Archive size={16} className='shrink-0 text-amber-700' />
+              <span className='truncate font-medium'>This canvas is archived</span>
+            </div>
+            {canArchiveCanvas && (
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={handleUnarchiveCurrentCanvas}
+                data-track-category='CANVAS'
+                data-track-name='UNARCHIVE_CHANNEL_CANVAS_FROM_BANNER'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
+              >
+                Unarchive
+              </Button>
+            )}
           </div>
         )}
 

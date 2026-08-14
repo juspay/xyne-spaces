@@ -8,7 +8,7 @@ import {
   Spinner,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
+import { Archive, PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
@@ -76,6 +76,7 @@ const CanvasPanel = (): ReactElement => {
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases] = useState(true);
   const [onlyCallGeneratedCanvases, setOnlyCallGeneratedCanvases] = useState(false);
+  const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
   const [listOptionsOpen, setListOptionsOpen] = useState(false);
   const debouncedGroupedSearchQuery = useDebouncedValue(groupedSearchQuery, 300);
@@ -200,6 +201,38 @@ const CanvasPanel = (): ReactElement => {
           description: 'Failed to update starred canvas. Please try again.',
         });
       }
+    },
+    [z],
+  );
+
+  const handleArchiveToggleCanvas = useCallback(
+    (canvas: Canvas) => {
+      const nextIsArchived = !canvas.isArchived;
+
+      void (async (): Promise<void> => {
+        try {
+          const result = z.mutate(
+            nextIsArchived
+              ? mutators.canvas.archiveCanvas({ canvasId: canvas.id })
+              : mutators.canvas.unarchiveCanvas({ canvasId: canvas.id }),
+          );
+          const serverResult = await result.server;
+
+          if (serverResult.type === 'error') {
+            throw new Error(
+              serverResult.error.message ||
+                `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas`,
+            );
+          }
+
+          toast.success(nextIsArchived ? 'Canvas archived' : 'Canvas unarchived');
+        } catch (error) {
+          const fallback = `Failed to ${nextIsArchived ? 'archive' : 'unarchive'} canvas. Please try again.`;
+          toast.error('Error', {
+            description: error instanceof Error ? error.message : fallback,
+          });
+        }
+      })();
     },
     [z],
   );
@@ -359,6 +392,25 @@ const CanvasPanel = (): ReactElement => {
                       }}
                     />
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
+                    onSelect={event => event.preventDefault()}
+                    data-track-category='CANVAS'
+                    data-track-name='TOGGLE_ONLY_ARCHIVED_CANVASES'
+                  >
+                    <Archive size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <span className='min-w-0 flex-1'>
+                      <span className='block leading-5'>Only archived</span>
+                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                        Show archived canvases only
+                      </span>
+                    </span>
+                    <Switch
+                      id='only-archived-canvases'
+                      checked={onlyArchivedCanvases}
+                      onCheckedChange={setOnlyArchivedCanvases}
+                    />
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -392,12 +444,14 @@ const CanvasPanel = (): ReactElement => {
               selectedCanvasId={selectedCanvasId}
               onDelete={handleDeleteCanvas}
               onDuplicate={handleDuplicateCanvas}
+              onArchiveToggle={handleArchiveToggleCanvas}
               isPersonalSectionCollapsed={isPersonalSectionCollapsed}
               onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
               excludeCallGeneratedCanvases={
                 onlyCallGeneratedCanvases ? false : excludeCallGeneratedCanvases
               }
               showStarredOnly={false}
+              onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}
               searchQuery={effectiveGroupedSearchQuery}
             />
@@ -407,6 +461,7 @@ const CanvasPanel = (): ReactElement => {
               onSelect={handleSelectCanvas}
               onDelete={handleDeleteCanvas}
               onDuplicate={handleDuplicateCanvas}
+              onArchiveToggle={handleArchiveToggleCanvas}
               currentUserId={user?.id}
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
@@ -415,6 +470,7 @@ const CanvasPanel = (): ReactElement => {
               }
               onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
               showStarredOnly={false}
+              onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}
               {...(selectedCanvasId ? { selectedCanvasId } : {})}
             />
