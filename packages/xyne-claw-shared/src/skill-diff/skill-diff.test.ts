@@ -138,8 +138,12 @@ describe("authorizeSkillUpdateApproval", () => {
   it("allows an admin to approve a personal skill", () => {
     expect(authorizeSkillUpdateApproval({ ...base, approverUserId: "u1", requiresAdmin: false, callerUserId: "admin", callerIsAdmin: true }).ok).toBe(true);
   });
-  it("rejects a non-admin on a global (admin-gated) skill even if they are the notify target", () => {
+  it("allows the owner/promoter to approve their own global skill (non-admin)", () => {
     const r = authorizeSkillUpdateApproval({ ...base, approverUserId: "u1", requiresAdmin: true, callerUserId: "u1", callerIsAdmin: false });
+    expect(r).toEqual({ ok: true });
+  });
+  it("rejects a non-owner non-admin on a global (admin-gated) skill (403)", () => {
+    const r = authorizeSkillUpdateApproval({ ...base, approverUserId: "u1", requiresAdmin: true, callerUserId: "attacker", callerIsAdmin: false });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe(403);
   });
