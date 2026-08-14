@@ -148,6 +148,7 @@ export type SlashIntercept =
       firstTurnTask: string;
       replyToUser: string;
       providerOverride?: { provider: string; model?: string };
+      maxTurns?: number;
     }
   | { kind: "goalStatusReply"; replyToUser: string }
   | { kind: "goalCleared"; replyToUser: string }
@@ -216,6 +217,7 @@ export async function handleSlashCommandBeforeRun(args: {
     condition: command.condition,
     firstTurnTask: NEXT_TURN_TASK_TEMPLATE(command.condition),
     ...(command.providerOverride ? { providerOverride: command.providerOverride } : {}),
+    ...(command.maxTurns != null ? { maxTurns: command.maxTurns } : {}),
     // Don't echo the condition back — the user just typed it, the thread
     // already contains it. A short, fixed ack keeps the thread clean even
     // when the goal is multi-paragraph.
