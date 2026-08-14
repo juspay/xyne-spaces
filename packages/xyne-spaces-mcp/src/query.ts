@@ -28,6 +28,60 @@ export async function query(ast: QueryAST): Promise<unknown> {
   return result.data
 }
 
+// ── Current user ─────────────────────────────────────────────────────
+
+export interface CurrentUser {
+  id: string
+  email?: string
+  name?: string
+  workspaceId?: string
+  role?: string
+  orgRole?: string
+  memberId?: string
+}
+
+/**
+ * Identity is cached for the process lifetime: it cannot change without a new
+ * consent grant, and the tools that need it (drafts, notifications) would
+ * otherwise pay a round trip on every call.
+ */
+let cachedUser: CurrentUser | undefined
+
+export async function getCurrentUser(): Promise<CurrentUser> {
+  if (cachedUser) return cachedUser
+
+  const data = (await spacesFetch("/auth/me")) as {
+    success?: boolean
+    user?: CurrentUser
+  }
+
+  if (!data.user?.id) {
+    throw new Error(
+      "Could not resolve the current user. The Spaces desktop app may need to be updated — " +
+        "this needs the /auth/me route."
+    )
+  }
+
+  cachedUser = data.user
+  return cachedUser
+}
+
+export async function queryWhoami(): Promise<string> {
+  const me = await getCurrentUser()
+  return [
+    `You are signed in to Spaces as:`,
+    `  Name: ${me.name ?? "(unknown)"}`,
+    `  Email: ${me.email ?? "(unknown)"}`,
+    `  UserID: ${me.id}`,
+    `  WorkspaceID: ${me.workspaceId ?? "(unknown)"}`,
+    ...(me.role ? [`  Role: ${me.role}`] : []),
+    ...(me.orgRole ? [`  Org role: ${me.orgRole}`] : []),
+    ``,
+    `Use this UserID wherever a tool asks for a user — for example assignedTo in ` +
+      `spaces-tickets, or assigneeId in spaces-update-ticket.`,
+  ].join("\n")
+}
+
 /** Resolve user ids to display names, since `include` cannot do it. */
 async function lookupUserNames(ids: Array<string | undefined>): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))]
@@ -112,6 +166,8 @@ export async function queryTickets(filters: TicketFilters): Promise<string> {
     if (t.tags && t.tags.length > 0) parts.push(`  Tags: ${t.tags.map((tg) => tg.name).join(", ")}`)
     if (t.eta) parts.push(`  ETA: ${new Date(t.eta).toLocaleDateString()}`)
     if (t.conversationId) parts.push(`  ConversationID: ${t.conversationId}`)
+    // TicketID, not just the key: spaces-update-ticket needs the cuid.
+    parts.push(`  TicketID: ${t.id}`)
     parts.push(`  Updated: ${new Date(t.updatedAt).toLocaleString()}`)
     return parts.join("\n")
   })
@@ -531,4 +587,392 @@ export async function queryBoards(search?: string, projectId?: string, limit?: n
   })
 
   return `${rows.length} board(s):\n\n${lines.join("\n\n")}`
+}
+
+// ── Ticket detail ────────────────────────────────────────────────────
+
+interface TicketDetailRow {
+  id: string
+  xyneId: string
+  title: string
+  description?: string
+  status: string
+  priority: string
+  stageName?: string
+  assignedTo?: string
+  createdBy?: string
+  boardId?: string
+  projectId?: string
+  conversationId?: string
+  channelId?: string
+  eta?: string
+  isArchived?: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * Accepts either the cuid `id` or the human-facing `xyneId` (e.g. JUSPROD-1234).
+ *
+ * Two sequential lookups rather than one `OR`: the backend's where-schema accepts
+ * arrays of strings/numbers only, so `OR: [{…}, {…}]` is rejected outright. The
+ * key shape decides which field to try first, so the common case costs one query.
+ */
+async function findTicket(idOrKey: string): Promise<TicketDetailRow | undefined> {
+  const looksLikeKey = /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(idOrKey)
+  const fields = looksLikeKey ? ["xyneId", "id"] : ["id", "xyneId"]
+
+  for (const field of fields) {
+    const rows = (await query({
+      model: "ticket",
+      operation: "findMany",
+      where: { [field]: { equals: idOrKey } },
+      take: 1,
+    })) as TicketDetailRow[]
+    if (rows.length > 0) return rows[0]
+  }
+  return undefined
+}
+
+export async function queryTicketDetail(idOrKey: string): Promise<string> {
+  const t = await findTicket(idOrKey)
+  if (!t) return `No ticket found matching "${idOrKey}".`
+
+  const names = await lookupUserNames([t.assignedTo, t.createdBy])
+  const subs = (await query({
+    model: "subTicket",
+    operation: "findMany",
+    where: { mappedTicketId: { equals: t.id } },
+    orderBy: [{ createdAt: "asc" }],
+    take: 50,
+  })) as Array<{ id: string; title: string; stageProgression?: string; assignedTo?: string }>
+
+  const parts = [
+    `[${t.xyneId}] ${t.title}`,
+    `  Status: ${t.status} · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`,
+    `  Assigned: ${t.assignedTo ? (names.get(t.assignedTo) ?? t.assignedTo) : "(unassigned)"}`,
+    `  Created by: ${t.createdBy ? (names.get(t.createdBy) ?? t.createdBy) : "(unknown)"}`,
+  ]
+  if (t.eta) parts.push(`  ETA: ${new Date(t.eta).toLocaleDateString()}`)
+  if (t.isArchived) parts.push(`  ARCHIVED`)
+  parts.push(`  Updated: ${new Date(t.updatedAt).toLocaleString()}`)
+  parts.push(`  TicketID: ${t.id}`)
+  if (t.boardId) parts.push(`  BoardID: ${t.boardId}`)
+  if (t.conversationId) parts.push(`  ConversationID: ${t.conversationId}`)
+  if (t.description) parts.push(`\nDescription:\n${t.description}`)
+
+  if (subs.length > 0) {
+    parts.push(`\nSub-tickets (${subs.length}):`)
+    for (const s of subs) {
+      parts.push(`  - ${s.title}${s.stageProgression ? ` · ${s.stageProgression}` : ""}`)
+    }
+  }
+
+  parts.push(
+    `\nTo change this ticket use spaces-update-ticket with TicketID ${t.id}. ` +
+      `Read the thread with spaces-messages using its ConversationID.`
+  )
+  return parts.join("\n")
+}
+
+// ── Board stages ─────────────────────────────────────────────────────
+
+export async function queryBoardStages(boardId: string): Promise<string> {
+  const rows = (await query({
+    model: "stage",
+    operation: "findMany",
+    where: { boardId: { equals: boardId } },
+    orderBy: [{ sequenceNumber: "asc" }],
+    take: 100,
+  })) as Array<{
+    id: string
+    name: string
+    sequenceNumber: number
+    defaultTicketStatus?: string
+    requestApprovalOnEntry?: boolean
+  }>
+
+  if (rows.length === 0) return `No stages found for board ${boardId}.`
+
+  const lines = rows.map(
+    (s) =>
+      `${s.sequenceNumber}. ${s.name}` +
+      `${s.defaultTicketStatus ? ` (status: ${s.defaultTicketStatus})` : ""}` +
+      `${s.requestApprovalOnEntry ? " · requires approval on entry" : ""}`
+  )
+
+  return (
+    `${rows.length} stage(s) on board ${boardId}, in order:\n\n${lines.join("\n")}\n\n` +
+    `Pass a stage NAME (not the number) as the 'stage' argument to spaces-update-ticket.`
+  )
+}
+
+// ── Channel participants ─────────────────────────────────────────────
+
+export async function queryChannelParticipants(channelId: string, limit: number): Promise<string> {
+  const rows = (await query({
+    model: "channelParticipant",
+    operation: "findMany",
+    where: { channelId: { equals: channelId } },
+    orderBy: [{ joinedAt: "asc" }],
+    take: limit,
+  })) as Array<{ userId: string; role?: string; joinedAt?: string }>
+
+  if (rows.length === 0) return `No participants found in channel ${channelId}.`
+
+  const names = await lookupUserNames(rows.map((p) => p.userId))
+  const lines = rows.map(
+    (p) => `- ${names.get(p.userId) ?? "(unknown)"}${p.role ? ` · ${p.role}` : ""}\n  UserID: ${p.userId}`
+  )
+
+  return `${rows.length} participant(s) in channel ${channelId}:\n\n${lines.join("\n")}`
+}
+
+// ── Calls ────────────────────────────────────────────────────────────
+
+export async function queryCalls(
+  status: string | undefined,
+  channelId: string | undefined,
+  limit: number
+): Promise<string> {
+  const where: Record<string, unknown> = {}
+  if (status) where["status"] = { equals: status }
+  if (channelId) where["channelId"] = { equals: channelId }
+
+  const rows = (await query({
+    model: "call",
+    operation: "findMany",
+    where,
+    orderBy: [{ startsAt: "desc" }],
+    take: limit,
+  })) as Array<{
+    id: string
+    title?: string
+    status?: string
+    callType?: string
+    startsAt?: string
+    endsAt?: string
+    channelId?: string
+    roomLink?: string
+    organizerId?: string
+    participantCount?: number
+    aiSummary?: string
+  }>
+
+  if (rows.length === 0) return "No calls found."
+
+  const names = await lookupUserNames(rows.map((c) => c.organizerId))
+  const lines = rows.map((c) => {
+    const parts = [`${c.title ?? "(untitled call)"}${c.status ? ` · ${c.status}` : ""}`]
+    if (c.startsAt) parts.push(`  Starts: ${new Date(c.startsAt).toLocaleString()}`)
+    if (c.organizerId) parts.push(`  Organizer: ${names.get(c.organizerId) ?? c.organizerId}`)
+    if (typeof c.participantCount === "number") parts.push(`  Participants: ${c.participantCount}`)
+    if (c.roomLink) parts.push(`  Link: ${c.roomLink}`)
+    if (c.channelId) parts.push(`  ChannelID: ${c.channelId}`)
+    parts.push(`  CallID: ${c.id}`)
+    return parts.join("\n")
+  })
+
+  return `${rows.length} call(s):\n\n${lines.join("\n\n")}`
+}
+
+// ── Canvases ─────────────────────────────────────────────────────────
+
+export async function queryCanvases(
+  channelId: string | undefined,
+  projectId: string | undefined,
+  limit: number
+): Promise<string> {
+  const where: Record<string, unknown> = {}
+  if (channelId) where["channelId"] = { equals: channelId }
+  if (projectId) where["projectId"] = { equals: projectId }
+
+  const rows = (await query({
+    model: "canvas",
+    operation: "findMany",
+    where,
+    orderBy: [{ updatedAt: "desc" }],
+    take: limit,
+  })) as Array<{
+    id: string
+    title?: string
+    docType?: string
+    visibility?: string
+    isCollaborative?: boolean
+    createdBy?: string
+    channelId?: string
+    updatedAt?: string
+  }>
+
+  if (rows.length === 0) return "No canvases found."
+
+  const names = await lookupUserNames(rows.map((c) => c.createdBy))
+  const lines = rows.map((c) => {
+    const parts = [`${c.title ?? "(untitled)"}${c.docType ? ` · ${c.docType}` : ""}`]
+    if (c.createdBy) parts.push(`  Created by: ${names.get(c.createdBy) ?? c.createdBy}`)
+    if (c.isCollaborative) parts.push(`  Collaborative (live-edited)`)
+    if (c.updatedAt) parts.push(`  Updated: ${new Date(c.updatedAt).toLocaleString()}`)
+    if (c.channelId) parts.push(`  ChannelID: ${c.channelId}`)
+    parts.push(`  CanvasID: ${c.id}`)
+    return parts.join("\n")
+  })
+
+  return `${rows.length} canvas(es):\n\n${lines.join("\n\n")}`
+}
+
+// ── Sub-tickets ──────────────────────────────────────────────────────
+
+export async function querySubTickets(ticketId: string): Promise<string> {
+  const rows = (await query({
+    model: "subTicket",
+    operation: "findMany",
+    where: { mappedTicketId: { equals: ticketId } },
+    orderBy: [{ createdAt: "asc" }],
+    take: 100,
+  })) as Array<{
+    id: string
+    title: string
+    description?: string
+    stageProgression?: string
+    assignedTo?: string
+    conversationId?: string
+  }>
+
+  if (rows.length === 0) return `No sub-tickets found for ticket ${ticketId}.`
+
+  const names = await lookupUserNames(rows.map((s) => s.assignedTo))
+  const lines = rows.map((s) => {
+    const parts = [`${s.title}${s.stageProgression ? ` · ${s.stageProgression}` : ""}`]
+    if (s.assignedTo) parts.push(`  Assigned: ${names.get(s.assignedTo) ?? s.assignedTo}`)
+    if (s.description) parts.push(`  ${truncate(s.description, 200)}`)
+    if (s.conversationId) parts.push(`  ConversationID: ${s.conversationId}`)
+    parts.push(`  SubTicketID: ${s.id}`)
+    return parts.join("\n")
+  })
+
+  return `${rows.length} sub-ticket(s) of ${ticketId}:\n\n${lines.join("\n\n")}`
+}
+
+// ── My drafts ────────────────────────────────────────────────────────
+
+export async function queryMyDrafts(limit: number): Promise<string> {
+  const me = await getCurrentUser()
+
+  const rows = (await query({
+    model: "draftMessage",
+    operation: "findMany",
+    where: { userId: { equals: me.id } },
+    orderBy: [{ updatedAt: "desc" }],
+    take: limit,
+  })) as Array<{
+    id: string
+    content?: string
+    channelId?: string
+    conversationId?: string
+    hasAttachment?: boolean
+    updatedAt?: string
+  }>
+
+  if (rows.length === 0) return "You have no saved drafts."
+
+  const lines = rows.map((d) => {
+    const parts = [`${truncate(d.content ?? "(empty draft)", 200)}${d.hasAttachment ? " 📎" : ""}`]
+    if (d.updatedAt) parts.push(`  Updated: ${new Date(d.updatedAt).toLocaleString()}`)
+    if (d.conversationId) parts.push(`  ConversationID: ${d.conversationId}`)
+    else if (d.channelId) parts.push(`  ChannelID: ${d.channelId} (unsent new thread)`)
+    return parts.join("\n")
+  })
+
+  return (
+    `${rows.length} draft(s):\n\n${lines.join("\n\n")}\n\n` +
+    `Drafts cannot be edited or sent from here — that needs the SDK path. ` +
+    `To post the text, use spaces-send-message or spaces-create-conversation.`
+  )
+}
+
+// ── Emails ───────────────────────────────────────────────────────────
+
+export async function queryEmails(
+  conversationId: string | undefined,
+  channelId: string | undefined,
+  limit: number
+): Promise<string> {
+  const where: Record<string, unknown> = {}
+  if (conversationId) where["conversationId"] = { equals: conversationId }
+  if (channelId) where["channelId"] = { equals: channelId }
+
+  const rows = (await query({
+    model: "email",
+    operation: "findMany",
+    where,
+    orderBy: [{ createdAt: "desc" }],
+    take: limit,
+  })) as Array<{
+    id: string
+    type?: string
+    subject?: string
+    body?: string
+    from?: string
+    to?: string
+    conversationId?: string
+    createdAt?: string
+  }>
+
+  if (rows.length === 0) return "No emails found."
+
+  const lines = rows.map((e) => {
+    const parts = [`${e.subject ?? "(no subject)"}${e.type ? ` · ${e.type}` : ""}`]
+    if (e.from) parts.push(`  From: ${e.from}`)
+    if (e.to) parts.push(`  To: ${e.to}`)
+    if (e.createdAt) parts.push(`  ${new Date(e.createdAt).toLocaleString()}`)
+    if (e.body) parts.push(`  ${truncate(e.body, 300)}`)
+    if (e.conversationId) parts.push(`  ConversationID: ${e.conversationId}`)
+    return parts.join("\n")
+  })
+
+  return `${rows.length} email(s):\n\n${lines.join("\n\n")}`
+}
+
+// ── Notifications ────────────────────────────────────────────────────
+
+export async function queryNotifications(
+  status: string | undefined,
+  limit: number
+): Promise<string> {
+  const me = await getCurrentUser()
+
+  const where: Record<string, unknown> = { userId: { equals: me.id } }
+  if (status) where["status"] = { equals: status }
+
+  const rows = (await query({
+    model: "notification",
+    operation: "findMany",
+    where,
+    orderBy: [{ createdAt: "desc" }],
+    take: limit,
+  })) as Array<{
+    id: string
+    type?: string
+    title?: string
+    message?: string
+    status?: string
+    relatedEntityType?: string
+    relatedEntityId?: string
+    readAt?: string
+    createdAt?: string
+  }>
+
+  if (rows.length === 0) return status ? `No ${status} notifications.` : "No notifications."
+
+  const lines = rows.map((n) => {
+    const parts = [`${n.title ?? n.type ?? "(notification)"}${n.status ? ` · ${n.status}` : ""}`]
+    if (n.message) parts.push(`  ${truncate(n.message, 200)}`)
+    if (n.createdAt) parts.push(`  ${new Date(n.createdAt).toLocaleString()}`)
+    if (n.relatedEntityType && n.relatedEntityId) {
+      parts.push(`  ${n.relatedEntityType}: ${n.relatedEntityId}`)
+    }
+    return parts.join("\n")
+  })
+
+  return `${rows.length} notification(s):\n\n${lines.join("\n\n")}`
 }

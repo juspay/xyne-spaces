@@ -125,20 +125,51 @@ for your own DM. That is the one place the two surfaces meet.
 
 | Tool | Description |
 |------|-------------|
+| `spaces-whoami` | **Who you are** — name, email, UserID, WorkspaceID |
 | `spaces-search` | Full-text search across messages, tickets, files, channels, users |
 | `spaces-memory-search` | Search facts, SOPs, and knowledge base entries |
 | `spaces-tickets` | List and filter tickets by status, priority, assignee, etc. |
+| `spaces-ticket-detail` | Read one ticket in full, by TicketID or key (JUSPROD-1234) |
+| `spaces-update-ticket` | Change status, priority, assignee, stage, title, ETA, or tags |
+| `spaces-subtickets` | List a ticket's sub-tickets |
+| `spaces-board-stages` | A board's stages in workflow order |
 | `spaces-messages` | Read messages in a conversation thread |
-| `spaces-message-detail` | Get detailed message info with reactions/attachments |
+| `spaces-message-detail` | Get detailed message info with attachments |
 | `spaces-channels` | List channels by visibility and scope type |
+| `spaces-conversations` | List threads in a channel — how you get a ConversationID |
+| `spaces-create-conversation` | Start a new thread in a channel |
+| `spaces-channel-participants` | Who is in a channel, with roles and UserIDs |
+| `spaces-add-reaction` / `spaces-remove-reaction` | React to a message |
+| `spaces-calls` | List calls — scheduled, active, or past |
+| `spaces-canvases` | List canvas documents |
+| `spaces-emails` | Emails tied to a conversation or channel |
+| `spaces-my-drafts` | Your unsent drafts |
+| `spaces-notifications` | Your notifications |
 | `spaces-users` | Look up users by name or email |
 | `spaces-activity` | Get your activity feed (mentions, replies, assignments) |
 | `spaces-projects` | Search and list projects |
 | `spaces-boards` | Search and list boards |
-| `spaces-send-message` | Send a message to a conversation |
+| `spaces-send-message` | Reply to an existing conversation thread |
 | `spaces-create-ticket` | Create a new ticket |
 | `spaces-schedule-call` | Schedule a call |
 | `spaces-webfetch` | Fetch external URLs |
+
+**Start with `spaces-whoami`** for anything phrased as "my" or "assigned to me" — no other tool
+reveals your own UserID, and the filters need it.
+
+**The id vocabulary matters.** A ChannelID is not a ConversationID is not a TicketID. Channels
+contain threads; threads contain messages. `spaces-conversations` is the bridge from a channel to
+something you can post into.
+
+### Not available here
+
+These exist in the product but have no REST route — they are Zero catalog mutators, which the
+desktop-app proxy cannot reach. They need the `@xyne/spaces-sdk` / `/api/v1` path:
+
+- editing or deleting a message
+- marking an activity read
+- reading reactions (`spaces-message-detail` does not show them — the reaction model is not on the
+  backend's query allowlist)
 
 Note: `spaces-webfetch` is provided for clients with no fetch capability of their own. If your
 client ships a built-in web fetch tool, prefer that one.
