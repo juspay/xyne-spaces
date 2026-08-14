@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { type Prisma } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { livekitService } from '@/services/liveKitService';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -43,6 +44,9 @@ export interface ExternalCalendarCallData {
   startsAt?: Date;
   endsAt?: Date;
   timezone: string;
+  xyneManaged?: boolean;
+  /** Self-DM channel backing a Xyne-managed call so LiveKit room creation on join succeeds. */
+  channelId?: string | null;
   metadata: Prisma.InputJsonObject;
 }
 
@@ -73,6 +77,37 @@ export async function upsertExternalCalendarCall(
   data: ExternalCalendarCallData,
   now: Date
 ): Promise<void> {
+  let status = data.status;
+
+  // Calendar providers only know that a non-cancelled event is scheduled; they
+  // do not know whether its Xyne room is currently live. A self-triggered
+  // Calendar webhook (for example, after injecting the Xyne link) can arrive
+  // after LiveKit has activated the Call. Do not let that stale Calendar state
+  // downgrade a genuinely active room back to SCHEDULED.
+  if (status === CallStatus.SCHEDULED) {
+    const existing = await repositories.calls.findByExternalId(data.externalId);
+    if (existing?.status === CallStatus.ACTIVE) {
+      try {
+        const rooms = await livekitService.listRooms([data.externalId]);
+        const room = rooms.find((candidate) => candidate.name === data.externalId);
+        if (room && room.numParticipants > 0) {
+          status = CallStatus.ACTIVE;
+          logger.info(`${data.externalId} Calendar sync preserved ACTIVE call status`, {
+            numParticipants: room.numParticipants,
+          });
+        }
+      } catch (err) {
+        // A transient LiveKit lookup failure is not evidence that the call has
+        // ended. Preserve ACTIVE and let room_finished/call validation perform
+        // the authoritative transition later.
+        status = CallStatus.ACTIVE;
+        logger.warn(`${data.externalId} LiveKit status check failed; preserving ACTIVE`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
   await repositories.calls.upsertExternalCalendarCall({
     externalId: data.externalId,
     id: uuidv4(),
@@ -81,12 +116,13 @@ export async function upsertExternalCalendarCall(
     createdByUserId: data.createdByUserId,
     callType: data.callType,
     callOrigin: data.callOrigin,
-    status: data.status,
+    status,
     roomLink: data.roomLink,
     startsAt: data.startsAt,
     endsAt: data.endsAt,
     timezone: data.timezone,
-    channelId: null,
+    xyneManaged: data.xyneManaged ?? false,
+    channelId: data.channelId ?? null,
     isRecurring: false,
     recordingEnabled: false,
     startedAt: now,
