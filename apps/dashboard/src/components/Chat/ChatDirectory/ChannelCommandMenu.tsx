@@ -200,6 +200,27 @@ const DEFAULT_ENABLED_TABS: TabType[] = [
   TabType.DESK,
 ];
 
+// A backend result group belongs to the active tab (ALL shows all; Files shows every
+// media kind). Prevents stale cross-tab groups from flashing during the search debounce.
+const backendGroupBelongsToTab = (groupKey: string, tab: TabType): boolean => {
+  if (tab === TabType.ALL) return true;
+  if (tab === TabType.MESSAGES) return groupKey === 'conversation';
+  if (tab === TabType.TICKETS) return groupKey === 'ticket';
+  if (tab === TabType.ATTACHMENTS) {
+    return (
+      groupKey === 'attachment' ||
+      groupKey === 'canvas' ||
+      groupKey === 'transcript' ||
+      groupKey === 'recording'
+    );
+  }
+  if (tab === TabType.CANVAS) return groupKey === 'canvas';
+  if (tab === TabType.CALL) return groupKey === 'transcript';
+  if (tab === TabType.RECORDING) return groupKey === 'recording';
+  if (tab === TabType.DESK) return groupKey === 'desk';
+  return false;
+};
+
 // Faint format hints for filters that open NO typeahead popup, so the caret would
 // otherwise sit after a bare colon with no cue. Shown only while the value is empty
 // (regex ends at `:` ) and cleared as soon as the user types a value.
@@ -2198,24 +2219,7 @@ const ChannelCommandMenu = ({
             </div>
           )
         : ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
-            .filter(groupKey => {
-              if (activeTab === TabType.ALL) return true;
-              if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
-              if (activeTab === TabType.TICKETS && groupKey === 'ticket') return true;
-              if (
-                activeTab === TabType.ATTACHMENTS &&
-                (groupKey === 'attachment' ||
-                  groupKey === 'canvas' ||
-                  groupKey === 'transcript' ||
-                  groupKey === 'recording')
-              )
-                return true;
-              if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
-              if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
-              if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
-              if (activeTab === TabType.DESK && groupKey === 'desk') return true;
-              return false;
-            })
+            .filter(groupKey => backendGroupBelongsToTab(groupKey, activeTab))
             .map(groupKey => {
               const items = groupedBackendResults[groupKey];
               if (!items || items.length === 0) return null;
@@ -2293,6 +2297,7 @@ const ChannelCommandMenu = ({
   const renderDefaultBackendResults = () => (
     <>
       {Object.entries(groupedBackendResults)
+        .filter(([type]) => backendGroupBelongsToTab(type, activeTab))
         .sort(([typeA], [typeB]) => {
           if (hasFromOrInFilter) {
             // When from:/in: filter is active, prioritize Messages/Tickets before Users
