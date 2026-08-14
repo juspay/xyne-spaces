@@ -65,6 +65,8 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     libssl-dev \
     ca-certificates \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
@@ -80,6 +82,24 @@ COPY --from=builder --chown=backend:nodejs /repo /repo
 
 # logger.ts imports the version from the repo-root package.json (../../../package.json)
 COPY package.json /package.json
+
+# ---------------------------------------------------------------------------
+# EnterpriseRAG-Bench dataset (questions + documents JSONL)
+# ---------------------------------------------------------------------------
+# questions.jsonl is committed to the repo and already in the image via
+# the builder COPY. documents.jsonl is too large for git, so we clone from
+# HuggingFace and convert the parquet to JSONL at build time — but only if
+# the file doesn't already exist (e.g. when present locally or from a
+# previous build layer).
+RUN apt-get update && apt-get install -y -qq git git-lfs python3 python3-pip > /dev/null 2>&1 && \
+    git lfs install && \
+    if [ ! -f /repo/apps/backend/src/dataset/documents.jsonl ]; then \
+      git clone https://huggingface.co/datasets/onyx-dot-app/EnterpriseRAG-Bench /tmp/rag-bench && \
+      pip3 install --no-cache-dir --break-system-packages pandas pyarrow && \
+      python3 -c "import pandas as pd; df = pd.read_parquet('/tmp/rag-bench/data/documents/test.parquet'); df.to_json('/repo/apps/backend/src/dataset/documents.jsonl', orient='records', lines=True); print(f'Wrote {len(df)} rows')" && \
+      rm -rf /tmp/rag-bench; \
+    fi
+
 
 RUN mkdir -p logs && chown backend:nodejs logs && \
     mkdir -p /home/backend/.ssh && \
