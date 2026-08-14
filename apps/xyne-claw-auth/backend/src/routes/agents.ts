@@ -31,6 +31,25 @@ import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig } from "../lib/agent-config-validation.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
+
+/**
+ * Does this config ask for file-style KB access — the path-based read/ls/grep/
+ * write/edit tools?
+ *
+ * Retrieval agents read their knowledge base through Vespa and never need
+ * these; only a deliberately built curator does. It is gated rather than
+ * implied by holding a KB grant, and gated on admin because nothing in the
+ * stack can delete a KB page — a bad writer can only be papered over.
+ */
+function configMutatesKb(config: Record<string, unknown> | undefined): boolean {
+  return config?.["kbAccess"] === "files";
+}
+
+/** Drops the file-access key in place, leaving the rest of the config alone. */
+function stripKbFileAccess(config: Record<string, unknown> | undefined): void {
+  if (!config) return;
+  delete config["kbAccess"];
+}
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
@@ -519,6 +538,13 @@ router.post("/", async (req: Request, res: Response) => {
     // the user's full KB.
     const effectiveKbScope: "COLLECTIONS" | "USER" = kbScope === "USER" ? "USER" : "COLLECTIONS";
 
+    // `kbAccess: "files"` swaps Vespa retrieval for the path-based tools, which
+    // can rewrite pages. Admin-only; non-admins keep the rest of their config.
+    const kbFileAccessDenied = !admin && configMutatesKb(normalizedConfig);
+    if (kbFileAccessDenied) {
+      stripKbFileAccess(normalizedConfig);
+    }
+
     const createOrgId = getOrgId(req);
     if (!createOrgId) {
       log.warn(`[agents/create] orgId is required requesterId=${requesterId ?? "none"} ownerUserId=${ownerUserId ?? "none"} slug=${slug.trim()} scope=${scope ?? "none"}`);
@@ -724,6 +750,14 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     // OFF) a silent no-op, so disabled toggles snap back on. Any future
     // partial-PUT caller must spread the full existing config first.
     const normalizedConfig = await normalizeGatewayServicesInConfig(config);
+
+    // Same admin gate as create — otherwise a non-admin creates a plain agent
+    // and immediately edits KB write access onto it.
+    if (configMutatesKb(normalizedConfig)) {
+      const updaterId = getRequesterId(req);
+      const updaterIsAdmin = updaterId ? await isClawAdmin(updaterId) : false;
+      if (!updaterIsAdmin) stripKbFileAccess(normalizedConfig);
+    }
 
     const data: Prisma.AgentUpdateInput = {};
 
