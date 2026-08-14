@@ -77,7 +77,7 @@ export class AutomationExecutor {
     this.resolver = options.variableResolver ?? new VariableResolver();
   }
 
-  async runExecution(executionId: string, requestedResumeStepName?: string): Promise<unknown> {
+  async runExecution(executionId: string): Promise<unknown> {
     const existing = await this.prisma.workflowExecution.findUnique({
       where: { id: executionId },
     });
@@ -115,18 +115,7 @@ export class AutomationExecutor {
 
     const config = parseAutomationConfig(workflow.context);
     const metadata = parseAutomationMetadata(workflow.metadata);
-
-    if (
-      requestedResumeStepName !== undefined &&
-      existing.status === AutomationRunStatus.RUNNING
-    ) {
-      throw new RetryableError(
-        `resume for execution=${executionId} step=${requestedResumeStepName} arrived before EXTERNAL_WAIT was persisted`,
-      );
-    }
-    const isResume =
-      requestedResumeStepName !== undefined ||
-      existing.status === AutomationRunStatus.EXTERNAL_WAIT;
+    const isResume = existing.status === AutomationRunStatus.EXTERNAL_WAIT;
     const isFresh =
       existing.status === AutomationRunStatus.PENDING ||
       existing.status === AutomationRunStatus.SCHEDULED;
@@ -143,7 +132,6 @@ export class AutomationExecutor {
       config,
       metadata,
       isResume,
-      requestedResumeStepName,
     );
     if (!prep) return undefined;
     return this.commitAndRun(executionId, workflow, config, prep);
@@ -180,7 +168,6 @@ export class AutomationExecutor {
     config: ReturnType<typeof parseAutomationConfig>,
     metadata: ReturnType<typeof parseAutomationMetadata>,
     isResume: boolean,
-    requestedResumeStepName?: string,
   ): Promise<PreparedRun | null> {
     const pauseState = await getAutomationPauseState(executionId);
     if (!pauseState?.context) {
@@ -221,7 +208,6 @@ export class AutomationExecutor {
     if (isResume) {
       const resumeStepName = await this.resolveResumeStepName(
         executionId,
-        requestedResumeStepName,
         initialCtx.__meta?.waitingStepName,
         pauseState.currentStepIndex,
       );
@@ -283,16 +269,12 @@ export class AutomationExecutor {
 
   private async resolveResumeStepName(
     runId: string,
-    requestedStepName: string | undefined,
     contextStepName: string | undefined,
     legacyStepIndex: number,
   ): Promise<string> {
-    // New callbacks and delay jobs carry this explicitly. New pause state also
-    // persists it in context as protection against a lost queue payload.
-    const stepName =
-      requestedStepName ??
-      contextStepName ??
-      `step_${legacyStepIndex}`;
+    // The persisted hierarchical name is authoritative. The numeric index is
+    // retained only for executions paused before waitingStepName was introduced.
+    const stepName = contextStepName ?? `step_${legacyStepIndex}`;
 
     const row = await this.readStepRow(runId, stepName);
     if (!row) {

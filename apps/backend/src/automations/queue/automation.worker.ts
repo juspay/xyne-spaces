@@ -61,12 +61,6 @@ class AutomationWorker {
       );
       return;
     }
-    const { resumeStepName } = job.data;
-    if (resumeStepName !== undefined && execution.status === AutomationRunStatus.RUNNING) {
-      throw new RetryableError(
-        `resume for execution=${executionId} step=${resumeStepName} arrived before the running step persisted EXTERNAL_WAIT`,
-      );
-    }
     const acceptableStatuses: readonly string[] = [
       AutomationRunStatus.PENDING,
       AutomationRunStatus.EXTERNAL_WAIT,
@@ -105,10 +99,10 @@ class AutomationWorker {
     if (!this.executor) {
       throw new Error('[AUTOMATION-WORKER] Executor not initialized');
     }
-    const { executionId, resumeStepName } = job.data;
+    const { executionId } = job.data;
 
-    if (execution.status === AutomationRunStatus.EXTERNAL_WAIT || resumeStepName !== undefined) {
-      await this.executor.runExecution(executionId, resumeStepName);
+    if (execution.status === AutomationRunStatus.EXTERNAL_WAIT) {
+      await this.executor.runExecution(executionId);
       return;
     }
 

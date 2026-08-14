@@ -2,6 +2,14 @@ import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { automationQueue } from '../queue/automation.queue';
+import { AutomationRunStatus } from '../types/status';
+
+const TERMINAL_EXECUTION_STATUSES: ReadonlySet<string> = new Set([
+  AutomationRunStatus.COMPLETED,
+  AutomationRunStatus.FAILED,
+  AutomationRunStatus.CANCELLED,
+  AutomationRunStatus.SKIPPED,
+]);
 
 export async function handleClawCallback(
   req: Request<{ executionId: string; stepName: string }>,
@@ -29,8 +37,8 @@ export async function handleClawCallback(
       return;
     }
     if (
-      existingRow.status === 'COMPLETED' ||
-      ['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(workflowExecution.status)
+      existingRow.status === AutomationRunStatus.COMPLETED ||
+      TERMINAL_EXECUTION_STATUSES.has(workflowExecution.status)
     ) {
       logger.info(
         `[automations] claw-callback ignored duplicate/stale payload execution=${executionId} step=${stepName}`,
@@ -47,7 +55,7 @@ export async function handleClawCallback(
       data: { data: JSON.stringify(merged) },
     });
 
-    await automationQueue.enqueueRun({ executionId, resumeStepName: stepName });
+    await automationQueue.enqueueRun({ executionId });
 
     logger.info(
       `[automations] claw-callback stored payload + enqueued resume execution=${executionId} step=${stepName}`,

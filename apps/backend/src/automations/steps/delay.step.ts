@@ -108,10 +108,9 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
       `[DELAY] scheduling wake-up — executionId=${store.runId} jobId=${jobId} amount=${amount} unit=${unit} delayedUntil=${delayedUntil}`,
     );
 
-    await automationScheduleQueue.enqueueScheduled(
-      { executionId: store.runId, resumeStepName: stepKey },
-      delayMs,
-    );
+    await automationScheduleQueue
+      .getQueue()
+      .add({ executionId: store.runId }, { delay: delayMs, jobId });
 
     throw new PauseStep(`delaying ${amount} ${unit}`, {
       statePatch: { output: { delayedUntil } },

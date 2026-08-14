@@ -10,7 +10,6 @@ import { isStallExhaustionError } from '../engine/retryability';
 
 export interface AutomationJobData {
   executionId: string;
-  resumeStepName?: string;
 }
 
 class AutomationQueue {
@@ -129,7 +128,7 @@ class AutomationQueue {
     );
     if (reset === 'reset') {
       logger.info(
-        `[AUTOMATION-QUEUE] execution=${executionId} reset FAILED → PENDING for retry (attempt ${attemptsMade + 1}/${maxAttempts})`,
+        `[AUTOMATION-QUEUE] execution=${executionId} reset to PENDING for retry (attempt ${attemptsMade + 1}/${maxAttempts})`,
       );
     } else if (reset === 'error') {
       logger.error(

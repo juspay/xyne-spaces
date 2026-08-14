@@ -218,6 +218,11 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
   'CANCELLED',
 ]);
 
+// A Bull retry can fail before the executor's runSteps() failure boundary gets
+// a chance to mark the execution FAILED. These states are safe retry sources:
+// the next queue attempt must be allowed to pick the execution up again.
+const RETRY_RESETTABLE_RUN_STATUSES = ['FAILED', 'RUNNING', 'SCHEDULED'] as const;
+
 export async function markAutomationFailed(
   workflowExecutionId: string,
   errorMessage: string,
@@ -267,11 +272,11 @@ export async function markAutomationFailed(
 }
 
 /**
- * Reset a failed run back to PENDING for the next retry attempt, recording the
- * failure under __meta.lastError + __meta.retryCount. Unlike markAutomationFailed,
- * FAILED is not treated as terminal here because the executor pre-marks the run
- * FAILED (and re-throws) before the queue listener decides to retry — so a
- * retryable run is already FAILED at this point and must transition FAILED -> PENDING.
+ * Reset a retryable run back to PENDING for the next retry attempt, recording
+ * the failure under __meta.lastError + __meta.retryCount. Most failures arrive
+ * after the executor has pre-marked the run FAILED, but failures before the
+ * runSteps() boundary can leave it RUNNING or SCHEDULED. Those states must also
+ * be recoverable or the next Bull attempt will be skipped by the worker.
  */
 export async function markAutomationRetryPending(
   workflowExecutionId: string,
@@ -283,10 +288,7 @@ export async function markAutomationRetryPending(
     select: { id: true, status: true, workspaceId: true },
   });
   if (!execution) return 'not-found';
-  // The executor pre-marks a retryable run FAILED before this listener runs, so
-  // only a FAILED run is eligible to be reset. Anything else means a concurrent
-  // transition (cancel/kill/duplicate-success) already won — do NOT resurrect it.
-  if (execution.status !== 'FAILED') {
+  if (!(RETRY_RESETTABLE_RUN_STATUSES as readonly string[]).includes(execution.status)) {
     return 'skipped-terminal';
   }
 
@@ -315,12 +317,16 @@ export async function markAutomationRetryPending(
     retryCount,
   };
 
-  // Conditional + atomic: only flip FAILED -> PENDING if the row is STILL FAILED at
-  // write time (guards against a cancel/kill or duplicate-success racing between the
-  // read above and this write). If the guard matches 0 rows, skip the state upsert.
+  // Conditional + atomic: only flip a retry-resettable state -> PENDING if the
+  // row is STILL in one of those states at write time. This guards against a
+  // cancel/kill or duplicate-success racing between the read above and this
+  // write. If the guard matches 0 rows, skip the state upsert.
   const flipped = await prisma.$transaction(async tx => {
     const { count } = await tx.workflowExecution.updateMany({
-      where: { id: workflowExecutionId, status: 'FAILED' },
+      where: {
+        id: workflowExecutionId,
+        status: { in: [...RETRY_RESETTABLE_RUN_STATUSES] },
+      },
       data: { status: 'PENDING' },
     });
     if (count === 0) {

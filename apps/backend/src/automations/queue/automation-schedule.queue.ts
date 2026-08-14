@@ -10,7 +10,6 @@ import { isStallExhaustionError } from '../engine/retryability';
 
 export interface AutomationScheduleJobData {
   executionId: string;
-  resumeStepName?: string;
 }
 
 class AutomationScheduleQueue {
@@ -117,7 +116,7 @@ class AutomationScheduleQueue {
     );
     if (reset === 'reset') {
       logger.info(
-        `[AUTOMATION-SCHEDULE-QUEUE] execution=${executionId} reset FAILED → PENDING for retry (attempt ${attemptsMade + 1}/${maxAttempts})`,
+        `[AUTOMATION-SCHEDULE-QUEUE] execution=${executionId} reset to PENDING for retry (attempt ${attemptsMade + 1}/${maxAttempts})`,
       );
     } else if (reset === 'error') {
       logger.error(
@@ -144,9 +143,7 @@ class AutomationScheduleQueue {
   ): Promise<Bull.Job<AutomationScheduleJobData>> {
     return this.getQueue().add(data, {
       delay: Math.max(0, delayMs),
-      jobId: data.resumeStepName
-        ? `${data.executionId}:delay:${data.resumeStepName}`
-        : data.executionId,
+      jobId: data.executionId,
     });
   }
 

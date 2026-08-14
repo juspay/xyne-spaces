@@ -14,6 +14,7 @@ import { parseAgentAttachments } from '../services/agent-attachment.service';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { RetryableError } from '../engine/retryability';
 
 const DEFAULT_MAX_RETRIES = 3;
 const AGENT_RESULT_LOG_LIMIT = 2_000;
@@ -207,6 +208,9 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         ...(visibleContext ? visibleContext : {}),
       });
     } catch (err) {
+      if (err instanceof RetryableError) {
+        throw err;
+      }
       throw new Error(
         `[RUN_AGENT] retry runAgent failed: ${err instanceof Error ? err.message : String(err)}`,
       );

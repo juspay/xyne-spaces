@@ -11,6 +11,16 @@ import { RetryableError } from '../engine/retryability';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
+type WebhookMethod = z.infer<typeof HttpMethod>;
+
+// A timeout or connection failure is ambiguous for any request that may mutate
+// remote state: the receiver may have committed the request before the response
+// was lost. Until webhook idempotency keys are supported, only GET requests may
+// participate in the automation-level retry mechanism.
+function mayRetryWebhook(method: WebhookMethod): boolean {
+  return method === 'GET';
+}
+
 const TriggerWebhookConfigSchema = z.object({
   url: variableRef(
     z
@@ -132,7 +142,7 @@ export class TriggerWebhookStep extends BaseActionStep<
       );
 
       if (!ok) {
-        if (status >= 500 || status === 429) {
+        if (mayRetryWebhook(method) && (status >= 500 || status === 429)) {
           throw new RetryableError(
             `[TRIGGER_WEBHOOK] ${method} ${url} returned ${status}: ${responseBody.slice(0, 200)}`,
           );
@@ -155,13 +165,16 @@ export class TriggerWebhookStep extends BaseActionStep<
       return { status, ok, responseBody, responseJson };
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        throw new RetryableError(`[TRIGGER_WEBHOOK] ${method} ${url} timed out after ${timeoutMs}ms`);
+        const message = `[TRIGGER_WEBHOOK] ${method} ${url} timed out after ${timeoutMs}ms`;
+        if (mayRetryWebhook(method)) throw new RetryableError(message);
+        throw new Error(message);
       }
       if (err instanceof TypeError) {
-        throw new RetryableError(
-          `[TRIGGER_WEBHOOK] ${method} ${url} network failure: ${err.message}`,
-          { cause: err },
-        );
+        const message = `[TRIGGER_WEBHOOK] ${method} ${url} network failure: ${err.message}`;
+        if (mayRetryWebhook(method)) {
+          throw new RetryableError(message, { cause: err });
+        }
+        throw new Error(message);
       }
       throw err;
     } finally {
