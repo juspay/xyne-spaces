@@ -3342,7 +3342,7 @@ const ChannelCommandMenu = ({
       >
         <SearchDefault size={14} className='text-muted-foreground shrink-0' />
         <span className='flex items-center flex-wrap gap-1'>
-          <span className='text-sm'>Show results for:</span>
+          <span className='text-sm'>Show detailed results for:</span>
           {selectedMentions.map(m => {
             const isPriority = m.type === MentionType.PRIORITY;
             const isUser = m.type === MentionType.USER;

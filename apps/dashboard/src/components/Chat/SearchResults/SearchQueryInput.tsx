@@ -85,9 +85,9 @@ export function SearchQueryInput({
         aria-label='Search query'
         className={cn(
           'flex-1 min-w-0 bg-transparent text-sm placeholder:text-muted-foreground outline-none',
-          // Uncommitted edits read as "not searched yet" in the accent colour; once Enter
-          // lands the text is what the results below are for, so it settles back to grey.
-          isDirty ? 'text-primary' : 'text-muted-foreground',
+          // Uncommitted edits sit at full contrast; once Enter lands the text is what the
+          // results below are for, so it settles back to grey.
+          isDirty ? 'text-foreground' : 'text-muted-foreground',
         )}
         data-track-category='SEARCH_RESULTS'
         data-track-name='EDIT_QUERY'
