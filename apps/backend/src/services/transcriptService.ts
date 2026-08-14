@@ -75,6 +75,11 @@ CITATION RULES:
 - Do NOT cite the Summary overview section — it is too high-level for precise citations
 - Do NOT invent segment numbers — only use numbers that appear in the transcript
 
+CALL PARTICIPANTS:
+- The call creator is: {callCreator}
+- In the Participants section, append "{HOST}" immediately after that person's name if they are listed.
+- Do not add the call creator to the Participants section if they are not otherwise a participant.
+
 MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 
 ## Summary:
@@ -1103,7 +1108,10 @@ Output ONLY the processed transcript, nothing else.`;
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
   async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
-    const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
+    const callCreator = await this.getCallCreatorName(callId);
+    const prompt = CALL_SUMMARY_PROMPT
+      .replace('{callCreator}', callCreator || 'Unknown')
+      .replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
       () => this.createAgent(callId),
@@ -1117,6 +1125,14 @@ Output ONLY the processed transcript, nothing else.`;
     }
 
     return extracted.content;
+  }
+
+  /** Resolve the creator's display name for the short-summary prompt. */
+  private async getCallCreatorName(callId?: string): Promise<string | null> {
+    if (!callId) return null;
+    const call = await repositories.calls.findByExternalId(callId);
+    const callCreator = call ? await repositories.users.findById(call.createdByUserId) : null;
+    return callCreator?.displayName || callCreator?.name || null;
   }
 
   /**
