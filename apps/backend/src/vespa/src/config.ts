@@ -1,6 +1,7 @@
+import { config } from '@/config/env';
 
-export const NAMESPACE = process.env.VESPA_NAMESPACE || "namespace"
-export const CLUSTER = process.env.CLUSTER || "my_content"
+export const NAMESPACE = config.vespa.namespace || "namespace"
+export const CLUSTER = config.vespa.cluster || "my_content"
 export default {
   nativeRankThreshold: 0.001,
   vespaMaxRetryAttempts: 3,
@@ -17,6 +18,6 @@ export default {
   apiKey: '',
   // 8083, not 8080: y-sweet owns 8080 and MESSAGE_CLASSIFIER_URL uses 8082, so docker-compose.dev.yml publishes
   // Vespa's feed port on 8083 (container-internal port is still 8080).
-  feedEndpoint: process.env.VESPA_FEED_URL || "http://127.0.0.1:8083",
-  queryEndpoint: process.env.VESPA_QUERY_URL || "http://127.0.0.1:8081",
+  feedEndpoint: config.vespa.feedUrl || "http://127.0.0.1:8083",
+  queryEndpoint: config.vespa.queryUrl || "http://127.0.0.1:8081",
 };

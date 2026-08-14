@@ -17,6 +17,7 @@ import {
 } from '@/utils/recordingGoogleDocs';
 import { markdownToPlainText } from '@/utils/markdownToPlainText';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
 const HEADLESS_CALL_TYPE = 'HEADLESS';
@@ -46,7 +47,7 @@ async function getRecordingDocAccessToken(userId: string): Promise<string | null
     email?: string;
   };
   if (!credentials.refreshToken) return null;
-  const client = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+  const client = new google.auth.OAuth2(config.email.clientId, config.email.clientSecret);
   client.setCredentials({ access_token: credentials.accessToken, refresh_token: credentials.refreshToken });
   const accessToken = (await client.getAccessToken()).token;
   if (!accessToken) return null;

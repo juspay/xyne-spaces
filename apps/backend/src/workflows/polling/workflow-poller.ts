@@ -1,3 +1,4 @@
+import { config } from '@/config/env';
 // Workflow poller for background execution
 
 import os from 'os'
@@ -120,7 +121,7 @@ export class WorkflowPoller {
   private async pollAndExecute(loop: PollingLoop): Promise<boolean> {
     if (!this.isRunning) return false
 
-    const allowedWorkflowType = process.env.WORKFLOW_TYPE
+    const allowedWorkflowType = config.workers.type
     const execution = await repositories.workflowExecutions.claimNextPendingExecution(
       allowedWorkflowType,
       ['root', 'rerun']

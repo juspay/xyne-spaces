@@ -37,7 +37,7 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const retryDelay = (attempt: number) =>
   Math.min(sched().retryMaxMs, sched().retryBaseMs * Math.max(attempt, 1))
 const workerId = (role: string) =>
-  `${role}:${process.env.HOSTNAME || 'local'}:${process.pid}:${Math.random().toString(36).slice(2)}`
+  `${role}:${config.observability.hostname || 'local'}:${process.pid}:${Math.random().toString(36).slice(2)}`
 
 const releaseOcrPermitsForFile = async (fileId: string) => {
   const parts = await getDoclingPartsForFile(fileId)

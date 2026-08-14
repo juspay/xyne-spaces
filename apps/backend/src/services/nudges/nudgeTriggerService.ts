@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { proactiveNudgeWorker, type ProactiveNudgeJobData } from '@/workers/proactiveNudgeWorker';
+import { config } from '@/config/env';
 
 export interface ActivityEventTriggerPayload {
   userId: string;
@@ -15,7 +16,7 @@ export interface ActivityEventTriggerPayload {
 }
 
 export async function triggerNudgesFromActivity(payload: ActivityEventTriggerPayload): Promise<void> {
-  const enabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true';
+  const enabled = config.workers.proactiveNudge;
   if (!enabled) {
     return;
   }

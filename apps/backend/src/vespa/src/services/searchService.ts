@@ -611,7 +611,7 @@ export class SearchService {
         );
       }
 
-      if (process.env.NODE_ENV === 'development') {
+      if (appConfig.env === 'development') {
         // Log only specific fields
         const simplifiedResults = response.root?.children?.map((child: any) => ({
           id: child.fields?.docId,

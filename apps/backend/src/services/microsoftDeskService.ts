@@ -140,9 +140,9 @@ export class MicrosoftDeskService {
   private oauthClient: AuthorizationCode | undefined;
 
   constructor() {
-    const clientId = process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    const clientId = config.microsoftGraph.clientId;
+    const clientSecret = config.microsoftGraph.clientSecret;
+    const tenantId = config.microsoftGraph.tenantId || 'common';
 
     if (clientId && clientSecret) {
       this.oauthClient = new AuthorizationCode({
@@ -555,9 +555,9 @@ export class MicrosoftDeskService {
 
     logger.info('Microsoft access token expired, refreshing...');
 
-    const clientId = process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    const clientId = config.microsoftGraph.clientId;
+    const clientSecret = config.microsoftGraph.clientSecret;
+    const tenantId = config.microsoftGraph.tenantId || 'common';
 
     if (!clientId || !clientSecret) {
       throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET required for token refresh');

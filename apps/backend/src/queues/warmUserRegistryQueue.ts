@@ -16,9 +16,10 @@ import { UserStatus, UserType } from '@xyne/shared';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const TAG = '[WarmUserRegistry]';
-const WARM_USER_REGISTRY_CRON = process.env.WARM_USER_REGISTRY_CRON || '0 3 * * *';
+const WARM_USER_REGISTRY_CRON = config.crons.warmUserRegistry || '0 3 * * *';
 
 export const STT_HINT_NAMES_REDIS_KEY = 'voiceInput:sttHintNames';
 // Refresh window is 24h; expire the cache a bit past that so a stalled cron

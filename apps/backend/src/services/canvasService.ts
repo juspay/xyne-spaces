@@ -12,6 +12,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { toJsonSafeValue } from './jsonSafe';
+import { config } from '@/config/env';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
 
@@ -303,7 +304,7 @@ export async function createKnowledgeCanvas(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
+  const frontendUrl = config.frontendUrl || 'https://spaces.xyne.juspay.net';
   const path = workspaceId
     ? `/${workspaceId}/chat/canvas/${canvasId}`
     : `/chat/canvas/${canvasId}`;

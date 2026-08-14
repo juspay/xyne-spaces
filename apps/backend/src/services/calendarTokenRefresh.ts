@@ -9,6 +9,7 @@
 import { DatabaseClient } from '@/database/client';
 import { AuthProvider } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import {
   getCalendarSourceType,
   parseCalendarCredentials,
@@ -56,8 +57,8 @@ async function fetchTokenWithRetry(url: string, initFactory: () => RequestInit):
 async function refreshGoogleToken(
   refreshToken: string
 ): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = config.email.clientId;
+  const clientSecret = config.email.clientSecret;
 
   if (!clientId || !clientSecret) {
     throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required');
@@ -90,9 +91,9 @@ async function refreshGoogleToken(
 async function refreshMicrosoftToken(
   refreshToken: string
 ): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+  const clientId = config.microsoftGraph.clientId;
+  const clientSecret = config.microsoftGraph.clientSecret;
+  const tenantId = config.microsoftGraph.tenantId || 'common';
 
   if (!clientId || !clientSecret) {
     throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET are required');

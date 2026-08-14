@@ -110,8 +110,8 @@ const getMerchantToken = async (merchantId: string): Promise<{ success: boolean;
   logger.info(`🔑 Getting merchant token for: ${merchantId}`);
 
   try {
-    const dashboardUrl = process.env.DASHBOARD_API_URL || 'https://dashboard.expresscheckout.juspay.in';
-    const authHeader = process.env.DASHBOARD_AUTH_TOKEN || '';
+    const dashboardUrl = config.dashboard.apiUrl || 'https://dashboard.expresscheckout.juspay.in';
+    const authHeader = config.dashboard.authToken || '';
 
     const response = await fetch(`${dashboardUrl}/ec/s1/admin/switch/merchant/${merchantId}`, {
       method: 'GET',

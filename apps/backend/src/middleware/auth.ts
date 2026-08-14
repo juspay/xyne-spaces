@@ -18,8 +18,8 @@ export class AuthMiddleware {
   private googleAuthEnabled: boolean;
 
   constructor() {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const clientId = config.email.clientId;
+    const clientSecret = config.email.clientSecret;
 
     // Only initialize Google OAuth if credentials are provided
     this.googleAuthEnabled = !!(clientId && clientSecret);
@@ -127,7 +127,7 @@ export class AuthMiddleware {
       // Continue with Google OAuth authentication if API key failed
       // Secure dev mode check - only allow in development environment
       const isDevEnvironment =
-        process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === 'true';
+        config.env === 'development' && config.auth.devAuthEnabled;
       const clientDevMode = req.headers['x-dev-mode'] === 'true';
 
       // Additional security: check if request is from localhost
@@ -140,8 +140,8 @@ export class AuthMiddleware {
 
       if (isDevEnvironment && isLocalhost && clientDevMode) {
         logger.info('[AUTH] Secure dev mode detected, using mock user authentication', {
-          nodeEnv: process.env.NODE_ENV,
-          enableDevAuth: process.env.ENABLE_DEV_AUTH,
+          nodeEnv: config.env,
+          enableDevAuth: config.auth.devAuthEnabled,
           clientIp: req.ip,
           hostname: req.hostname,
           host: req.get('host'),
@@ -202,7 +202,7 @@ export class AuthMiddleware {
       // Log dev mode rejection for security awareness
       if (clientDevMode && !isDevEnvironment) {
         logger.warn('[AUTH] Dev mode headers detected but rejected - not in development environment', {
-          nodeEnv: process.env.NODE_ENV,
+          nodeEnv: config.env,
           clientIp: req.ip,
           hostname: req.hostname,
         });
@@ -279,7 +279,7 @@ export class AuthMiddleware {
             tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
 
             // Set new token in workspace-specific cookie
-            const isProduction = process.env.NODE_ENV === 'production';
+            const isProduction = config.env === 'production';
             if (workspaceId) {
               res.cookie(`xyne_ws_${workspaceId}_token`, refreshResult.customToken, {
                 httpOnly: true,
@@ -384,7 +384,7 @@ export class AuthMiddleware {
             payload = jwtService.verifyToken(refreshResult.customToken);
 
             // Set new token in HTTP-only cookie
-            const isProduction = process.env.NODE_ENV === 'production';
+            const isProduction = config.env === 'production';
             res.cookie('google_access_token', refreshResult.customToken, {
               httpOnly: true,
               secure: isProduction,
@@ -538,7 +538,7 @@ export class AuthMiddleware {
         createHash('sha256').update(user.id).digest().readUInt32BE(0) % 100
       );
       if (req.cookies?.u_cohort !== cohort) {
-        const isProduction = process.env.NODE_ENV === 'production';
+        const isProduction = config.env === 'production';
         res.cookie('u_cohort', cohort, {
           httpOnly: true,
           secure: isProduction,
@@ -658,7 +658,7 @@ export class AuthMiddleware {
     try {
       // Check for secure dev mode (same security checks as authenticate)
       const isDevEnvironment =
-        process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === 'true';
+        config.env === 'development' && config.auth.devAuthEnabled;
       const clientDevMode = req.headers['x-dev-mode'] === 'true';
       const isLocalhost =
         req.ip === '127.0.0.1' ||

@@ -1,5 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 export interface BotJobData {
   executionId: string;
@@ -24,11 +25,11 @@ class BotQueueService {
     try {
       // Use the same Redis configuration as redisService
       const redisConfig = {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        host: config.redis.host || 'localhost',
+        port: config.redis.port,
         maxRetriesPerRequest: 3,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && {
+        ...(config.redis.password && { password: config.redis.password }),
+        ...(config.redis.tls && {
           tls: {
             rejectUnauthorized: false
           }

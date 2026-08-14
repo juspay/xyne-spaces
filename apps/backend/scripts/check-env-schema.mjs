@@ -2,9 +2,9 @@
 /**
  * Keeps three things in step:
  *
- *   1. every variable the service reads off process.env is declared in the Joi schema
- *   2. every declared variable appears in .env.example
- *   3. .env.example still validates against the schema
+ *   1. nothing outside the schema reads process.env — everything goes through `config`
+ *   2. every variable the schema knows about is declared there
+ *   3. every declared variable appears in .env.example
  *
  * The schema ends in `.unknown()`, so an undeclared variable is not an error at
  * runtime — it simply passes through unvalidated and undocumented. That is how 84
@@ -63,6 +63,42 @@ const inExample = new Set(
 
 const failures = [];
 
+// Reading process.env outside the schema means bypassing coercion and defaults —
+// the raw string, with a local fallback that drifts from the declared one. These
+// are the only places allowed to touch it, each for a reason that config cannot serve.
+const DIRECT_ACCESS_ALLOWED = new Map([
+  ['src/config/env.ts', 'the schema itself — the one place that reads the environment'],
+  ['src/test/setup.ts', 'test bootstrap; sets variables before the schema is imported'],
+  [
+    'src/bots/unified/execution/external-runtime.ts',
+    'the key is chosen at runtime from a bot definition (externalApi.authEnvVar)',
+  ],
+  ['src/utils/retry.ts', 'the key is a caller-supplied argument'],
+]);
+
+const offenders = files
+  .filter((f) => !DIRECT_ACCESS_ALLOWED.has(f))
+  .map((f) => {
+    const hits = readFileSync(join(BACKEND, f), 'utf8')
+      .split('\n')
+      .map((line, i) => ({ line: line.trim(), no: i + 1 }))
+      .filter(({ line }) => /process\.env\b/.test(line) && !line.startsWith('//') && !line.startsWith('*'));
+    return { f, hits };
+  })
+  .filter(({ hits }) => hits.length);
+
+if (offenders.length) {
+  failures.push(
+    `${offenders.reduce((n, o) => n + o.hits.length, 0)} direct process.env access(es) outside the schema:\n` +
+      offenders
+        .map(({ f, hits }) => hits.map((h) => `    ${f}:${h.no}  ${h.line.slice(0, 80)}`).join('\n'))
+        .join('\n') +
+      '\n\n  Read it through `config` instead — the value is already coerced, defaulted\n' +
+      '  and validated there. If the key genuinely is not known until runtime, add the\n' +
+      '  file to DIRECT_ACCESS_ALLOWED in this script with the reason.',
+  );
+}
+
 const undeclared = [...read.keys()].filter((k) => !declared.has(k) && !AMBIENT.has(k)).sort();
 if (undeclared.length) {
   failures.push(
@@ -89,6 +125,6 @@ if (failures.length) {
 }
 
 console.log(
-  `✓ env schema check: ${declared.size} declared, ${read.size} read from process.env, ` +
-    `${inExample.size} in .env.example — all in step`,
+  `✓ env check: ${declared.size} declared, ${inExample.size} documented, ` +
+    `${DIRECT_ACCESS_ALLOWED.size} files allowed direct process.env access — all in step`,
 );

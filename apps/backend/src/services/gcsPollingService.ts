@@ -61,7 +61,7 @@ export class GcsPollingService {
   private isInitialized: boolean = false;
 
   private constructor() {
-    this.bucketName = process.env.NETWORK_DOCUMENTS_GCS_BUCKET || 'xyne-documents';
+    this.bucketName = config.networkDocuments.gcsBucket || 'xyne-documents';
     this.storageService = getStorageService(this.bucketName);
     this.ticketController = new TicketController();
     this.systemUserId = ''; // Will be set in initializeConfiguration
@@ -70,11 +70,11 @@ export class GcsPollingService {
   private async initializeConfiguration(): Promise<void> {
     if (this.isInitialized) return;
 
-    const projectName = process.env.NETWORK_DOCUMENT_PROJECT_NAME;
-    const boardName = process.env.NETWORK_DOCUMENT_BOARD_NAME;
-    const userGroupName = process.env.NETWORK_DOCUMENT_USER_GROUP_NAME;
-    const channelName = process.env.NETWORK_DOCUMENT_CHANNEL_NAME;
-    const systemUserEmail = process.env.NETWORK_DOCUMENT_SYSTEM_USER_EMAIL;
+    const projectName = config.networkDocuments.projectName;
+    const boardName = config.networkDocuments.boardName;
+    const userGroupName = config.networkDocuments.userGroupName;
+    const channelName = config.networkDocuments.channelName;
+    const systemUserEmail = config.networkDocuments.systemUserEmail;
 
     if (!projectName || !boardName || !userGroupName || !channelName || !systemUserEmail) {
       throw new Error('Missing NETWORK_DOCUMENT env configuration');
@@ -160,7 +160,7 @@ export class GcsPollingService {
       return;
     }
 
-    const intervalMs = parseInt(process.env.GCS_POLLING_INTERVAL_MS || '90000', 10);
+    const intervalMs = config.networkDocuments.pollingIntervalMs;
 
     logger.info(`[GCS_POLLING] Starting GCS polling service`, {
       bucket: this.bucketName,

@@ -3,6 +3,7 @@ import { CallStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { jwtService } from '@/services/jwtService';
+import { config } from '@/config/env';
 
 const JOINABLE_CALL_STATUSES = new Set<CallStatus>([
   CallStatus.SCHEDULED,
@@ -75,7 +76,7 @@ class CallInviteRoutingService {
     // The following hard navigation loads the dashboard in the call's
     // workspace. Update the server-side workspace pointer as well so Zero and
     // endpoints that do not carry x-workspace-id resolve the same workspace.
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isProduction = config.env === 'production';
     res.cookie('xyne_last_workspace', callWorkspaceId, {
       httpOnly: true,
       secure: isProduction,

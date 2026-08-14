@@ -3,6 +3,7 @@ import { PRMetricsRepository } from '@/database/repositories/pullRequestsReposit
 import { BitbucketManager } from '@/bitbucket/apis';
 import { logger } from '@/utils/logger';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
+import { config } from '@/config/env';
 
 // Bitbucket PR validation configuration constants
 const BITBUCKET_PR_CONFIG = {
@@ -185,7 +186,7 @@ export class PullRequestValidationService {
         'SUCCESSFUL',
         BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
         BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
-        process.env.FRONTEND_URL || '' ,
+        config.frontendUrl || '' ,
         description,
       );
     } catch (error) {
@@ -203,7 +204,7 @@ export class PullRequestValidationService {
         'FAILED',
         BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
         BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
-        process.env.FRONTEND_URL || '' ,
+        config.frontendUrl || '' ,
         description
       );
     } catch (error) {

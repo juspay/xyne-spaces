@@ -5,6 +5,7 @@
 
 import { WebClient } from '@slack/web-api';
 import { logger } from '../../../utils/logger';
+import { config } from '@/config/env';
 
 export interface PostMessageOptions {
   channelId?: string;
@@ -16,7 +17,7 @@ export interface PostMessageOptions {
 }
 
 function getSlackClient(token?: string): WebClient | null {
-  const resolvedToken = token || process.env.SLACK_BOT_TOKEN;
+  const resolvedToken = token || config.slackBotToken;
   if (!resolvedToken) {
     logger.warn('[Migration] No bot token available for postMessage');
     return null;

@@ -16,7 +16,7 @@ export type ApnsPayload = {
   uuid?: string;
 };
 
-const isProduction = (process.env.NODE_ENV || 'development') === 'production';
+const isProduction = (config.env || 'development') === 'production';
 
 class ApnsService {
   private provider?: apn.Provider;

@@ -1,10 +1,11 @@
 import { redisService } from './redisService';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 export async function checkRateLimit(endpoint: string, identifier: string, count = 1): Promise<boolean> {
   try {
-    const maxRequests = parseInt(process.env.ZERO_MAX_REQUESTS || '300', 10);
-    const windowSeconds = parseInt(process.env.ZERO_REQUEST_WINDOW || '60', 10);
+    const maxRequests = config.zero.maxRequests;
+    const windowSeconds = config.zero.requestWindow;
     const redis = redisService.getClient();
     const key = `rate:${endpoint}:${identifier}`;
 

@@ -61,7 +61,7 @@ function getSheets(): sheets_v4.Sheets {
   // Use shared Google OAuth credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET via config.email)
   const clientId = config.email.clientId;
   const clientSecret = config.email.clientSecret;
-  const refreshToken = process.env.MIGRATION_SHEETS_REFRESH_TOKEN;
+  const refreshToken = config.google.migrationSheetsRefreshToken;
 
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error(
@@ -84,7 +84,7 @@ function getSheets(): sheets_v4.Sheets {
 }
 
 function getSpreadsheetId(): string {
-  const id = process.env.MIGRATION_SHEET_ID;
+  const id = config.autoSyncSlackChannel.sheetId;
   if (!id) {
     throw new Error('[GoogleSheets] Missing MIGRATION_SHEET_ID');
   }

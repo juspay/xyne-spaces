@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 /**
  * Middleware to authenticate internal service-to-service requests.
@@ -12,7 +13,7 @@ export const internalServiceAuth = (
   res: Response,
   next: NextFunction
 ): void => {
-  const expectedSecret = process.env.INTERNAL_SERVICE_SECRET;
+  const expectedSecret = config.internal.serviceSecret;
   const providedSecret = req.headers['x-internal-service-secret'] as string | undefined;
 
   if (!expectedSecret) {

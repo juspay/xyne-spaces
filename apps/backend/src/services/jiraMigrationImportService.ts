@@ -4103,7 +4103,7 @@ export class JiraMigrationImportService {
       unresolvedUsersCount: unresolvedUsers.size,
     });
 
-    const unresolvedUsersOutputPath = process.env.JIRA_MIGRATION_UNRESOLVED_USERS_PATH?.trim();
+    const unresolvedUsersOutputPath = config.jiraMigration.unresolvedUsersPath?.trim();
     if (unresolvedUsersOutputPath) {
       try {
         await writeFile(

@@ -48,11 +48,11 @@ class VespaQueue {
 
 		try {
 			const redisConfig = {
-				host: process.env.REDIS_HOST || 'localhost',
-				port: parseInt(process.env.REDIS_PORT || '6379', 10),
+				host: config.redis.host || 'localhost',
+				port: config.redis.port,
 				maxRetriesPerRequest: 3,
-				...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-				...(process.env.REDIS_TLS === 'true' && {
+				...(config.redis.password && { password: config.redis.password }),
+				...(config.redis.tls && {
 					tls: {
 						rejectUnauthorized: false
 					}
@@ -61,7 +61,7 @@ class VespaQueue {
 
 			const queueNames = (this.queueNamesOverride && this.queueNamesOverride.length)
 				? this.queueNamesOverride
-				: (process.env.VESPA_QUEUE_NAMES || 'vespa-ingestion,vespa-files')
+				: (config.vespa.queueNames || 'vespa-ingestion,vespa-files')
 					.split(',')
 					.map(n => n.trim())
 					.filter(Boolean);
@@ -129,7 +129,7 @@ class VespaQueue {
 		}
 
 		const { schema, jobType, docId } = vespaJob;
-		const fileQueueName = this.fileQueueNameOverride || process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
+		const fileQueueName = this.fileQueueNameOverride || config.vespa.fileQueueName || 'vespa-files';
 		
 		try {
 			const jobData: VespaJob = vespaJob;
@@ -495,9 +495,9 @@ export const vespaQueue = new VespaQueue();
 //   - file-schema backfill jobs → vespa-backfill-file
 // Both names are overridable via env. Drained by dedicated backfill worker pods that set
 // VESPA_WORKER_QUEUE_NAME to one of these queue names.
-const backfillQueueNames = (process.env.VESPA_BACKFILL_QUEUE_NAMES || 'vespa-backfill-normal,vespa-backfill-file')
+const backfillQueueNames = (config.vespa.backfillQueueNames || 'vespa-backfill-normal,vespa-backfill-file')
 	.split(',')
 	.map(n => n.trim())
 	.filter(Boolean);
-const backfillFileQueueName = process.env.VESPA_BACKFILL_FILE_QUEUE_NAME || 'vespa-backfill-file';
+const backfillFileQueueName = config.vespa.backfillFileQueueName || 'vespa-backfill-file';
 export const vespaBackfillQueue = new VespaQueue(backfillQueueNames, backfillFileQueueName);

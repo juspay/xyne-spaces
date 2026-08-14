@@ -13,6 +13,7 @@ import { UserGroupRepository, UserRepository } from '@/database/repositories'
 import { db } from '@/database/client'
 import * as yaml from 'js-yaml'
 import jwt from "jsonwebtoken";
+import { config } from '@/config/env';
 import { getStorageService, type FileMetadata } from '@/services/storage'
 
 const CAC_KEYS = {
@@ -90,15 +91,15 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
 
   constructor() {
     super();
-    const backendUrl = process.env.API_BASE_URL || process.env.BACKEND_URL;
+    const backendUrl = config.apiBaseUrl || config.backendUrl;
     if (!backendUrl) {
       logger.warn('API_BASE_URL or BACKEND_URL environment variable is not set');
     }
-    if (!process.env.APP_JWT_KEY) {
+    if (!config.auth.appJwtKey) {
       logger.warn('APP_JWT_KEY environment variable is not set.');
     }
     this.BACKEND_URL = backendUrl || 'http://localhost:3000';
-    this.APP_JWT_KEY = process.env.APP_JWT_KEY || '';
+    this.APP_JWT_KEY = config.auth.appJwtKey || '';
     const parsed = TokenPayloadSchema.safeParse(jwt.decode(this.APP_JWT_KEY));
     this.botUserId = parsed.data?.userId || '';
 
