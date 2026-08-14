@@ -107,7 +107,7 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
   let db: { ok: boolean; fp?: string; len?: number; error?: string };
   if (!agent.spacesAppId) {
     db = { ok: false, error: "agent has no spacesAppId" };
-  } else if (CONFIG.spacesEncryptionKey.length === 0) {
+  } else if (CONFIG.spacesEncryptionKeys.size === 0) {
     db = { ok: false, error: "SPACES_ENCRYPTION_KEY unset" };
   } else {
     try {
@@ -115,7 +115,7 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
       if (!blob) {
         db = { ok: false, error: "no installed_apps row / null signingSecret" };
       } else {
-        const p = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKey);
+        const p = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKeys);
         db = { ok: true, fp: fingerprint(p), len: p.length };
       }
     } catch (err) {
