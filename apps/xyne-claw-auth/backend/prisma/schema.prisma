@@ -457,11 +457,11 @@ model UserMemoryCandidate {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// Cluster label. One of: "style" | "expertise" | "projects" |
+  /// Cluster label. One of: "style" | "triage" | "expertise" | "projects" |
   /// "relationships" | "preferences" | "decisions" | "context" | "docs"
   subsystem String
 
-  /// The memory text the curator emitted, ≤ 1500 chars.
+  /// The memory text the curator emitted.
   text       String
   /// If the user edited before approving, the edited version goes here; the
   /// curator's original stays in `text` for audit.

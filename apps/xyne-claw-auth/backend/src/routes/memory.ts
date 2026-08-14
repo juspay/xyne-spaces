@@ -883,6 +883,7 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
           content: m?.content ?? "(deleted from provider — recall history retained)",
           scope: isShared ? "shared" : ownerTag ? "user" : null,
           category: categoryTag ? categoryTag.slice(4) : (m?.factType ?? null),
+          factType: m?.factType ?? null,
           status: m ? "approved" : "rejected",
           createdAt: m?.createdAt ?? null,
         };
@@ -960,6 +961,7 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
         content: m?.content ?? "(deleted from provider — recall history retained)",
         scope: isShared ? "shared" : ownerTag ? "user" : null,
         category: categoryTag ? categoryTag.slice(4) : (m?.factType ?? null),
+        factType: m?.factType ?? null,
         status: m ? "approved" : "rejected",
         createdAt: m?.createdAt ?? null,
       };
@@ -1359,6 +1361,20 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUser
     res.json({ success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("HINDSIGHT_DERIVED_OBSERVATION")) {
+      logger.info("[memory] Direct delete refused for derived observation", {
+        agentSlug: req.params["agentSlug"],
+        hindsightMemoryId: req.params["hindsightMemoryId"],
+        by: getRequesterId(req),
+      });
+      res.status(409).json({
+        success: false,
+        code: "HINDSIGHT_DERIVED_OBSERVATION",
+        error:
+          "This is a derived Hindsight observation and cannot be deleted directly. Delete its supporting world or experience memories; Hindsight will then recompute or remove the observation automatically.",
+      });
+      return;
+    }
     logger.error("[memory] DELETE /banks/:agentSlug/memories/:hindsightMemoryId failed", { err: msg });
     // Hindsight too old to support per-memory invalidate (405). Not a bug in this
     // service — return an actionable 503 so the UI shows a real reason instead of

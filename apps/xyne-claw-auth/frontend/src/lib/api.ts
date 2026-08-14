@@ -6,7 +6,11 @@ const BACKEND_URL = frontendConfig.spacesAuthBaseUrl;
 const AUTH_API_URL = frontendConfig.clawApiBaseUrl;
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+  ) {
     super(message);
     this.name = "ApiError";
   }
@@ -95,8 +99,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string };
-    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`);
+    const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
+    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code);
   }
 
   return res.json() as Promise<T>;
@@ -1690,6 +1694,120 @@ export interface AdminRole {
   grantedBy: string | null;
   createdAt: string;
   user: { id: string; name: string; email: string; orgId?: string; orgName?: string | null };
+}
+
+export type AdminDigitalTwinBackfillStatus =
+  | "not_started"
+  | "running"
+  | "paused"
+  | "complete"
+  | "error";
+
+export interface AdminDigitalTwinUser {
+  id: string;
+  name: string;
+  email: string;
+  orgId: string;
+  orgName: string;
+  enabled: boolean;
+  enabledAt: string | null;
+  backfill: {
+    status: AdminDigitalTwinBackfillStatus;
+    from: string | null;
+    to: string | null;
+    progressPct: number | null;
+    recordsSeen: number;
+    candidatesMade: number;
+    lastError: string | null;
+  };
+}
+
+export interface AdminDigitalTwinUsersPage {
+  rows: AdminDigitalTwinUser[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: { enabled: number; disabled: number; total: number };
+  organizations: Array<{ id: string; name: string }>;
+}
+
+export interface AdminDigitalTwinUsersQuery {
+  search?: string;
+  status?: "all" | "enabled" | "disabled";
+  orgId?: string;
+  sort?: "name_asc" | "name_desc" | "email_asc" | "recently_enabled";
+  limit?: 10 | 25 | 50 | 100;
+  offset?: number;
+}
+
+export interface AdminDigitalTwinBackfillWindow {
+  from: string;
+  to: string;
+}
+
+export async function listAdminDigitalTwinUsers(
+  userId: string,
+  query: AdminDigitalTwinUsersQuery = {},
+): Promise<AdminDigitalTwinUsersPage> {
+  const params = new URLSearchParams();
+  if (query.search) params.set("search", query.search);
+  if (query.status) params.set("status", query.status);
+  if (query.orgId) params.set("orgId", query.orgId);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.offset != null) params.set("offset", String(query.offset));
+  const data = await request<{ success: boolean; data: AdminDigitalTwinUsersPage }>(
+    `${AUTH_API_URL}/api/v1/admin/digital-twin/users?${params.toString()}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function adminEnableDigitalTwinForUser(
+  userId: string,
+  targetUserId: string,
+  backfill: AdminDigitalTwinBackfillWindow | null,
+): Promise<{ enabled: true; enabledAt: string; backfillJobIds: string[] }> {
+  const data = await request<{
+    success: boolean;
+    data: { enabled: true; enabledAt: string; backfillJobIds: string[] };
+  }>(`${AUTH_API_URL}/api/v1/admin/digital-twin/users/${encodeURIComponent(targetUserId)}/enable`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({ backfill }),
+  });
+  return data.data;
+}
+
+export async function adminDisableDigitalTwinForUser(
+  userId: string,
+  targetUserId: string,
+): Promise<{ disabled: true; cancelledJobs: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { disabled: true; cancelledJobs: number };
+  }>(`${AUTH_API_URL}/api/v1/admin/digital-twin/users/${encodeURIComponent(targetUserId)}/disable`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({}),
+  });
+  return data.data;
+}
+
+export async function adminStartDigitalTwinBackfillForUser(
+  userId: string,
+  targetUserId: string,
+  backfill: AdminDigitalTwinBackfillWindow,
+): Promise<{ backfillJobIds: string[] }> {
+  const data = await request<{ success: boolean; data: { backfillJobIds: string[] } }>(
+    `${AUTH_API_URL}/api/v1/admin/digital-twin/users/${encodeURIComponent(targetUserId)}/backfill`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify({ backfill }),
+    },
+  );
+  return data.data;
 }
 
 export interface AuditLogEntry {
@@ -4311,7 +4429,7 @@ export interface CuratorEmittedCandidate {
   signalScore?: number;
   groundedOnIds?: string[];
   verdict: "kept" | "dropped";
-  dropReason?: "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
 }
 
 /** Full trace of one curator LLM call. Mirrors UserMemoryCuratorTrace in
@@ -4348,6 +4466,20 @@ export interface SynthFileResult {
   action: "updated" | "skipped" | "error";
   chars?: number;
   error?: string;
+  model?: string;
+  durationMs?: number;
+  systemPrompt?: string;
+  userPrompt?: string;
+  rawOutput?: string;
+  promptChars?: number;
+  factsAvailable?: number;
+  factsDropped?: number;
+  factsClipped?: number;
+  factInputChars?: number;
+  factInputBudgetChars?: number;
+  contextLimited?: boolean;
+  finishReason?: string;
+  usage?: { promptTokens?: number; completionTokens?: number };
 }
 
 /** Trace stored on a synthesize pipeline event (instead of a CuratorTrace). */
@@ -4782,6 +4914,9 @@ export interface MemoryBankMemory {
   id: string;
   hindsightMemoryId: string;
   category: string | null;
+  /** Hindsight storage type. Observations are derived and cannot be curated
+   *  directly; delete their supporting world/experience facts instead. */
+  factType?: string | null;
   content: string;
   curatorReasoning: string | null;
   curatorConfidence: number | null;
@@ -4809,6 +4944,7 @@ export interface MemoryBankStats {
     lastRecalledAt: string | null;
     content: string;
     category: string | null;
+    factType?: string | null;
     status: string | null;
     createdAt: string | null;
   }>;
@@ -4869,7 +5005,14 @@ export async function deleteDigitalTwinMemory(userId: string, hindsightMemoryId:
     `${MEMORY_BASE}/banks/digital-twin/memories/${encodeURIComponent(hindsightMemoryId)}?userTag=${encodeURIComponent(`user:${userId}`)}`,
     { method: "DELETE", credentials: "include" },
   );
-  if (!res.ok) throw new Error(`Failed to delete memory: ${res.status}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    throw new ApiError(
+      res.status,
+      body.error ?? `Failed to delete memory: ${res.status}`,
+      body.code,
+    );
+  }
 }
 
 
