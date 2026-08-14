@@ -31,6 +31,7 @@ import {
 } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { CallConfirmationModal } from '../../components/Call/CallConfirmationModal';
 import { DeleteCallModal } from '../../components/Call/DeleteCallModal';
 import { InstantCallModal } from '../../components/Call/InstantCallModal/InstantCallModal';
@@ -184,6 +185,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     summaryTemplateId: null,
     labels: [],
     markedItems: [],
+    xyneManaged: false,
     participants: Array.from({ length: participantCount }, (_, index) => {
       const userId = participantUserIds[index] || '';
       const displayName = stripSearchHighlight(participantNames[index]);
@@ -872,6 +874,18 @@ const CallHistoryScreen = (): ReactElement => {
         viewMode === 'calendar' ? 'overflow-hidden' : 'overflow-y-auto',
       )}
     >
+      {/* This root is itself the scroll container, so an absolutely positioned
+          navigator would scroll away with the list. A zero-height sticky wrapper
+          pins it to the top-left instead while contributing no layout height, so
+          the list still starts where it did. z-[60] clears the sticky header's
+          z-50 for the widths where the centred column reaches the left edge. */}
+      {!isMobile && (
+        <div className='sticky left-0 top-0 z-[60] hidden h-0 w-fit md:block'>
+          <div className='h-[52px] w-fit'>
+            <AppNavigator />
+          </div>
+        </div>
+      )}
       <div
         className={cn(
           'w-full flex flex-col items-center px-4',
