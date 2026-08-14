@@ -39,7 +39,7 @@ function tidy(line: string): string {
     .trim();
 }
 
-export function stripCitationTokens(line: string): string {
+function stripCitationTokens(line: string): string {
   return tidy(line.replace(CLAW_CITATION_MALFORMED_RE, ''));
 }
 

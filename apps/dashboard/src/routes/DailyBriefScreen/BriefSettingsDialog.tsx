@@ -40,7 +40,7 @@ export function BriefSettingsDialog({
       .getConfig()
       .then(config => {
         if (cancelled) return;
-        setEnabled(config.enabled);
+        setEnabled(config.instructionsEnabled);
         setInstructions(config.instructions);
       })
       .catch(() => {
@@ -57,7 +57,7 @@ export function BriefSettingsDialog({
   const save = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     try {
-      await dailyBriefApi.saveConfig({ enabled, instructions });
+      await dailyBriefApi.saveConfig({ instructionsEnabled: enabled, instructions });
       toast.success('Brief settings saved');
       return true;
     } catch {
@@ -88,7 +88,7 @@ export function BriefSettingsDialog({
       onOpenChange={onOpenChange}
       title='Brief settings'
       description='Customise how your daily brief is written'
-      className='max-w-lg'
+      className='max-w-2xl'
     >
       <div className='p-6'>
         <div className='mb-6'>
@@ -133,7 +133,7 @@ export function BriefSettingsDialog({
               data-track-name='daily-brief-settings-instructions'
               placeholder='e.g. Keep it under six lines. Lead with anything touching payments, and always name who I am waiting on.'
               className={cn(
-                'w-full resize-y rounded-lg border bg-background px-3 py-2',
+                'w-full resize-none rounded-lg border bg-background px-3 py-2',
                 'text-sm text-foreground placeholder:text-muted-foreground',
                 'outline-none transition-colors focus:border-ring',
                 'disabled:cursor-not-allowed disabled:opacity-50',

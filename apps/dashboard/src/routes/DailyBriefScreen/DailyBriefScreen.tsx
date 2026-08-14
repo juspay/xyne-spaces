@@ -165,10 +165,12 @@ function BriefSection({
   );
 }
 
+const BRIEF_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TODAY_SEGMENT = 'today';
+
 const DailyBriefScreen = (): ReactElement => {
   const [latest, setLatest] = useState<DailyBriefLatest | null>(null);
   const [history, setHistory] = useState<DailyBriefHistoryItem[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -178,8 +180,13 @@ const DailyBriefScreen = (): ReactElement => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const mountedRef = useRef(true);
   const navigate = useNavigate();
-  const { workspaceId } = useParams();
+  const { workspaceId, briefDate } = useParams();
   const briefPath = workspaceId ? `/${workspaceId}/ai/daily-brief` : '/ai/daily-brief';
+  const todayPath = `${briefPath}/${TODAY_SEGMENT}`;
+  // The URL owns which brief is shown; `null` means the today/latest view.
+  const selectedDate = briefDate && BRIEF_DATE_RE.test(briefDate) ? briefDate : null;
+  const todayBucket = latest?.isToday ? (latest.date ?? null) : null;
+  const viewingToday = selectedDate === null || selectedDate === todayBucket;
   // Read on unmount, where component state is already stale.
   const regenerateStartedAtRef = useRef<number | null>(null);
   const isInPanelWebview = useIsInPanelWebview();
@@ -198,7 +205,6 @@ const DailyBriefScreen = (): ReactElement => {
       if (!mountedRef.current) return;
       setLatest(latestRes);
       setHistory(historyRes);
-      setSelectedDate(prev => prev ?? latestRes.date ?? historyRes[0]?.date ?? null);
     } catch {
       if (mountedRef.current && !opts?.quiet) setError('Failed to load daily brief.');
     } finally {
@@ -220,6 +226,21 @@ const DailyBriefScreen = (): ReactElement => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Normalise anything that isn't `today` or a YYYY-MM-DD date.
+  useEffect(() => {
+    if (briefDate === TODAY_SEGMENT) return;
+    if (briefDate && BRIEF_DATE_RE.test(briefDate)) return;
+    void navigate(todayPath, { replace: true });
+  }, [briefDate, navigate, todayPath]);
+
+  // A well-formed date with no brief behind it would otherwise render the
+  // latest brief under a URL that disagrees with it.
+  useEffect(() => {
+    if (loading || selectedDate === null) return;
+    if (history.some(item => item.date === selectedDate)) return;
+    void navigate(todayPath, { replace: true });
+  }, [loading, selectedDate, history, navigate, todayPath]);
 
   const selected = useMemo((): SelectedBrief | null => {
     if (selectedDate) {
@@ -246,13 +267,16 @@ const DailyBriefScreen = (): ReactElement => {
 
   const briefStatus = selected?.status;
   const briefGenerating = briefStatus === 'generating';
-  const generationInFlight = regenerating || briefGenerating;
+  // Today's row, not the viewed one — so a cron/other-tab run is still visible
+  // while reading an older brief.
+  const latestGenerating = latest?.status === 'generating';
+  const generationInFlight = regenerating || latestGenerating || briefGenerating;
 
   useEffect(() => {
-    if (!regenerating && briefStatus !== 'generating') return undefined;
+    if (!generationInFlight) return undefined;
     const id = window.setInterval(() => void load({ quiet: true }), 10_000);
     return () => window.clearInterval(id);
-  }, [regenerating, briefStatus, load]);
+  }, [generationInFlight, load]);
 
   useEffect(() => {
     const onVisible = (): void => {
@@ -284,13 +308,13 @@ const DailyBriefScreen = (): ReactElement => {
       });
       if (failureMessage === null) {
         await load();
-        update(() => setSelectedDate(null));
+        update(() => void navigate(todayPath));
         if (!mountedRef.current || document.hidden) {
           toast.success('Your daily brief is ready', {
             action: {
               label: 'View',
               onClick: () => {
-                void navigate(briefPath);
+                void navigate(todayPath);
               },
             },
           });
@@ -307,7 +331,7 @@ const DailyBriefScreen = (): ReactElement => {
         setProgress(null);
       });
     }
-  }, [generationInFlight, load, navigate, briefPath]);
+  }, [generationInFlight, load, navigate, todayPath]);
 
   const currentDate = selected?.date ?? null;
   const handleSelectDate = useCallback(
@@ -315,9 +339,9 @@ const DailyBriefScreen = (): ReactElement => {
       if (date !== currentDate) {
         trackDailyBriefSwitched();
       }
-      setSelectedDate(date);
+      void navigate(date === todayBucket ? todayPath : `${briefPath}/${date}`);
     },
-    [currentDate],
+    [currentDate, navigate, todayBucket, todayPath, briefPath],
   );
 
   const renderContext = useBriefRenderContext(
@@ -336,7 +360,10 @@ const DailyBriefScreen = (): ReactElement => {
   }, [selected]);
 
   const hasBrief = selected !== null;
-  const isBusy = (loading && !selected) || regenerating || (!showRaw && briefGenerating);
+  // A regeneration always targets today, so it only blanks the body when today
+  // is what you're looking at — other briefs stay readable while it runs.
+  const isBusy =
+    (loading && !selected) || (viewingToday && regenerating) || (!showRaw && briefGenerating);
 
   const actionLabel = ((): string => {
     if (loading && !selected) return 'Loading…';
@@ -484,6 +511,22 @@ const DailyBriefScreen = (): ReactElement => {
             <h1 className='py-10 text-center font-serif text-[40px] font-semibold italic leading-[1.2] text-foreground'>
               {formatBriefTitle(selected.date)}
             </h1>
+          )}
+          {generationInFlight && !viewingToday && (
+            <button
+              type='button'
+              onClick={() => void navigate(todayPath)}
+              data-track-category='DailyBrief'
+              data-track-name='daily-brief-view-generating'
+              className='mb-6 flex w-full items-center justify-center gap-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground'
+            >
+              <span
+                className='size-1.5 animate-pulse rounded-full bg-xyne-orange-500'
+                aria-hidden
+              />
+              {progress ?? 'Today’s brief is generating…'}
+              <span className='underline underline-offset-2'>View</span>
+            </button>
           )}
           {!isBusy &&
             selected?.status === 'ready' &&

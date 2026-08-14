@@ -70,8 +70,11 @@ export interface RegenerateHandlers {
 
 /** Per-user brief config: the enable flag + custom instructions (GET/PUT /config). */
 export interface DailyBriefConfig {
+  /** Master opt-in for the scheduled brief (users.dailyBriefEnabled). Not the instructions flag. */
   enabled: boolean;
   instructions: string;
+  /** Whether the stored instructions are applied to a run. */
+  instructionsEnabled: boolean;
   updatedAt?: string | null;
 }
 
@@ -85,6 +88,7 @@ export const dailyBriefApi = {
     return {
       enabled: Boolean(res.data?.enabled),
       instructions: res.data?.instructions ?? '',
+      instructionsEnabled: res.data?.instructionsEnabled !== false,
       updatedAt: res.data?.updatedAt ?? null,
     };
   },
@@ -93,11 +97,13 @@ export const dailyBriefApi = {
   saveConfig: async (payload: {
     enabled?: boolean;
     instructions?: string;
+    instructionsEnabled?: boolean;
   }): Promise<DailyBriefConfig> => {
     const res = await apiInstance.put<DailyBriefConfig>('/daily-brief/config', payload);
     return {
       enabled: Boolean(res.data?.enabled),
       instructions: res.data?.instructions ?? '',
+      instructionsEnabled: res.data?.instructionsEnabled !== false,
       updatedAt: res.data?.updatedAt ?? null,
     };
   },

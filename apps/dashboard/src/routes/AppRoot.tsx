@@ -874,6 +874,7 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+                  { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
                   {
                     path: 'admin',
