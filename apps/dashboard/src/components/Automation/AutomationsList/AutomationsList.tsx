@@ -51,10 +51,16 @@ export function AutomationsList({
   onCreate,
   onOpen,
   onShowRuns,
-  filterPredicate,
+  initialChannelIds,
+  onClone,
+  onEditFork,
 }: AutomationsListProps): React.ReactElement {
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState<AutomationFilters>(DEFAULT_AUTOMATION_FILTERS);
+  const [filters, setFilters] = useState<AutomationFilters>(() =>
+    initialChannelIds?.length
+      ? { ...DEFAULT_AUTOMATION_FILTERS, channelIds: initialChannelIds }
+      : DEFAULT_AUTOMATION_FILTERS,
+  );
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
@@ -78,10 +84,7 @@ export function AutomationsList({
 
   const [rows, rowsMeta] = useCachedQuery(queries.automationsList({ workspaceId }));
   const isLoading = !rows || rowsMeta?.type !== 'complete';
-  const adapted: Automation[] = useMemo(() => {
-    const mapped = (rows ?? []).map(workflowToAutomation);
-    return filterPredicate ? mapped.filter(filterPredicate) : mapped;
-  }, [rows, filterPredicate]);
+  const adapted: Automation[] = useMemo(() => (rows ?? []).map(workflowToAutomation), [rows]);
 
   const visibleItems: Automation[] = useMemo(() => {
     const meId = me?.id ?? null;
@@ -136,12 +139,20 @@ export function AutomationsList({
   });
 
   const handleClone = (item: Automation): void => {
+    if (onClone) {
+      onClone(item);
+      return;
+    }
     void navigate(`/automations/new?fork=${item.id}&clone=1`);
   };
 
   const handleEdit = (item: Automation): void => {
     if (item.status === AutomationStatusValues.DRAFT) {
       onOpen(item);
+      return;
+    }
+    if (onEditFork) {
+      onEditFork(item);
       return;
     }
     void navigate(`/automations/new?fork=${item.id}`);

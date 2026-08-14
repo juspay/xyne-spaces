@@ -161,6 +161,8 @@ export function AutomationBuilder({
   onBack,
   onShowRuns,
   onShowVersionHistory,
+  onProposeChange,
+  onCancelFork,
   readOnlyPreview = false,
 }: AutomationBuilderProps): React.ReactElement {
   const [name, setName] = useState(automation?.name ?? initialName ?? '');
@@ -529,10 +531,13 @@ export function AutomationBuilder({
   });
 
   const handleProposeChangeNavigate = useCallback((): void => {
-    if (automation?.id) {
-      void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+    if (!automation) return;
+    if (onProposeChange) {
+      onProposeChange(automation);
+      return;
     }
-  }, [automation?.id, navigate]);
+    void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+  }, [automation, onProposeChange, navigate]);
 
   // Approve / Reject — only used in approval-review mode, when an admin
   // opens a PENDING_APPROVAL proposal from the inbox. The actual auth check
@@ -861,7 +866,11 @@ export function AutomationBuilder({
                     return;
                   }
                   if (forkSourceAutomationId) {
-                    void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    if (onCancelFork) {
+                      onCancelFork(forkSourceAutomationId);
+                    } else {
+                      void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    }
                     return;
                   }
                   onBack();
