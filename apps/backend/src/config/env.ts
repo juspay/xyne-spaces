@@ -500,6 +500,133 @@ const envSchema = Joi.object({
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
 
+  // ── Previously undeclared ──────────────────────────────────────────────────
+  // These are read directly off process.env elsewhere in the service. The schema
+  // has `.unknown()`, so until now they passed through unvalidated and undocumented.
+  // Each entry below mirrors the default its reader already applies, so declaring
+  // them changes no runtime behaviour — it only makes a malformed value fail at
+  // boot instead of surfacing later as a NaN, an empty string, or a silent `false`.
+  // Booleans accept '1'/'0' as well as 'true'/'false' because deployments use both,
+  // and their readers compare against the string 'true'; widening here keeps a
+  // currently-booting deployment booting.
+
+  // Auth, identity and service-to-service
+  // Shape-checked because a truncated or non-hex key is otherwise not discovered
+  // until the first decrypt, by which time the process has been serving traffic.
+  // 'set-me' is the placeholder .env.example ships and `pnpm run secrets` replaces
+  // (scripts/generate-local-secrets.mjs), so it has to pass or a fresh checkout
+  // cannot boot before that script is run.
+  ENCRYPTION_KEY: Joi.string().allow('', 'set-me').hex().length(64).default(''),
+  INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  APP_JWT_KEY: Joi.string().allow('').default(''),
+  SUDO_QUERY_TOKEN: Joi.string().allow('').default(''),
+  API_KEY: Joi.string().allow('').default(''),
+  API_KEY_USER: Joi.string().allow('').default(''),
+  DASHBOARD_AUTH_TOKEN: Joi.string().allow('').default(''),
+  ALLOWED_REDIRECT_ORIGINS: Joi.string().allow('').default(''),
+  DEFAULT_ADMIN_EMAIL: Joi.string().allow('').default(''),
+  ENABLE_DEV_AUTH: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  TEST_AUTH_EMAIL: Joi.string().allow('').default('test-user@xyne-test.local'),
+  TEST_AUTH_NAME: Joi.string().allow('').default('Test User'),
+
+  // Google
+  GOOGLE_MOBILE_CLIENT_ID: Joi.string().allow('').default(''),
+  GOOGLE_MOBILE_CLIENT_SECRET: Joi.string().allow('').default(''),
+  GOOGLE_IOS_CLIENT_ID: Joi.string().allow('').default(''),
+  GOOGLE_REDIRECT_URI: Joi.string().allow('').default(''),
+  GOOGLE_CLOUD_PROJECT_ID: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_TOPIC: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').base64().default(''),
+
+  // Microsoft
+  MICROSOFT_CLIENT_ID: Joi.string().allow('').default(''),
+  MICROSOFT_CLIENT_SECRET: Joi.string().allow('').default(''),
+  MICROSOFT_TENANT_ID: Joi.string().allow('').default(''),
+  MICROSOFT_CALENDAR_SUBSCRIPTION_TTL_MINUTES: Joi.number().allow('').integer().positive(),
+
+  // Datastores
+  ZERO_UPSTREAM_DB: Joi.string().allow('').default(''),
+  ZERO_MAX_REQUESTS: Joi.number().allow('').integer().positive().default(300),
+  ZERO_REQUEST_WINDOW: Joi.number().allow('').integer().positive().default(60),
+
+  // Worker enable flags — each reader compares the raw string against 'true'
+  ENABLE_ACTIVITY_CLASSIFICATION_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_CALL_VALIDATION_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_DATA_SOURCE_INGESTION_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_DOCUMENT_INGESTION_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_GCS_POLLING_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_NOTIFICATION_PRODUCER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_PROACTIVE_NUDGE_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_VESPA_FILE_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  ENABLE_VESPA_WORKER: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  LOTUS_OWN_MESSAGE_PREFETCH_ENABLED: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  WORKFLOW_TYPE: Joi.string().allow('').default(''),
+
+  // Deliberately a string, not a boolean: its reader tests `=== '1'`, so 'true'
+  // does NOT enable it. Declaring it boolean here would describe it wrongly.
+  RELEASE_AUTOSTUB_MISSING_TICKETS: Joi.string().allow('').default(''),
+
+  // Vespa
+  VESPA_NAMESPACE: Joi.string().allow('').default('namespace'),
+  CLUSTER: Joi.string().allow('').default('my_content'),
+  VESPA_DEBUG_MODE: Joi.boolean().truthy('1').falsy('0').allow('').default(false),
+  VESPA_PAGE_SIZE: Joi.number().allow('').integer().positive().default(10),
+  VESPA_MAX_RETRY_ATTEMPTS: Joi.number().allow('').integer().min(0).default(3),
+  VESPA_RETRY_DELAY: Joi.number().allow('').integer().min(0).default(1000),
+  VESPA_FEED_TIMEOUT_MS: Joi.number().allow('').integer().positive().default(180000),
+  VESPA_FILE_QUEUE_NAME: Joi.string().allow('').default('vespa-files'),
+  VESPA_WORKER_QUEUE_NAME: Joi.string().allow('').default('vespa-ingestion'),
+  VESPA_FILE_WORKER_CONCURRENCY: Joi.number().allow('').integer().positive().default(1),
+  VESPA_BACKFILL_AGE_DAYS: Joi.number().allow('').integer().positive().default(365),
+  VESPA_BACKFILL_FILE_QUEUE_NAME: Joi.string().allow('').default('vespa-backfill-file'),
+  VESPA_BACKFILL_QUEUE_NAMES: Joi.string().allow('').default('vespa-backfill-normal,vespa-backfill-file'),
+
+  // Network documents (GCS polling)
+  NETWORK_DOCUMENTS_GCS_BUCKET: Joi.string().allow('').default('xyne-documents'),
+  NETWORK_DOCUMENT_BOARD_NAME: Joi.string().allow('').default(''),
+  NETWORK_DOCUMENT_CHANNEL_NAME: Joi.string().allow('').default(''),
+  NETWORK_DOCUMENT_PROJECT_NAME: Joi.string().allow('').default(''),
+  NETWORK_DOCUMENT_SYSTEM_USER_EMAIL: Joi.string().allow('').default(''),
+  NETWORK_DOCUMENT_USER_GROUP_NAME: Joi.string().allow('').default(''),
+  NETWORK_DOCUMENT_DEFAULT_USER_GROUP_ID: Joi.string().allow('').default(''),
+  GCS_POLLING_INTERVAL_MS: Joi.number().allow('').integer().positive().default(90000),
+
+  // Document processing
+  DOCLING_TEMP_RESULTS_DIR: Joi.string().allow('').default(''),
+  DOCLING_WRAPPER_GLOBAL_ACTIVE_KEY: Joi.string().allow('').default('docling:async:global:active'),
+  QPDF_TIMEOUT_MS: Joi.number().allow('').integer().positive(),
+  IMAGE_DESCRIPTION_MODEL: Joi.string().allow('').default(''),
+  OPENAI_API_BASE: Joi.string().allow('').default(''),
+  OPENAI_API_KEY: Joi.string().allow('').default(''),
+  LITELLM_BEST_MODEL: Joi.string().allow('').default(''),
+  LITELLM_FAST_MODEL: Joi.string().allow('').default(''),
+
+  // Message classification
+  MESSAGE_CLASSIFIER_MODEL: Joi.string().allow('').default('gpt-4o-mini'),
+  MESSAGE_CLASSIFICATION_DEBOUNCE_MS: Joi.number().allow('').integer().min(0).default(30000),
+  MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE: Joi.number().allow('').integer().min(0).default(1),
+
+  // Scheduled jobs
+  CALENDAR_RENEWAL_CRON: Joi.string().allow('').default('0 2 * * *'),
+  GMAIL_WATCH_RENEWAL_CRON: Joi.string().allow('').default('0 3 * * *'),
+  WARM_USER_REGISTRY_CRON: Joi.string().allow('').default('0 3 * * *'),
+
+  // Observability and diagnostics
+  LANGFUSE_PROMPT_CACHE_TTL: Joi.number().allow('').integer().positive().default(300),
+  NOTIFICATION_TRACE_USER_IDS: Joi.string().allow('').default(''),
+  ALERT_BLACKLISTED_LABELS: Joi.string().allow('').default(''),
+  SNS_BLACKLISTED_LABELS: Joi.string().allow('').default(''),
+  HOSTNAME: Joi.string().allow('').default(''),
+
+  // Migration tooling
+  CONFLUENCE_IMPORT_ACTOR_USER_ID: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_UNRESOLVED_USERS_PATH: Joi.string().allow('').default(''),
+
+  // Service URLs
+  API_BASE_URL: Joi.string().allow('').default(''),
+  CLIENT_URL: Joi.string().allow('').default('http://localhost:3000'),
+  DASHBOARD_API_URL: Joi.string().allow('').default('https://dashboard.expresscheckout.juspay.in'),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
