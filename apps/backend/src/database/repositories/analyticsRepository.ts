@@ -1528,7 +1528,7 @@ export class AnalyticsRepository {
     // Get all user IDs from different activity types using Promise.all for parallel execution
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       // Users who posted reactions
-      withWorkspaceScope(() => this.prisma.reaction.findMany({
+      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
         where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true },
         distinct: ['userId'],
@@ -1563,7 +1563,7 @@ export class AnalyticsRepository {
       }),
 
       // Users who edited canvas
-      withWorkspaceScope(() => this.prisma.canvasParticipant.findMany({
+      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
         where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true},
         distinct: ['userId'],
@@ -1721,16 +1721,16 @@ export class AnalyticsRepository {
 
     // Get all channelIds from valid messages
     const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    const conversations = await withWorkspaceScope(() => this.prisma.conversation.findMany({
+    const conversations = await withWorkspaceScope(async () => await this.prisma.conversation.findMany({
       where: { conversationId: { in: conversationIds } },
       select: { conversationId: true, channelId: true }
     }));
 
     const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    const channels = await this.prisma.channel.findMany({
+    const channels = await withWorkspaceScope(async () => await this.prisma.channel.findMany({
       where: { id: { in: channelIds }, workspaceId },
       select: { id: true, scopeType: true }
-    });
+    }));
 
     // Create lookup maps for efficient processing
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
@@ -1850,7 +1850,7 @@ export class AnalyticsRepository {
 
     // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      withWorkspaceScope(() => this.prisma.reaction.findMany({
+      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
         where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, createdAt: true },
       })),
@@ -1878,7 +1878,7 @@ export class AnalyticsRepository {
       }),
 
       // Users who edited canvas
-      withWorkspaceScope(() => this.prisma.canvasParticipant.findMany({
+      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
         where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, updatedAt: true },
       }))
@@ -2026,7 +2026,7 @@ export class AnalyticsRepository {
     // Get unique conversationIds
     const validConversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
     // Get channels for valid conversations
-    const conversations = await withWorkspaceScope(() => this.prisma.conversation.findMany({
+    const conversations = await withWorkspaceScope(async () => await this.prisma.conversation.findMany({
       where: {
         conversationId: { in: validConversationIds }
       },
@@ -2038,7 +2038,7 @@ export class AnalyticsRepository {
     }
 
     // Get channels with DEFAULT scope type
-    const channels = await this.prisma.channel.findMany({
+    const channels = await withWorkspaceScope(async () => await this.prisma.channel.findMany({
       where: {
         id: { in: channelIds },
         scopeType: ChannelScopeType.DEFAULT,
@@ -2047,7 +2047,7 @@ export class AnalyticsRepository {
       select: {
         id: true
       }
-    });
+    }));
 
     return channels.length;
   }
@@ -2072,16 +2072,16 @@ export class AnalyticsRepository {
 
     // Get all channelIds from valid messages
     const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    const conversations = await withWorkspaceScope(() => this.prisma.conversation.findMany({
+    const conversations = await withWorkspaceScope(async () => await this.prisma.conversation.findMany({
       where: { conversationId: { in: conversationIds } },
       select: { conversationId: true, channelId: true }
     }));
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
     const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    const channels = await this.prisma.channel.findMany({
+    const channels = await withWorkspaceScope(async () => await this.prisma.channel.findMany({
       where: { id: { in: channelIds }, scopeType: ChannelScopeType.DEFAULT, workspaceId },
       select: { id: true }
-    });
+    }));
     const defaultChannelIds = new Set(channels.map(c => c.id));
 
     // Generate time buckets based on groupBy
@@ -2440,7 +2440,7 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Get all calls in the date range
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         ...this.getCallWorkspaceFilter(workspaceId, userIds)
@@ -2536,7 +2536,7 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Get calls that have both start and end times
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         endedAt: { not: null },
@@ -2580,7 +2580,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Get calls that have both start and end times
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         endedAt: { not: null },
