@@ -8,6 +8,7 @@ import * as google from "./google/index.js";
 import * as microsoft from "./microsoft/index.js";
 import * as schedule from "./schedule/index.js";
 import * as askQuestion from "./ask-question/index.js";
+import * as codeArtifacts from "./code-artifacts/index.js";
 import * as addCitations from "./add-citations/index.js";
 import * as attachment from "./attachment/index.js";
 import * as researchAgent from "./research-agent/index.js";
@@ -43,6 +44,9 @@ function register(tool: ToolDefinition): void {
 register(schedule.scheduleTask);
 register(schedule.scheduledJobControl);
 register(askQuestion.askUserQuestion);
+register(codeArtifacts.postCodeBlock);
+register(codeArtifacts.postDiff);
+register(codeArtifacts.postChart);
 register(addCitations.addCitationsTool);
 
 // Register google tools
@@ -188,9 +192,8 @@ register(skillManagement.updateSkillTool);
 
 // Register plan-tracking tools (todo-write / todo-read). The agent maintains an
 // explicit todo list that renders as a live, in-place-updating card in the
-// Spaces thread (via claw-auth's kind:"plan" progress handler). todo-write
-// fires the render using ctx.progressUrl/sessionId/s2sKey — threaded by
-// loadCustomTools — so no extra wiring is needed here.
+// Spaces thread. todo-write publishes the shared ui-widget envelope, so the
+// same tool works over legacy progress POSTs and the unified SSE transport.
 register(todo.todoWriteTool);
 register(todo.todoReadTool);
 

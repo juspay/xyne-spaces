@@ -16,7 +16,7 @@
 //
 // Auth: same `x-s2s-key` header that the legacy POST path uses. No handshake.
 
-import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo } from "xyne-claw-shared";
+import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo, type UiWidget } from "xyne-claw-shared";
 
 export interface ClawStreamHandlers {
   onStarted?: (sessionId: string) => void | Promise<void>;
@@ -26,6 +26,7 @@ export interface ClawStreamHandlers {
   onAttachment?: (sessionId: string, attachment: Extract<ClawStreamEvent, { event: "attachment" }>["attachment"]) => void | Promise<void>;
   onSandboxPreview?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "sandbox-preview" }>["payload"]) => void | Promise<void>;
   onPlan?: (sessionId: string, todos: Todo[]) => void | Promise<void>;
+  onUiWidget?: (sessionId: string, widget: UiWidget) => void | Promise<void>;
   onProgressLabel?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "progress-label" }>["payload"]) => void | Promise<void>;
   onDebug?: (sessionId: string, debugEvent: unknown) => void | Promise<void>;
   onCancelled?: (sessionId: string, reason: string | undefined) => void | Promise<void>;
@@ -173,6 +174,9 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
       case "plan":
         await handlers.onPlan?.(event.sessionId, event.todos);
         return;
+      case "ui-widget":
+        await handlers.onUiWidget?.(event.sessionId, event.widget);
+        return;
       case "progress-label":
         await handlers.onProgressLabel?.(event.sessionId, event.payload);
         return;
@@ -277,6 +281,9 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         },
         onPlan: async (sessionId, todos) => {
           await postProgress({ sessionId, kind: "plan", todos });
+        },
+        onUiWidget: async (sessionId, widget) => {
+          await postProgress({ sessionId, kind: "ui-widget", widget });
         },
         onProgressLabel: async (sessionId, payload) => {
           await postProgress({ sessionId, ...payload });

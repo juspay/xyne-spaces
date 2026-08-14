@@ -1,5 +1,8 @@
-export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse } from "./tools/types.js";
+export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse, UserQuestion, UserQuestionType } from "./tools/types.js";
+export { isUiWidget } from "./types/ui-widget.js";
+export type { UiWidget, UiWidgetType, PrWidgetPayload } from "./types/ui-widget.js";
 export { getAllCustomTools, getCustomTool, getToolsBySource } from "./tools/registry.js";
+export { publishUiWidget } from "./tools/ui-widget.js";
 export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/add-citations/tools.js";
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";
 export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, type SubagentDefinition, type AgentToolsConfig } from "./tools/subagents/index.js";
@@ -20,11 +23,13 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
-export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildChartFlow } from "./flow/builder.js";
+export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
+export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
+export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
 // The sandbox_unavailable wire contract — shared by the emitting tool, the

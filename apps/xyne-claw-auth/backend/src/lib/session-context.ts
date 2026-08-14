@@ -66,11 +66,13 @@ export interface SessionContext {
    */
   progressMessageId?: string;
   /**
-   * MessageId of the live plan/todo card (todo-write → kind:"plan" progress
+   * MessageId of the live plan/todo card (todo-write → ui-widget progress
    * event). Posted once, then updated in place on every subsequent todo-write.
    * Undefined until the first todo-write of the run.
    */
   planMessageId?: string;
+  /** Live PR cards posted during this run, keyed by deterministic PR screenId. */
+  prMessageIds?: Record<string, string>;
   /**
    * Auto-draft forward URL. Present only when this run was triggered by the
    * Spaces email auto-draft (a synthetic APP_MENTIONED, not a real mention).
@@ -401,4 +403,3 @@ export async function deleteSession(sessionId: string): Promise<void> {
     } catch { /* malformed — nothing to clean up */ }
   }
 }
-

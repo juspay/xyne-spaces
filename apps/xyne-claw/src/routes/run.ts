@@ -29,6 +29,7 @@ import {
   type ClawStreamMeta,
   type ClawDoneStatus,
   type Todo,
+  type UiWidget,
   type ToolExecutionContext,
   cleanupSdlcSandboxCredentialsForContext,
 } from "xyne-claw-shared";
@@ -1175,6 +1176,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     attachment: (sid, attachment: ClawAttachmentPayload) => write({ event: "attachment", seq: next(), sessionId: sid, attachment }),
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
+    uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -1907,9 +1909,9 @@ async function processTask(
     // (URL or emitter, whichever is plumbed).
     const progressEmitter = progressUrl && typeof progressUrl !== "string" ? progressUrl : undefined;
     const progressUrlForCustom = typeof progressUrl === "string" ? progressUrl : undefined;
-    const emitPlanForCustom =
+    const emitUiWidgetForCustom =
       progressEmitter
-        ? (todos: Todo[]) => progressEmitter.plan(sessionId, todos)
+        ? async (widget: UiWidget) => progressEmitter.uiWidget(sessionId, widget)
         : undefined;
     customToolsResult = loadCustomTools(
       effectiveConfig,
@@ -1922,7 +1924,7 @@ async function processTask(
       sessionToken,
       undefined,
       runtimeProviderConfig,
-      emitPlanForCustom,
+      emitUiWidgetForCustom,
       taskCommand?.autoTools ?? [],
     );
     const {
@@ -2388,7 +2390,7 @@ async function processTask(
           calleeSessionToken,
           undefined,
           calleeProviderConfigForTools,
-          emitPlanForCustom,
+          emitUiWidgetForCustom,
         );
         const calleeGroupsWithoutKb = calleeMcp.groups.filter((g) => g.serverType !== "knowledge-base");
         const calleeKbTools = calleeMcp.groups.find((g) => g.serverType === "knowledge-base")?.tools ?? [];
@@ -3205,7 +3207,7 @@ async function processTask(
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
         "- Reuse a single sandbox session across many commands when possible. Avoid one-shot `sandbox-run` calls if you need to keep state.",
         "- For URLs of the form `http://localhost:<port>` (dashboard :5173, backend :3001) use `sandbox-pw-*` tools, NOT `sandbox-run` with inline Playwright. The browser inside the sandbox can reach those addresses.",
-        "- Git/GitHub PRs: make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). The sandbox has NO `gh` CLI — do NOT try `gh pr create`. To OPEN the PR, hand it to the **github** subagent's `create_pull_request` tool (head=<your branch>, base=<default branch>); that runs against the GitHub API and needs no `gh`. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
+        "- Opening PRs (any git host): make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). There is NO `gh`/`glab`/host CLI. The push only creates the branch; to OPEN the PR, hand it to the subagent matching the repo host: GitHub uses the **github** subagent's `create_pull_request` (`head`, `base`); Bitbucket uses the **bitbucket** subagent's `create_pull_request` (`workspace`, `repository`, `source_branch`, `destination_branch`). Never use one host's subagent for another host. Only fall back to a compare URL if `create_pull_request` returns an actual error, and report that error.",
         "- NEVER claim a branch was pushed or a PR was opened from memory. Verify first: a push is only real if `git ls-remote --heads origin <branch>` shows the ref (or `git push` printed the upstream-tracking/'new branch' line). State exactly what the command returned — do not narrate a success or a failure you did not observe.",
       ];
       // Surface an active session for this conversation so the agent reuses
@@ -4060,7 +4062,7 @@ async function processTask(
     }
 
     clog.info(
-      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
+      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options?.length ?? 0}`,
     );
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,
