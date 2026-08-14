@@ -54,8 +54,10 @@ const CURATOR_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] 
 // base+step (12m), attempt 3 = base+2·step (14m).
 const CURATOR_TIMEOUT_STEP_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_STEP_MS"] ?? 120_000);
 
-/** Hard cap per batch — over this the prompt blows past Haiku's window. */
-const MAX_RECORDS_PER_BATCH = 50;
+/** Record-count backstop. The auth-side packer first enforces the ~80k-token
+ * record-text budget, so this mainly lets batches of short messages use the
+ * available context instead of stopping at the old 50-record ceiling. */
+const MAX_RECORDS_PER_BATCH = 200;
 const MAX_TEXT_CHARS_PER_RECORD = 1_500;
 /** Assembled conversation units (type="conversation") carry a whole thread and
  *  legitimately need far more room than a single message. This is now a
@@ -67,11 +69,10 @@ const MAX_TEXT_CHARS_PER_RECORD = 1_500;
  *  truncates a unit the packer already sized — the earlier 5k value re-clipped
  *  the very messages the 3k-per-message change was meant to preserve. */
 const MAX_CONVERSATION_CHARS = 320_000;
-/** Raised from 12 → 20: the enriched prompt scans a broad facet checklist
- *  (voice, response patterns, per-person tone, expertise, …) and a rich batch
- *  legitimately surfaces more distinct grounded facts than the old bland pass.
- *  The ≥0.7 signal bar + "merge near-duplicates" rule keep quantity honest. */
-const MAX_CANDIDATES_PER_BATCH = 20;
+/** A 200-record batch can contain many independent, grounded signals. Keep a
+ * high output ceiling so combining short records does not reduce recall; the
+ * ≥0.7 signal bar and "merge near-duplicates" rule still control quality. */
+const MAX_CANDIDATES_PER_BATCH = 100;
 
 const EMIT_CANDIDATES_TOOL = {
   type: "function" as const,
@@ -92,7 +93,7 @@ const EMIT_CANDIDATES_TOOL = {
               text: {
                 type: "string",
                 description:
-                  "Single concrete fact about the user, ≤ 1500 chars, written in third person ('the user…' or 'the user prefers…'). One fact per candidate. No generic statements; ground each in the records. For style/voice facts, embed a short real example or trigger in quotes (e.g. acks with 'on it', never 'I will get to it') — a voice fact with no example is too vague to use.",
+                  "Single concrete fact about the user, written in third person ('the user…' or 'the user prefers…'). Keep it concise but complete. One fact per candidate. No generic statements; ground each in the records. For style/voice facts, embed a short real example or trigger in quotes (e.g. acks with 'on it', never 'I will get to it') — a voice fact with no example is too vague to use.",
               },
               subsystem: {
                 type: "string",
@@ -234,7 +235,7 @@ GOOD: "Decided on 2026-05-22 to ship the workspaceId fix to /channel/openDm imme
 2. **Ground every fact** in record IDs from the input. If you can't cite ≥1 record, do not emit.
 3. **At least one specific entity OR one concrete, exampled communication pattern is required.** Skip vague ones even if they feel true.
 4. **Be comprehensive, not repetitive.** Cover every facet the batch evidences, but MERGE near-duplicate observations into the single most specific phrasing — don't emit five variations of "writes short replies".
-5. **Calibrate volume to signal density.** A rich batch may yield 12-20 candidates; a batch of routine one-word messages may yield 0-2. Never manufacture to hit a count.
+5. **Calibrate volume to signal density.** A rich 200-record batch may yield dozens of candidates (up to 100); a batch of routine one-word messages may yield 0-2. Never manufacture to hit a count.
 6. **Subsystem selection is constrained** to the eight fixed labels in the tool schema. Never invent one.
 7. **Third person + present tense.** "The user prefers X", "the user acks with …". Past tense only for dated decisions.
 8. **For style/voice facts, embed a short REAL example or trigger** (3-8 words, quoted) — "'on it', never 'I will get to it'". A voice fact without an example is usually too vague to use.
@@ -516,7 +517,12 @@ async function runDistillAttempt(
   const out: UserMemoryCandidatePayload[] = [];
   const emitted: UserMemoryCuratorEmittedCandidate[] = [];
 
-  for (const c of parsed.candidates) {
+  if (parsed.candidates.length > MAX_CANDIDATES_PER_BATCH) {
+    log.warn(
+      `[user-memory-curator] candidate output truncated ${parsed.candidates.length} → ${MAX_CANDIDATES_PER_BATCH} userId=${userId}`,
+    );
+  }
+  for (const c of parsed.candidates.slice(0, MAX_CANDIDATES_PER_BATCH)) {
     // malformed = the entry isn't an object; we can't report its fields.
     if (!c || typeof c !== "object") {
       emitted.push({ text: "", verdict: "dropped", dropReason: "malformed" });
@@ -538,8 +544,8 @@ async function runDistillAttempt(
       groundedOnIds,
     };
 
-    if (!text || text.length > 1_500) {
-      emitted.push({ ...base, dropReason: "empty-or-too-long" });
+    if (!text) {
+      emitted.push({ ...base, dropReason: "empty" });
       continue;
     }
     if (typeof subsystem !== "string" || !subsystemSet.has(subsystem as UserMemorySubsystem)) {

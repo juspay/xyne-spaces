@@ -35,6 +35,7 @@ import { SearchEvalsPageV3 } from "./components/SearchEvalsPageV3";
 import { EntityTypesPageV3 } from "./components/EntityTypesPageV3";
 import { ErrorPipelinePageV3 } from "./components/ErrorPipelinePageV3";
 import { CliLoginPageV3 } from "./components/CliLoginPageV3";
+import { DigitalTwinUserControlsPageV3 } from "./components/DigitalTwinUserControlsPageV3";
 import { ChatProvider } from "./hooks/useChat";
 
 
@@ -194,6 +195,18 @@ export function AppV3() {
                 <OrganizationsPageV3 userId={userId} />
               </div>
             } />
+            <Route
+              path="/v3/configurations/digital-twin"
+              element={
+                isAdmin ? (
+                  <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                    <DigitalTwinUserControlsPageV3 userId={userId} />
+                  </div>
+                ) : isAdminLoading ? null : (
+                  <Navigate to="/v3/home" replace />
+                )
+              }
+            />
             <Route path="/v3/metrics" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                 <MetricsPageV3 userId={userId} />

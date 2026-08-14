@@ -712,6 +712,9 @@ digitalTwinRouter.post("/memories/delete", requireUserAuth, async (req, res) => 
         const page = await memory.listMemories(TWIN_BANK_ID, { tags: [userTag], limit: 1000 });
         const targets = page.memories
           .filter((m) => (m.tags ?? []).includes(userTag))
+          // Observations are derived and cannot be invalidated directly.
+          // Removing their raw sources makes Hindsight reconcile them.
+          .filter((m) => m.factType?.toLowerCase() !== "observation")
           .filter((m) => {
             const t = Date.parse(m.createdAt ?? "");
             return Number.isFinite(t) && t >= fromMs && t <= toMs;
@@ -995,7 +998,7 @@ digitalTwinRouter.post("/clusters/:subsystem/approve", requireUserAuth, async (r
       let retained = 0;
       let failed = 0;
       for (const c of candidates) {
-        const content = (c.editedText ?? c.text).slice(0, 1500);
+        const content = c.editedText ?? c.text;
         const tags = [
           `user:${userId}`,
           `subsystem:${subsystem}`,
@@ -1071,12 +1074,12 @@ digitalTwinRouter.patch("/candidates/:id", requireUserAuth, async (req, res) => 
 
     const updates: Record<string, unknown> = {};
     if (typeof body.editedText === "string") {
-      updates["editedText"] = body.editedText.slice(0, 1500);
+      updates["editedText"] = body.editedText;
     }
 
     let hindsightMemoryId: string | null = candidate.hindsightMemoryId ?? null;
     if (body.status === "approved" && candidate.status === "pending") {
-      const content = (typeof body.editedText === "string" ? body.editedText : candidate.text).slice(0, 1500);
+      const content = typeof body.editedText === "string" ? body.editedText : candidate.text;
       const tags = [
         `user:${userId}`,
         `subsystem:${candidate.subsystem}`,
