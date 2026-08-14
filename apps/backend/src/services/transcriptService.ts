@@ -247,38 +247,6 @@ TRANSCRIPT:
 {transcript}
 `;
 
-// Decisions/actions extraction. Transcript lines are prefixed with a "[MM:SS]"
-// (or "[HH:MM:SS]") timestamp relative to call start — the LLM is asked to
-// report that same timestamp back per item so it can be stored alongside the
-// text, instead of us trying to re-locate the sentence in the transcript.
-const MARKED_ITEMS_PROMPT = `
-You are analyzing a call transcript (each line is prefixed with a "[MM:SS]" or "[HH:MM:SS]" timestamp relative to the start of the call) to extract key decisions made and action items assigned.
-
-CRITICAL RULES:
-- Output ONLY valid JSON
-- Extract 0-15 items total across decisions and actions \u2014 only clear, concrete ones
-- For each item, use the exact "[MM:SS]" (or "[HH:MM:SS]") timestamp of the transcript line it is most closely associated with
-- "type" must be exactly "decision" or "action"
-- Keep "text" concise (one sentence)
-- If nothing clear qualifies, return an empty array for "items"
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
-
-JSON STRUCTURE (FOLLOW EXACTLY):
-{
-  "items": [
-    { "type": "decision" | "action", "text": "[concise description]", "timestamp": "MM:SS" }
-  ]
-}
-
-Only output valid JSON.
-No explanations.
-
-TRANSCRIPT:
-{transcript}
-`;
-
 export interface TicketSuggestion {
   id: string;
   title: string;
@@ -287,12 +255,6 @@ export interface TicketSuggestion {
   suggestedAssignee: string;
   status: 'pending' | 'created' | 'dismissed';
   createdTicketId?: string;
-}
-
-export interface MarkedItem {
-  type: 'decision' | 'action' | 'moment';
-  text: string;
-  timestampSeconds: number;
 }
 
 export class TranscriptService {
@@ -1313,76 +1275,6 @@ Output ONLY the processed transcript, nothing else.`;
       return labels;
     } catch (error) {
       logger.error(`call_labels_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
-      return [];
-    }
-  }
-
-  /** Parse a "MM:SS" or "HH:MM:SS" string (as emitted by formatTimestamp) back to seconds. */
-  private parseTimestampToSeconds(value: unknown): number {
-    if (typeof value !== 'string') return 0;
-    const match = value.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
-    if (!match) return 0;
-    const hours = match[1] ? parseInt(match[1], 10) : 0;
-    const minutes = parseInt(match[2], 10);
-    const seconds = parseInt(match[3], 10);
-    return hours * 3600 + minutes * 60 + seconds;
-  }
-
-  /**
-   * Generate key decisions/action items from the transcript, each anchored to
-   * the timestamp (in seconds from call start) of the transcript line it came
-   * from. Returns [] on any failure or when nothing qualifies.
-   */
-  async generateMarkedItems(transcript: string, callId?: string): Promise<MarkedItem[]> {
-    const logCallId = callId || 'unknown';
-    const agent = await this.createAgent(logCallId);
-    if (!agent) {
-      logger.warn('Agent creation failed. Skipping marked items generation.');
-      return [];
-    }
-
-    const prompt = MARKED_ITEMS_PROMPT.replace('{transcript}', transcript);
-
-    try {
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
-      });
-
-      const extracted = extractAgentContent(result);
-      if (!extracted.ok) {
-        logger.error(`marked_items_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
-        return [];
-      }
-
-      let jsonContent = extracted.content;
-      const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
-      if (codeBlockMatch) {
-        jsonContent = codeBlockMatch[1].trim();
-      }
-
-      const parsed = JSON.parse(jsonContent);
-      if (!Array.isArray(parsed.items)) {
-        logger.error(`marked_items_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
-        return [];
-      }
-
-      const items: MarkedItem[] = parsed.items
-        .slice(0, 15)
-        .map((item: any) => {
-          const text = typeof item?.text === 'string' ? item.text.trim() : '';
-          if (!text) return null;
-          return {
-            type: item?.type === 'action' ? 'action' : 'decision',
-            text,
-            timestampSeconds: this.parseTimestampToSeconds(item?.timestamp),
-          } satisfies MarkedItem;
-        })
-        .filter((item: MarkedItem | null): item is MarkedItem => item !== null);
-
-      logger.info(`Generated ${items.length} marked items`);
-      return items;
-    } catch (error) {
-      logger.error(`marked_items_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
       return [];
     }
   }
