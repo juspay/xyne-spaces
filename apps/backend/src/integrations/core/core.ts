@@ -452,17 +452,10 @@ export class ExternalSourceCore {
     // this logic, but one source must not merge into another source's tickets.
 
     const isChannelEmail = this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType);
-    const isEmailReply = !!normalizedData.externalParentId || (normalizedData.referencedMessageIds?.length ?? 0) > 0;
-    
+    // Channel emails always create a new conversation — no thread merging even
+    // for replies.
     const existingExtMsg = isChannelEmail
-      ? isEmailReply
-        ? await this.externalMessageRepo.findByThreadIdInChannel(
-            source.id,
-            normalizedData.externalThreadId,
-            source.channelId!,
-            ExternalEntityType.MESSAGE
-          )
-        : null
+      ? null
       : await this.externalMessageRepo.findByThreadId(
           source.id,
           normalizedData.externalThreadId,
@@ -479,17 +472,6 @@ export class ExternalSourceCore {
         throw new Error(`Conversation ${conversationid} not found`);
       }
 
-      if (isChannelEmail && conversation.channelId !== source.channelId) {
-        // Should not happen: the channel-scoped lookup already guarantees a
-        // same-channel conversation. Kept as a defensive cross-check.
-        logger.warn('[CHANNEL_EMAIL_THREAD] Cross-channel thread match — refusing merge', {
-          sourceName: source.name,
-          externalThreadId: normalizedData.externalThreadId,
-          conversationChannelId: conversation.channelId,
-          sourceChannelId: source.channelId,
-        });
-        throw new Error(`Cross-channel thread match for channel email in thread ${normalizedData.externalThreadId}`);
-      }
 
       // Create reply message
 
