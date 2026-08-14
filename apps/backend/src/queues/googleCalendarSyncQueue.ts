@@ -26,13 +26,13 @@ import { storeGCalEventsAsCallsForUser } from '@/services/googleCalendarCallStor
 import { reconcileXyneCallLinks } from '@/services/xyneCallLinkInjector';
 import { GoogleCalendarWatchService } from '@/services/googleCalendarWatchService';
 import {
+  CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
   CALENDAR_SYNC_LOOKAHEAD_DAYS,
   MAX_CALENDAR_EVENTS_PER_SYNC,
 } from '@/services/calendarSyncConfig';
 import { calendarSyncErrorMessage, isPermanentCalendarAuthError } from './calendarSyncErrorUtils';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][QUEUE]';
-const INCREMENTAL_CONTINUATION_DELAY_MS = 5_000;
 
 type CalendarSyncJobData = {
   sourceId?: string;
@@ -354,11 +354,11 @@ class GoogleCalendarSyncQueue {
         await clearDeadJobForReenqueue(queue, continuationId);
         logger.info(`${TAG} Scheduling incremental continuation`, {
           sourceId: continuation.sourceId,
-          delayMs: INCREMENTAL_CONTINUATION_DELAY_MS,
+          delayMs: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
         });
         await queue.add('incremental-sync', continuation, {
           jobId: continuationId,
-          delay: INCREMENTAL_CONTINUATION_DELAY_MS,
+          delay: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
         });
       }
     });
