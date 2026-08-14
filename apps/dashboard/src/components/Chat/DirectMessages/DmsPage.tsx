@@ -328,7 +328,12 @@ const DmsPage = (): ReactElement => {
   }, [directMessages]);
 
   const handleAddDirectMessage = (): void => {
-    setShowAddDmForm(true);
+    // Keep parity with CMD+N and the sidebar "New Message" button: on desktop,
+    // route to the full-page compose panel (/chat/search?mode=dm -> ComposeDmPanel)
+    // instead of the AddDmForm modal. Mobile keeps the modal, matching ChatDirectory.
+    if (isMobile) {
+      setShowAddDmForm(true);
+    } else void navigate('/chat/search?mode=dm', { replace: true });
   };
 
   const handleAddDmSubmit = (data: CreateDmFormData): void => {
