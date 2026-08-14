@@ -66,6 +66,7 @@ import {
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { useAffinityLoaded } from '../../../hooks/useAffinityLoaded';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
@@ -92,7 +93,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import {
   useSearchMetrics,
   filterChannelsBySearchableNames,
-  rankUsers,
+  rankUsersWithMfu,
   CMDK_USER_LIMIT,
 } from '../../../hooks/useSearchMetrics';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -541,10 +542,17 @@ const ChannelCommandMenu = ({
 
   // Shared Cmd+K user rank for the plain-search USERS section. Hoisted so the
   // strong-match check below and the rendered section use the exact same order.
-  const rankedLocalUsers = useMemo(
-    () => rankUsers(filteredLocalUsers, cleanedSearchText, dmContactRecency),
-    [filteredLocalUsers, cleanedSearchText, dmContactRecency],
-  );
+  // Uses rankUsersWithMfu (not plain rankUsers) because filteredLocalUsers is the
+  // 25-capped `useUserSearch` window: a frequently-used person who matches the query
+  // but ranks past the cap would be sliced out before ranking. rankUsersWithMfu
+  // recovers those query-matching weighted users from the full `allUsers` list.
+  // Re-render once when affinity weights finish loading so the empty People-tab ranking re-reads
+  // them (rankUsersWithMfu reads getUserWeight imperatively; same fix as GlobalCommandMenu browse).
+  const affinityVersion = useAffinityLoaded();
+  const rankedLocalUsers = useMemo(() => {
+    void affinityVersion;
+    return rankUsersWithMfu(filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency);
+  }, [filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency, affinityVersion]);
 
   // Slack-style strong user match: when the top-ranked user's full name
   // prefix-matches the query, the USERS section renders ABOVE the "Show
@@ -1364,18 +1372,24 @@ const ChannelCommandMenu = ({
 
     if (userTrigger === 'to:') return [];
     if (mentionSearchType !== MentionType.USER && channelTrigger !== 'in:') return [];
-    return rankUsers(mentionUsers, mentionSearchQuery, dmContactRecency).map(user => ({
-      id: user.id,
-      name: user.name,
-      status: user.status,
-      ...(user.email && { email: user.email }),
-    }));
+    // `useUserSearch` slices to CMDK_USER_LIMIT *before* ranking, so a frequently-used
+    // person can be dropped from `mentionUsers` entirely. `rankUsersWithMfu` recovers
+    // MFU-weighted matches from the full `allUsers` list so they can float back up.
+    return rankUsersWithMfu(mentionUsers, allUsers, mentionSearchQuery, dmContactRecency).map(
+      user => ({
+        id: user.id,
+        name: user.name,
+        status: user.status,
+        ...(user.email && { email: user.email }),
+      }),
+    );
   }, [
     isDeskPeopleTrigger,
     userTrigger,
     deskContacts,
     deskPeople,
     mentionUsers,
+    allUsers,
     mentionSearchQuery,
     mentionSearchType,
     channelTrigger,
@@ -4322,9 +4336,13 @@ const ChannelCommandMenu = ({
                         ) : (
                           <>
                             {renderBrowseLocalChannels()}
-                            {activeTab !== TabType.CHANNELS &&
-                              backendResults.length > 0 &&
-                              renderDefaultBackendResults()}
+                            {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
+                                search branch, instead of the raw, unranked backend user list. */}
+                            {activeTab === TabType.USERS
+                              ? renderSearchUsersSection()
+                              : activeTab !== TabType.CHANNELS &&
+                                backendResults.length > 0 &&
+                                renderDefaultBackendResults()}
                           </>
                         )}
                       </>

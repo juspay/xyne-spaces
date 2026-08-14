@@ -13,6 +13,8 @@ import {
   getDMParticipantIdsToFetch,
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
+import { affinityService } from '../../services/affinityService';
+import { useAffinityLoaded } from '../../hooks/useAffinityLoaded';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import { TabType, type MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -78,6 +80,9 @@ const GlobalCommandMenu = ({
   const channelData = useAllChannels();
   const visibleAllChannels = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
+  // Re-render once when affinity weights finish loading so the ranking memo below re-reads them
+  // (they load async after mount and are otherwise invisible until an unrelated dep changes).
+  const affinityVersion = useAffinityLoaded();
   const [internalOpen, setInternalOpen] = useState(false);
   const [internalInitialMention, setInternalInitialMention] = useState<MentionData | null>(null);
   const [internalContextualTab, setInternalContextualTab] = useState<TabType | undefined>(
@@ -214,6 +219,9 @@ const GlobalCommandMenu = ({
 
   // Group channels by scope type
   const { starred, channels, directMessages } = useMemo(() => {
+    // Referenced only so this memo re-runs when affinity weights finish loading (the weights
+    // themselves are read imperatively via getChannelWeight below); keeps exhaustive-deps active.
+    void affinityVersion;
     if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
 
     const visibleChannels = channelData.map(channel => {
@@ -231,19 +239,30 @@ const GlobalCommandMenu = ({
     // Re-include them so the search `in:` picker can scope to desk channels.
     const emailChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
 
-    const sortByActivity = (list: typeof visibleChannels) =>
-      [...list].sort(
-        (a, b) =>
-          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
-          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
-      );
+    // Rank each group by personalization weight (desc), tie-break on recency. Weights are
+    // precomputed into a Map so getChannelWeight (stale-cache background fetch) is never called
+    // inside the comparator. No weights → 0 ties → pure recency, identical to the previous order.
+    const weightById = new Map(
+      visibleChannels.map(c => [c.id, affinityService.getChannelWeight(c.id)]),
+    );
+    const rankByAffinityThenActivity = (list: typeof visibleChannels): VisibleChannel[] =>
+      [...list].sort((a, b) => {
+        const wa = weightById.get(a.id) ?? 0;
+        const wb = weightById.get(b.id) ?? 0;
+        if (wa !== wb) return wb - wa;
+        return (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0);
+      });
+
+    const rankedStarred = rankByAffinityThenActivity(grouped.starred);
+    const rankedChannels = rankByAffinityThenActivity([...grouped.channels, ...emailChannels]);
+    const rankedDirectMessages = rankByAffinityThenActivity(grouped.directMessages);
 
     return {
-      starred: sortByActivity(grouped.starred),
-      channels: sortByActivity([...grouped.channels, ...emailChannels]),
-      directMessages: sortByActivity(grouped.directMessages),
+      starred: rankedStarred,
+      channels: rankedChannels,
+      directMessages: rankedDirectMessages,
     };
-  }, [channelData, allChannelsUserStatus, visibleAllChannels]);
+  }, [channelData, allChannelsUserStatus, visibleAllChannels, affinityVersion]);
 
   // Reconstruct the previous search (mention chips + trailing text) from the
   // results-page URL params so reopening the overlay from the header restores it.
