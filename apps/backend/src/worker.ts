@@ -33,6 +33,7 @@ import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
+import { bulkTicketCreationWorker } from '@/workers/bulkTicketCreationWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
@@ -235,6 +236,9 @@ class WorkerService {
         logger.info('Starting ETA deadline worker...');
         await etaDeadlineWorker.start();
       }
+
+      logger.info('Starting bulk ticket creation worker...');
+      await bulkTicketCreationWorker.start();
 
       if (appConfig.enableAutomationWorker) {
         logger.info('Initializing notification service for automation worker...');
