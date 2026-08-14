@@ -27,7 +27,7 @@ export function LibraryIconTile({
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-normal shadow-sm',
+        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-medium shadow-sm',
         TILE_SIZE[size],
 
         color ? 'text-white' : 'border border-border bg-card text-muted-foreground',
