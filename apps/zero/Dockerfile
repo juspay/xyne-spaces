@@ -31,8 +31,7 @@ ARG ZERO_TARBALL=""
 ENV NODE_ENV=production \
     PATH="/opt/app/node_modules/.bin:${PATH}" \
     ZERO_LITESTREAM_EXECUTABLE=/usr/local/bin/litestream \
-    ZERO_LITESTREAM_EXECUTABLE_V5=/usr/local/bin/litestream-v5 \
-    ZERO_LITESTREAM_CONFIG_PATH=/etc/litestream.yml
+    ZERO_LITESTREAM_EXECUTABLE_V5=/usr/local/bin/litestream-v5
 
 # nginx serves :8080 and proxies to zero-cache; su-exec/tini are not used because
 # start-zero.sh keeps nginx as PID 1, matching the production image.
@@ -63,11 +62,8 @@ RUN set -eux; \
     rm -f /opt/app/*.tgz; \
     node -e "console.log('installed @rocicorp/zero', require('/opt/app/node_modules/@rocicorp/zero/package.json').version)"
 
-# litestream binaries + config template (see LITESTREAM_SRC_IMAGE above).
-# litestream = Rocicorp fork 0.3.13+z0.0.9, litestream-v5 = 0.5.11.
 COPY --from=litestream /usr/local/bin/litestream /usr/local/bin/litestream
 COPY --from=litestream /usr/local/bin/litestream-v5 /usr/local/bin/litestream-v5
-COPY --from=litestream /etc/litestream.yml /etc/litestream.yml
 
 # nginx config: :8080 -> 127.0.0.1:4848, WebSocket upgrade, buffering disabled
 COPY apps/zero/nginx.conf /etc/nginx/nginx.conf
