@@ -93,7 +93,10 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
 
+      # tsc over the dashboard's type surface exceeds Node's ~2GB default heap.
       - name: Typecheck
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
