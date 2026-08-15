@@ -21,7 +21,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID, buildAgentCardFlow, AGENT_COMPONENT_ID } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -1494,6 +1494,116 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       resp = { type: "close_screen", finalMessage: finalText };
       res.json(resp);
       void replaceFlowCardWithText(messageId, skillAgentSlug, finalText, conversationId, undefined, skillSpacesAppId);
+      return;
+    }
+
+    // ── Agent card ────────────────────────────────────────────────────────────
+    // The single dispatch site for the `agent` artifact. Today it decides a DRAFT
+    // (variant "draft"): the requester approves or declines the agent an agent
+    // drafted for them. New variants (a live agent's editor, …) add an actionId
+    // here — the envelope, the authz shape and the in-place card update stay put.
+    //
+    // The card carries only the requestId; the spec lives in its AgentRequest row
+    // (resolveAgentDraft re-reads it), so what the user approved is what gets
+    // created. The only thing taken from the client is the capability selection,
+    // and that can only narrow the grant.
+    if (actionType === "agent-card") {
+      const requestId = data["requestId"] as string | undefined;
+      const cardUserId = data["userId"] as string | undefined;
+      const cardAgentSlug = data["agentSlug"] as string | undefined;
+      const cardSpacesAppId = data["spacesAppId"] as string | undefined;
+      const cardChannelId = data["channelId"] as string | undefined;
+      const cardConversationId = (data["conversationId"] as string | undefined) ?? conversationId;
+
+      if (!requestId || !cardUserId) {
+        res.status(400).json({ type: "error", message: "Missing agent-card fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+      // Fail closed: a missing callerUserId must never skip the check.
+      if (!callerUserId || callerUserId !== cardUserId) {
+        log.error(`[flow-action] agent-card: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${cardUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+      if (actionId !== "agent-draft-approve" && actionId !== "agent-draft-decline") {
+        res.status(400).json({ type: "error", message: `Unknown agent-card action: ${actionId}` } satisfies AppActionResponse);
+        return;
+      }
+
+      const decision = actionId === "agent-draft-approve" ? "approve" : "reject";
+      // The chips the user kept, from the node's own flow-state key.
+      const keptCapabilityIds = Array.isArray(values[AGENT_COMPONENT_ID])
+        ? (values[AGENT_COMPONENT_ID] as unknown[]).filter((v): v is string => typeof v === "string")
+        : undefined;
+
+      const { resolveAgentDraft } = await import("../lib/agent-card.js");
+      const result = await resolveAgentDraft(
+        requestId,
+        callerUserId,
+        decision,
+        keptCapabilityIds,
+        cardAgentSlug,
+      );
+
+      if (!result.ok) {
+        resp = { type: "close_screen", finalMessage: result.error };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, `⚠️ ${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
+        return;
+      }
+
+      // Stamp the audit ONLY for a decision made right now. On a replay (the
+      // other tab already decided it, or the draft was superseded) this click
+      // decided nothing, and stamping it would write a false "Created by X ·
+      // just now" over a decision someone else made earlier.
+      const decidedNow = !result.alreadyResolved;
+      const deciderName = decidedNow
+        ? await prisma.user
+            .findUnique({ where: { id: callerUserId }, select: { name: true } })
+            .then((u) => u?.name?.trim() ?? "")
+            .catch(() => "")
+        : "";
+      const phase = result.status === "approved" ? "created" : "rejected";
+      const finalText =
+        result.status === "approved"
+          ? result.alreadyResolved
+            ? `✅ Agent "${result.identity.name}" was already created.`
+            : `✅ Agent "${result.identity.name}" created.`
+          : result.alreadyResolved
+            ? "❌ This draft was already declined."
+            : "❌ Agent draft declined.";
+
+      resp = { type: "close_screen", finalMessage: finalText };
+      res.json(resp);
+      // Update the SAME card in place — the identity stays visible, the chip and
+      // footer flip to the decided state. Falls back to text if the card can't
+      // be rebuilt, so the buttons never survive a decision either way.
+      void replaceFlowCardWithFlow(
+        messageId,
+        cardAgentSlug,
+        buildAgentCardFlow(
+          {
+            variant: "draft",
+            phase,
+            agent: result.identity,
+            ...(result.note ? { note: result.note } : {}),
+            ...(deciderName ? { decidedBy: deciderName } : {}),
+            ...(decidedNow ? { decidedById: callerUserId } : {}),
+            ...(decidedNow ? { decidedAt: new Date().toISOString() } : {}),
+          },
+          {
+            requestId,
+            agentSlug: cardAgentSlug ?? "",
+            userId: cardUserId,
+            ...(cardConversationId ? { conversationId: cardConversationId } : {}),
+            ...(cardChannelId ? { channelId: cardChannelId } : {}),
+          },
+        ),
+        cardConversationId,
+        cardChannelId,
+        cardSpacesAppId,
+      );
+      log.info(`[flow-action] agent-card ${decision} request=${requestId} by=${callerUserId} phase=${phase}`);
       return;
     }
 
