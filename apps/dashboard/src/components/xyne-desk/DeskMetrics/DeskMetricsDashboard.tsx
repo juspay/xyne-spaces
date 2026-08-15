@@ -14,7 +14,6 @@ import {
   ChevronUp,
   ArrowUpDown,
   Download,
-  Search,
   UserCircle2,
   Users,
   ListFilter,
@@ -25,6 +24,7 @@ import {
 } from 'lucide-react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
+import { FilterMultiSelect, type FilterOption } from '../../ui/Select';
 import {
   DynamicFieldSubmenu,
   PrioritySubmenu,
@@ -930,8 +930,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'desks'>('overview');
-  const [deskPickerOpen, setDeskPickerOpen] = useState(false);
-  const [deskSearch, setDeskSearch] = useState('');
 
   const selectedDeskIds = useMemo(() => {
     const selectable = new Set(availableDesks.map(d => d.id));
@@ -940,23 +938,29 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
   const isMultiDesk = selectedDeskIds.length > 1;
   const isDeskSelectionAtLimit = selectedDeskIds.length >= DESK_METRICS_MAX_AGGREGATE_DESKS;
+  const deskCompareOptions = useMemo<FilterOption[]>(
+    () =>
+      availableDesks
+        .filter(desk => desk.id !== channelId)
+        .map(desk => ({
+          label: desk.name,
+          value: desk.id,
+        })),
+    [availableDesks, channelId],
+  );
 
-  const toggleDesk = useCallback(
-    (deskId: string) => {
-      if (deskId === channelId) return;
-      if (
-        !comparedChannelIds.includes(deskId) &&
-        selectedDeskIds.length >= DESK_METRICS_MAX_AGGREGATE_DESKS
-      ) {
-        return;
+  const handleComparedDeskChange = useCallback(
+    (nextIds: string[]): void => {
+      const selectable = new Set(deskCompareOptions.map(option => option.value));
+      const uniqueNextIds = [...new Set(nextIds)].filter(id => selectable.has(id));
+      const maxComparedDesks = DESK_METRICS_MAX_AGGREGATE_DESKS - 1;
+      if (uniqueNextIds.length > maxComparedDesks) return;
+      setComparedChannelIds(uniqueNextIds);
+      if (uniqueNextIds.length === 0) {
+        setActiveTab(prev => (prev === 'desks' ? 'overview' : prev));
       }
-      setComparedChannelIds(
-        comparedChannelIds.includes(deskId)
-          ? comparedChannelIds.filter(id => id !== deskId)
-          : [...comparedChannelIds, deskId],
-      );
     },
-    [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
+    [deskCompareOptions, setComparedChannelIds],
   );
 
   const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee' | 'tags'>(
@@ -1333,128 +1337,24 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
             </div>
             <div className='contents'>
               <div className='col-span-2 row-start-2 -mx-6 flex min-w-0 flex-wrap items-center justify-start gap-3 border-t border-desk-border bg-muted/20 px-6 py-3 dark:border-border'>
-                {availableDesks.length > 1 && (
-                  <Popover
-                    open={deskPickerOpen}
-                    onOpenChange={openState => {
-                      setDeskPickerOpen(openState);
-                      if (!openState) setDeskSearch('');
-                    }}
-                    align='start'
-                    sideOffset={6}
-                    className='p-0'
-                    trigger={
-                      <button
-                        type='button'
-                        className='flex h-[32px] w-[150px] max-w-[150px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
-                        data-track-category='DeskMetrics'
-                        data-track-name='DeskSelector'
-                      >
-                        <Layers size={14} className='shrink-0 text-muted-foreground' />
-                        <span className='flex-1 truncate text-left text-sm'>
-                          {isMultiDesk ? `${selectedDeskIds.length} desks` : '1 desk'}
-                        </span>
-                        {comparedChannelIds.length > 0 ? (
-                          <X
-                            size={12}
-                            className='shrink-0 text-muted-foreground hover:text-foreground'
-                            onClick={e => {
-                              e.stopPropagation();
-                              setComparedChannelIds([]);
-                              setActiveTab(prev => (prev === 'desks' ? 'overview' : prev));
-                            }}
-                          />
-                        ) : (
-                          <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
-                        )}
-                      </button>
-                    }
-                  >
-                    <div className='w-[260px]'>
-                      <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
-                        <Search size={14} className='shrink-0 text-muted-foreground' />
-                        <input
-                          type='text'
-                          value={deskSearch}
-                          onChange={e => setDeskSearch(e.target.value)}
-                          onKeyDown={e => e.stopPropagation()}
-                          placeholder='Search desks…'
-                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                          data-track-category='DeskMetrics'
-                          data-track-name='SearchDesks'
-                        />
-                      </div>
-                      <div
-                        className='max-h-[260px] overflow-y-auto py-1'
-                        onWheel={e => e.stopPropagation()}
-                      >
-                        {((): ReactElement | ReactElement[] => {
-                          const query = deskSearch.trim().toLowerCase();
-                          const visible = availableDesks.filter(
-                            d => !query || d.name.toLowerCase().includes(query),
-                          );
-                          if (visible.length === 0) {
-                            return (
-                              <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                                No desks match
-                              </div>
-                            );
-                          }
-                          return visible.map(desk => {
-                            const isPrimary = desk.id === channelId;
-                            const isSelected = selectedDeskIds.includes(desk.id);
-                            const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
-                            return (
-                              <label
-                                key={desk.id}
-                                className={cn(
-                                  'flex items-center gap-2 px-3 py-1.5 text-sm',
-                                  isPrimary && 'cursor-default opacity-70',
-                                  isDisabledByLimit && 'cursor-not-allowed opacity-50',
-                                  !isPrimary &&
-                                    !isDisabledByLimit &&
-                                    'cursor-pointer hover:bg-accent',
-                                )}
-                                title={
-                                  isPrimary
-                                    ? 'The desk this dashboard was opened from is always included'
-                                    : isDisabledByLimit
-                                      ? `You can compare up to ${DESK_METRICS_MAX_AGGREGATE_DESKS} desks at once`
-                                      : undefined
-                                }
-                              >
-                                <input
-                                  type='checkbox'
-                                  checked={isSelected}
-                                  disabled={isPrimary || isDisabledByLimit}
-                                  onChange={() => toggleDesk(desk.id)}
-                                  className='h-3.5 w-3.5 accent-desk-accent'
-                                  data-track-category='DeskMetrics'
-                                  data-track-name='ToggleDesk'
-                                />
-                                <span className='flex-1 truncate'>{desk.name}</span>
-                                {isPrimary && (
-                                  <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
-                                    current
-                                  </span>
-                                )}
-                              </label>
-                            );
-                          });
-                        })()}
-                      </div>
-                      <div
-                        className={cn(
-                          'border-t border-border px-3 py-2 text-xs text-muted-foreground',
-                          isDeskSelectionAtLimit && 'text-amber-600 dark:text-amber-400',
-                        )}
-                      >
-                        {selectedDeskIds.length} of {DESK_METRICS_MAX_AGGREGATE_DESKS} desks
-                        selected
-                        {isDeskSelectionAtLimit && ' — limit reached'}
-                      </div>
-                    </div>
-                  </Popover>
+                {deskCompareOptions.length > 0 && (
+                  <div className='flex items-center gap-2'>
+                    <FilterMultiSelect
+                      options={deskCompareOptions}
+                      selectedValues={comparedChannelIds}
+                      onChange={handleComparedDeskChange}
+                      placeholder='Compare desks'
+                      className='h-[32px] max-w-[280px] border-desk-border bg-background text-foreground shadow-none hover:bg-accent dark:border-border'
+                    />
+                    <span
+                      className={cn(
+                        'text-xs text-muted-foreground',
+                        isDeskSelectionAtLimit && 'text-amber-600 dark:text-amber-400',
+                      )}
+                    >
+                      {selectedDeskIds.length}/{DESK_METRICS_MAX_AGGREGATE_DESKS} desks
+                    </span>
+                  </div>
                 )}
 
                 {/* Assignee filter */}
