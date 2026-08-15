@@ -15,7 +15,7 @@ SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
 SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
 
 ZERO_VERSION ?= 1.9.0
-ZERO_IMAGE_TAG ?= $(SOURCE_SHORT_COMMIT)-zero$(ZERO_VERSION)
+ZERO_IMAGE_TAG ?= $(SOURCE_SHORT_COMMIT)
 ZERO_TARBALL ?=
 # GKE nodes are amd64. Pin the platform so an arm64 dev machine (Apple Silicon)
 # still produces a runnable image instead of one that fails with "exec format error".
