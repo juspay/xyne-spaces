@@ -3298,6 +3298,11 @@ const ChannelCommandMenu = ({
         isScreenPalette
           ? '[cmdk-item]:not([aria-disabled="true"])'
           : '[cmdk-item]:not([aria-disabled="true"]):not([data-show-results-item])',
+      ) as HTMLElement | null) ??
+      // Zero results leave the pinned row as the only item — then it IS the Enter target,
+      // or Enter would go dead with an actionable row on screen.
+      (commandRef.current?.querySelector(
+        '[cmdk-item][data-show-results-item]',
       ) as HTMLElement | null);
 
     // Screen-mode popup: Enter navigates to search screen only when no result item is selected
@@ -3313,6 +3318,13 @@ const ChannelCommandMenu = ({
       return;
     }
 
+    // The row is invoked directly, not via a synthetic .click() — that path would fire its
+    // onClick and log this keyboard activation as a click.
+    if (enterTarget?.getAttribute('data-show-results-item') === 'true') {
+      goToSearchResults('keyboard');
+      return;
+    }
+
     // Prime modifier ref before the synthetic .click() — a synthetic click
     // loses modifier state, so downstream selection handlers read this ref
     // instead of checking event.metaKey.
@@ -3322,9 +3334,14 @@ const ChannelCommandMenu = ({
 
   // "Show results for: <chips> <query>" — the row that leaves the palette for the
   // full-screen results page. Rendered in both palettes; where it sits in the list is
-  // decided at the call sites below.
+  // decided at the call sites below. Never in the inline/context-selection palettes
+  // (Ask AI context picker, thread-panel context) — navigating away would hijack the
+  // picking flow. The old screen-only gate excluded those implicitly.
   const showResultsForRow =
-    !mentionSearchType && (searchText.trim() || selectedMentions.length > 0) ? (
+    !inline &&
+    !contextSelectionMode &&
+    !mentionSearchType &&
+    (searchText.trim() || selectedMentions.length > 0) ? (
       <Command.Item
         value='__show-results-for__'
         data-show-results-item='true'
@@ -3763,7 +3780,10 @@ const ChannelCommandMenu = ({
               // position is communicated by aria-selected, never by a ring here.
               'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
               '[&_[cmdk-item]]:scroll-mb-[30px]',
-              suppressHover && '[&_[cmdk-item]]:pointer-events-none',
+              // The pinned "Show results for" row is exempt: it sits where the cursor
+              // rests when the palette opens, and its first click must land even before
+              // any mousemove clears suppressHover. Result rows keep the guard.
+              suppressHover && '[&_[cmdk-item]:not([data-show-results-item])]:pointer-events-none',
             )}
             ref={el => {
               if (el) {
