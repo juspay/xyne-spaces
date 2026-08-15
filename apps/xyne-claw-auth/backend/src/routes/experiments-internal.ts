@@ -3,7 +3,7 @@ import { experimentRepository } from "../repositories/index.js";
 import { proofWasDelivered } from "../repositories/experimentRepository.js";
 import { buildLedgerMarkdown, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
-import { hasResolvableCitation } from "../lib/understanding-frontier.js";
+import { hasResolvableCitation } from "../lib/experiment-text.js";
 
 export const experimentsInternalRouter = Router();
 const log = createLogger("experiments-internal");

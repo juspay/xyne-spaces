@@ -65,3 +65,24 @@ const CITATION_RE = /[\w./-]+\.[A-Za-z][\w]*:\d+/;
 export function hasResolvableCitation(note: unknown): boolean {
   return typeof note === "string" && CITATION_RE.test(note);
 }
+
+/**
+ * Focus is replayed into EVERY epoch's task prompt, so it stays capped — but the
+ * old 1000-char cap silently ate a fifth of a 57-table list and cut mid-token
+ * ("reseller_account rese"), so the run explored a scope the user never saw it
+ * narrow. Bigger cap, cut on a word boundary, and the dropped remainder is
+ * returned so the caller can SAY so instead of discarding input in silence.
+ */
+const MAX_FOCUS_CHARS = 4000;
+
+export function normalizeFocus(raw: string): { focus?: string; dropped?: string } {
+  const value = raw.trim().replace(/^focus=/i, "").trim();
+  if (!value) return {};
+  if (value.length <= MAX_FOCUS_CHARS) return { focus: value };
+  const head = value.slice(0, MAX_FOCUS_CHARS);
+  // Never split a token: a half-identifier is worse than an absent one, because
+  // it reads as a real name the agent will go looking for.
+  const cut = head.lastIndexOf(" ");
+  const boundary = cut > MAX_FOCUS_CHARS * 0.8 ? cut : head.length;
+  return { focus: value.slice(0, boundary).trim(), dropped: value.slice(boundary).trim() };
+}

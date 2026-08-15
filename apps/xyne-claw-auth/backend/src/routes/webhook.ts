@@ -1775,6 +1775,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       seededPaths > 0
         ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
         : `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+      // Never drop part of the user's scope in silence: the old cap cut a
+      // 57-table list mid-word and the run explored a narrower scope than the
+      // user believed they had asked for.
+      ...(experimentCommand.droppedFocus
+        ? [`⚠️ Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
+        : []),
       `Use \`/experiment status\` to inspect progress.`,
     ].join("\n"));
     try {

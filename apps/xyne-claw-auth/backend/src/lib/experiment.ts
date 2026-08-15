@@ -2,7 +2,7 @@ import type { ExperimentFinding, ExperimentReview, ExperimentRun } from "@prisma
 import { CONFIG } from "../config.js";
 import { experimentRepository, agentRepository } from "../repositories/index.js";
 import { setSession, type SessionContext } from "./session-context.js";
-import { parseFrontierItems } from "./understanding-frontier.js";
+import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
@@ -13,7 +13,7 @@ const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
 export type ExperimentCommand =
-  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: "understanding" }
+  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: "understanding"; droppedFocus?: string }
   | { sub: "status" }
   | { sub: "stop" }
   | { sub: "findings"; id?: string }
@@ -65,7 +65,7 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
   }
   durationMs = Math.min(Math.max(durationMs, 1), MAX_DURATION_MS);
   const { focusParts: cleanedFocusParts, provider, model, invalidProvider } = extractProviderOverride(focusParts);
-  const focus = normalizeFocus(cleanedFocusParts.join(" "));
+  const { focus, dropped: droppedFocus } = normalizeFocus(cleanedFocusParts.join(" "));
   const resolvedProvider = invalidProvider === undefined
     ? provider ?? (model ? "spaces" : undefined)
     : undefined;
@@ -76,6 +76,7 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
     ...(model ? { model } : {}),
     ...(invalidProvider !== undefined ? { invalidProvider } : {}),
+    ...(droppedFocus ? { droppedFocus } : {}),
     ...(kind ? { kind } : {}),
   };
 }
@@ -93,11 +94,6 @@ export async function cancelRunSession(sessionId: string, userId: string): Promi
     const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `Cancel failed: HTTP ${cancelRes.status}`);
   }
-}
-
-function normalizeFocus(raw: string): string | undefined {
-  const value = raw.trim().replace(/^focus=/i, "").trim();
-  return value ? value.slice(0, 1000) : undefined;
 }
 
 function extractProviderOverride(parts: string[]): {
