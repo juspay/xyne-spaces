@@ -1814,6 +1814,10 @@ model ExperimentRun {
   /// dispatch. NULL = the agent's normal provider resolution.
   provider          String?
   modelId           String?
+  /// "experiment" (default proof-reward loop) or "understanding" (coverage-gated:
+  /// end-experiment stays locked until the open-conjecture frontier is exhausted).
+  /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
+  kind              String              @default("experiment")
   status            String              @default("running") /// running | finishing | done | aborted
   epoch             Int                 @default(1)
   deadlineAt        DateTime

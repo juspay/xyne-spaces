@@ -215,6 +215,7 @@ function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined
     deadlineAt,
     ...(focus ? { focus } : {}),
     ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
+    ...(obj["kind"] === "understanding" ? { kind: "understanding" as const } : {}),
   };
 }
 
@@ -566,6 +567,9 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       epoch?: number;
       deadlineAt?: string;
       focus?: string;
+      /** "understanding" = coverage-gated variant: exit on an exhausted
+       *  code-path frontier instead of the deadline. Set by claw-auth. */
+      kind?: "understanding";
     };
     /** True when this run is Turn 2 (auto) dispatched right after a plan was
      *  approved (or a trivial plan auto-continued). Used only to emit a
@@ -2721,6 +2725,8 @@ async function processTask(
       log(
         experiment.mode === "review"
           ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
+          : experiment.kind === "understanding"
+          ? `Understanding mode — injected experiment tools (epoch ${experiment.epoch}, coverage-gated exit)`
           : `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
       );
     }
@@ -3511,6 +3517,8 @@ async function processTask(
     // fabricating results from a tool it never received.
     const experimentGuide = experiment?.mode === "review"
       ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
+      : experiment?.kind === "understanding"
+      ? `\n\n## Understanding mode\nYou are in a coverage-gated understanding run (epoch ${experiment.epoch}; focus ${experiment.focus ?? "unspecified"}). Your job is to UNDERSTAND every reachable code path in scope, not to accumulate trivially-provable facts. The exit is exhaustion, not the clock: end-experiment unlocks only when the open-conjecture frontier reaches 0 (with at least one path closed). Loop: read the ledger -> if the frontier is empty, enumerate every entrypoint and branch in scope as an open conjecture (experiment-ledger action=record status=conjecture, one per path) -> pick ONE open path, trace it to real behavior, and ADD every new callee or branch you discover as a new open conjecture BEFORE you close the current one (proved/refuted) with file:line evidence and a description of what the code actually does and why. The frontier grows as you explore and shrinks only when a path is genuinely explained — never close a path with a shallow structural restatement. When open reaches 0 the scope is exhausted: deliver the artifacts and end.`
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";

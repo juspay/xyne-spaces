@@ -12,6 +12,12 @@ export interface ExperimentContext {
    *  NOT end-experiment or the ledger write path — a checker must not be able
    *  to end the experiment or edit the work it is judging. */
   mode?: "review";
+  /** "understanding" = a coverage-gated run: the exit condition is an EXHAUSTED
+   *  code-path frontier (zero open conjectures) rather than an elapsed deadline.
+   *  Each unexplored path is recorded as an open conjecture; closing every one of
+   *  them (proved/refuted, with evidence) is the exit. The deadline still applies
+   *  as a hard safety cap so the loop stays bounded. */
+  kind?: "understanding";
 }
 
 type FindingStatus = "conjecture" | "proved" | "refuted";
@@ -356,7 +362,7 @@ export function buildExperimentTools(
     {
       name: "end-experiment",
       label: "End Experiment",
-      description: "Complete the experiment after the deadline. This is the ONLY exit. Before ending, ensure every proved finding's artifact has been delivered to the thread.",
+      description: "Complete the run. For a time-boxed experiment this unlocks only AFTER the deadline; for an understanding run it unlocks only once the code-path frontier is exhausted (zero open conjectures, at least one path closed). Before ending, ensure every finding's artifact has been delivered to the thread.",
       parameters: Type.Object({
         report: Type.String(),
       }, { additionalProperties: false }),
@@ -364,7 +370,31 @@ export function buildExperimentTools(
         const p = asRecord(params);
         const report = typeof p["report"] === "string" ? p["report"] : "";
         const deadline = deadlineMs(ctx);
-        if (Date.now() < deadline) {
+        const pastDeadline = Date.now() >= deadline;
+        if (ctx.kind === "understanding") {
+          // Coverage-gated exit: the run ends when the enumerated code-path
+          // frontier is EXHAUSTED (open conjectures -> 0), not when the clock
+          // runs out. The deadline is only a hard safety cap so the loop stays
+          // bounded even if the frontier never fully closes.
+          let open: number | undefined;
+          let closed = 0;
+          try {
+            const ledger = await readLedger(ctx);
+            open = ledger.counts.conjecture;
+            closed = ledger.counts.proved + ledger.counts.refuted;
+          } catch {
+            // Ledger unreachable: we cannot prove exhaustion, so only the
+            // deadline cap below can release the run.
+          }
+          const frontierExhausted = open === 0 && closed > 0;
+          if (!pastDeadline && !frontierExhausted) {
+            const openStr = open === undefined ? "unknown" : String(open);
+            return textResult(
+              `❌ Cannot end: the code-path frontier is not exhausted (epoch ${ctx.epoch}). Open paths: ${openStr}, closed: ${closed}. Enumerate every reachable path in scope as an open conjecture, then close each one (proved/refuted) with file:line evidence. Every new callee or branch you find is itself a new open path. Exit unlocks only when open reaches 0. Your report was NOT accepted.`,
+              { refused: true, open, closed },
+            );
+          }
+        } else if (!pastDeadline) {
           let open = "unknown";
           try {
             const ledger = await readLedger(ctx);

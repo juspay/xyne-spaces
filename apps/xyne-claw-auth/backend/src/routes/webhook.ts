@@ -1565,6 +1565,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (experimentCommand.sub === "unknown") {
       await postExperimentReply([
         "/experiment <duration> [provider=…] [model=…] [focus…]",
+        "/understanding [duration cap] [focus…] — coverage-gated: runs until the code-path frontier is exhausted",
         "/experiment status",
         "/experiment list",
         "/experiment findings [id]",
@@ -1754,12 +1755,16 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       focus: experimentCommand.focus ?? null,
       provider: experimentCommand.provider ?? null,
       modelId: experimentCommand.model ?? null,
+      kind: experimentCommand.kind ?? null,
       deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
     });
+    const isUnderstanding = experimentCommand.kind === "understanding";
     await postExperimentReply([
-      "**/experiment started**",
-      `Mode: time-boxed autonomous exploration`,
-      `Duration: ${formatDuration(experimentCommand.durationMs)}`,
+      isUnderstanding ? "**/understanding started**" : "**/experiment started**",
+      isUnderstanding
+        ? `Mode: coverage-gated understanding loop (ends when the code-path frontier is exhausted)`
+        : `Mode: time-boxed autonomous exploration`,
+      `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
       ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
       `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
       `Use \`/experiment status\` to inspect progress.`,
