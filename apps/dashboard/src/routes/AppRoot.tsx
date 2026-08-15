@@ -25,6 +25,7 @@ import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
+import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
 import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
 import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
 import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
@@ -222,6 +223,7 @@ import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
 import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
+import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
@@ -894,6 +896,14 @@ export const router = createBrowserRouter([
                   { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                   { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                  {
+                    path: 'organization',
+                    element: (
+                      <RequireOrgManager>
+                        <AIOrganizationScreen />
+                      </RequireOrgManager>
+                    ),
+                  },
                   {
                     element: <AISectionLayout />,
                     children: [

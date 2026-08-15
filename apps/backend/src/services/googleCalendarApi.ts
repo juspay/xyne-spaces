@@ -10,6 +10,82 @@ import { logger } from '@/utils/logger';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][API]';
 
+/** Thrown when a PATCH is rejected due to a stale etag (If-Match precondition failed). */
+export class GoogleCalendarPatchConflictError extends Error {
+  constructor(eventId: string) {
+    super(`Google Calendar PATCH conflict (412) for event ${eventId}`);
+    this.name = 'GoogleCalendarPatchConflictError';
+  }
+}
+
+export async function getGoogleEventById(accessToken: string, eventId: string): Promise<GCalEvent> {
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar API ${res.status}: ${text}`);
+  }
+
+  return (await res.json()) as GCalEvent;
+}
+
+/**
+ * PATCH a single Google Calendar event owned by the connected (organizer)
+ * user. Used by the Xyne Call Link Auto-Injection reconciler to replace/inject
+ * the conference entry and description block. Callers own retry-on-conflict
+ * decisions; this function only performs the network call and surfaces a
+ * typed error for 412 so callers can distinguish "stale etag, re-evaluate
+ * once" from other failures.
+ */
+export async function patchGoogleEvent(
+  accessToken: string,
+  eventId: string,
+  body: Record<string, unknown>,
+  options?: { conferenceDataVersion?: boolean; etag?: string }
+): Promise<GCalEvent> {
+  // This is a background reconciliation, not an organizer-authored update.
+  // Suppress attendee emails; webhook delivery is unaffected by sendUpdates.
+  const params = new URLSearchParams({ sendUpdates: 'none' });
+  if (options?.conferenceDataVersion) {
+    params.set('conferenceDataVersion', '1');
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  };
+  if (options?.etag) {
+    headers['If-Match'] = options.etag;
+  }
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}?${params.toString()}`,
+    {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+
+  if (res.status === 412) {
+    throw new GoogleCalendarPatchConflictError(eventId);
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar API ${res.status}: ${text}`);
+  }
+
+  return (await res.json()) as GCalEvent;
+}
+
 interface CalendarFetchResult<TEvent> {
   events: TEvent[];
   truncated: boolean;

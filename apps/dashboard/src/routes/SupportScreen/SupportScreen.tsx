@@ -111,6 +111,7 @@ import {
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
+import { classificationApi } from '../../api/classificationApi';
 import {
   CalendarView,
   PRESETS,
@@ -201,6 +202,8 @@ import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
 import {
   channelService,
   CreateChannelFormData,
@@ -771,18 +774,49 @@ const SupportScreen = (): ReactElement => {
       enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
     },
   );
-  const availableAiCategories = useMemo(() => {
-    const fromMappings = [
-      ...new Set(
-        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
-      ),
-    ];
-    if (fromMappings.length === 0) return [];
-    if (!fromMappings.includes('Other')) {
-      fromMappings.push('Other');
+  // Categories the AI actually assigned to tickets. The AI emits free-form values, so the
+  // configured mappings only cover the subset that has an assignment rule — without this the
+  // filter hides every unmapped category that is visibly labelled on the list.
+  const [ticketAiCategories, setTicketAiCategories] = useState<string[]>([]);
+  const aiCategoriesChannelId =
+    filterOptionsEnabled && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null;
+
+  useEffect(() => {
+    if (!aiCategoriesChannelId) {
+      setTicketAiCategories([]);
+      return;
     }
-    return fromMappings;
-  }, [classificationMappings]);
+    let cancelled = false;
+    classificationApi
+      .getAiCategories(aiCategoriesChannelId)
+      .then(categories => {
+        if (!cancelled) setTicketAiCategories(categories);
+      })
+      .catch(() => {
+        if (!cancelled) setTicketAiCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [aiCategoriesChannelId]);
+
+  const availableAiCategories = useMemo(() => {
+    const merged = [
+      ...new Set([
+        ...(classificationMappings ?? [])
+          .map(m => m.category)
+          .filter((c): c is string => Boolean(c)),
+        ...ticketAiCategories,
+      ]),
+    ];
+    if (merged.length === 0) return [];
+    if (!merged.includes('Other')) {
+      merged.push('Other');
+    }
+    return merged;
+  }, [classificationMappings, ticketAiCategories]);
 
   const availableStages = useMemo(
     () =>
@@ -2547,6 +2581,25 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
+                      {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
+                        <Tooltip content='Ask AI' side='bottom'>
+                          <button
+                            onClick={() => {
+                              if (!selectedChannelId) return;
+                              trackAskAIOpened(
+                                emailChannels?.find(c => c.id === selectedChannelId)?.scopeType,
+                              );
+                              xyneAIActor.send({ type: 'OPEN', channelId: selectedChannelId });
+                            }}
+                            className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
+                            data-track-category='Support'
+                            data-track-name='OPEN_XYNE_AI'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <XyneAIStar />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         channelPreference?.metricsEnabled && (

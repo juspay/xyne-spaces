@@ -425,7 +425,7 @@ const ThreadList = ({
   // Render with date separators for ticket threads
   if (isTicketThread && messagesWithSeparators) {
     return (
-      <div ref={hoverToolbarContainerRef} className='relative flex-1 min-h-0 bg-background'>
+      <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
         {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
         <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
         <div
@@ -553,7 +553,7 @@ const ThreadList = ({
 
   // Default render without date separators
   return (
-    <div ref={hoverToolbarContainerRef} className='relative flex-1 min-h-0 bg-background'>
+    <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
       {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
       <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
       <div

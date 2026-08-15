@@ -296,13 +296,24 @@ export class ConversationParticipantRepository extends BaseRepository<
             },
           };
 
+    const userChannels = await this.db.channelParticipant.findMany({
+      where: { userId },
+      select: { channelId: true },
+    });
+    const joinedChannelIds = userChannels.map((c) => c.channelId);
+
     const acl = ACLFactory.getACL('conversationParticipant', tenantContext, this.db);
     const where = await acl.applyToWhere({
       userId,
       isSubscribed: true,
       lastReplyAt: { not: null },
-      // Skip orphan participants so a missing required conversation does not fail the entire query.
-      conversation: { is: {} },
+      // We check `conversation.channelId` explicitly. The `is` safely ignores
+      // cases where the conversation record itself might be missing (orphaned).
+      conversation: {
+        is: {
+          channelId: { in: joinedChannelIds }
+        }
+      },
       ...sectionWhere,
     });
 

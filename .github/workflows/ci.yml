@@ -50,6 +50,11 @@ jobs:
           pnpm --filter xyne-spaces-backend run db:generate
           pnpm --filter xyne-spaces-backend run db:common:generate
 
+      # The hand-maintained Zero client schema must not declare a column that
+      # schema.prisma does not have (the drift that caused a runtime mismatch).
+      - name: Validate Zero <> Prisma column parity
+        run: node scripts/validate-zero-column-parity.mjs --ci-mode
+
       # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
       - name: Typecheck
         run: pnpm --filter xyne-spaces-backend run typecheck
@@ -88,7 +93,10 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
 
+      # tsc over the dashboard's type surface exceeds Node's ~2GB default heap.
       - name: Typecheck
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build

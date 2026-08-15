@@ -19,11 +19,13 @@ export function useDeskMetrics(
   stageNames?: string[],
   priorities?: TicketPriority[],
   userGroupIds?: string[],
+  tagValues?: string[],
 ): UseQueryResult<DeskMetricsResponse> {
   const sortedStageNames = [...(stageNames ?? [])].sort();
   const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
   const sortedPriorities = [...(priorities ?? [])].sort();
   const sortedUserGroupIds = [...(userGroupIds ?? [])].sort();
+  const sortedTagValues = [...(tagValues ?? [])].sort();
   return useQuery({
     queryKey: [
       'desk-metrics',
@@ -34,6 +36,7 @@ export function useDeskMetrics(
       sortedStageNames,
       sortedPriorities,
       sortedUserGroupIds,
+      sortedTagValues,
     ],
     queryFn: () =>
       getDeskMetrics(
@@ -44,6 +47,7 @@ export function useDeskMetrics(
         sortedStageNames,
         sortedPriorities,
         sortedUserGroupIds,
+        sortedTagValues,
       ),
     enabled: enabled && !!channelId,
     retry: 1,
@@ -59,12 +63,14 @@ export function useAggregateDeskMetrics(
   stageNames?: string[],
   priorities?: TicketPriority[],
   userGroupIds?: string[],
+  tagValues?: string[],
 ): UseQueryResult<DeskMetricsAggregateResponse> {
   const sortedIds = [...channelIds].sort();
   const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
   const sortedStageNames = [...(stageNames ?? [])].sort();
   const sortedPriorities = [...(priorities ?? [])].sort();
   const sortedUserGroupIds = [...(userGroupIds ?? [])].sort();
+  const sortedTagValues = [...(tagValues ?? [])].sort();
   const idsKey = sortedIds.join(',');
   return useQuery({
     queryKey: [
@@ -76,6 +82,7 @@ export function useAggregateDeskMetrics(
       sortedStageNames,
       sortedPriorities,
       sortedUserGroupIds,
+      sortedTagValues,
     ],
     queryFn: () =>
       getAggregateDeskMetrics(
@@ -86,6 +93,7 @@ export function useAggregateDeskMetrics(
         sortedStageNames,
         sortedPriorities,
         sortedUserGroupIds,
+        sortedTagValues,
       ),
     enabled: enabled && sortedIds.length > 0,
     retry: 1,
