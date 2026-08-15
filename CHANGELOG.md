@@ -1,3 +1,10 @@
+## [1.186.1](https://github.com/juspay/xyne-spaces/compare/v1.186.0...v1.186.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* add index for entityType, recapDate, and entityId in Recap model ([#616](https://github.com/juspay/xyne-spaces/issues/616)) ([ad62d82](https://github.com/juspay/xyne-spaces/commit/ad62d82102342595984e02728eacd068cc68385f))
+
 ## [1.186.0](https://github.com/juspay/xyne-spaces/compare/v1.185.0...v1.186.0) (2026-08-15)
 
 
