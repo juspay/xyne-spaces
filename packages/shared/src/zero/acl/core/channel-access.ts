@@ -33,15 +33,22 @@ export function scalarChannelBody(
   if (isMember === true) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (ch: any) =>
-      ch.where('id', channelId).whereExists(
-        'participants',
-        (p: any) => p.where('userId', ctx.userID).where('channelId', channelId),
-        SCALAR,
-      );
+      ch
+        .where('id', channelId)
+        .where('workspaceId', '=', ctx.workspaceId)
+        .whereExists(
+          'participants',
+          (p: any) => p.where('userId', ctx.userID).where('channelId', channelId),
+          SCALAR,
+        );
   }
   if (isMember === false) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (ch: any) => ch.where('id', channelId).where('visibility', ChannelVisibility.PUBLIC);
+    return (ch: any) =>
+      ch
+        .where('id', channelId)
+        .where('workspaceId', '=', ctx.workspaceId)
+        .where('visibility', ChannelVisibility.PUBLIC);
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (ch: any) =>

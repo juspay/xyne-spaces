@@ -23,6 +23,7 @@ export class TicketActivitiesACL extends BaseQueryACL<'ticket_activities'> {
     if (channelId) {
       return query.whereExists('ticket', (t) =>
         t
+          .where('workspaceId', '=', this.ctx.workspaceId)
           .where('channelId', channelId)
           .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR)
       );
