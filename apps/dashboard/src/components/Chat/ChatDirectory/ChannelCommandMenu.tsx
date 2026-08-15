@@ -45,6 +45,7 @@ import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
   MentionType,
+  type MentionData,
   ChannelCommandMenuProps,
   TYPE_SUGGESTIONS,
   SearchableTypes,
@@ -87,7 +88,7 @@ import {
   EVENTS,
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
-import { LexicalSearchInput } from './LexicalSearchInput';
+import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import {
   useSearchMetrics,
@@ -334,22 +335,38 @@ const ChannelCommandMenu = ({
   const [seedCommandMode, setSeedCommandMode] = useState(
     () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
-  // While seeding, feed the editor a `/` through the existing initial-query path; otherwise pass the
-  // caller's query straight through. Memoized so the reference stays stable across renders.
+  // The search the user left behind when the palette sent them to the results page, handed
+  // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
+  const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
+
+  // While seeding, feed the editor a `/` through the existing initial-query path; a restored
+  // search goes down the same path. Otherwise pass the caller's query straight through.
+  // Memoized so the reference stays stable across renders.
   const effectiveInitialQuery = useMemo(
-    () => (seedCommandMode ? { mentions: [], text: '/' } : initialQuery),
-    [seedCommandMode, initialQuery],
+    () =>
+      seedCommandMode ? { mentions: [], text: '/' } : restoredQuery ? restoredQuery : initialQuery,
+    [seedCommandMode, restoredQuery, initialQuery],
   );
 
-  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back
-  // arrow (and the browser back gesture) closes the palette instead of leaving the page.
-  // Closing it any other way pops that entry straight back off.
-  const { markNavigating } = useHistoryBackedOverlay({
+  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
+  // (and the browser back gesture) closes the palette instead of leaving the page. When a
+  // row sends the user to the results page, that entry keeps the search — so back from the
+  // results page reopens the palette with it rather than landing on a bare page.
+  const { markNavigating } = useHistoryBackedOverlay<InitialQueryData>({
     open,
     onClose: () => onOpenChange(false),
+    onRestore: restored => {
+      setRestoredQuery(restored ?? null);
+      onOpenChange(true);
+    },
     id: 'command-menu',
     enabled: !inline && !contextSelectionMode,
   });
+
+  // A restore only seeds the open it triggered — the next plain cmd+K starts empty.
+  useEffect(() => {
+    if (!open) setRestoredQuery(null);
+  }, [open]);
 
   useShortcutById(
     'global.search',
@@ -1014,9 +1031,17 @@ const ChannelCommandMenu = ({
     navigatingToResultsRef.current = true;
     showResultsTriggerRef.current = 'keyboard';
 
-    // Tell the history hook this close comes with a navigation, so it doesn't pop the
-    // palette's entry and land the user back where they started.
-    markNavigating();
+    // Hand the history hook the search we're leaving with. It stamps this onto the
+    // palette's entry, so back from the results page reopens cmd+K with it — and it also
+    // marks the close as a navigation, so the entry isn't popped out from under us.
+    markNavigating({
+      text: searchText,
+      // Plain-object copies: history state has to survive structured cloning. Chips carry
+      // a display name; fall back to the id so a nameless one still restores.
+      // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
+      // same values at runtime, they're only ever set from that union.
+      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
+    });
 
     // Metrics must never be able to swallow the navigation.
     try {
