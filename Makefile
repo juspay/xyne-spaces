@@ -12,6 +12,7 @@ TRANSCRIPTION_AGENT_IMAGE_NAME ?= xyne-spaces-transcription-agent
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
 CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
+ZERO_IMAGE_NAME ?= xyne-spaces-zero
 SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
 SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
 
@@ -19,6 +20,10 @@ SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short
 # of git). Empty default: local builds ship a bundle with analytics disabled.
 VITE_POSTHOG_KEY ?=
 VITE_POSTHOG_HOST ?=
+
+ZERO_VERSION ?= 1.9.0
+ZERO_IMAGE_TAG ?= $(SOURCE_SHORT_COMMIT)-zero$(ZERO_VERSION)
+ZERO_TARBALL ?=
 
 #temp2
 # Backend targets 3s
@@ -145,6 +150,22 @@ clean-transcription-agent:
 	docker rmi $(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# Zero cache runtime targets. Built separately from build-all because the image
+# needs ZERO_VERSION and an optional ZERO_TARBALL.
+build-zero:
+	$(info Building $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) / zero: $(ZERO_VERSION) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG))
+	docker buildx build -f apps/zero/Dockerfile -t $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) --build-arg "ZERO_VERSION=$(ZERO_VERSION)" --build-arg "ZERO_TARBALL=$(ZERO_TARBALL)" --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+
+push-zero:
+	$(info Pushing to registry: $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) / zero: $(ZERO_VERSION))
+	docker buildx build -f apps/zero/Dockerfile -t $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) --build-arg "ZERO_VERSION=$(ZERO_VERSION)" --build-arg "ZERO_TARBALL=$(ZERO_TARBALL)" --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	$(info Successfully pushed: $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG))
+
+clean-zero:
+	docker rmi $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) || true
+	docker rmi $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) || true
+
 # Claw runtime targets (xyne-claw — the agent runtime). Root build context (.)
 # because the Dockerfile COPYs packages/xyne-claw-shared/ and packages/kata-sdk/ too.
 build-claw:
@@ -264,4 +285,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-zero push-zero clean-zero build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
