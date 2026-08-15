@@ -1821,6 +1821,7 @@ model ChannelStats {
   channel          Channel               @relation(fields: [channelId], references: [id])
 
   @@index([channelId])
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
   @@map("channel_stats")
   @@schema("public")
 }
@@ -2290,6 +2291,8 @@ model MessageAttachment {
   @@index([conversationId])
   @@index([entityId])
   @@index([entityId, id])
+  @@index([entityId, entityType, createdAt(sort: Desc)])
+  @@index([workspaceId, createdAt(sort: Desc), id])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -3204,6 +3207,7 @@ model FormContextMapping {
   @@unique([contextId, contextType, formId])
   @@unique([contextId, entityType])
   @@index([contextId, contextType])
+  @@index([formId])
   @@map("forms_context_mapping")
   @@schema("public")
 }

@@ -1,8 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 import { guestTicketAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class TicketsACL extends BaseQueryACL<'tickets'> {
@@ -17,38 +17,15 @@ export class TicketsACL extends BaseQueryACL<'tickets'> {
         .where(guestTicketAccessWhere(this.ctx));
     }
 
-    const channelId = args?.channelId as string | undefined;
-
-    // When the caller knows the user is a member (pre-checked against channel_user_status),
-    // use a scalar EXISTS on channel_participants which resolves once at hydration time
-    // instead of the expensive OR(PUBLIC, EXISTS(participants)) evaluated per-row during push.
-
     query = query.where('workspaceId', '=', this.ctx.workspaceId);
 
-    if (args?.isMember && channelId) {
-      return query.whereExists('channel', (ch) =>
-        ch.whereExists('participants', (p) =>
-          p.where('userId', this.ctx.userID).where('channelId', channelId),
-          { scalar: true }
-        ),
-      );
-    }
-
-    if (args?.isMember === false && channelId) {
-      return query.whereExists('channel', (ch) =>
-        ch.where("id", channelId).where('visibility', ChannelVisibility.PUBLIC),
-        { scalar: true }
-      );
+    const { channelId, isMember } = channelAccessArgs(args);
+    if (channelId) {
+      return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
     return query.whereExists('channel', (ch) =>
-      ch.where(({ or, cmp, exists }) =>
-        or(
-          cmp('visibility', ChannelVisibility.PUBLIC),
-          exists('participants', (p) => p.where('userId', this.ctx.userID))
-        )
-      )
+      ch.where(channelAccessWhere(this.ctx))
     );
-  
   }
 }
