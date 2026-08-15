@@ -13,7 +13,7 @@ import {
   getDMParticipantIdsToFetch,
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
-import { affinityService } from '../../services/affinityService';
+import { rankChannelsByAffinity } from '../../hooks/useSearchMetrics';
 import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
@@ -239,23 +239,11 @@ const GlobalCommandMenu = ({
     // Re-include them so the search `in:` picker can scope to desk channels.
     const emailChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
 
-    // Rank each group by personalization weight (desc), tie-break on recency. Weights are
-    // precomputed into a Map so getChannelWeight (stale-cache background fetch) is never called
-    // inside the comparator. No weights → 0 ties → pure recency, identical to the previous order.
-    const weightById = new Map(
-      visibleChannels.map(c => [c.id, affinityService.getChannelWeight(c.id)]),
-    );
-    const rankByAffinityThenActivity = (list: typeof visibleChannels): VisibleChannel[] =>
-      [...list].sort((a, b) => {
-        const wa = weightById.get(a.id) ?? 0;
-        const wb = weightById.get(b.id) ?? 0;
-        if (wa !== wb) return wb - wa;
-        return (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0);
-      });
-
-    const rankedStarred = rankByAffinityThenActivity(grouped.starred);
-    const rankedChannels = rankByAffinityThenActivity([...grouped.channels, ...emailChannels]);
-    const rankedDirectMessages = rankByAffinityThenActivity(grouped.directMessages);
+    // Rank each group by personalization weight (desc), tie-break on recency (shared with the
+    // `/chat`/`/call` pickers). No weights → 0 ties → pure recency, identical to the previous order.
+    const rankedStarred = rankChannelsByAffinity(grouped.starred);
+    const rankedChannels = rankChannelsByAffinity([...grouped.channels, ...emailChannels]);
+    const rankedDirectMessages = rankChannelsByAffinity(grouped.directMessages);
 
     return {
       starred: rankedStarred,

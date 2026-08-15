@@ -279,6 +279,38 @@ export function rankUsersWithMfu<
 }
 
 /**
+ * Rank channels/DMs by personalization weight (desc), tie-break on recency
+ * (`channelStats.lastActivityAt`). Mirrors the empty-browse ordering used by the
+ * Cmd+K channel groups so the `/chat`/`/call` pickers surface the same
+ * most-used conversations first.
+ *
+ * Weights are precomputed into a Map up front — never call `getChannelWeight`
+ * inside the comparator, since its stale-cache background refetch would re-check
+ * on every comparison. No weights → all-0 ties → pure recency, i.e. the incoming
+ * order is preserved. `channelStats` is optional so base `Channel` lists (no
+ * relation loaded) degrade to weight-only, while `VisibleChannel` lists keep the
+ * recency tie-break.
+ */
+export function rankChannelsByAffinity<
+  T extends {
+    id: string;
+    // `| undefined` is required: VisibleChannel's channelStats is a Zero `one()` relation typed
+    // `{…} | undefined`, which exactOptionalPropertyTypes rejects for a plain optional field.
+    channelStats?: { lastActivityAt?: number | null } | null | undefined;
+  },
+>(channels: T[]): T[] {
+  const weightById = new Map(
+    channels.map(c => [c.id, affinityService.getChannelWeight(c.id)] as const),
+  );
+  return [...channels].sort((a, b) => {
+    const wa = weightById.get(a.id) ?? 0;
+    const wb = weightById.get(b.id) ?? 0;
+    if (wa !== wb) return wb - wa;
+    return (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0);
+  });
+}
+
+/**
  * Filter channel entries for Cmd+K search.
  *
  * DMs/Group DMs match against `searchableNames` (participant display names)

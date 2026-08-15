@@ -682,6 +682,7 @@ const ChannelCommandMenu = ({
     resetSearchState,
     navigate: path => void navigate(path),
     onCommandClick: handleSlashCommandClick,
+    dmContactRecency,
   });
   // The parent owns the input box, ghost, keydown handler, mention guards and the compose/confirm
   // overlays, so it reads these fields directly. Everything the palette needs is handed to it as the
