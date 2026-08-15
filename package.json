@@ -73,7 +73,7 @@
         {
           "preset": "conventionalcommits",
           "parserOpts": {
-            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(XYNE-\\d+):?\\s*(.+)$",
+            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(?:(XYNE-\\d+):?\\s*)?(.+)$",
             "headerCorrespondence": [
               "type",
               "ticket",
@@ -145,7 +145,7 @@
         {
           "preset": "conventionalcommits",
           "parserOpts": {
-            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(XYNE-\\d+):?\\s*(.+)$",
+            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(?:(XYNE-\\d+):?\\s*)?(.+)$",
             "headerCorrespondence": [
               "type",
               "ticket",
