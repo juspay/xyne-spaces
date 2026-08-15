@@ -17,6 +17,9 @@ SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short
 ZERO_VERSION ?= 1.9.0
 ZERO_IMAGE_TAG ?= $(SOURCE_SHORT_COMMIT)-zero$(ZERO_VERSION)
 ZERO_TARBALL ?=
+# GKE nodes are amd64. Pin the platform so an arm64 dev machine (Apple Silicon)
+# still produces a runnable image instead of one that fails with "exec format error".
+ZERO_PLATFORM ?= linux/amd64
 
 #temp2
 # Backend targets 3s
@@ -102,13 +105,13 @@ clean-lighton-ocr-wrapper:
 
 
 build-zero:
-	$(info Building $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) / zero: $(ZERO_VERSION) / git-head: $(SOURCE_COMMIT))
+	$(info Building $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) / zero: $(ZERO_VERSION) / platform: $(ZERO_PLATFORM) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG))
-	docker buildx build -f apps/zero/Dockerfile -t $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) --build-arg "ZERO_VERSION=$(ZERO_VERSION)" --build-arg "ZERO_TARBALL=$(ZERO_TARBALL)" --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+	docker buildx build -f apps/zero/Dockerfile --platform $(ZERO_PLATFORM) -t $(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) --build-arg "ZERO_VERSION=$(ZERO_VERSION)" --build-arg "ZERO_TARBALL=$(ZERO_TARBALL)" --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
 
 push-zero:
-	$(info Pushing to registry: $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) / zero: $(ZERO_VERSION))
-	docker buildx build -f apps/zero/Dockerfile -t $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) --build-arg "ZERO_VERSION=$(ZERO_VERSION)" --build-arg "ZERO_TARBALL=$(ZERO_TARBALL)" --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	$(info Pushing to registry: $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) / zero: $(ZERO_VERSION) / platform: $(ZERO_PLATFORM))
+	docker buildx build -f apps/zero/Dockerfile --platform $(ZERO_PLATFORM) -t $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG) --build-arg "ZERO_VERSION=$(ZERO_VERSION)" --build-arg "ZERO_TARBALL=$(ZERO_TARBALL)" --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
 	$(info Successfully pushed: $(NS)/$(ZERO_IMAGE_NAME):$(ZERO_IMAGE_TAG))
 
 clean-zero:
