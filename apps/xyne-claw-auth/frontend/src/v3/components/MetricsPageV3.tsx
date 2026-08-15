@@ -9,7 +9,7 @@
  * 1180px max-width column matching the rest of v3.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
   BarChart, Bar,
@@ -25,6 +25,7 @@ import {
 } from "../../lib/api";
 import { Skeleton } from "./ui/Skeleton";
 import { Switch } from "./ui/Switch";
+import { SelectField, type SelectOption } from "./ui/SelectField";
 import { useAdminStatus } from "../hooks/useAdminStatus";
 
 interface MetricsPageV3Props {
@@ -303,6 +304,10 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
   const [agentSlugs, setAgentSlugs] = useState<string[]>([]);
   const [allOrgs, setAllOrgs] = useState(false);
   const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
+  const agentOptions = useMemo<SelectOption[]>(() => ([
+    { value: "", label: "All workspace" },
+    ...agentSlugs.map((slug) => ({ value: slug, label: slug })),
+  ]), [agentSlugs]);
 
   useEffect(() => {
     if (!isAdmin && allOrgs) setAllOrgs(false);
@@ -356,17 +361,15 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
                 All orgs
               </label>
             )}
-            <label className="text-[12px] text-xyne-fg-muted">View:</label>
-            <select
+            <SelectField
+              id="metrics-agent-view"
+              label="View"
               value={selectedAgent ?? ""}
-              onChange={(e) => setSelectedAgent(e.target.value || null)}
-              className="text-[13px] rounded-md bg-xyne-bg-secondary border border-xyne-border px-3 py-1.5 text-xyne-fg-primary focus:outline-none focus:ring-1 focus:ring-xyne-fg-primary/30"
-            >
-              <option value="">All workspace</option>
-              {agentSlugs.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+              onValueChange={(value) => setSelectedAgent(value || null)}
+              options={agentOptions}
+              placeholder="Choose a view…"
+              className="w-[260px]"
+            />
           </div>
         </div>
         <MetricsPanel
