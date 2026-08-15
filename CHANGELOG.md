@@ -1,3 +1,15 @@
+## [1.186.0](https://github.com/juspay/xyne-spaces/compare/v1.185.0...v1.186.0) (2026-08-15)
+
+
+### Features
+
+* add Zero <> Prisma column-parity guard (pre-commit + CI) ([#554](https://github.com/juspay/xyne-spaces/issues/554)) ([9c88571](https://github.com/juspay/xyne-spaces/commit/9c885710bed0a619a54ab30a7212337e50ac154c))
+
+
+### Bug Fixes
+
+* add loading checks and confirmation for saving non-linear board … ([#472](https://github.com/juspay/xyne-spaces/issues/472)) ([3094066](https://github.com/juspay/xyne-spaces/commit/30940663e0cca624ae5c7ecf4400a48192978306))
+
 ## [1.185.0](https://github.com/juspay/xyne-spaces/compare/v1.184.0...v1.185.0) (2026-08-15)
 
 
