@@ -96,6 +96,8 @@ overrides:
   ws@8: 8.21.1
   xlsx: npm:@e965/xlsx@0.20.3
 
+packageExtensionsChecksum: sha256-kYla/jBKu002rBl6Loamo/+kTzooiIs3F5TZy64LHO8=
+
 importers:
 
   .:
@@ -11052,6 +11054,10 @@ packages:
   conventional-changelog-angular@8.3.1:
     resolution: {integrity: sha512-6gfI3otXK5Ph5DfCOI1dblr+kN3FAm5a97hYoQkqNZxOaYa5WKfXH+AnpsmS+iUH2mgVC2Cg2Qw9m5OKcmNrIg==}
     engines: {node: '>=18'}
+
+  conventional-changelog-conventionalcommits@7.0.2:
+    resolution: {integrity: sha512-NKXYmMR/Hr1DevQegFB4MwfM5Vv0m4UIxKZTTYuD98lpTknaZlSRrDOG4X7wIXpGkfsYxZTghUN+Qq+T0YQI7w==}
+    engines: {node: '>=16'}
 
   conventional-changelog-conventionalcommits@9.3.1:
     resolution: {integrity: sha512-dTYtpIacRpcZgrvBYvBfArMmK2xvIpv2TaxM0/ZI5CBtNUzvF2x0t15HsbRABWprS6UPmvj+PzHVjSx4qAVKyw==}
@@ -27132,6 +27138,7 @@ snapshots:
   '@semantic-release/commit-analyzer@11.1.0(semantic-release@22.0.12(typescript@5.9.3))':
     dependencies:
       conventional-changelog-angular: 7.0.0
+      conventional-changelog-conventionalcommits: 7.0.2
       conventional-commits-filter: 4.0.0
       conventional-commits-parser: 5.0.0
       debug: 4.4.3(supports-color@8.1.1)
@@ -27145,6 +27152,7 @@ snapshots:
   '@semantic-release/commit-analyzer@9.0.2(semantic-release@22.0.12(typescript@5.9.3))':
     dependencies:
       conventional-changelog-angular: 5.0.13
+      conventional-changelog-conventionalcommits: 7.0.2
       conventional-commits-filter: 2.0.7
       conventional-commits-parser: 3.2.4
       debug: 4.4.3(supports-color@8.1.1)
@@ -27215,6 +27223,7 @@ snapshots:
   '@semantic-release/release-notes-generator@10.0.3(semantic-release@22.0.12(typescript@5.9.3))':
     dependencies:
       conventional-changelog-angular: 5.0.13
+      conventional-changelog-conventionalcommits: 7.0.2
       conventional-changelog-writer: 5.0.1
       conventional-commits-filter: 2.0.7
       conventional-commits-parser: 3.2.4
@@ -27231,6 +27240,7 @@ snapshots:
   '@semantic-release/release-notes-generator@12.1.0(semantic-release@22.0.12(typescript@5.9.3))':
     dependencies:
       conventional-changelog-angular: 7.0.0
+      conventional-changelog-conventionalcommits: 7.0.2
       conventional-changelog-writer: 7.0.1
       conventional-commits-filter: 4.0.0
       conventional-commits-parser: 5.0.0
@@ -30730,6 +30740,10 @@ snapshots:
       compare-func: 2.0.0
 
   conventional-changelog-angular@8.3.1:
+    dependencies:
+      compare-func: 2.0.0
+
+  conventional-changelog-conventionalcommits@7.0.2:
     dependencies:
       compare-func: 2.0.0
 
