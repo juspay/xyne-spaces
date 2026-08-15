@@ -4039,7 +4039,8 @@ interface MessageAttachmentRow {
   size: number;
   createdAt: string;
   uploadedByUserId: string;
-  entityId: string;          // messageId for CHAT entityType
+  entityId: string;          // messageId for CHAT; ticket/email id for TICKET/EMAIL
+  entityType?: string;       // CHAT, TICKET, EMAIL, ... (present when the query returns it)
   url?: string;
 }
 
@@ -4049,11 +4050,13 @@ const spacesThreadAttachments: ToolDef = {
     "List every non-deleted attachment in a Spaces conversation thread. " +
     "Pass the conversationId from your Session Metadata block. " +
     "Returns one line per attachment with id, filename, mimetype, size, uploader, posted time, and source messageId. " +
+    "Attachments on a linked ticket or email are NOT part of the chat thread (they are keyed by the ticket/email id, not the conversation), so pass that id as entityId to include them. " +
     "Use the returned id with spaces-fetch-attachment to download.",
   inputSchema: {
     type: "object",
     properties: {
       conversationId: { type: "string", description: "Thread/conversation id (from Session Metadata or spaces-messages results)." },
+      entityId: { type: "string", description: "Optional. A ticket or email id whose attachments should ALSO be listed. Ticket/email attachments are stored with conversationId unset (keyed by this id), so they never appear from conversationId alone — pass the ticket/email id here to surface them (e.g. an invoice attached to the email, or images on the ticket)." },
       limit: { type: "number", minimum: 1, maximum: 200, default: 100, description: "Max attachments to return (default 100, max 200)." },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0). Call again with a higher offset to page through a thread with many attachments." },
     },
@@ -4063,6 +4066,7 @@ const spacesThreadAttachments: ToolDef = {
     try {
       const conversationId = String(args["conversationId"] ?? "");
       if (!conversationId) return err("conversationId is required");
+      const entityId = String(args["entityId"] ?? "").trim();
       const limit = (args["limit"] as number | undefined) ?? 100;
       const offset = (args["offset"] as number | undefined) ?? 0;
 
@@ -4117,11 +4121,17 @@ const spacesThreadAttachments: ToolDef = {
         take: fetchCap,
       })) as MessageAttachmentRow[];
 
-      const byEntity = messageIds.length > 0
+      // Union the conversation's messageIds with an explicit ticket/email
+      // entityId (when supplied). TICKET/EMAIL attachments carry
+      // conversationId = NULL and entityId = <ticket/email id>, so the
+      // conversationId query above can never see them; adding the id to this
+      // entityId `in` filter is the only path that surfaces them.
+      const entityIds = entityId ? [...messageIds, entityId] : messageIds;
+      const byEntity = entityIds.length > 0
         ? ((await interact({
             model: "messageAttachment",
             operation: "findMany",
-            where: { entityId: { in: messageIds }, isDeleted: { equals: false } },
+            where: { entityId: { in: entityIds }, isDeleted: { equals: false } },
             orderBy: [{ createdAt: "asc" }],
             take: fetchCap,
           })) as MessageAttachmentRow[])
@@ -4151,13 +4161,17 @@ const spacesThreadAttachments: ToolDef = {
         // entityId here IS the messageId the attachment was posted on, so the
         // citation chip can deep-link straight to that message in the thread
         // panel instead of dropping the user at the top.
+        // Only CHAT attachments have entityId == a real messageId we can
+        // deep-link to. For TICKET/EMAIL rows entityId is the ticket/email id,
+        // so don't emit it as a messageId (that would be a broken link).
+        const isChatRow = !r.entityType || r.entityType === "CHAT";
         pushThreadCitation(
           citations,
           channelIdForChunk,
           conversationId,
           idx + 1,
           r.originalFilename,
-          r.entityId ? { messageId: r.entityId } : undefined,
+          isChatRow && r.entityId ? { messageId: r.entityId } : undefined,
         );
         return prefixChunk(
           idx + 1,
