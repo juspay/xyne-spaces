@@ -352,7 +352,7 @@ const ChannelCommandMenu = ({
   // (and the browser back gesture) closes the palette instead of leaving the page. When a
   // row sends the user to the results page, that entry keeps the search — so back from the
   // results page reopens the palette with it rather than landing on a bare page.
-  const { markNavigating } = useHistoryBackedOverlay<InitialQueryData>({
+  const { markNavigating, setPayload } = useHistoryBackedOverlay<InitialQueryData>({
     open,
     onClose: () => onOpenChange(false),
     onRestore: restored => {
@@ -1023,6 +1023,20 @@ const ChannelCommandMenu = ({
     return params;
   }
 
+  // Keep the palette's history entry carrying the current search. The palette can be left
+  // in many ways — opening a DM, a channel, a message, a ticket, the results page — and
+  // each goes through its own handler, so recording it here is what makes ANY of them
+  // restorable when the user comes back.
+  useEffect(() => {
+    if (!open) return;
+    setPayload({
+      text: searchText,
+      // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
+      // same values at runtime, they're only ever set from that union.
+      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
+    });
+  }, [open, searchText, selectedMentions, setPayload]);
+
   // Leave the palette for the full-screen results page via the "Show results for" row.
   // Logged as its own event so the jump-out rate is readable per palette and trigger.
   const goToSearchResults = (trigger: 'click' | 'keyboard'): void => {
@@ -1031,17 +1045,9 @@ const ChannelCommandMenu = ({
     navigatingToResultsRef.current = true;
     showResultsTriggerRef.current = 'keyboard';
 
-    // Hand the history hook the search we're leaving with. It stamps this onto the
-    // palette's entry, so back from the results page reopens cmd+K with it — and it also
-    // marks the close as a navigation, so the entry isn't popped out from under us.
-    markNavigating({
-      text: searchText,
-      // Plain-object copies: history state has to survive structured cloning. Chips carry
-      // a display name; fall back to the id so a nameless one still restores.
-      // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
-      // same values at runtime, they're only ever set from that union.
-      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
-    });
+    // Mark the close as a navigation so the palette's entry isn't popped out from under
+    // us. The search itself is already on that entry, kept current by the effect above.
+    markNavigating();
 
     // Metrics must never be able to swallow the navigation.
     try {

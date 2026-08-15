@@ -43,7 +43,10 @@ export function useHistoryBackedOverlay<TPayload = unknown>({
   onRestore,
   id,
   enabled = true,
-}: HistoryBackedOverlayParams<TPayload>): { markNavigating: (payload?: TPayload) => void } {
+}: HistoryBackedOverlayParams<TPayload>): {
+  markNavigating: () => void;
+  setPayload: (payload: TPayload) => void;
+} {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -70,6 +73,11 @@ export function useHistoryBackedOverlay<TPayload = unknown>({
 
   // The entry we last restored, so closing the overlay doesn't immediately re-restore it.
   const restoredKeyRef = useRef<string | null>(null);
+
+  // True between scheduling a pop and it landing. Without it the restore branch fires in
+  // that gap — the overlay is closed and still standing on its own entry — and springs
+  // the overlay straight back open.
+  const poppingRef = useRef(false);
 
   const state = location.state as Record<string, unknown> | null;
   const isOverlayEntry = state?.[OVERLAY_STATE_KEY] === id;
@@ -120,6 +128,7 @@ export function useHistoryBackedOverlay<TPayload = unknown>({
     if (
       !open &&
       !pushedRef.current &&
+      !poppingRef.current &&
       isOverlayEntry &&
       payload !== undefined &&
       restoredKeyRef.current !== location.key &&
@@ -146,11 +155,16 @@ export function useHistoryBackedOverlay<TPayload = unknown>({
       // results page) all pass through here; popping on top of their push would silently
       // undo it. If the shape ever changes the check just fails and we skip the pop — a
       // stale entry, never a cancelled navigation.
+      poppingRef.current = true;
       const timer = setTimeout(() => {
         const live = window.history.state as { usr?: Record<string, unknown> } | null;
         if (live?.usr?.[OVERLAY_STATE_KEY] === id) void navigate(-1);
+        poppingRef.current = false;
       }, 0);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        poppingRef.current = false;
+      };
     }
     return undefined;
     // `location` is read for the push url only — re-running on every location change
@@ -158,24 +172,35 @@ export function useHistoryBackedOverlay<TPayload = unknown>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isOverlayEntry, enabled, id, navigate]);
 
-  const markNavigating = useCallback(
-    (nextPayload?: TPayload): void => {
-      navigatingRef.current = true;
-      if (nextPayload === undefined) return;
-      // Stamp the payload onto the entry we're about to bury, so returning to it can
-      // restore the overlay. Replace (not push) — this IS our entry.
-      void navigate(hrefRef.current, {
-        replace: true,
-        state: {
-          ...stateRef.current,
-          [OVERLAY_STATE_KEY]: id,
-          [OVERLAY_PAYLOAD_KEY]: nextPayload,
-        },
-        preventScrollReset: true,
-      });
+  const markNavigating = useCallback((): void => {
+    navigatingRef.current = true;
+  }, []);
+
+  /**
+   * Keeps the overlay's own history entry up to date with whatever should be handed back
+   * if the user ever returns to it. Call it as the state changes — the overlay can be left
+   * in a hundred ways (a result, a channel, a DM, the results page, an external link), and
+   * only the entry itself is guaranteed to still be there afterwards.
+   *
+   * Written straight to `window.history` rather than through the router: this is the
+   * current entry, the url is unchanged, and a router replace would re-render the tree on
+   * every keystroke. React Router reads `usr` back out on a pop, so a restore still sees it.
+   */
+  const setPayload = useCallback(
+    (nextPayload: TPayload): void => {
+      const live = window.history.state as {
+        usr?: Record<string, unknown> | null;
+        key?: string;
+        idx?: number;
+      } | null;
+      if (live?.usr?.[OVERLAY_STATE_KEY] !== id) return;
+      window.history.replaceState(
+        { ...live, usr: { ...live.usr, [OVERLAY_PAYLOAD_KEY]: nextPayload } },
+        '',
+      );
     },
-    [navigate, id],
+    [id],
   );
 
-  return { markNavigating };
+  return { markNavigating, setPayload };
 }
