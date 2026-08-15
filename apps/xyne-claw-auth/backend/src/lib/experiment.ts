@@ -2,6 +2,7 @@ import type { ExperimentFinding, ExperimentReview, ExperimentRun } from "@prisma
 import { CONFIG } from "../config.js";
 import { experimentRepository, agentRepository } from "../repositories/index.js";
 import { setSession, type SessionContext } from "./session-context.js";
+import { parseFrontierItems } from "./understanding-frontier.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
@@ -479,4 +480,33 @@ export function buildCheckerTask(run: ExperimentRun, epoch: number, findings: Ex
     `## Findings recorded in epoch ${epoch}`,
     rows,
   ].join("\n");
+}
+
+/**
+ * Write one open conjecture per named item. Best-effort: a seeding failure must
+ * not strand the run, it just falls back to model-driven enumeration.
+ * Returns how many paths were seeded.
+ */
+export async function seedUnderstandingFrontier(
+  runId: string,
+  focus: string | null | undefined,
+): Promise<number> {
+  const items = parseFrontierItems(focus);
+  if (items.length === 0) return 0;
+  let seeded = 0;
+  for (const item of items) {
+    try {
+      await experimentRepository.addFinding({
+        experimentId: runId,
+        epoch: 1,
+        status: "conjecture",
+        title: item,
+        hypothesis: `Unexplained path: ${item}. Close it by explaining what it is, who writes it, who reads it, and what breaks if it is wrong — with file:line evidence.`,
+      });
+      seeded += 1;
+    } catch {
+      // A duplicate title or a transient write must not abort the seed.
+    }
+  }
+  return seeded;
 }

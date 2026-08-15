@@ -47,7 +47,7 @@ import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
 import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
-import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession, seedUnderstandingFrontier } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -1759,6 +1759,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
     });
     const isUnderstanding = experimentCommand.kind === "understanding";
+    // Seed the frontier from a list the user already gave us (e.g. 57 table
+    // names). Ground truth beats model enumeration: with the paths pre-recorded
+    // the run cannot exit by imagining fewer of them.
+    const seededPaths = isUnderstanding
+      ? await seedUnderstandingFrontier(run.id, experimentCommand.focus).catch(() => 0)
+      : 0;
     await postExperimentReply([
       isUnderstanding ? "**/understanding started**" : "**/experiment started**",
       isUnderstanding
@@ -1766,7 +1772,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         : `Mode: time-boxed autonomous exploration`,
       `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
       ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
-      `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+      seededPaths > 0
+        ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
+        : `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
       `Use \`/experiment status\` to inspect progress.`,
     ].join("\n"));
     try {

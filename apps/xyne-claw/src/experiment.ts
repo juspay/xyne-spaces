@@ -20,6 +20,16 @@ export interface ExperimentContext {
   kind?: "understanding";
 }
 
+/** Minimum closed paths before an "exhausted" frontier is believed. Guards the
+ *  degenerate understanding run: record one conjecture, close it, exit. */
+const MIN_CLOSED_PATHS = 5;
+
+/** `path/to/file.ext:LINE` — the evidence shape an understanding close must
+ *  carry. Mirrors hasResolvableCitation in claw-auth's experiments-internal.ts,
+ *  which enforces the same rule server-side; this copy exists so the agent is
+ *  told BEFORE the round trip, not after a silent downgrade. */
+const CITATION_RE = /[\w./-]+\.[A-Za-z][\w]*:\d+/;
+
 type FindingStatus = "conjecture" | "proved" | "refuted";
 
 interface ExperimentEnvelope<T> {
@@ -299,6 +309,21 @@ export function buildExperimentTools(
             if (typeof title !== "string" || typeof hypothesis !== "string") {
               return textResult("Missing required title or hypothesis.", { error: true });
             }
+            // Understanding runs close a path by EXPLAINING it, and the failure
+            // mode is a close that restates the identifier ("gateway_card_info
+            // stores gateway card info"). A name-restatement cannot cite where
+            // the behaviour lives, so requiring the citation shape up front is
+            // what separates the two. claw-auth enforces the same rule; this
+            // check just fails fast with an actionable message.
+            if (ctx.kind === "understanding" && status === "proved") {
+              const note = typeof p["note"] === "string" ? p["note"] : "";
+              if (!CITATION_RE.test(note)) {
+                return textResult(
+                  "Cannot close this path: `note` needs at least one file:line citation (e.g. `src/foo/bar.ts:214`) showing where the behaviour actually lives, plus what the code does and why. A description that only restates the name does not close a path.",
+                  { error: true, needsCitation: true },
+                );
+              }
+            }
             const payload: {
               epoch: number;
               status: FindingStatus;
@@ -386,11 +411,19 @@ export function buildExperimentTools(
             // Ledger unreachable: we cannot prove exhaustion, so only the
             // deadline cap below can release the run.
           }
-          const frontierExhausted = open === 0 && closed > 0;
+          // FLOOR. `open === 0 && closed > 0` alone is satisfiable by recording
+          // one path and closing it — an exit in epoch 1 having explained a
+          // single thing, which is weaker than the time-boxed loop it replaces.
+          // The cheapest way to satisfy an exhaustion gate is to enumerate less,
+          // so the gate has to require that enumeration happened at all.
+          const frontierExhausted = open === 0 && closed >= MIN_CLOSED_PATHS;
           if (!pastDeadline && !frontierExhausted) {
             const openStr = open === undefined ? "unknown" : String(open);
+            const why = open === 0 && closed < MIN_CLOSED_PATHS
+              ? `Only ${closed} path(s) closed — an exhausted frontier means the scope was enumerated, not that one path was explained. Enumerate every reachable path in scope (at least ${MIN_CLOSED_PATHS}) before the frontier counts as empty.`
+              : `Open paths: ${openStr}, closed: ${closed}. Enumerate every reachable path in scope as an open conjecture, then close each one with file:line evidence. Every new callee or branch you find is itself a new open path.`;
             return textResult(
-              `❌ Cannot end: the code-path frontier is not exhausted (epoch ${ctx.epoch}). Open paths: ${openStr}, closed: ${closed}. Enumerate every reachable path in scope as an open conjecture, then close each one (proved/refuted) with file:line evidence. Every new callee or branch you find is itself a new open path. Exit unlocks only when open reaches 0. Your report was NOT accepted.`,
+              `❌ Cannot end: the code-path frontier is not exhausted (epoch ${ctx.epoch}). ${why} Exit unlocks only when open reaches 0. Your report was NOT accepted.`,
               { refused: true, open, closed },
             );
           }

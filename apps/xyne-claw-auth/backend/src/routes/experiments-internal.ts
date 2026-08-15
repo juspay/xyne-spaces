@@ -3,6 +3,7 @@ import { experimentRepository } from "../repositories/index.js";
 import { proofWasDelivered } from "../repositories/experimentRepository.js";
 import { buildLedgerMarkdown, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
+import { hasResolvableCitation } from "../lib/understanding-frontier.js";
 
 export const experimentsInternalRouter = Router();
 const log = createLogger("experiments-internal");
@@ -60,9 +61,22 @@ experimentsInternalRouter.post("/:id/findings", async (req: Request<{ id: string
   // A claim whose evidence is gone is a conjecture, so that is what we store —
   // the finding is kept, only the label is refused, and the agent is told
   // exactly how to earn it back.
+  //
+  // UNDERSTANDING RUNS PROVE DIFFERENTLY. A coverage-gated run closes a code
+  // path by explaining it with file:line evidence — there is no repro artifact
+  // to deliver, and demanding one made the mode unusable: every close was
+  // downgraded to conjecture, so `open` could never reach 0 and the frontier
+  // could never be exhausted. The durability concern still applies, it just has
+  // a different answer here: a `path/file.ext:123` citation is checkable
+  // against the repo forever, whereas /workspace/... dies with the sandbox.
   let status = body.status;
   let downgradeNote: string | null = null;
-  if (status === "proved" && !proofWasDelivered(body.proofArtifactPath as string | null, run.deliveredArtifacts)) {
+  const understanding = run.kind === "understanding";
+  if (understanding && status === "proved" && !hasResolvableCitation(body.note)) {
+    status = "conjecture";
+    downgradeNote =
+      "Recorded as conjecture, NOT closed: no file:line evidence. Cite where the behaviour actually lives (e.g. `src/foo/bar.ts:214`) in `note`, describing what the code does and why, then record this path again.";
+  } else if (!understanding && status === "proved" && !proofWasDelivered(body.proofArtifactPath as string | null, run.deliveredArtifacts)) {
     status = "conjecture";
     downgradeNote = body.proofArtifactPath
       ? `Recorded as conjecture, NOT proved: ${String(body.proofArtifactPath)} was never delivered to the thread. Call sandbox-deliver-files with that exact path, then record this finding again with proofArtifactPath set to the delivered filename.`
