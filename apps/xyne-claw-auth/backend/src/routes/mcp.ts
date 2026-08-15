@@ -8,6 +8,7 @@ import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
+import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import type { Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
@@ -601,6 +602,9 @@ const CUSTOM_TOOL_INJECTIONS: ReadonlyArray<{
   createIfMissing: boolean;
 }> = [
   { match: (t) => t === "bitbucket", tools: BITBUCKET_CUSTOM_TOOLS, createIfMissing: false },
+  // upload-pr-attachment hits GitHub's REST + uploads API directly, so it works
+  // even when the upstream github MCP server fails to spawn.
+  { match: (t) => t === "github", tools: GITHUB_CUSTOM_TOOLS, createIfMissing: true },
   { match: (t) => t === "postman", tools: POSTMAN_CUSTOM_TOOLS, createIfMissing: false },
   { match: (t) => t === "slack", tools: SLACK_CUSTOM_TOOLS, createIfMissing: true },
   { match: isGrafanaFamilyType, tools: GRAFANA_CUSTOM_TOOLS, createIfMissing: true },
@@ -1597,6 +1601,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     }
     if (serverType === "bitbucket" && tool === "get-pr-template") {
       const result = await handleGetPrTemplate(credentials, params ?? {});
+      res.json({ success: true, data: result });
+      return;
+    }
+
+    // GitHub: proof-of-test media → GitHub's user-attachments CDN, returning
+    // PR-ready markdown. Runs here (not in claw) because the connection's PAT
+    // is decrypted server-side and never leaves this process.
+    if (serverType === "github" && tool === "upload-pr-attachment") {
+      const result = await handleUploadPrAttachment(credentials, params ?? {});
       res.json({ success: true, data: result });
       return;
     }
