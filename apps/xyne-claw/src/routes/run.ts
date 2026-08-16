@@ -41,7 +41,7 @@ import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { buildExperimentTools, type ExperimentContext } from "../experiment.js";
+import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -2723,7 +2723,17 @@ async function processTask(
       log("Daily brief mode — injected terminal emit_brief tool");
     }
     if (experiment) {
-      allTools.push(...buildExperimentTools(experiment, abortRun));
+      // CHECKER (mode:"review") and PARTICIPANT are DIFFERENT toolsets. The
+      // checker gets read-only ledger + experiment-review (and must NOT have
+      // end-experiment / ledger-write — the prompt says so). Previously this
+      // always injected the participant tools, so the checker was told to call
+      // experiment-review but never had it ("experiment-review unavailable,
+      // verdicts not recorded") while wrongly holding end-experiment.
+      allTools.push(
+        ...(experiment.mode === "review"
+          ? buildExperimentReviewTools(experiment)
+          : buildExperimentTools(experiment, abortRun)),
+      );
       log(
         experiment.mode === "review"
           ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
@@ -4713,6 +4723,34 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     judgeContext,
   );
   res.json({ success: true, data: decision });
+});
+
+// ── Provider availability penny-drop (called by claw-auth's retry poller) ──
+// A run that died on provider capacity can't be retried blindly — claw-auth
+// polls this to learn whether the exact model+key is serving again. The keys
+// live HERE (claw env for platform-default runs; BYO config passed in the
+// body), so the probe must run claw-side. Returns state=available|capacity|
+// permanent; claw-auth re-dispatches on available, backs off on capacity, and
+// stops on permanent.
+router.post("/internal/provider-probe", validateS2SKey, async (req, res: Response) => {
+  const { provider, model, providerConfig, automation } = req.body as {
+    provider?: string;
+    model?: string;
+    providerConfig?: { apiKey: string; model: string; baseUrl?: string; authType?: string };
+    automation?: boolean;
+  };
+  if (!provider || typeof provider !== "string") {
+    res.status(400).json({ success: false, error: "provider is required" });
+    return;
+  }
+  const { probeProvider } = await import("../provider-probe.js");
+  const result = await probeProvider({
+    provider,
+    ...(typeof model === "string" ? { model } : {}),
+    ...(providerConfig ? { providerConfig } : {}),
+    ...(automation === true ? { automation: true } : {}),
+  });
+  res.json({ success: true, data: result });
 });
 
 // ── Generate agent prompt (called by xyne-claw-auth) ──────────────────────

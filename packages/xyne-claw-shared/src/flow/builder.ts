@@ -644,6 +644,61 @@ export function buildPromoteProviderFlow(
  * collapses to a confirmation line after tap via
  * replaceFlowCardWithText so the user can't double-tap.
  */
+/**
+ * Capacity-retry card. Posted after a run dies because the model provider is
+ * over capacity, when there is no alternate provider to promote to (otherwise
+ * buildPromoteProviderFlow — switch — is the better offer). Tells the user the
+ * run will be retried automatically once the model is serving again, and offers
+ * a manual "Retry now" plus a "Stop" that deschedules the poller.
+ *
+ * Primitive components only, so it renders on the deployed dashboard with no
+ * schema change. `retryToken` lets the handlers find + deschedule the pending
+ * poller job.
+ */
+export function buildCapacityRetryFlow(
+  provider: string,
+  context: {
+    agentSlug: string;
+    channelId: string;
+    conversationId: string;
+    userId: string;
+    retryToken: string;
+    /** "pending" (auto-retry scheduled), "exhausted" (gave up after the cap),
+     *  "cancelled", or "retrying" (a retry is in flight). Chooses the copy and
+     *  whether the buttons survive. */
+    phase?: 'pending' | 'retrying' | 'exhausted' | 'cancelled';
+  },
+): FlowDefinition {
+  const phase = context.phase ?? 'pending';
+  const b = new FlowBuilder(`capacity-retry-${context.retryToken}`);
+
+  if (phase === 'pending') {
+    b.addText('q', `⚠️ **${provider}** is over capacity right now, so this didn't complete. I'll retry automatically as soon as it's serving again (checking every few minutes for up to ~3 hours). You don't need to do anything — or tap **Retry now** to try immediately.`);
+    b.addButton('now', 'Retry now', { type: 'submit', actionId: 'capacity-retry-now', successMessage: 'Retrying…' }, { variant: 'primary' });
+    b.addButton('cancel', 'Stop retrying', { type: 'submit', actionId: 'capacity-retry-cancel' }, { variant: 'secondary' });
+  } else if (phase === 'retrying') {
+    b.addText('q', `▶ **${provider}** is back — retrying now.`, { variant: 'success' });
+  } else if (phase === 'exhausted') {
+    b.addText('q', `⚠️ **${provider}** is still over capacity after ~3 hours of retries. Tap **Retry now** to try again, or send your request later.`);
+    b.addButton('now', 'Retry now', { type: 'submit', actionId: 'capacity-retry-now', successMessage: 'Retrying…' }, { variant: 'primary' });
+  } else {
+    b.addText('q', `Auto-retry stopped. Mention me again when you're ready to retry.`, { variant: 'muted' });
+  }
+
+  return b
+    .setData({
+      actionType: 'capacity-retry',
+      provider,
+      retryToken: context.retryToken,
+      phase,
+      agentSlug: context.agentSlug,
+      channelId: context.channelId,
+      conversationId: context.conversationId,
+      userId: context.userId,
+    })
+    .build();
+}
+
 export function buildGoalSuggestionFlow(
   rationale: string,
   context: {

@@ -106,11 +106,103 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, isTwinDelivery } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, isTwinDelivery } from "xyne-claw-shared";
+import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
 const clog = createLogger("webhook");
+
+/** A run that died because the model provider was over capacity (429 / quota /
+ *  overloaded / 5xx after fallback), as opposed to a real agent error. */
+function isCapacityFailure(payload: { status?: string; error?: unknown; emptyReason?: string }): boolean {
+  if (payload.emptyReason === "provider_capacity") return true;
+  if (payload.status !== "failed") return false;
+  const e = String(payload.error ?? "").toLowerCase();
+  return /\b429\b|\b50[234]\b|quota|rate.?limit|overloaded|over capacity|service unavailable|too many requests/.test(e);
+}
+
+/**
+ * Schedule an auto-retry when a run failed on PLATFORM provider capacity.
+ *
+ * Interactive → post a card and poll with it; automation → poll silently and
+ * only surface if it gives up. Scoped to the platform provider (litellm/spaces):
+ * a BYO provider that hit capacity is better served by promote-provider
+ * (switch), and re-dispatching BYO needs cred reconstruction we defer. Returns
+ * true if a retry was scheduled (interactive callers use it to suppress the
+ * generic failure notice).
+ */
+async function scheduleCapacityRetryIfNeeded(
+  ctx: SessionContext,
+  payload: { status?: string; error?: unknown; emptyReason?: string; provider?: string; model?: string },
+  interactive: boolean,
+): Promise<boolean> {
+  // Experiments run their own recovery loop (experiment supervisor); don't
+  // double-drive them.
+  if (ctx.isExperiment) return false;
+  if (!isCapacityFailure(payload)) return false;
+  const provider = payload.provider ?? ctx.provider;
+  const isPlatform = !provider || provider === "litellm" || provider === "spaces";
+  if (!isPlatform) return false;
+  // channelId is only needed to POST the card — a channel-less automation
+  // (pure API caller) must still get the silent retry.
+  if (!ctx.agentSlug || !ctx.agentOrgId || !ctx.conversationId || !ctx.senderId) return false;
+  if (interactive && !ctx.channelId) return false;
+
+  const retryToken = crypto.randomUUID();
+  const redispatch = {
+    userId: ctx.senderId,
+    task: ctx.task ?? "",
+    agentSlug: ctx.agentSlug,
+    orgId: ctx.agentOrgId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId ?? "",
+    // Automation retries MUST re-declare their run type: claw's read-only tool
+    // gating (isReadOnlyJob) keys on eventType, and losing it would hand the
+    // retried automation write tools the original never had.
+    ...(ctx.resultForwardUrl ? { eventType: "automation" } : {}),
+    ...(provider ? { provider } : {}),
+    ...(ctx.resultForwardUrl ? { resultForwardUrl: ctx.resultForwardUrl } : {}),
+  };
+
+  let card: { messageId: string; spacesAppId?: string } | undefined;
+  if (interactive) {
+    try {
+      const flow = withSpacesAppId(
+        buildCapacityRetryFlow(provider ?? "the model", {
+          agentSlug: ctx.agentSlug,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+          retryToken,
+          phase: "pending",
+        }),
+        ctx.spacesAppId,
+      );
+      const posted = (await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        flow,
+        userId: ctx.spacesAppUserId,
+      }, ctx.appToken)) as { messageId?: string; id?: string };
+      const messageId = posted?.messageId ?? posted?.id;
+      if (messageId) card = { messageId, ...(ctx.spacesAppId ? { spacesAppId: ctx.spacesAppId } : {}) };
+    } catch (err) {
+      clog.warn("[capacity-retry] failed to post card (scheduling silently):", err instanceof Error ? err.message : err);
+    }
+  }
+
+  await scheduleProviderRetry({
+    retryToken,
+    provider: provider ?? "litellm",
+    ...(payload.model ? { model: payload.model } : {}),
+    automation: !!ctx.resultForwardUrl,
+    redispatch,
+    ...(card ? { card } : {}),
+  });
+  clog.info(`[capacity-retry] scheduled token=${retryToken} interactive=${interactive} automation=${!!ctx.resultForwardUrl} conv=${ctx.conversationId}`);
+  return true;
+}
 
 // Feature flag: when Spaces has the XYNE-12145 fix deployed
 // (POST /api/apps/chat/agentProgress with the authenticateApp middleware), flip
@@ -4696,6 +4788,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // via their callback and return BEFORE the bot-mention surfacing below —
     // they want the callback, not a message posted into a thread.
     if (ctx?.resultForwardUrl) {
+      // Automation capacity failure: schedule a SILENT auto-retry before
+      // forwarding, so an over-capacity model self-heals overnight instead of
+      // the user finding it undone hours later. The retry is a fresh dispatch
+      // carrying the same resultForwardUrl, so its eventual success forwards on.
+      await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
       await forwardResult(ctx.resultForwardUrl, { sessionId, status: "failed", ...(payload.error ? { error: payload.error } : {}) }, "");
       return;
     }
@@ -4881,6 +4978,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     }
 
+    // Capacity auto-retry (interactive): only when promote-provider did NOT fire
+    // — switching to a working provider is the better offer when one exists;
+    // this "wait for the same model to come back" card is for when it doesn't.
+    // Shutdown drains are pod restarts, not capacity — run-recovery refires them.
+    if (!failureSurfaced && !isShutdownDrain && ctx) {
+      const scheduled = await scheduleCapacityRetryIfNeeded(ctx, payload, true).catch(() => false);
+      if (scheduled) failureSurfaced = true;
+    }
+
     // Safety net: a failed run that nothing above surfaced must still tell the
     // user — otherwise the thread goes silent and looks like the agent ignored
     // the mention. Only for conversation-mode failures with a thread to post
@@ -5016,6 +5122,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       } catch (err) {
         log.warn(`mention resolution failed — forwarding raw text: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+    // Capacity failure shaped as an EMPTY completed result: schedule the same
+    // silent retry as the failed path before forwarding, so the automation
+    // self-heals instead of its caller receiving a blank and nobody retrying.
+    if (payload.emptyReason === "provider_capacity" && !forwardText.trim()) {
+      await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
     }
     await forwardResult(ctx.resultForwardUrl, payload, forwardText);
     return;
@@ -5576,6 +5688,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       log.warn("Empty result in approval mode — skipping (no thread message)");
       await deleteSession(sessionId);
       return;
+    }
+
+    // Capacity failures often surface as an EMPTY result (status=completed,
+    // emptyReason=provider_capacity), not status=failed — so hook the auto-retry
+    // here too. The card replaces the generic "try again in a moment" notice.
+    if (payload.emptyReason === "provider_capacity") {
+      const scheduled = await scheduleCapacityRetryIfNeeded(ctx, payload, true).catch(() => false);
+      if (scheduled) {
+        await deleteSession(sessionId).catch(() => {});
+        return;
+      }
     }
 
     log.warn("Empty result — notifying user", {

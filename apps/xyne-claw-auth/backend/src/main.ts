@@ -77,6 +77,7 @@ import { initDailyBriefWorker, closeDailyBriefWorker } from "./queue/daily-brief
 import { closeDailyBriefQueue } from "./queue/daily-brief-queue.js";
 import { initDailyBriefCron } from "./services/dailyBriefCron.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "./queue/run-recovery-worker.js";
+import { initProviderRetryWorker, closeProviderRetryWorker } from "./queue/provider-retry-worker.js";
 import { initExperimentSupervisor, closeExperimentSupervisor } from "./queue/experiment-supervisor.js";
 import { initDigitalTwinBackfillWorker } from "./queue/digital-twin-backfill-worker.js";
 import { initAgentBackfillWorker, closeAgentBackfillWorker } from "./queue/agent-backfill-worker.js";
@@ -347,6 +348,7 @@ listen(CONFIG.port, () => {
     // Normal API pod: the full background fleet, no runner.
     initScheduledJobsWorker();
     initRunRecoveryWorker();
+    initProviderRetryWorker();
     initExperimentSupervisor();
     initDigitalTwinBackfillWorker();
     initAgentBackfillWorker();
@@ -386,6 +388,7 @@ async function shutdown(signal: string): Promise<void> {
     stopBitbucketStatsBackgroundRefresh();
     await closeWorker().catch(() => {});
     await closeRunRecoveryWorker().catch(() => {});
+    await closeProviderRetryWorker().catch(() => {});
     closeExperimentSupervisor();
     await closeEvalImportWorker().catch(() => {});
     await closeEvalGenerationWorker().catch(() => {});

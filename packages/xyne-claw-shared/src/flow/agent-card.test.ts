@@ -221,9 +221,10 @@ describe("buildAgentCardFlow — primitive fallback (agent component not deploye
 
   it("keeps the screenId stable across paths so a phase update lands in place", () => {
     process.env["SPACES_SUPPORTS_AGENT_CARD"] = "true";
-    const nativeId = draft().id;
+    const nativeId = draft().screenId;
     delete process.env["SPACES_SUPPORTS_AGENT_CARD"];
-    expect(draft().id).toBe(nativeId);
+    expect(nativeId).toBeTruthy();
+    expect(draft().screenId).toBe(nativeId);
   });
 
   it("drops the buttons once the draft is decided", () => {

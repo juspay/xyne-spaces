@@ -45,6 +45,7 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
+import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
@@ -1604,6 +1605,58 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         cardSpacesAppId,
       );
       log.info(`[flow-action] agent-card ${decision} request=${requestId} by=${callerUserId} phase=${phase}`);
+      return;
+    }
+
+    // ── Capacity retry card (buildCapacityRetryFlow) ──────────────────────────
+    // "Retry now" dispatches immediately + stops the poller; "Stop retrying"
+    // deschedules it. Both only carry the retryToken; the re-dispatch payload
+    // lives in redis under that token (provider-retry-worker).
+    if (actionType === "capacity-retry") {
+      const retryToken = data["retryToken"] as string | undefined;
+      const capUserId = data["userId"] as string | undefined;
+      const capAgentSlug = data["agentSlug"] as string | undefined;
+      const capChannelId = data["channelId"] as string | undefined;
+      const capConversationId = (data["conversationId"] as string | undefined) ?? conversationId;
+      const capSpacesAppId = data["spacesAppId"] as string | undefined;
+
+      if (!retryToken || !capUserId) {
+        res.status(400).json({ type: "error", message: "Missing capacity-retry fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+      if (!callerUserId || callerUserId !== capUserId) {
+        log.error(`[flow-action] capacity-retry: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${capUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+      if (actionId !== "capacity-retry-now" && actionId !== "capacity-retry-cancel") {
+        res.status(400).json({ type: "error", message: `Unknown capacity-retry action: ${actionId}` } satisfies AppActionResponse);
+        return;
+      }
+
+      if (actionId === "capacity-retry-cancel") {
+        await cancelProviderRetry(retryToken).catch(() => {});
+        resp = { type: "close_screen", finalMessage: "Auto-retry stopped." };
+        res.json(resp);
+        void replaceFlowCardWithText(
+          messageId, capAgentSlug,
+          "Auto-retry stopped. Mention me again when you're ready to retry.",
+          capConversationId, capChannelId, capSpacesAppId,
+        );
+        log.info(`[flow-action] capacity-retry cancel token=${retryToken} by=${callerUserId}`);
+        return;
+      }
+
+      // capacity-retry-now
+      const dispatched = await retryNowByToken(retryToken).catch(() => false);
+      resp = { type: "close_screen", finalMessage: dispatched ? "▶ Retrying now…" : "Couldn't retry — the request expired. Mention me again." };
+      res.json(resp);
+      void replaceFlowCardWithText(
+        messageId, capAgentSlug,
+        dispatched ? "▶ **Retrying now.**" : "This retry request expired. Mention me again to try.",
+        capConversationId, capChannelId, capSpacesAppId,
+      );
+      log.info(`[flow-action] capacity-retry now token=${retryToken} by=${callerUserId} dispatched=${dispatched}`);
       return;
     }
 
