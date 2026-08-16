@@ -57,8 +57,6 @@ import {
   FormContextType,
   FormEntityType,
   ReleaseTrackingMode,
-  isSdlcSurfaceMetadata,
-  isSdlcTicketMetadata,
   serializeTicketMd,
   TicketStatusV2,
   TicketPriority,
@@ -75,7 +73,6 @@ import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { backlogFlowGroup } from '@/services/flowCascadeService';
 import { AppError } from '@/middleware/errorHandler';
-import { mergeSdlcTicketMetadata } from '@/sdlc/sdlcTicketMetadata';
 
 import { z } from 'zod';
 
@@ -668,21 +665,6 @@ export class TicketController {
         board?.boardType === BoardType.FLOW && !parentTicketId
           ? BaseTicketType.Epic
           : ticketType;
-      const sdlcRepo = actualChannelId
-        ? await prisma.repo.findFirst({
-            where: {
-              channelId: actualChannelId,
-              projectId,
-              project: { sdlcBoardId: boardId },
-            },
-            select: { id: true },
-          })
-        : null;
-      const resolvedMetadata = sdlcRepo ? mergeSdlcTicketMetadata(metadata, sdlcRepo.id) : metadata;
-      const sdlcConversationMetadata = sdlcRepo
-        ? { surface: 'SDLC', repoId: sdlcRepo.id }
-        : undefined;
-
       // Process file uploads BEFORE transaction (external I/O operation)
       let uploadedFiles: UploadedFileResult[] = [];
       if (files.length > 0 && (!draftAttachmentIds || draftAttachmentIds.length === 0)) {
@@ -810,7 +792,7 @@ export class TicketController {
             statusV2: effectiveStatusV2,
             priority,
             eta,
-            metadata: resolvedMetadata,
+            metadata,
             closedAt,
             closedBy,
             merchantId,
@@ -844,7 +826,6 @@ export class TicketController {
             data: {
               ticketId: ticket.id,
               ticket_md: ticketMd,
-              ...(sdlcConversationMetadata && { metadata: sdlcConversationMetadata }),
             },
           });
 
@@ -950,7 +931,7 @@ export class TicketController {
             statusV2: effectiveStatusV2,
             priority,
             eta,
-            metadata: resolvedMetadata,
+            metadata,
             closedAt,
             closedBy,
             merchantId,
@@ -998,7 +979,6 @@ export class TicketController {
             data: {
               ticketId: ticket.id,
               ticket_md: ticketMd,
-              ...(sdlcConversationMetadata && { metadata: sdlcConversationMetadata }),
             },
           });
 
@@ -1537,23 +1517,6 @@ export class TicketController {
 
       const { assigneeId, stage, groupId, title, description, priority, status, eta, tags } =
         req.body ?? {};
-      if (stage !== undefined || status !== undefined) {
-        const lifecycleTicket = await prisma.ticket.findUnique({
-          where: { id: ticketId },
-          select: { metadata: true, board: { select: { metadata: true } } },
-        });
-        if (
-          lifecycleTicket &&
-          (isSdlcTicketMetadata(lifecycleTicket.metadata) ||
-            isSdlcSurfaceMetadata(lifecycleTicket.board.metadata))
-        ) {
-          res.status(409).json({
-            error: 'Ticket stages are controlled by the SDLC workflow',
-            code: 'SDLC_WORKFLOW_CONTROLLED',
-          });
-          return;
-        }
-      }
       // Custom form-field values, keyed by field name. Accept `formFields`
       // (preferred) or the legacy `dynamicFields` alias used by the apps API.
       const rawFormFields = (req.body?.formFields ?? req.body?.dynamicFields) as unknown;

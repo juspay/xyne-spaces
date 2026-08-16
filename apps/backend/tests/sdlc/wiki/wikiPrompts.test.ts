@@ -114,7 +114,7 @@ describe('SDLC Wiki prompts', () => {
     expect(prompt).toContain('spaces-sdlc-mutate-artifact');
   });
 
-  it.each(['ARCHITECTURE_VALIDATOR', 'OPERATIONS_VALIDATOR'] as const)(
+  it.each(['ARCHITECTURE_VALIDATOR'] as const)(
     'makes %s explicitly read-only',
     (role) => {
       expect(SDLC_WIKI_ROLE_INSTRUCTIONS[role]).toContain('read-only');

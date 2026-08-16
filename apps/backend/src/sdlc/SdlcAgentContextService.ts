@@ -5,6 +5,7 @@ import { allBaselinesApproved } from './sdlcProgressiveGate';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
+import { issueSdlcInteractiveGrant } from './vcs/sdlcInteractiveGrant';
 
 export type SdlcAgentOperation = 'interactive' | 'baseline' | 'artifact' | 'work' | 'wiki';
 export type SdlcWikiAgentRole =
@@ -14,7 +15,6 @@ export type SdlcWikiAgentRole =
   | 'BOOTSTRAP'
   | 'GENERATOR'
   | 'ARCHITECTURE_VALIDATOR'
-  | 'OPERATIONS_VALIDATOR'
   | 'CORRECTOR';
 
 export interface SdlcAgentContextInput {
@@ -24,12 +24,12 @@ export interface SdlcAgentContextInput {
   conversationId?: string;
   setupExecutionId?: string;
   baselineKind?: string;
+  generationCommit?: string;
   artifactKind?: 'PRD' | 'TECH_DOC';
   artifactId?: string;
   ticketId?: string;
   sourceType?: 'CANVAS' | 'TICKET';
   sourceId?: string;
-  writeRequested?: boolean;
   wikiRole?: SdlcWikiAgentRole;
   wikiAssignedCommitShas?: string[];
   wikiBootstrapRef?: string | null;
@@ -44,7 +44,7 @@ export interface SdlcAgentContext {
   channelId: string;
   actorUserId: string;
   repository: { id: string; name: string; url: string; baseBranch: string };
-  permissions: { repositoryRole: 'ADMIN' | 'MEMBER'; writeRequested: boolean };
+  permissions: { repositoryRole: 'ADMIN' | 'MEMBER' };
   gates: {
     capabilities: unknown[];
     allBaselinesApproved: boolean;
@@ -54,6 +54,7 @@ export interface SdlcAgentContext {
     sessionId: string | null;
     conversationId: string | null;
   };
+  interactiveGrant: string | null;
   artifact: {
     kind: string | null;
     id: string | null;
@@ -63,6 +64,7 @@ export interface SdlcAgentContext {
   ticketId: string | null;
   setupExecutionId: string | null;
   baselineKind: string | null;
+  generationCommit: string | null;
   wiki: {
     role: SdlcWikiAgentRole | null;
     assignedCommitShas: string[];
@@ -111,7 +113,7 @@ export class SdlcAgentContextService {
     if (!participant) throw new AppError('You are not a member of this repository', 403);
     const baselines = await this.prisma.canvas.findMany({
       where: { channelId: repo.channelId },
-      select: { metadata: true },
+      select: { metadata: true, lastEditedAt: true },
     });
     const parsed = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
     return {
@@ -129,7 +131,6 @@ export class SdlcAgentContextService {
       },
       permissions: {
         repositoryRole: participant.role === 'ADMIN' ? 'ADMIN' : 'MEMBER',
-        writeRequested: input.writeRequested === true,
       },
       gates: {
         capabilities: Array.isArray(repo.accessCapabilities) ? repo.accessCapabilities : [],
@@ -140,6 +141,19 @@ export class SdlcAgentContextService {
         sessionId: input.sessionId ?? null,
         conversationId: input.conversationId ?? null,
       },
+      interactiveGrant:
+        input.operation === 'interactive' && input.conversationId
+          ? issueSdlcInteractiveGrant(
+              {
+                agentSlug: 'sdlc-agent',
+                workspaceId: actor.workspaceId,
+                repoId: repo.id,
+                actorUserId: actor.userId,
+                conversationId: input.conversationId,
+              },
+              process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || ''
+            )
+          : null,
       artifact: {
         kind: input.artifactKind ?? null,
         id: input.artifactId ?? null,
@@ -149,6 +163,7 @@ export class SdlcAgentContextService {
       ticketId: input.ticketId ?? null,
       setupExecutionId: input.setupExecutionId ?? null,
       baselineKind: input.baselineKind ?? null,
+      generationCommit: input.generationCommit ?? null,
       wiki: {
         role: input.wikiRole ?? null,
         assignedCommitShas: input.wikiAssignedCommitShas ?? [],

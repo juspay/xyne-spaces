@@ -83,8 +83,6 @@ import {
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
 import {
   createSdlcLinkSchema,
-  isSdlcSurfaceMetadata,
-  isSdlcTicketMetadata,
   sdlcDiscussionSchema,
 } from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
@@ -4121,18 +4119,6 @@ export const mutators = defineMutators({
 
         const currentTicket = await tx.run(zql.tickets.where('id', id).one());
         if (!currentTicket) throw new Error('Ticket not found');
-        const lifecycleChange = stageName !== undefined || statusV2 !== undefined;
-        const currentBoard = lifecycleChange
-          ? await tx.run(zql.boards.where('id', currentTicket.boardId).one())
-          : null;
-        if (
-          lifecycleChange &&
-          (isSdlcTicketMetadata(currentTicket.metadata) ||
-            isSdlcSurfaceMetadata(currentBoard?.metadata))
-        ) {
-          throw new Error('Ticket stages are controlled by the SDLC workflow');
-        }
-
         const updateData: TicketUpdateData = {
           updatedBy: ctx.userID,
           updatedAt: updatedAt,

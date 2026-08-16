@@ -3,13 +3,37 @@ import { z } from "zod";
 export const SDLC_BASELINE_KINDS = [
   "CORE_CODE_MAP",
   "FRONTEND_DESIGN_SYSTEM",
+  "BACKEND_DESIGN_SYSTEM",
   "CODE_LINT_STANDARDS",
+  "COMMIT_STANDARDS",
   "RUN_GUIDE",
   "TEST_GUIDE",
 ] as const;
 
+export const SDLC_BASELINE_COUNT = SDLC_BASELINE_KINDS.length;
+
 export const sdlcBaselineKindSchema = z.enum(SDLC_BASELINE_KINDS);
 export type SdlcBaselineKind = z.infer<typeof sdlcBaselineKindSchema>;
+
+function sdlcTimestamp(
+  value: string | number | Date | null | undefined,
+): number | null {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function isSdlcBaselineApprovalCurrent(input: {
+  approvedAt?: string | number | Date | null;
+  lastEditedAt?: string | number | Date | null;
+}): boolean {
+  const approvedAt = sdlcTimestamp(input.approvedAt);
+  if (approvedAt === null) return false;
+  const lastEditedAt = sdlcTimestamp(input.lastEditedAt);
+  return lastEditedAt === null || lastEditedAt <= approvedAt;
+}
 
 export const SDLC_ARTIFACT_KINDS = ["BASELINE", "PRD", "TECH_DOC"] as const;
 export const sdlcArtifactKindSchema = z.enum(SDLC_ARTIFACT_KINDS);
@@ -145,7 +169,7 @@ export const sdlcWikiChunkSizeSchema = z.union([
 ]);
 export type SdlcWikiChunkSize = z.infer<typeof sdlcWikiChunkSizeSchema>;
 
-export const SDLC_WIKI_QUALITIES = ["QUICK", "STANDARD", "THOROUGH"] as const;
+export const SDLC_WIKI_QUALITIES = ["QUICK", "STANDARD"] as const;
 export const sdlcWikiQualitySchema = z.enum(SDLC_WIKI_QUALITIES);
 export type SdlcWikiQuality = z.infer<typeof sdlcWikiQualitySchema>;
 
@@ -199,17 +223,14 @@ export const sdlcWikiAgentCommitRefSchema = z.union([
 ]);
 
 export const startSdlcWikiRunSchema = z.object({
-  historyRange: sdlcWikiHistoryRangeSchema.default({
-    kind: "LAST_PERCENT",
-    percent: 20,
-  }),
-  chunkSize: sdlcWikiChunkSizeSchema.default(10),
+  historyRange: sdlcWikiHistoryRangeSchema.default({ kind: "FULL" }),
+  chunkSize: sdlcWikiChunkSizeSchema.default(1),
   quality: sdlcWikiQualitySchema.default("STANDARD"),
 });
 export type StartSdlcWikiRunInput = z.infer<typeof startSdlcWikiRunSchema>;
 
 export const refreshSdlcWikiRunSchema = z.object({
-  chunkSize: sdlcWikiChunkSizeSchema.default(10),
+  chunkSize: sdlcWikiChunkSizeSchema.default(1),
   quality: sdlcWikiQualitySchema.default("STANDARD"),
 });
 export type RefreshSdlcWikiRunInput = z.infer<typeof refreshSdlcWikiRunSchema>;
@@ -223,13 +244,23 @@ const sdlcWikiPagePathSchema = z
     /^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i,
     "Use a normalized relative Markdown path",
   );
-const sdlcWikiSourcePathsSchema = z.array(z.string().trim().min(1).max(1024)).max(500);
-const sdlcWikiSourceReferencesSchema = z.array(z.object({
+const sdlcWikiSourcePathsSchema = z
+  .array(z.string().trim().min(1).max(1024))
+  .max(500);
+export const sdlcSourceReferenceInputSchema = z.object({
   path: z.string().trim().min(1).max(1024),
   symbol: z.string().trim().min(1).max(512).optional(),
   startLine: z.number().int().positive().optional(),
   endLine: z.number().int().positive().optional(),
-})).max(500).optional();
+});
+export type SdlcSourceReferenceInput = z.infer<typeof sdlcSourceReferenceInputSchema>;
+
+export const sdlcSourceReferencesSchema = z
+  .array(sdlcSourceReferenceInputSchema)
+  .max(500)
+  .optional();
+
+const sdlcWikiSourceReferencesSchema = sdlcSourceReferencesSchema;
 
 const sdlcWikiRevisionSourceReferenceSchema = z.object({
   path: z.string().trim().min(1).max(1024),
@@ -247,14 +278,21 @@ const sdlcWikiCreateActionSchema = z.object({
   sourcePaths: sdlcWikiSourcePathsSchema.min(1),
   sourceReferences: sdlcWikiSourceReferencesSchema,
 });
-const sdlcWikiWriteActionSchema = z.object({
-  action: z.enum(["update", "restore"]),
+const sdlcWikiWriteActionFields = {
   path: sdlcWikiPagePathSchema,
   expectedContentHash: z.string().trim().min(1).max(128),
   title: z.string().trim().min(1).max(255),
   markdown: z.string().min(1).max(5_000_000),
   sourcePaths: sdlcWikiSourcePathsSchema.min(1),
   sourceReferences: sdlcWikiSourceReferencesSchema,
+};
+const sdlcWikiUpdateActionSchema = z.object({
+  action: z.literal("update"),
+  ...sdlcWikiWriteActionFields,
+});
+const sdlcWikiRestoreActionSchema = z.object({
+  action: z.literal("restore"),
+  ...sdlcWikiWriteActionFields,
 });
 const sdlcWikiArchiveActionSchema = z.object({
   action: z.literal("archive"),
@@ -263,29 +301,37 @@ const sdlcWikiArchiveActionSchema = z.object({
   sourcePaths: sdlcWikiSourcePathsSchema,
   sourceReferences: sdlcWikiSourceReferencesSchema,
 });
-const sdlcWikiSectionActionSchema = z.object({
-  action: z.enum(["replace_section", "insert_section", "remove_section"]),
+const sdlcWikiSectionActionFields = {
   path: sdlcWikiPagePathSchema,
   expectedContentHash: z.string().trim().min(1).max(128),
   heading: z.string().trim().min(1).max(255),
-  markdown: z.string().min(1).max(1_000_000).optional(),
   sourcePaths: sdlcWikiSourcePathsSchema.min(1),
   sourceReferences: sdlcWikiSourceReferencesSchema,
-}).superRefine((value, ctx) => {
-  if (value.action !== "remove_section" && !value.markdown) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["markdown"],
-      message: "Section insertion or replacement requires Markdown",
-    });
-  }
+};
+const sdlcWikiReplaceSectionActionSchema = z.object({
+  action: z.literal("replace_section"),
+  ...sdlcWikiSectionActionFields,
+  markdown: z.string().min(1).max(1_000_000),
+});
+const sdlcWikiInsertSectionActionSchema = z.object({
+  action: z.literal("insert_section"),
+  ...sdlcWikiSectionActionFields,
+  markdown: z.string().min(1).max(1_000_000),
+});
+const sdlcWikiRemoveSectionActionSchema = z.object({
+  action: z.literal("remove_section"),
+  ...sdlcWikiSectionActionFields,
+  markdown: z.string().min(1).max(1_000_000).optional(),
 });
 
-export const sdlcWikiPageActionSchema = z.union([
+export const sdlcWikiPageActionSchema = z.discriminatedUnion("action", [
   sdlcWikiCreateActionSchema,
-  sdlcWikiWriteActionSchema,
+  sdlcWikiUpdateActionSchema,
+  sdlcWikiRestoreActionSchema,
   sdlcWikiArchiveActionSchema,
-  sdlcWikiSectionActionSchema,
+  sdlcWikiReplaceSectionActionSchema,
+  sdlcWikiInsertSectionActionSchema,
+  sdlcWikiRemoveSectionActionSchema,
 ]);
 export type SdlcWikiPageAction = z.infer<typeof sdlcWikiPageActionSchema>;
 
@@ -335,7 +381,14 @@ export type SdlcWikiValidatorReport = z.infer<
 >;
 
 export const sdlcWikiRevisionEvidenceSchema = z.object({
-  action: z.enum(["created", "updated", "archived", "restored", "refined", "moved"]),
+  action: z.enum([
+    "created",
+    "updated",
+    "archived",
+    "restored",
+    "refined",
+    "moved",
+  ]),
   commitSha: sdlcWikiCommitRefSchema,
   canvasId: z.string().min(1),
   canvasVersionId: z.string().min(1),
@@ -344,7 +397,10 @@ export const sdlcWikiRevisionEvidenceSchema = z.object({
   path: sdlcWikiPagePathSchema.optional(),
   title: z.string().trim().min(1).max(500).optional(),
   archived: z.boolean().optional(),
-  sourceReferences: z.array(sdlcWikiRevisionSourceReferenceSchema).max(500).optional(),
+  sourceReferences: z
+    .array(sdlcWikiRevisionSourceReferenceSchema)
+    .max(500)
+    .optional(),
 });
 export type SdlcWikiRevisionEvidence = z.infer<
   typeof sdlcWikiRevisionEvidenceSchema
@@ -392,9 +448,18 @@ export interface SdlcWikiRunProgress {
   activeCheckpointSha?: string | null;
 }
 
+const sdlcRunAuthoritySchema = z.union([
+  z.object({
+    executionId: z.string().min(1),
+    sessionId: z.string().min(1),
+  }),
+  z.object({
+    interactiveGrant: z.string().min(1),
+    conversationId: z.string().min(1),
+  }),
+]);
+
 export const createSdlcPullRequestSchema = z.object({
-  executionId: z.string().min(1),
-  sessionId: z.string().min(1),
   repoId: z.string().min(1),
   title: z.string().trim().min(1).max(256),
   body: z.string().max(65_536).default(""),
@@ -404,20 +469,18 @@ export const createSdlcPullRequestSchema = z.object({
     .string()
     .trim()
     .regex(/^[0-9a-f]{40}$/i),
-});
+}).and(sdlcRunAuthoritySchema);
 export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
 
 export const bootstrapSdlcRuntimeCredentialSchema = z.object({
   agentSlug: z.literal("sdlc-agent"),
-  executionId: z.string().min(1),
-  sessionId: z.string().min(1),
   repoId: z.string().min(1),
-  operation: z.enum(["CLONE", "PUSH"]),
+  operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
   sandboxId: z.string().min(1).max(256),
   sandboxPublicKey: z.string().min(32).max(1024),
-});
+}).and(sdlcRunAuthoritySchema);
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
@@ -443,6 +506,7 @@ export const createSdlcClawArtifactSchema = z
     workflowExecutionId: z.string().min(1).optional(),
     parentCanvasId: z.string().min(1).optional(),
     generationCommit: z.string().trim().max(255).optional(),
+    sourceReferences: sdlcSourceReferencesSchema,
   })
   .superRefine((value, ctx) => {
     if (
@@ -468,6 +532,18 @@ export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
 >;
 
+export const updateSdlcClawArtifactSchema = z.object({
+  repoId: z.string().min(1),
+  kind: z.enum(["PRD", "TECH_DOC"]),
+  viewAccessId: z.string().min(1),
+  title: z.string().trim().min(1).max(255).optional(),
+  markdown: z.string().min(1).max(5_000_000),
+  sourceReferences: sdlcSourceReferencesSchema,
+});
+export type UpdateSdlcClawArtifactInput = z.infer<
+  typeof updateSdlcClawArtifactSchema
+>;
+
 export const updateSdlcBaselineDraftSchema = z
   .object({
     repoId: z.string().min(1),
@@ -479,6 +555,7 @@ export const updateSdlcBaselineDraftSchema = z
     sectionKey: z.string().trim().min(1).max(80).optional(),
     sectionTitle: z.string().trim().min(1).max(255).optional(),
     markdown: z.string().min(1).max(1_000_000).optional(),
+    sourceReferences: sdlcSourceReferencesSchema,
   })
   .superRefine((value, ctx) => {
     if (
@@ -496,13 +573,6 @@ export type UpdateSdlcBaselineDraftInput = z.infer<
   typeof updateSdlcBaselineDraftSchema
 >;
 
-export const createSdlcTicketSchema = z.object({
-  title: z.string().trim().min(1).max(255),
-  description: z.string().max(50_000).default(""),
-  sourceCanvasId: z.string().min(1).optional(),
-});
-export type CreateSdlcTicketInput = z.infer<typeof createSdlcTicketSchema>;
-
 export const createSdlcLinkSchema = z.object({
   sourceType: sdlcEntityTypeSchema,
   sourceId: z.string().min(1),
@@ -511,27 +581,6 @@ export const createSdlcLinkSchema = z.object({
   relationType: sdlcRelationTypeSchema,
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
-
-export const startSdlcWorkSchema = z.object({
-  sourceType: z.enum(["CANVAS", "TICKET"]),
-  sourceId: z.string().min(1),
-});
-export type StartSdlcWorkInput = z.infer<typeof startSdlcWorkSchema>;
-
-export function isSdlcSurfaceMetadata(value: unknown): boolean {
-  return (
-    Boolean(value) &&
-    typeof value === "object" &&
-    (value as Record<string, unknown>).surface === "SDLC"
-  );
-}
-
-export function isSdlcTicketMetadata(value: unknown): boolean {
-  return (
-    isSdlcSurfaceMetadata(value) &&
-    typeof (value as Record<string, unknown>).repoId === "string"
-  );
-}
 
 export interface SdlcCanvasMetadata {
   surface: "SDLC";
@@ -545,6 +594,13 @@ export interface SdlcCanvasMetadata {
   approvedAt?: string;
   approvedBy?: string;
   knowledgeDocumentId?: string;
+  sdlcSourceReferences?: Array<{
+    path: string;
+    commitSha: string;
+    symbol?: string;
+    startLine?: number;
+    endLine?: number;
+  }>;
 }
 
 export interface SdlcWikiCanvasMetadata {

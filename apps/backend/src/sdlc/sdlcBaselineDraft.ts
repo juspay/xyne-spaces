@@ -6,6 +6,15 @@ export type BaselineGenerationStatus = 'GENERATING' | 'READY';
 export interface BaselineDraftSection {
   title: string;
   markdown: string;
+  sourceReferences: BaselineSourceReference[];
+}
+
+export interface BaselineSourceReference {
+  path: string;
+  commitSha: string;
+  symbol?: string;
+  startLine?: number;
+  endLine?: number;
 }
 
 type Metadata = Record<string, unknown>;
@@ -49,6 +58,15 @@ export function baselineDraftSections(metadata: Metadata): Record<string, Baseli
     result[key] = {
       title: section.title,
       markdown: stripRendererOwnedHeadings(section.markdown, section.title),
+      sourceReferences: Array.isArray(section.sourceReferences)
+        ? section.sourceReferences.filter(
+            (reference): reference is BaselineSourceReference =>
+              Boolean(reference) &&
+              typeof reference === 'object' &&
+              typeof (reference as BaselineSourceReference).path === 'string' &&
+              typeof (reference as BaselineSourceReference).commitSha === 'string'
+          )
+        : [],
     };
   }
   return result;
@@ -56,7 +74,12 @@ export function baselineDraftSections(metadata: Metadata): Record<string, Baseli
 
 export function applyBaselineDraftSection(
   metadata: Metadata,
-  section: { sectionKey: string; sectionTitle: string; markdown: string }
+  section: {
+    sectionKey: string;
+    sectionTitle: string;
+    markdown: string;
+    sourceReferences?: BaselineSourceReference[];
+  }
 ): Metadata {
   const sections = baselineDraftSections(metadata);
   return {
@@ -67,6 +90,7 @@ export function applyBaselineDraftSection(
       [section.sectionKey]: {
         title: section.sectionTitle,
         markdown: stripRendererOwnedHeadings(section.markdown, section.sectionTitle),
+        sourceReferences: section.sourceReferences ?? [],
       },
     },
   };
@@ -107,10 +131,28 @@ export function finalizeBaselineMetadata(kind: SdlcBaselineKind, metadata: Metad
   const rest = Object.fromEntries(
     Object.entries(metadata).filter(([key]) => key !== 'draftSections')
   );
+  const sourceReferences = Object.values(baselineDraftSections(metadata)).flatMap(
+    section => section.sourceReferences
+  );
+  const uniqueSourceReferences = [
+    ...new Map(
+      sourceReferences.map(reference => [
+        JSON.stringify([
+          reference.commitSha,
+          reference.path,
+          reference.symbol,
+          reference.startLine,
+          reference.endLine,
+        ]),
+        reference,
+      ])
+    ).values(),
+  ];
   return {
     ...rest,
     generationStatus: 'READY',
     completedSections: definitionFor(kind).sections.map((section) => section.key),
+    sdlcSourceReferences: uniqueSourceReferences,
   };
 }
 
@@ -119,4 +161,12 @@ export function isCompletedBaselineMetadata(metadata: Metadata | null | undefine
     metadata?.artifactKind === 'BASELINE' &&
     (metadata.generationStatus === undefined || metadata.generationStatus === 'READY')
   );
+}
+
+export function baselineRefreshChanged(
+  currentMarkdown: string,
+  candidateMarkdown: string
+): boolean {
+  const normalize = (value: string) => value.replace(/\r\n/g, '\n').trim();
+  return normalize(currentMarkdown) !== normalize(candidateMarkdown);
 }

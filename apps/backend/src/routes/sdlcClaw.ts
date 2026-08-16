@@ -1,8 +1,10 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import {
   UserType,
+  createSdlcLinkSchema,
   createSdlcClawArtifactSchema,
   updateSdlcBaselineDraftSchema,
+  updateSdlcClawArtifactSchema,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -48,11 +50,32 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
 }
 
 router.post(
+  '/links',
+  route(async (req, res) => {
+    const input = createSdlcLinkSchema.extend({ repoId: createSdlcLinkSchema.shape.sourceId }).parse(
+      req.body,
+    );
+    const { repoId, ...linkInput } = input;
+    const link = await sdlcHub.linkContext(await actorFromRequest(req), repoId, linkInput);
+    res.status(201).json({ success: true, link });
+  }),
+);
+
+router.post(
   '/artifacts',
   route(async (req, res) => {
     const input = createSdlcClawArtifactSchema.parse(req.body);
     const artifact = await sdlcHub.createArtifactFromClaw(await actorFromRequest(req), input);
     res.status(201).json({ success: true, artifact });
+  }),
+);
+
+router.post(
+  '/artifacts/update',
+  route(async (req, res) => {
+    const input = updateSdlcClawArtifactSchema.parse(req.body);
+    const artifact = await sdlcHub.updateArtifactFromClaw(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, artifact });
   }),
 );
 

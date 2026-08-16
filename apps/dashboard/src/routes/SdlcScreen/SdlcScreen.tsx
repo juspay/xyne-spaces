@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   ChannelRole,
+  isSdlcBaselineApprovalCurrent,
+  SDLC_BASELINE_COUNT,
   SDLC_ENTITY_TYPES,
   SDLC_RELATION_TYPES,
-  SDLC_SETUP_STATUSES,
   type SdlcEntityType,
   type SdlcRelationType,
   type SdlcSetupStatus,
@@ -59,9 +60,10 @@ import {
 import { useExternalDebuggerStore } from '../../store/useExternalDebuggerStore';
 import CanvasScreen from '../../components/Canvas/CanvasScreen';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
-import { SdlcTicketsBoard } from './SdlcTicketsBoard';
+import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { artifactCta } from './artifactCtaPolicy';
 import { baselineApprovalAction } from './baselinePolicy';
+import { shouldLoadSdlcWikiPages, shouldLoadSdlcWikiRun } from './sdlcWikiQueryPolicy';
 import {
   SdlcWikiSection,
   SdlcWikiSidebarTree,
@@ -91,15 +93,20 @@ import {
   shouldShowSdlcRelatedLink,
   type SdlcChatTab,
 } from './sdlcChatPolicy';
+import { latestTicketPullRequest, ticketTraceValue, type SdlcTicket } from './ticketPolicy';
 import {
-  filterTickets,
-  latestTicketPullRequest,
-  linkedTicketForCanvasChain,
-  ticketDebugContext,
-  ticketTraceValue,
-  type SdlcTicket,
-  type TicketExecution,
-} from './ticketPolicy';
+  linkedTicketIds,
+  relatedTicketsForArtifact,
+  startWorkPrompt,
+} from './artifactTicketPolicy';
+import {
+  canDebugRepoKnowledge,
+  isRepoKnowledgeRunning,
+  repoKnowledgeAction,
+  repoKnowledgeControl,
+  repoKnowledgeState,
+  type RepoKnowledgeControl,
+} from './repoKnowledgePolicy';
 
 type Section = 'overview' | 'wiki' | 'baseline' | 'prds' | 'tech-docs' | 'tickets';
 type ArtifactKind = 'PRD' | 'TECH_DOC';
@@ -125,7 +132,9 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof Boxes }> = [
 const BASELINE_LABELS: Record<string, string> = {
   CORE_CODE_MAP: 'Core Code Map',
   FRONTEND_DESIGN_SYSTEM: 'Frontend Design System',
+  BACKEND_DESIGN_SYSTEM: 'Backend Design System',
   CODE_LINT_STANDARDS: 'Code & Lint Standards',
+  COMMIT_STANDARDS: 'Commit Standards',
   RUN_GUIDE: 'Run Guide',
   TEST_GUIDE: 'Test Guide',
 };
@@ -140,77 +149,6 @@ const EMPTY_CONTEXT_SELECTIONS: ContextSelections = {
 
 function metadataOf(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-}
-
-function isSetupStatus(value: unknown): value is SdlcSetupStatus {
-  return typeof value === 'string' && SDLC_SETUP_STATUSES.includes(value as SdlcSetupStatus);
-}
-
-function setupState(
-  execution:
-    | { status?: string; context?: string | null; updatedAt?: number | null }
-    | null
-    | undefined,
-): {
-  phase: SdlcSetupStatus;
-  error?: string;
-  conversationId?: string;
-  sessionId?: string;
-  currentBaselineKind?: string;
-  completedCount: number;
-  updatedAt?: number;
-} {
-  if (!execution) return { phase: 'NOT_STARTED', completedCount: 0 };
-  try {
-    const context = JSON.parse(execution.context || '{}') as {
-      phase?: unknown;
-      error?: string;
-      conversationId?: string;
-      sessionId?: string;
-      currentBaselineKind?: string;
-      completedBaselineKinds?: unknown;
-    };
-    const phase =
-      execution.status === 'FAILURE'
-        ? 'PARTIALLY_FAILED'
-        : execution.status === 'CANCELLED'
-          ? 'CANCELLED'
-          : isSetupStatus(context.phase)
-            ? context.phase
-            : execution.status === 'SUCCESS'
-              ? 'READY_FOR_REVIEW'
-              : execution.status === 'RUNNING'
-                ? 'GENERATING'
-                : 'QUEUED';
-    return {
-      phase,
-      completedCount: Array.isArray(context.completedBaselineKinds)
-        ? context.completedBaselineKinds.length
-        : 0,
-      ...((context.error || execution.status === 'FAILURE') && {
-        error: context.error || 'Setup failed. Retry the run.',
-      }),
-      ...(context.conversationId && { conversationId: context.conversationId }),
-      ...(context.sessionId && { sessionId: context.sessionId }),
-      ...(context.currentBaselineKind && { currentBaselineKind: context.currentBaselineKind }),
-      ...(typeof execution.updatedAt === 'number' && { updatedAt: execution.updatedAt }),
-    };
-  } catch {
-    return {
-      phase:
-        execution.status === 'FAILURE'
-          ? 'PARTIALLY_FAILED'
-          : execution.status === 'CANCELLED'
-            ? 'CANCELLED'
-            : execution.status === 'SUCCESS'
-              ? 'READY_FOR_REVIEW'
-              : execution.status === 'RUNNING'
-                ? 'GENERATING'
-                : 'QUEUED',
-      completedCount: 0,
-      ...(typeof execution.updatedAt === 'number' && { updatedAt: execution.updatedAt }),
-    };
-  }
 }
 
 function setupUpdatedAtLabel(value?: number): string {
@@ -240,20 +178,16 @@ export default function SdlcScreen(): ReactElement {
       enabled: Boolean(repoId),
     },
   );
-  const sdlcBoardId = repo && !(repo instanceof Error) ? (repo.project?.sdlcBoard?.id ?? '') : '';
-  const [sdlcBoardDetail] = useCachedQuery(queries.boardDetailById({ boardId: sdlcBoardId }), {
-    enabled: Boolean(sdlcBoardId),
-  });
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<ArtifactKind | null>(null);
   const [artifactTitle, setArtifactTitle] = useState('');
   const [artifactAiDraft, setArtifactAiDraft] = useState(false);
   const [artifactAiPrompt, setArtifactAiPrompt] = useState('');
   const [parentCanvasId, setParentCanvasId] = useState('');
-  const [ticketDialog, setTicketDialog] = useState(false);
-  const [ticketTitle, setTicketTitle] = useState('');
-  const [ticketDescription, setTicketDescription] = useState('');
-  const [ticketSourceId, setTicketSourceId] = useState('');
+  const [startWorkPicker, setStartWorkPicker] = useState<{
+    artifact: { id: string; title: string; kind: ArtifactKind };
+    tickets: SdlcTicket[];
+  } | null>(null);
   const [linkDialog, setLinkDialog] = useState(false);
   const [membersDialog, setMembersDialog] = useState(false);
   const [relatedSourceId, setRelatedSourceId] = useState<string | null>(null);
@@ -288,7 +222,7 @@ export default function SdlcScreen(): ReactElement {
       );
       return response.data.pages;
     },
-    enabled: Boolean(repoId && section === 'wiki'),
+    enabled: Boolean(repoId && shouldLoadSdlcWikiPages(section)),
   });
   const wikiRunQuery = useQuery({
     queryKey: ['sdlc-wiki-run', repoId],
@@ -298,13 +232,17 @@ export default function SdlcScreen(): ReactElement {
       );
       return response.data.run;
     },
-    enabled: Boolean(repoId && section === 'wiki'),
+    enabled: Boolean(repoId && shouldLoadSdlcWikiRun(section)),
+    staleTime: 0,
+    refetchOnMount: 'always',
     refetchInterval: query => {
       const phase = query.state.data?.phase;
-      return phase &&
+      const knowledgePhase = query.state.data?.knowledge?.phase;
+      return (phase &&
         ['QUEUED', 'PREPARING', 'BOOTSTRAPPING', 'PROCESSING', 'VALIDATING', 'CORRECTING'].includes(
           phase,
-        )
+        )) ||
+        (knowledgePhase && ['QUEUED', 'GENERATING'].includes(knowledgePhase))
         ? 2_000
         : false;
     },
@@ -313,9 +251,9 @@ export default function SdlcScreen(): ReactElement {
   const refetchWikiPages = wikiQuery.refetch;
   const wikiRunUpdatedAt = wikiRunQuery.data?.updatedAt;
   useEffect(() => {
-    if (!wikiRunUpdatedAt) return;
+    if (!wikiRunUpdatedAt || section !== 'wiki') return;
     void refetchWikiPages();
-  }, [refetchWikiPages, wikiRunUpdatedAt]);
+  }, [refetchWikiPages, section, wikiRunUpdatedAt]);
   const selectedWikiPage = wikiPages.find(page => page.canvasId === selectedCanvasId);
   const assistantCanvas = useMemo(
     () =>
@@ -327,7 +265,11 @@ export default function SdlcScreen(): ReactElement {
     [selectedCanvas, selectedWikiPage],
   );
   const baseline = useMemo(
-    () => canvases.filter(canvas => metadataOf(canvas.metadata)['artifactKind'] === 'BASELINE'),
+    () =>
+      canvases.filter(canvas => {
+        const metadata = metadataOf(canvas.metadata);
+        return metadata['artifactKind'] === 'BASELINE' && metadata['refreshCandidate'] !== true;
+      }),
     [canvases],
   );
   const baselineSidebarPages = useMemo<SdlcWikiPage[]>(
@@ -354,22 +296,6 @@ export default function SdlcScreen(): ReactElement {
     () => canvases.filter(canvas => metadataOf(canvas.metadata)['artifactKind'] === 'TECH_DOC'),
     [canvases],
   );
-  const sdlcBoard = repo && !(repo instanceof Error) ? repo.project?.sdlcBoard : undefined;
-  const rawTickets: readonly SdlcTicket[] =
-    repo && !(repo instanceof Error)
-      ? ((repo.channel?.tickets ?? []) as unknown as readonly SdlcTicket[])
-      : [];
-  const tickets = useMemo(
-    () =>
-      repo && !(repo instanceof Error) && repo.channelId && sdlcBoard?.id
-        ? filterTickets(rawTickets, {
-            repoId: repo.id,
-            boardId: sdlcBoard.id,
-            channelId: repo.channelId,
-          })
-        : [],
-    [rawTickets, repo, sdlcBoard?.id],
-  );
   const links = useMemo(
     () =>
       repo && !(repo instanceof Error)
@@ -389,6 +315,15 @@ export default function SdlcScreen(): ReactElement {
           )
         : [],
     [repo],
+  );
+  const relatedTicketIds = useMemo(() => linkedTicketIds(links), [links]);
+  const [relatedTickets] = useCachedQuery(
+    queries.sdlcTicketsByIds({ ticketIds: relatedTicketIds }),
+  );
+  const tickets = useMemo<readonly SdlcTicket[]>(
+    () =>
+      Array.isArray(relatedTickets) ? (relatedTickets as unknown as readonly SdlcTicket[]) : [],
+    [relatedTickets],
   );
   const selectedCanvasConversationLinkIds = useMemo(
     () =>
@@ -504,6 +439,22 @@ export default function SdlcScreen(): ReactElement {
         });
       })
     : [];
+  const selectedArtifactKindValue = selectedCanvas
+    ? metadataOf(selectedCanvas.metadata)['artifactKind']
+    : null;
+  const selectedArtifactKind: ArtifactKind | null =
+    selectedArtifactKindValue === 'PRD' || selectedArtifactKindValue === 'TECH_DOC'
+      ? selectedArtifactKindValue
+      : null;
+  const selectedArtifactTickets =
+    selectedCanvas && selectedArtifactKind && repo && !(repo instanceof Error) && repo.project?.id
+      ? relatedTicketsForArtifact({
+          canvasId: selectedCanvas.id,
+          projectId: repo.project.id,
+          links,
+          tickets,
+        })
+      : [];
   const traceRows = useMemo(
     () =>
       prds.map(prd => {
@@ -511,11 +462,15 @@ export default function SdlcScreen(): ReactElement {
           link => link.sourceId === prd.id && link.relationType === 'TECH_DOC',
         );
         const techDoc = techDocs.find(item => item.id === techDocLink?.targetId);
-        const ticket = linkedTicketForCanvasChain(
-          tickets,
-          links,
-          [prd.id, techDoc?.id ?? ''].filter(Boolean),
-        );
+        const ticket =
+          repo && !(repo instanceof Error) && repo.project?.id
+            ? (relatedTicketsForArtifact({
+                canvasId: prd.id,
+                projectId: repo.project.id,
+                links,
+                tickets,
+              })[0] ?? null)
+            : null;
         const pullRequest = ticket
           ? latestTicketPullRequest(ticket)
           : prds.length === 1
@@ -531,10 +486,10 @@ export default function SdlcScreen(): ReactElement {
           pullRequest,
         };
       }),
-    [links, prds, techDocs, tickets],
+    [links, prds, repo, techDocs, tickets],
   );
-  const state = setupState(repo && !(repo instanceof Error) ? repo.setupExecution : null);
-  const setupRunning = ['QUEUED', 'CLONING', 'GENERATING'].includes(state.phase);
+  const state = repoKnowledgeState(repo && !(repo instanceof Error) ? repo.setupExecution : null);
+  const setupRunning = isRepoKnowledgeRunning(state.phase);
 
   useEffect(() => {
     if (!repoId || externalDebuggerTarget?.repoId !== repoId) return;
@@ -565,19 +520,6 @@ export default function SdlcScreen(): ReactElement {
       });
       return;
     }
-    const ticketExecution = tickets
-      .flatMap(ticket => ticket.workflows ?? [])
-      .flatMap(workflow => workflow.workflowExecutions ?? [])
-      .find(execution => execution.id === externalDebuggerTarget.executionId);
-    if (!ticketExecution) return;
-    const debugContext = ticketDebugContext(ticketExecution);
-    updateExternalDebugger(repoId, {
-      ...(debugContext && {
-        conversationId: debugContext.conversationId,
-        sessionId: debugContext.sessionId,
-      }),
-      running: ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING'].includes(ticketExecution.status),
-    });
   }, [
     externalDebuggerTarget,
     repo,
@@ -585,14 +527,17 @@ export default function SdlcScreen(): ReactElement {
     setupRunning,
     state.conversationId,
     state.sessionId,
-    tickets,
     updateExternalDebugger,
     wikiRunQuery.data,
   ]);
 
-  const approvedCount = baseline.filter(
-    canvas => typeof metadataOf(canvas.metadata)['approvedAt'] === 'string',
-  ).length;
+  const approvedCount = baseline.filter(canvas => {
+    const metadata = metadataOf(canvas.metadata);
+    return isSdlcBaselineApprovalCurrent({
+      approvedAt: typeof metadata['approvedAt'] === 'string' ? metadata['approvedAt'] : null,
+      lastEditedAt: canvas.lastEditedAt,
+    });
+  }).length;
   const accessRepoId = repo && !(repo instanceof Error) ? repo.id : '';
   const accessCapabilities =
     repo && !(repo instanceof Error) && Array.isArray(repo.accessCapabilities)
@@ -603,7 +548,7 @@ export default function SdlcScreen(): ReactElement {
       item => item.capability === capability && states.includes(item.state || ''),
     );
   const readReady = capabilityReady('READ_REPOSITORY', ['PROVEN']);
-  const artifactsUnlocked = readReady && approvedCount === 5;
+  const artifactsUnlocked = readReady && approvedCount === SDLC_BASELINE_COUNT;
   const writeReady =
     capabilityReady('PUSH_BRANCH', ['PROVEN', 'INFERRED']) &&
     capabilityReady('CREATE_PULL_REQUEST', ['PROVEN', 'INFERRED']);
@@ -662,7 +607,10 @@ export default function SdlcScreen(): ReactElement {
       key,
       async () => {
         await apiInstance.post(`/sdlc/repositories/${repoId!}/wiki/${path}`, body);
-        await Promise.all([wikiRunQuery.refetch(), wikiQuery.refetch()]);
+        await Promise.all([
+          wikiRunQuery.refetch(),
+          ...(section === 'wiki' ? [wikiQuery.refetch()] : []),
+        ]);
       },
       success,
     );
@@ -672,10 +620,20 @@ export default function SdlcScreen(): ReactElement {
     callWikiAction('wiki-generate', 'generate', input, 'Wiki generation started');
   const refreshWiki = (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>): Promise<void> =>
     callWikiAction('wiki-refresh', 'refresh', input, 'Wiki refresh started');
+  const runKnowledgeControl = (control: RepoKnowledgeControl): Promise<void> => {
+    const action = repoKnowledgeAction(control);
+    return call(
+      action.key,
+      () => apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`),
+      action.success,
+    );
+  };
+  const retryKnowledge = (): Promise<void> => runKnowledgeControl('RETRY');
   const retryWiki = (): Promise<void> =>
     callWikiAction('wiki-retry', 'retry', {}, 'Wiki run resumed');
   const cancelWiki = (): Promise<void> =>
     callWikiAction('wiki-cancel', 'cancel', {}, 'Wiki run cancelled');
+  const selectedKnowledgeControl = repoKnowledgeControl(state.phase);
 
   const ownerHasConversations = useCallback(
     (ownerCanvasId: string | null): boolean => sdlcOwnerHasConversations(ownerCanvasId, links),
@@ -877,6 +835,77 @@ export default function SdlcScreen(): ReactElement {
     [closeConversations, openExternalDebugger],
   );
 
+  const renderRepoKnowledgeControls = (compact = false): ReactElement | undefined => {
+    if (!isAdmin || !repo || repo instanceof Error) return undefined;
+    const controlPresentation = {
+      GENERATE: {
+        icon: Rocket,
+        variant: 'default' as const,
+      },
+      CANCEL: {
+        icon: X,
+        variant: 'destructive' as const,
+      },
+      RETRY: {
+        icon: RefreshCw,
+        variant: 'default' as const,
+      },
+      REFRESH: {
+        icon: RefreshCw,
+        variant: 'default' as const,
+      },
+    }[selectedKnowledgeControl];
+    const action = repoKnowledgeAction(selectedKnowledgeControl);
+    const Icon = controlPresentation.icon;
+    const debugAvailable = canDebugRepoKnowledge({
+      isAdmin,
+      executionId: repo.setupExecution?.id,
+      conversationId: state.conversationId,
+    });
+    const requiresReadAccess =
+      selectedKnowledgeControl === 'GENERATE' || selectedKnowledgeControl === 'REFRESH';
+
+    return (
+      <div className='flex items-center gap-2'>
+        {debugAvailable && (
+          <Button
+            variant='ghost'
+            size='iconSm'
+            className='text-muted-foreground'
+            title='Debug generation'
+            aria-label='Debug generation'
+            data-track-category='SdlcHub'
+            data-track-name='RepoKnowledgeDebuggerOpened'
+            onClick={() => {
+              openSdlcDebugger({
+                source: 'sdlc',
+                repoId: repo.id,
+                executionId: repo.setupExecution!.id,
+                conversationId: state.conversationId!,
+                sessionId: state.sessionId || null,
+                running: setupRunning,
+              });
+            }}
+          >
+            <Bug />
+          </Button>
+        )}
+        <Button
+          size={compact ? 'sm' : 'default'}
+          variant={controlPresentation.variant}
+          loading={busy === action.key}
+          disabled={busy !== null || (requiresReadAccess && !readReady)}
+          onClick={() => void runKnowledgeControl(selectedKnowledgeControl)}
+          data-track-category='SdlcHub'
+          data-track-name={`RepoKnowledge${selectedKnowledgeControl}Clicked`}
+        >
+          <Icon size={compact ? 14 : 16} />
+          {action.label}
+        </Button>
+      </div>
+    );
+  };
+
   useEffect(() => {
     if (sdlcChatTab !== 'ai' || xyneAIActor.getSnapshot().matches('open')) return;
     openSdlcAssistant();
@@ -905,44 +934,57 @@ export default function SdlcScreen(): ReactElement {
     if (canvasId) openCanvas(canvasId);
   };
 
-  const createTicket = async (): Promise<void> => {
-    if (!repoId || !ticketTitle.trim()) return;
-    await apiInstance.post(`/sdlc/repositories/${repoId}/tickets`, {
-      title: ticketTitle.trim(),
-      description: ticketDescription.trim(),
-      ...(ticketSourceId && { sourceCanvasId: ticketSourceId }),
-    });
-    setTicketDialog(false);
-    setTicketTitle('');
-    setTicketDescription('');
-    setTicketSourceId('');
-  };
-
-  const startTicket = (ticketId: string): void => {
-    if (!repoId) return;
-    void call(
-      `work-${ticketId}`,
-      () =>
-        apiInstance.post(`/sdlc/repositories/${repoId}/start-work`, {
-          sourceType: 'TICKET',
-          sourceId: ticketId,
+  const sendStartWork = useCallback(
+    (artifact: { id: string; title: string; kind: ArtifactKind }, ticket: SdlcTicket): void => {
+      if (!repo || repo instanceof Error || !repo.channelId) return;
+      setStartWorkPicker(null);
+      setDiscussionUrl({ open: discussionOwner !== null, conversationId: null, tab: 'ai' });
+      closeExternalDebugger();
+      setSelectedAgentSlug('sdlc-agent');
+      xyneAIActor.send({
+        type: 'OPEN',
+        contextType: 'chat',
+        contextId: repo.channelId,
+        channelId: repo.channelId,
+        startFreshChat: true,
+        canvasInfo: { canvasId: artifact.id, title: artifact.title },
+        initialContextSelections: {
+          canvases: [{ id: artifact.id, canvasId: artifact.id, title: artifact.title }],
+          tickets: [
+            {
+              id: ticket.id,
+              title: ticket.title,
+              xyneId: ticket.xyneId,
+              status: ticket.stageName,
+            },
+          ],
+          recordings: [],
+        },
+        researchContext: { type: 'repository', id: repo.id, name: repo.name },
+        initialQuery: startWorkPrompt({
+          repositoryName: repo.name,
+          artifactKind: artifact.kind,
+          artifactTitle: artifact.title,
+          ticket,
         }),
-      'Coding work queued',
-    );
-  };
+      });
+    },
+    [closeExternalDebugger, discussionOwner, repo, setDiscussionUrl, setSelectedAgentSlug],
+  );
 
-  const debugTicket = (execution: TicketExecution): void => {
-    const debugContext = ticketDebugContext(execution);
-    if (!repo || repo instanceof Error || !debugContext) return;
-    openSdlcDebugger({
-      source: 'sdlc',
-      repoId: repo.id,
-      executionId: execution.id,
-      conversationId: debugContext.conversationId,
-      sessionId: debugContext.sessionId,
-      running: ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING'].includes(execution.status),
-    });
-  };
+  const startArtifactWork = useCallback(
+    (
+      artifact: { id: string; title: string; kind: ArtifactKind },
+      candidates: SdlcTicket[],
+    ): void => {
+      if (candidates.length === 1) {
+        sendStartWork(artifact, candidates[0]!);
+        return;
+      }
+      if (candidates.length > 1) setStartWorkPicker({ artifact, tickets: candidates });
+    },
+    [sendStartWork],
+  );
 
   const linkPickedContext = (selections: ContextSelections): void => {
     if (!repoId || !relatedSourceId) return;
@@ -1019,8 +1061,8 @@ export default function SdlcScreen(): ReactElement {
       <section>
         {!artifactsUnlocked && (
           <div className='mb-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground'>
-            Locked until repository read access is verified and all five Repo Knowledge documents
-            are approved.
+            Locked until repository read access is verified and all {SDLC_BASELINE_COUNT} Repo
+            Knowledge documents are approved.
           </div>
         )}
         <SectionHeader
@@ -1034,7 +1076,9 @@ export default function SdlcScreen(): ReactElement {
             <Button
               disabled={!artifactsUnlocked}
               title={
-                !artifactsUnlocked ? 'Approve all five Repo Knowledge documents first' : undefined
+                !artifactsUnlocked
+                  ? `Approve all ${SDLC_BASELINE_COUNT} Repo Knowledge documents first`
+                  : undefined
               }
               onClick={() => setArtifactDialog(kind)}
             >
@@ -1045,12 +1089,20 @@ export default function SdlcScreen(): ReactElement {
         />
         <div className='grid grid-cols-2 gap-4'>
           {list.map(canvas => {
+            const artifactTickets = repo.project?.id
+              ? relatedTicketsForArtifact({
+                  canvasId: canvas.id,
+                  projectId: repo.project.id,
+                  links,
+                  tickets,
+                })
+              : [];
             const linkedTargetId =
               kind === 'PRD'
                 ? (links.find(
                     link => link.relationType === 'TECH_DOC' && link.sourceId === canvas.id,
                   )?.targetId ?? null)
-                : (linkedTicketForCanvasChain(tickets, links, [canvas.id])?.id ?? null);
+                : (artifactTickets[0]?.id ?? null);
             const cta = artifactCta(kind, linkedTargetId);
             return (
               <ArtifactCard
@@ -1060,23 +1112,23 @@ export default function SdlcScreen(): ReactElement {
                 onOpen={() => openCanvas(canvas.id)}
                 actionLabel={cta.label}
                 actionDisabled={cta.action.startsWith('CREATE_') && !artifactsUnlocked}
+                {...(kind === 'PRD' &&
+                  artifactTickets.length > 0 && {
+                    onStartWork: (): void =>
+                      startArtifactWork(
+                        { id: canvas.id, title: canvas.title, kind },
+                        artifactTickets,
+                      ),
+                  })}
                 onAction={() => {
                   if (cta.action === 'VIEW_TECH_DOC') {
                     openArtifactCanvas(cta.targetId);
                     return;
                   }
-                  if (cta.action === 'VIEW_TICKET') {
-                    const sourceLink = links.find(
-                      link => link.relationType === 'TICKET' && link.targetId === cta.targetId,
-                    );
-                    const ownerCanvasId = sourceLink
-                      ? (resolveCanvasDiscussionOwner(sourceLink.sourceId, canvases, links)
-                          ?.canvasId ?? null)
-                      : null;
-                    navigateWithinSdlc(
-                      `/sdlc/${repo.id}/tickets`,
-                      `?ticket=${encodeURIComponent(cta.targetId)}`,
-                      ownerCanvasId,
+                  if (cta.action === 'START_WORK') {
+                    startArtifactWork(
+                      { id: canvas.id, title: canvas.title, kind },
+                      artifactTickets,
                     );
                     return;
                   }
@@ -1144,7 +1196,9 @@ export default function SdlcScreen(): ReactElement {
                 <button
                   disabled={sectionLocked}
                   title={
-                    sectionLocked ? 'Approve all five Repo Knowledge documents first' : undefined
+                    sectionLocked
+                      ? `Approve all ${SDLC_BASELINE_COUNT} Repo Knowledge documents first`
+                      : undefined
                   }
                   onClick={() => navigateWithinSdlc(`/sdlc/${repo.id}/${item.id}`)}
                   className={cn(
@@ -1353,6 +1407,24 @@ export default function SdlcScreen(): ReactElement {
                 )}
               </div>
               <div className='flex shrink-0 items-center gap-2'>
+                {selectedCanvas && selectedArtifactKind && selectedArtifactTickets.length > 0 && (
+                  <Button
+                    variant='outline'
+                    onClick={() =>
+                      startArtifactWork(
+                        {
+                          id: selectedCanvas.id,
+                          title: selectedCanvas.title,
+                          kind: selectedArtifactKind,
+                        },
+                        selectedArtifactTickets,
+                      )
+                    }
+                  >
+                    <Rocket className='size-4' />
+                    Start work
+                  </Button>
+                )}
                 <Button
                   onClick={() => (discussionOwner ? openConversations() : openSdlcAssistant())}
                   data-track-category='SdlcHub'
@@ -1408,7 +1480,7 @@ export default function SdlcScreen(): ReactElement {
                               ? `Current: ${BASELINE_LABELS[state.currentBaselineKind] || state.currentBaselineKind}`
                               : 'No document currently running'}
                             {' · '}
-                            {state.completedCount}/5 generated
+                            {state.completedCount}/{SDLC_BASELINE_COUNT} generated
                             {' · '}
                             Updated {setupUpdatedAtLabel(state.updatedAt)}
                           </p>
@@ -1420,102 +1492,10 @@ export default function SdlcScreen(): ReactElement {
                         </div>
                         <div className='flex shrink-0 items-center gap-2'>
                           <StatusPill phase={state.phase} />
-                          {isAdmin && state.conversationId && repo.setupExecution?.id && (
-                            <Button
-                              variant='ghost'
-                              size='iconSm'
-                              className='text-muted-foreground'
-                              title='Debug generation'
-                              aria-label='Debug generation'
-                              onClick={() => {
-                                openSdlcDebugger({
-                                  source: 'sdlc',
-                                  repoId: repo.id,
-                                  executionId: repo.setupExecution!.id,
-                                  conversationId: state.conversationId!,
-                                  sessionId: state.sessionId || null,
-                                  running: setupRunning,
-                                });
-                              }}
-                            >
-                              <Bug />
-                            </Button>
-                          )}
-                          {setupRunning && isAdmin ? (
-                            <>
-                              <Button
-                                variant='destructive'
-                                loading={busy === 'cancel'}
-                                disabled={busy !== null}
-                                onClick={() =>
-                                  void call(
-                                    'cancel',
-                                    () =>
-                                      apiInstance.post(
-                                        `/sdlc/repositories/${repo.id}/setup/cancel`,
-                                      ),
-                                    'Setup cancelled',
-                                  )
-                                }
-                              >
-                                <X />
-                                Cancel
-                              </Button>
-                              <Button
-                                variant='outline'
-                                loading={busy === 'restart'}
-                                disabled={busy !== null}
-                                onClick={() =>
-                                  void call(
-                                    'restart',
-                                    () =>
-                                      apiInstance.post(
-                                        `/sdlc/repositories/${repo.id}/setup/restart`,
-                                      ),
-                                    'Setup restarted',
-                                  )
-                                }
-                              >
-                                <RefreshCw />
-                                Restart
-                              </Button>
-                            </>
-                          ) : state.phase === 'NOT_STARTED' && isAdmin ? (
-                            <Button
-                              loading={busy === 'setup'}
-                              disabled={!readReady}
-                              onClick={() =>
-                                void call(
-                                  'setup',
-                                  () => apiInstance.post(`/sdlc/repositories/${repo.id}/setup`),
-                                  'Repo Knowledge setup queued',
-                                )
-                              }
-                            >
-                              <Rocket />
-                              Next: Generate baseline
-                            </Button>
-                          ) : (state.phase === 'PARTIALLY_FAILED' ||
-                              state.phase === 'CANCELLED' ||
-                              repo.setupExecution?.status === 'FAILURE') &&
-                            isAdmin ? (
-                            <Button
-                              loading={busy === 'retry'}
-                              onClick={() =>
-                                void call(
-                                  'retry',
-                                  () =>
-                                    apiInstance.post(`/sdlc/repositories/${repo.id}/setup/retry`),
-                                  'Setup retry queued',
-                                )
-                              }
-                            >
-                              <RefreshCw />
-                              Retry setup
-                            </Button>
-                          ) : state.phase === 'NOT_STARTED' ? (
+                          {renderRepoKnowledgeControls()}
+                          {!isAdmin && state.phase === 'NOT_STARTED' ? (
                             <span className='max-w-40 text-right text-xs text-muted-foreground'>
-                              Repository admin must generate baseline.
+                              Repository admin must generate Repo Knowledge.
                             </span>
                           ) : null}
                         </div>
@@ -1524,7 +1504,7 @@ export default function SdlcScreen(): ReactElement {
                     <div className='mt-5 grid grid-cols-2 divide-x divide-y overflow-hidden rounded-xl border bg-background sm:grid-cols-4 sm:divide-y-0'>
                       <Metric
                         label='Repo Knowledge approved'
-                        value={`${approvedCount}/5`}
+                        value={`${approvedCount}/${SDLC_BASELINE_COUNT}`}
                         icon={ShieldCheck}
                       />
                       <Metric label='PRDs' value={String(prds.length)} icon={ScrollText} />
@@ -1627,7 +1607,8 @@ export default function SdlcScreen(): ReactElement {
                   <section>
                     <SectionHeader
                       title='Repo Knowledge'
-                      description='Admins edit and approve. Members can read. Reapproval replaces permanent memory.'
+                      description='Generate or refresh from repository history. Admins edit and approve; members read.'
+                      action={renderRepoKnowledgeControls(true)}
                     />
                     <div className='grid grid-cols-2 gap-4'>
                       {baseline.map(canvas => {
@@ -1729,9 +1710,9 @@ export default function SdlcScreen(): ReactElement {
                       {baseline.length === 0 && (
                         <EmptyCard
                           text={
-                            state.phase === 'NOT_STARTED'
-                              ? 'Run Setup SDLC to generate Repo Knowledge.'
-                              : 'Repo Knowledge generation is in progress.'
+                            setupRunning
+                              ? 'Repo Knowledge generation is in progress.'
+                              : 'Generate Repo Knowledge directly from the repository.'
                           }
                         />
                       )}
@@ -1748,10 +1729,13 @@ export default function SdlcScreen(): ReactElement {
                     onOpen={openWikiPage}
                     run={wikiRunQuery.data ?? null}
                     isAdmin={isAdmin}
-                    actionPending={busy?.startsWith('wiki-') ?? false}
+                    actionPending={
+                      (busy?.startsWith('wiki-') || busy?.startsWith('knowledge-')) ?? false
+                    }
                     onGenerate={generateWiki}
                     onRefresh={refreshWiki}
                     onRetryRun={retryWiki}
+                    onRetryKnowledge={retryKnowledge}
                     onCancelRun={cancelWiki}
                     onDebugRun={() => {
                       const run = wikiRunQuery.data;
@@ -1777,24 +1761,10 @@ export default function SdlcScreen(): ReactElement {
 
                 {section === 'prds' && renderArtifacts('PRD')}
                 {section === 'tech-docs' && renderArtifacts('TECH_DOC')}
-                {section === 'tickets' && (
-                  <SdlcTicketsBoard
-                    repoId={repo.id}
-                    boardId={sdlcBoard?.id ?? ''}
-                    channelId={repo.channelId ?? ''}
-                    tickets={tickets}
-                    initialTicketId={discussionOpen ? null : selectedTicketId}
-                    stages={sdlcBoardDetail?.stages ?? []}
-                    links={links}
-                    canvases={canvases}
-                    busyKey={busy}
-                    actionsDisabled={!artifactsUnlocked}
-                    onNewTicket={() => setTicketDialog(true)}
-                    onStartWork={startTicket}
-                    onDebugRun={debugTicket}
-                    onOpenCanvas={openArtifactCanvas}
-                    onOpenConversations={ticketId => openConversations(ticketId)}
-                  />
+                {section === 'tickets' && repo.channelId && (
+                  <div className='h-[calc(100vh-8rem)] min-h-[36rem]'>
+                    <KanbanBoardScreen channelId={repo.channelId} />
+                  </div>
                 )}
               </div>
             )}
@@ -2030,73 +2000,35 @@ export default function SdlcScreen(): ReactElement {
         </div>
       </Dialog>
 
-      <Dialog open={ticketDialog} onOpenChange={setTicketDialog} title='New Ticket'>
-        <form
-          className='p-6'
-          onSubmit={event => {
-            event.preventDefault();
-            void call('ticket', createTicket, 'Ticket created in Backlog');
-          }}
-        >
-          <h2 className='text-lg font-semibold'>New Ticket</h2>
+      <Dialog
+        open={startWorkPicker !== null}
+        onOpenChange={open => {
+          if (!open) setStartWorkPicker(null);
+        }}
+        title='Choose a ticket'
+      >
+        <div className='p-6'>
+          <h2 className='text-lg font-semibold'>Choose a ticket</h2>
           <p className='mt-1 text-sm text-muted-foreground'>
-            Creates an existing Xyne ticket on the project SDLC board.
+            This artifact is linked to multiple tickets. Select the one the AI should start.
           </p>
-          <label htmlFor='sdlc-ticket-title' className='mt-5 block text-sm font-medium'>
-            Title
-          </label>
-          <input
-            id='sdlc-ticket-title'
-            autoFocus
-            value={ticketTitle}
-            onChange={event => setTicketTitle(event.target.value)}
-            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
-            data-track-category='SdlcHub'
-            data-track-name='TicketTitleChanged'
-          />
-          <label htmlFor='sdlc-ticket-description' className='mt-4 block text-sm font-medium'>
-            Description
-          </label>
-          <textarea
-            id='sdlc-ticket-description'
-            value={ticketDescription}
-            onChange={event => setTicketDescription(event.target.value)}
-            className='mt-2 min-h-28 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
-            data-track-category='SdlcHub'
-            data-track-name='TicketDescriptionChanged'
-          />
-          <label htmlFor='sdlc-ticket-source' className='mt-4 block text-sm font-medium'>
-            PRD or Tech Doc <span className='font-normal text-muted-foreground'>(optional)</span>
-          </label>
-          <select
-            id='sdlc-ticket-source'
-            value={ticketSourceId}
-            onChange={event => setTicketSourceId(event.target.value)}
-            className='mt-2 h-10 w-full rounded-md border bg-background px-3'
-            data-track-category='SdlcHub'
-            data-track-name='TicketSourceChanged'
-          >
-            <option value=''>No linked canvas</option>
-            {prds.map(item => (
-              <option key={item.id} value={item.id}>
-                PRD · {item.title}
-              </option>
+          <div className='mt-5 grid gap-2'>
+            {startWorkPicker?.tickets.map(ticket => (
+              <button
+                key={ticket.id}
+                type='button'
+                className='rounded-lg border p-3 text-left transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                onClick={() => sendStartWork(startWorkPicker.artifact, ticket)}
+                data-track-category='SdlcHub'
+                data-track-name='StartWorkTicketSelected'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+              >
+                <span className='block text-xs font-semibold text-primary'>{ticket.xyneId}</span>
+                <span className='mt-1 block text-sm font-medium'>{ticket.title}</span>
+              </button>
             ))}
-            {techDocs.map(item => (
-              <option key={item.id} value={item.id}>
-                Tech Doc · {item.title}
-              </option>
-            ))}
-          </select>
-          <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => setTicketDialog(false)}>
-              Cancel
-            </Button>
-            <Button type='submit' loading={busy === 'ticket'} disabled={!ticketTitle.trim()}>
-              Create in Backlog
-            </Button>
           </div>
-        </form>
+        </div>
       </Dialog>
 
       <Dialog
@@ -2122,7 +2054,7 @@ function SectionHeader({
 }: {
   title: string;
   description: string;
-  action?: ReactElement;
+  action?: ReactElement | undefined;
 }): ReactElement {
   return (
     <div className='mb-6 flex items-end justify-between'>
@@ -2193,6 +2125,7 @@ function ArtifactCard({
   eyebrow,
   onOpen,
   onAction,
+  onStartWork,
   actionLabel,
   actionDisabled,
 }: {
@@ -2200,6 +2133,7 @@ function ArtifactCard({
   eyebrow: string;
   onOpen: () => void;
   onAction: () => void;
+  onStartWork?: () => void;
   actionLabel: string;
   actionDisabled: boolean;
 }): ReactElement {
@@ -2227,17 +2161,33 @@ function ArtifactCard({
         <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
           Open document
         </span>
-        <Button
-          size='sm'
-          disabled={actionDisabled}
-          onKeyDown={event => event.stopPropagation()}
-          onClick={event => {
-            event.stopPropagation();
-            onAction();
-          }}
-        >
-          {actionLabel}
-        </Button>
+        <div className='flex items-center gap-2'>
+          {onStartWork && (
+            <Button
+              size='sm'
+              variant='outline'
+              onKeyDown={event => event.stopPropagation()}
+              onClick={event => {
+                event.stopPropagation();
+                onStartWork();
+              }}
+            >
+              <Rocket className='size-4' />
+              Start work
+            </Button>
+          )}
+          <Button
+            size='sm'
+            disabled={actionDisabled}
+            onKeyDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.stopPropagation();
+              onAction();
+            }}
+          >
+            {actionLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );

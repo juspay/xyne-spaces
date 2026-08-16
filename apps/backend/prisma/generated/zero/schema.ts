@@ -975,7 +975,6 @@ export const projectTable = table("projects")
     updatedBy: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
-    sdlcBoardId: string().optional(),
   })
   .primaryKey("id");
 
@@ -3834,11 +3833,6 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     sourceField: ["id"],
     destField: ["projectId"],
     destSchema: repoTable,
-  }),
-  sdlcBoard: one({
-    sourceField: ["sdlcBoardId"],
-    destField: ["id"],
-    destSchema: boardTable,
   })
 }));
 
@@ -3892,11 +3886,6 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ["id"],
     destField: ["boardId"],
     destSchema: channelBoardMappingTable,
-  }),
-  sdlcForProject: one({
-    sourceField: ["id"],
-    destField: ["sdlcBoardId"],
-    destSchema: projectTable,
   })
 }));
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import {
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -56,7 +57,7 @@ export interface SdlcWikiRun {
     lastCauseAt: string;
   };
   chunkSize: 1 | 10 | 25 | 50 | 100;
-  quality: 'QUICK' | 'STANDARD' | 'THOROUGH';
+  quality: 'QUICK' | 'STANDARD';
   baseBranch: string;
   currentCommitSha: string | null;
   currentChunkPosition: number | null;
@@ -64,6 +65,13 @@ export interface SdlcWikiRun {
   conversationId: string | null;
   sessionId: string | null;
   updatedAt: string;
+  knowledge: {
+    executionId: string;
+    phase: string;
+    completedCount: number;
+    totalCount: number;
+    error: string | null;
+  } | null;
 }
 
 export interface SdlcWikiStartInput {
@@ -72,7 +80,7 @@ export interface SdlcWikiStartInput {
     | { kind: 'FULL' }
     | { kind: 'CUSTOM_SHA'; sha: string };
   chunkSize: 1 | 10 | 25 | 50 | 100;
-  quality: 'QUICK' | 'STANDARD' | 'THOROUGH';
+  quality: 'QUICK' | 'STANDARD';
 }
 
 const ACTIVE_WIKI_PHASES = new Set([
@@ -91,19 +99,29 @@ function WikiRunControls(props: {
   onGenerate: (input: SdlcWikiStartInput) => Promise<void>;
   onRefresh: (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>) => Promise<void>;
   onRetry: () => Promise<void>;
+  onRetryKnowledge: () => Promise<void>;
   onCancel: () => Promise<void>;
   onDebug: () => void;
 }): ReactElement {
   const [open, setOpen] = useState(false);
-  const [history, setHistory] = useState<'20' | '50' | 'FULL' | 'CUSTOM'>('20');
+  const [history, setHistory] = useState<'20' | '50' | 'FULL' | 'CUSTOM'>('FULL');
   const [customSha, setCustomSha] = useState('');
-  const [chunkSize, setChunkSize] = useState<1 | 10 | 25 | 50 | 100>(10);
-  const [quality, setQuality] = useState<'QUICK' | 'STANDARD' | 'THOROUGH'>('STANDARD');
+  const [chunkSize, setChunkSize] = useState<1 | 10 | 25 | 50 | 100>(1);
+  const [quality, setQuality] = useState<'QUICK' | 'STANDARD'>('STANDARD');
   const active = props.run ? ACTIVE_WIKI_PHASES.has(props.run.phase) : false;
+  const resumable = props.run?.phase === 'PARTIALLY_FAILED' || props.run?.phase === 'CANCELLED';
   const canRefresh = props.run?.phase === 'COMPLETED' && Boolean(props.run.cursorSha);
   const progress = props.run?.total
     ? Math.min(100, Math.round((props.run.processed / props.run.total) * 100))
     : 0;
+  const historyLabel =
+    history === '20'
+      ? 'Latest 20%'
+      : history === '50'
+        ? 'Latest 50%'
+        : history === 'FULL'
+          ? 'Full history'
+          : customSha.trim() || 'Custom SHA';
   const start = async (): Promise<void> => {
     const historyRange: SdlcWikiStartInput['historyRange'] =
       history === '20'
@@ -148,7 +166,7 @@ function WikiRunControls(props: {
                 <Bug size={14} />
               </button>
             ) : null}
-            {props.run?.phase === 'PARTIALLY_FAILED' ? (
+            {resumable ? (
               <button
                 type='button'
                 disabled={props.actionPending}
@@ -157,7 +175,7 @@ function WikiRunControls(props: {
                 data-track-name='RetryClicked'
                 className='inline-flex h-8 items-center gap-2 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50'
               >
-                <RefreshCw size={13} /> Retry
+                <RefreshCw size={13} /> Resume
               </button>
             ) : null}
             {active ? (
@@ -175,11 +193,18 @@ function WikiRunControls(props: {
               <button
                 type='button'
                 onClick={() => setOpen(current => !current)}
+                aria-expanded={open}
                 data-track-category='SdlcWiki'
                 data-track-name={canRefresh ? 'RefreshPanelOpened' : 'GeneratePanelOpened'}
-                className='inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90'
+                className={cn(
+                  'inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium',
+                  open
+                    ? 'border bg-background text-foreground hover:bg-muted'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                )}
               >
-                <Settings2 size={13} /> {canRefresh ? 'Refresh Wiki' : 'Generate Wiki'}
+                <Settings2 size={13} />
+                {open ? 'Hide settings' : canRefresh ? 'Refresh Wiki' : 'Generate Wiki'}
               </button>
             )}
           </div>
@@ -234,6 +259,33 @@ function WikiRunControls(props: {
         </p>
       ) : null}
 
+      {props.run?.knowledge ? (
+        <div
+          className={cn(
+            'flex items-center justify-between gap-3 border-t px-4 py-2 text-xs',
+            props.run.knowledge.error ? 'text-destructive' : 'text-muted-foreground',
+          )}
+        >
+          <span>
+            Repo Knowledge: {props.run.knowledge.phase.toLowerCase().replaceAll('_', ' ')} ·{' '}
+            {props.run.knowledge.completedCount}/{props.run.knowledge.totalCount}
+            {props.run.knowledge.error ? ` · ${props.run.knowledge.error}` : ''}
+          </span>
+          {props.isAdmin && props.run.knowledge.error ? (
+            <button
+              type='button'
+              disabled={props.actionPending}
+              onClick={() => void props.onRetryKnowledge()}
+              data-track-category='SdlcWiki'
+              data-track-name='RepoKnowledgeRetryClicked'
+              className='h-7 shrink-0 rounded-md border px-2 text-[11px] font-medium hover:bg-muted disabled:opacity-50'
+            >
+              Retry knowledge
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {open ? (
         <div className='space-y-5 border-t px-4 py-4'>
           {!canRefresh ? (
@@ -255,18 +307,26 @@ function WikiRunControls(props: {
                     key={value}
                     type='button'
                     onClick={() => setHistory(value)}
+                    aria-pressed={history === value}
                     data-track-category='SdlcWiki'
                     data-track-name='HistoryRangeSelected'
                     data-track-metadata={JSON.stringify({ value })}
                     className={cn(
-                      'rounded-md border px-3 py-2 text-xs font-medium',
+                      'flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium',
                       history === value
                         ? 'border-primary bg-primary/10 text-primary'
                         : 'hover:bg-muted',
                     )}
                   >
-                    {label}
-                    {value === '20' ? ' · default' : ''}
+                    <span className='inline-flex items-center gap-1.5'>
+                      {history === value ? <Check size={13} strokeWidth={2.5} /> : null}
+                      {label}
+                    </span>
+                    {value === 'FULL' ? (
+                      <span className='shrink-0 text-[10px] font-semibold text-primary'>
+                        · Default
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -296,37 +356,48 @@ function WikiRunControls(props: {
                   key={value}
                   type='button'
                   onClick={() => setChunkSize(value)}
+                  aria-pressed={chunkSize === value}
                   data-track-category='SdlcWiki'
                   data-track-name='ChunkSizeSelected'
                   data-track-metadata={JSON.stringify({ value })}
                   className={cn(
-                    'min-w-12 rounded-md border px-3 py-2 font-mono text-xs',
+                    'inline-flex min-w-12 items-center justify-center gap-1.5 rounded-md border px-3 py-2 font-mono text-xs',
                     chunkSize === value
                       ? 'border-primary bg-primary/10 text-primary'
                       : 'hover:bg-muted',
                   )}
                 >
-                  {value}
-                  {value === 10 ? ' · default' : ''}
+                  <span className='inline-flex items-center gap-1.5'>
+                    {chunkSize === value ? <Check size={12} strokeWidth={2.5} /> : null}
+                    {value}
+                  </span>
+                  {value === 1 ? (
+                    <span className='shrink-0 font-sans text-[10px] font-semibold text-primary'>
+                      · Default
+                    </span>
+                  ) : null}
                 </button>
               ))}
             </div>
           </fieldset>
 
           <fieldset>
-            <legend className='text-xs font-semibold'>Quality</legend>
-            <div className='mt-2 grid gap-2 sm:grid-cols-3'>
+            <legend className='text-xs font-semibold'>Review mode</legend>
+            <p className='mt-1 text-xs text-muted-foreground'>
+              Choose whether the generated Wiki gets an independent review pass.
+            </p>
+            <div className='mt-2 grid gap-2 sm:grid-cols-2'>
               {(
                 [
                   ['QUICK', 'Quick', 'Generation only. Fastest; no independent review.'],
                   ['STANDARD', 'Standard', 'One read-only review and one correction pass.'],
-                  ['THOROUGH', 'Thorough', 'Two focused reviews and one correction pass.'],
                 ] as const
               ).map(([value, label, note]) => (
                 <button
                   key={value}
                   type='button'
                   onClick={() => setQuality(value)}
+                  aria-pressed={quality === value}
                   data-track-category='SdlcWiki'
                   data-track-name='QualitySelected'
                   data-track-metadata={JSON.stringify({ value })}
@@ -335,9 +406,23 @@ function WikiRunControls(props: {
                     quality === value ? 'border-primary bg-primary/10' : 'hover:bg-muted',
                   )}
                 >
-                  <span className='block text-xs font-semibold'>
+                  <span className='flex items-center gap-2 text-xs font-semibold'>
+                    <span
+                      className={cn(
+                        'grid size-4 place-items-center rounded-full border',
+                        quality === value
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-muted-foreground/40',
+                      )}
+                    >
+                      {quality === value ? <Check size={10} strokeWidth={3} /> : null}
+                    </span>
                     {label}
-                    {value === 'STANDARD' ? ' · default' : ''}
+                    {value === 'STANDARD' ? (
+                      <span className='ml-auto shrink-0 text-[10px] font-semibold text-primary'>
+                        Default
+                      </span>
+                    ) : null}
                   </span>
                   <span className='mt-1 block text-[11px] leading-4 text-muted-foreground'>
                     {note}
@@ -347,12 +432,23 @@ function WikiRunControls(props: {
             </div>
           </fieldset>
 
-          <div className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200'>
-            <AlertTriangle size={15} className='mt-0.5 shrink-0' />
+          <div className='flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-muted/25 px-3 py-2.5'>
+            <span className='text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+              Run configuration
+            </span>
+            <span className='font-mono text-[11px] text-foreground'>
+              {canRefresh ? 'New commits' : historyLabel} · {chunkSize} commits/update ·{' '}
+              {quality === 'STANDARD' ? 'Reviewed' : 'Generation only'}
+            </span>
+          </div>
+
+          <div className='flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5 text-foreground'>
+            <AlertTriangle size={15} className='mt-0.5 shrink-0 text-amber-500' />
             <span>
-              More history, smaller Wiki updates, and higher quality improve historical context, but
-              increase runtime and model cost. Every window still saves its endpoint; meaningful
-              intermediate checkpoints are optional.
+              More history, smaller Wiki updates, and independent review increase runtime and model
+              cost. Every window still saves its endpoint; meaningful intermediate checkpoints are
+              optional. Wiki and Repo Knowledge can run independently. After Wiki completion, a
+              reconciliation still updates only changed or missing Repo Knowledge documents.
             </span>
           </div>
           <div className='flex justify-end gap-2'>
@@ -756,6 +852,7 @@ export function SdlcWikiSection(props: {
   onGenerate: (input: SdlcWikiStartInput) => Promise<void>;
   onRefresh: (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>) => Promise<void>;
   onRetryRun: () => Promise<void>;
+  onRetryKnowledge: () => Promise<void>;
   onCancelRun: () => Promise<void>;
   onDebugRun: () => void;
 }): ReactElement {
@@ -809,6 +906,7 @@ export function SdlcWikiSection(props: {
         onGenerate={props.onGenerate}
         onRefresh={props.onRefresh}
         onRetry={props.onRetryRun}
+        onRetryKnowledge={props.onRetryKnowledge}
         onCancel={props.onCancelRun}
         onDebug={props.onDebugRun}
       />

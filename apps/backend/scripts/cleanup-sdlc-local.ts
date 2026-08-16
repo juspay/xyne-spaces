@@ -210,30 +210,6 @@ async function main(): Promise<void> {
   const repos = await resolveRepos(repoSelector);
   const repoIds = repos.map((repo) => repo.id);
   const channelIds = repos.map((repo) => repo.channelId);
-  const projectIds = repos.flatMap((repo) => (repo.projectId ? [repo.projectId] : []));
-  const boardIds = repoSelector
-    ? projectIds.length === 0
-      ? []
-      : await textIds(
-          `SELECT DISTINCT p."sdlcBoardId" AS id
-             FROM public.projects p
-            WHERE p.id = ANY($1::text[])
-              AND p."sdlcBoardId" IS NOT NULL
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM public.repos other
-                  JOIN public.channels c ON c.id = other."channelId"
-                 WHERE other."projectId" = p.id
-                   AND other.id <> ALL($2::text[])
-                   AND c.metadata->>'surface' = 'SDLC'
-              )`,
-          [projectIds, repoIds]
-        )
-    : await textIds(
-        `SELECT DISTINCT p."sdlcBoardId" AS id
-           FROM public.projects p
-          WHERE p."sdlcBoardId" IS NOT NULL`
-      );
   const workflowIds = await textIds(
     `SELECT id FROM public.workflows
       WHERE "workflowType" = ANY($1::text[])
@@ -272,13 +248,11 @@ async function main(): Promise<void> {
         channelIds,
       ])
     : [];
-  const tickets =
-    channelIds.length || boardIds.length
-      ? await textIds(
-          'SELECT id FROM public.tickets WHERE "channelId" = ANY($1::text[]) OR "boardId" = ANY($2::text[])',
-          [channelIds, boardIds]
-        )
-      : [];
+  const tickets = channelIds.length
+    ? await textIds('SELECT id FROM public.tickets WHERE "channelId" = ANY($1::text[])', [
+        channelIds,
+      ])
+    : [];
   const conversations = channelIds.length
     ? await textIds(
         'SELECT "conversationId" AS id FROM public.conversations WHERE "channelId" = ANY($1::text[])',
@@ -291,15 +265,11 @@ async function main(): Promise<void> {
         [conversations]
       )
     : [];
-  const stages = boardIds.length
-    ? await textIds('SELECT id FROM public.stages WHERE "boardId" = ANY($1::text[])', [boardIds])
-    : [];
   const queue = await inspectQueue(repoSelector ? repoIds[0] : undefined);
 
   const summary = {
     repos: repoIds.length,
     channels: channelIds.length,
-    boards: boardIds.length,
     tickets: tickets.length,
     canvases: canvases.length,
     conversations: conversations.length,
@@ -350,17 +320,9 @@ async function main(): Promise<void> {
       ids: executionIds,
     },
     { label: 'workflow', columns: ['workflowId'], ids: workflowIds },
-    { label: 'board', columns: ['boardId'], ids: boardIds },
-    { label: 'stage', columns: ['stageId', 'fromStageId', 'toStageId'], ids: stages },
   ];
 
   const deleted = await prisma.$transaction(async (tx) => {
-    if (boardIds.length > 0) {
-      await tx.$executeRawUnsafe(
-        'UPDATE public.projects SET "sdlcBoardId" = NULL WHERE "sdlcBoardId" = ANY($1::text[])',
-        boardIds
-      );
-    }
     if (repoIds.length > 0) {
       await tx.$executeRawUnsafe(
         'UPDATE public.repos SET "sdlcSetupExecutionId" = NULL WHERE id = ANY($1::text[])',
@@ -377,8 +339,6 @@ async function main(): Promise<void> {
       ['public', 'repos', 'id', repoIds],
       ['public', 'workflow_executions', 'id', executionIds],
       ['public', 'workflows', 'id', workflowIds],
-      ['public', 'stages', 'id', stages],
-      ['public', 'boards', 'id', boardIds],
       ['public', 'channels', 'id', channelIds],
     ];
     let core = 0;

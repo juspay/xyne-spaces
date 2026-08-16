@@ -94,8 +94,6 @@ import {
   deskTypeForChannelType,
   Platform,
   createSdlcLinkSchema,
-  isSdlcSurfaceMetadata,
-  isSdlcTicketMetadata,
   sdlcDiscussionSchema,
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
@@ -5633,17 +5631,6 @@ export function createMutators(
         async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where('id', params.id).one());
           if (!ticket) throw new Error('Ticket not found');
-          const lifecycleChange = params.stageName !== undefined || params.statusV2 !== undefined;
-          const board = lifecycleChange
-            ? await tx.run(zql.boards.where('id', ticket.boardId).one())
-            : null;
-          if (
-            lifecycleChange &&
-            (isSdlcTicketMetadata(ticket.metadata) || isSdlcSurfaceMetadata(board?.metadata))
-          ) {
-            throw new Error('Ticket stages are controlled by the SDLC workflow');
-          }
-
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
             currentBoard?.boardType === BoardType.FLOW &&

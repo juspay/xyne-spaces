@@ -141,6 +141,7 @@ export class SdlcArtifactVersionStore {
       const artifactKind = metadata.documentKind === 'WIKI'
         ? 'WIKI'
         : String(metadata.artifactKind ?? '');
+      if (metadata.refreshCandidate === true) return [];
       if (!['WIKI', 'BASELINE', 'PRD', 'TECH_DOC'].includes(artifactKind)) return [];
       if (wanted.size > 0 && !wanted.has(artifactKind as ResolvedArtifact['artifactKind'])) return [];
       const archived = artifactKind === 'WIKI' && typeof metadata.wikiArchivedAt === 'string';

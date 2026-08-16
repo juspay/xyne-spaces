@@ -13,8 +13,9 @@ export interface SandboxCredentialBinding {
   workspaceId: string;
   repoId: string;
   operation: string;
-  executionId: string;
-  sessionId: string;
+  executionId?: string;
+  sessionId?: string;
+  conversationId?: string;
   sandboxId: string;
   credentialRevision: number;
   expiresAt: string;

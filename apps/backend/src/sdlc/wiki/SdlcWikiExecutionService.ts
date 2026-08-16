@@ -6,6 +6,7 @@ import { sdlcAdmission } from '@/queues/sdlcAdmission';
 import { sdlcQueue } from '@/queues/sdlcQueue';
 import { getS2SClawRunStatus, runS2SClawAgent } from '@/services/clawAgentService';
 import { logger } from '@/utils/logger';
+import { SdlcBaselineReconciliationService } from '../SdlcBaselineReconciliationService';
 import { sdlcAgentContext, type SdlcWikiAgentRole } from '../SdlcAgentContextService';
 import { sdlcVcs } from '../vcs';
 import { buildSdlcWikiPrompt } from './prompts';
@@ -54,14 +55,20 @@ export class SdlcWikiExecutionService {
       workspaceId: string;
       userId: string;
       targetHeadSha: string;
-    }) => Promise<Array<{ code: string; path: string; detail: string }>> = async input => {
+    }) => Promise<Array<{ code: string; path: string; detail: string }>> = async (input) => {
       const { SdlcWikiPageStore } = await import('./SdlcWikiPageStore');
       return SdlcWikiPageStore.withSourceVerifier(
         (repoId, commitSha, paths) => sdlcVcs.verifySourcePaths(repoId, commitSha, paths),
-        (repoId, commitSha, references) => sdlcVcs.verifySourceRanges(repoId, commitSha, references),
+        (repoId, commitSha, references) =>
+          sdlcVcs.verifySourceRanges(repoId, commitSha, references),
         this.prisma
       ).contentAudit(input);
-    }
+    },
+    private readonly queueBaselineReconciliation: (
+      repoId: string,
+      wikiExecutionId: string
+    ) => Promise<string | null> = (repoId, wikiExecutionId) =>
+      new SdlcBaselineReconciliationService(this.prisma).queueAfterWiki(repoId, wikiExecutionId)
   ) {}
 
   async dispatch(executionId: string, admissionPermitId: string): Promise<boolean> {
@@ -215,14 +222,13 @@ export class SdlcWikiExecutionService {
     );
     const nextContext: WikiExecutionContext = {
       ...context,
-      phase:
-        ['BOOTSTRAP', 'BOOTSTRAP_SURVEY', 'BOOTSTRAP_PAGE', 'BOOTSTRAP_EDITOR'].includes(role)
-          ? 'BOOTSTRAPPING'
-          : role === 'ARCHITECTURE_VALIDATOR' || role === 'OPERATIONS_VALIDATOR'
-            ? 'VALIDATING'
-            : role === 'CORRECTOR'
-              ? 'CORRECTING'
-              : 'PROCESSING',
+      phase: ['BOOTSTRAP', 'BOOTSTRAP_SURVEY', 'BOOTSTRAP_PAGE', 'BOOTSTRAP_EDITOR'].includes(role)
+        ? 'BOOTSTRAPPING'
+        : role === 'ARCHITECTURE_VALIDATOR'
+          ? 'VALIDATING'
+          : role === 'CORRECTOR'
+            ? 'CORRECTING'
+            : 'PROCESSING',
       agentSlug: 'sdlc-agent',
       conversationId,
       sessionId,
@@ -234,15 +240,15 @@ export class SdlcWikiExecutionService {
             ? 'BOOTSTRAP'
             : role === 'BOOTSTRAP_SURVEY'
               ? 'BOOTSTRAP_SURVEY'
-            : role === 'BOOTSTRAP_PAGE'
-              ? 'BOOTSTRAP_PAGE'
-            : role === 'BOOTSTRAP_EDITOR'
-              ? 'BOOTSTRAP_EDITOR'
-            : role === 'ARCHITECTURE_VALIDATOR' || role === 'OPERATIONS_VALIDATOR'
-              ? 'VALIDATION'
-              : role === 'CORRECTOR'
-                ? 'CORRECTION'
-                : 'COMMITS',
+              : role === 'BOOTSTRAP_PAGE'
+                ? 'BOOTSTRAP_PAGE'
+                : role === 'BOOTSTRAP_EDITOR'
+                  ? 'BOOTSTRAP_EDITOR'
+                  : role === 'ARCHITECTURE_VALIDATOR'
+                    ? 'VALIDATION'
+                    : role === 'CORRECTOR'
+                      ? 'CORRECTION'
+                      : 'COMMITS',
         conversationId,
         sessionId,
         commitShas,
@@ -307,10 +313,7 @@ export class SdlcWikiExecutionService {
           executionId: execution.id,
           repoId: repo.id,
           baseBranch: context.baseBranch,
-          targetHeadSha: shortestUniqueWikiCommitRef(
-            context.targetHeadSha!,
-            commitRefUniverse
-          ),
+          targetHeadSha: shortestUniqueWikiCommitRef(context.targetHeadSha!, commitRefUniverse),
           sessionId,
           assignedCommitShas: agentCommitRefs,
           ...(role === 'GENERATOR' && nextContext.assignedChunk?.window
@@ -336,16 +339,16 @@ export class SdlcWikiExecutionService {
         ...(role === 'CORRECTOR'
           ? { validatorFeedback: JSON.stringify(context.validatorReports) }
           : {}),
-        ...(['BOOTSTRAP', 'BOOTSTRAP_PAGE', 'BOOTSTRAP_EDITOR'].includes(role) && context.bootstrapPlan
+        ...(['BOOTSTRAP', 'BOOTSTRAP_PAGE', 'BOOTSTRAP_EDITOR'].includes(role) &&
+        context.bootstrapPlan
           ? {
               bootstrapPlan: JSON.stringify({
                 repositorySummary: context.bootstrapPlan.repositorySummary,
-                page:
-                  context.bootstrapPlan.correction?.path
-                    ? context.bootstrapPlan.pages.find(
-                        page => page.path === context.bootstrapPlan!.correction!.path
-                      )
-                    : context.bootstrapPlan.pages[context.bootstrapPlan.nextPageIndex],
+                page: context.bootstrapPlan.correction?.path
+                  ? context.bootstrapPlan.pages.find(
+                      (page) => page.path === context.bootstrapPlan!.correction!.path
+                    )
+                  : context.bootstrapPlan.pages[context.bootstrapPlan.nextPageIndex],
                 correction: context.bootstrapPlan.correction,
               }),
             }
@@ -404,7 +407,8 @@ export class SdlcWikiExecutionService {
         });
         const durableContext = recoverWikiFailureContext(latest?.context, context);
         if (!wikiAssignmentDurablyCompleted(context, durableContext)) {
-          const cause = payload.error || `Wiki agent transport ended as ${payload.status ?? 'unknown'}`;
+          const cause =
+            payload.error || `Wiki agent transport ended as ${payload.status ?? 'unknown'}`;
           if (
             role === 'GENERATOR' &&
             durableContext.version === 2 &&
@@ -472,13 +476,13 @@ export class SdlcWikiExecutionService {
         const durable = parseWikiExecutionContext(latest.context);
         const plan = durable.bootstrapPlan!;
         const page = plan.correction
-          ? plan.pages.find(candidate => candidate.path === plan.correction!.path)
+          ? plan.pages.find((candidate) => candidate.path === plan.correction!.path)
           : plan.pages[plan.nextPageIndex];
         if (!page) throw new Error('Wiki bootstrap page plan is exhausted');
         if (
           durable.pendingCommit?.commitSha !== durable.bootstrapRef ||
           !durable.pendingCommit.pages.some(
-            written =>
+            (written) =>
               written.path === page.path &&
               // Older in-flight executions may not contain writerSessionId.
               // Accept that legacy evidence only when it is the sole pending
@@ -524,7 +528,7 @@ export class SdlcWikiExecutionService {
         const actionable =
           !report.complete || report.missingTopics.length > 0 || report.issues.length > 0;
         const correctionAlreadyAttempted = plan.editorialReports.some(
-          previous =>
+          (previous) =>
             previous.path === path &&
             (!previous.report.complete ||
               previous.report.missingTopics.length > 0 ||
@@ -558,25 +562,20 @@ export class SdlcWikiExecutionService {
         await this.requeue(execution.id, execution.workflowId, next);
         return;
       }
-      if (role === 'ARCHITECTURE_VALIDATOR' || role === 'OPERATIONS_VALIDATOR') {
+      if (role === 'ARCHITECTURE_VALIDATOR') {
         const reports = [...context.validatorReports, this.validatorReport(payload.result)];
-        const finalValidator =
-          (context.quality === 'STANDARD' && role === 'ARCHITECTURE_VALIDATOR') ||
-          role === 'OPERATIONS_VALIDATOR';
-        if (finalValidator) {
-          const findings = await this.runContentAudit({
-            repoId: context.repoId,
-            workspaceId: execution.workspaceId,
-            userId: execution.createdBy!,
-            targetHeadSha: context.targetHeadSha!,
-          });
-          reports.push({
-            complete: findings.length === 0,
-            missingTopics: [],
-            issues: findings.map(finding => `[${finding.code}] ${finding.path}: ${finding.detail}`),
-            suggestions: [],
-          });
-        }
+        const findings = await this.runContentAudit({
+          repoId: context.repoId,
+          workspaceId: execution.workspaceId,
+          userId: execution.createdBy!,
+          targetHeadSha: context.targetHeadSha!,
+        });
+        reports.push({
+          complete: findings.length === 0,
+          missingTopics: [],
+          issues: findings.map((finding) => `[${finding.code}] ${finding.path}: ${finding.detail}`),
+          suggestions: [],
+        });
         const next: WikiExecutionContext = {
           ...context,
           phase: 'VALIDATING',
@@ -623,7 +622,8 @@ export class SdlcWikiExecutionService {
         const recovery = {
           attempts: (checkpointed.recovery?.attempts ?? 0) + 1,
           noProgressAttempts,
-          lastCause: 'Wiki agent completed without the mandatory history-window endpoint checkpoint',
+          lastCause:
+            'Wiki agent completed without the mandatory history-window endpoint checkpoint',
           lastCauseAt: new Date().toISOString(),
         };
         if (noProgressAttempts < WIKI_MAX_NO_PROGRESS_RECOVERIES) {
@@ -834,9 +834,7 @@ export class SdlcWikiExecutionService {
       case 'CORRECTION':
         return 'CORRECTOR';
       case 'VALIDATION':
-        return context.validatorReports.length === 0
-          ? 'ARCHITECTURE_VALIDATOR'
-          : 'OPERATIONS_VALIDATOR';
+        return 'ARCHITECTURE_VALIDATOR';
     }
 
     // A successful finalization clears assignedChunk immediately so its
@@ -856,9 +854,7 @@ export class SdlcWikiExecutionService {
       case 'CORRECTING':
         return 'CORRECTOR';
       case 'VALIDATING':
-        return context.validatorReports.length === 0
-          ? 'ARCHITECTURE_VALIDATOR'
-          : 'OPERATIONS_VALIDATOR';
+        return 'ARCHITECTURE_VALIDATOR';
       default:
         throw new Error('Wiki execution has no recoverable assigned role');
     }
@@ -884,9 +880,6 @@ export class SdlcWikiExecutionService {
     if (context.counts.processed < context.counts.total) return 'GENERATOR';
     if (context.quality === 'QUICK') return null;
     if (context.validatorReports.length === 0) return 'ARCHITECTURE_VALIDATOR';
-    if (context.quality === 'THOROUGH' && context.validatorReports.length === 1) {
-      return 'OPERATIONS_VALIDATOR';
-    }
     const actionable = context.validatorReports.some(
       (report) => !report.complete || report.missingTopics.length > 0 || report.issues.length > 0
     );
@@ -903,12 +896,9 @@ export class SdlcWikiExecutionService {
       role === 'BOOTSTRAP_SURVEY' ||
       role === 'BOOTSTRAP_PAGE' ||
       role === 'BOOTSTRAP_EDITOR'
-    ) return [context.bootstrapRef!];
-    if (
-      role === 'ARCHITECTURE_VALIDATOR' ||
-      role === 'OPERATIONS_VALIDATOR' ||
-      role === 'CORRECTOR'
-    ) {
+    )
+      return [context.bootstrapRef!];
+    if (role === 'ARCHITECTURE_VALIDATOR' || role === 'CORRECTOR') {
       return [context.targetHeadSha!];
     }
     return nextWikiChunk({
@@ -940,14 +930,25 @@ export class SdlcWikiExecutionService {
       credentialSessionId: null,
       admissionPermitId: null,
     };
-    await this.prisma.$transaction(async (tx) => {
+    const completed = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.workflowExecution.updateMany({
         where: { id: executionId, status: 'RUNNING' },
         data: { status: 'SUCCESS', context: serializeWikiRunState(next) },
       });
-      if (updated.count !== 1) return;
+      if (updated.count !== 1) return false;
       await tx.workflow.update({ where: { id: workflowId }, data: { status: 'SUCCESS' } });
+      return true;
     });
+    if (!completed) return;
+    try {
+      await this.queueBaselineReconciliation(context.repoId, executionId);
+    } catch (error) {
+      logger.error('[SDLC-WIKI] knowledge reconciliation dispatch failed', {
+        repoId: context.repoId,
+        wikiExecutionId: executionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async fail(
@@ -1015,17 +1016,25 @@ export class SdlcWikiExecutionService {
       pendingEditorialPath: null,
       correction: null,
       editorialReports: [],
-      pages: pages.slice(0, 50).flatMap(page => {
+      pages: pages.slice(0, 50).flatMap((page) => {
         if (!page || typeof page !== 'object' || Array.isArray(page)) return [];
         const candidate = page as Record<string, unknown>;
         const strings = (field: string, limit: number): string[] =>
           Array.isArray(candidate[field])
             ? (candidate[field] as unknown[])
-                .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                .filter(
+                  (item): item is string => typeof item === 'string' && item.trim().length > 0
+                )
                 .slice(0, limit)
             : [];
         const archetypes = new Set([
-          'overview', 'subsystem', 'flow', 'data-model', 'interface', 'operations', 'decision',
+          'overview',
+          'subsystem',
+          'flow',
+          'data-model',
+          'interface',
+          'operations',
+          'decision',
         ]);
         const priorities = new Set(['HIGH', 'MEDIUM', 'LOW']);
         if (
@@ -1033,7 +1042,8 @@ export class SdlcWikiExecutionService {
           typeof candidate.purpose !== 'string' ||
           !archetypes.has(String(candidate.archetype)) ||
           !priorities.has(String(candidate.priority))
-        ) return [];
+        )
+          return [];
         let path: string;
         try {
           const proposed = candidate.path.trim().slice(0, 512);
@@ -1043,17 +1053,26 @@ export class SdlcWikiExecutionService {
         }
         if (seenPaths.has(path)) return [];
         seenPaths.add(path);
-        return [{
-          path,
-          purpose: candidate.purpose.slice(0, 1_000),
-          concepts: strings('concepts', 20),
-          priority: candidate.priority as 'HIGH' | 'MEDIUM' | 'LOW',
-          archetype: candidate.archetype as 'overview' | 'subsystem' | 'flow' | 'data-model' | 'interface' | 'operations' | 'decision',
-          sourceAreas: strings('sourceAreas', 20),
-          relatedPages: strings('relatedPages', 20),
-          tableCandidates: strings('tableCandidates', 10),
-          diagramCandidates: strings('diagramCandidates', 10),
-        }];
+        return [
+          {
+            path,
+            purpose: candidate.purpose.slice(0, 1_000),
+            concepts: strings('concepts', 20),
+            priority: candidate.priority as 'HIGH' | 'MEDIUM' | 'LOW',
+            archetype: candidate.archetype as
+              | 'overview'
+              | 'subsystem'
+              | 'flow'
+              | 'data-model'
+              | 'interface'
+              | 'operations'
+              | 'decision',
+            sourceAreas: strings('sourceAreas', 20),
+            relatedPages: strings('relatedPages', 20),
+            tableCandidates: strings('tableCandidates', 10),
+            diagramCandidates: strings('diagramCandidates', 10),
+          },
+        ];
       }),
     };
     if (!plan.repositorySummary || plan.pages.length === 0) {

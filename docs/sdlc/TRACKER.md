@@ -8,7 +8,7 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete, `[!]` blocked.
 
 - [x] T0.1 Record product goals, non-goals, users, ACLs, information architecture, lifecycle, failure behavior, and acceptance criteria.
 - [x] T0.2 Lock repository-scoped hidden Channel + flat Baseline/PRDs/Tech Docs folders.
-- [x] T0.3 Lock one shared Project SDLC Board and existing Tickets as Tickets.
+- [x] T0.3 Reuse the normal Project Boards and Tickets without an SDLC-owned Board.
 - [x] T0.4 Lock five baseline documents, manual approval/upsert, and all-five coding gate.
 - [x] T0.5 Lock one generic entity-link table and actual-source-only policy.
 - [x] T0.6 Lock deep `SdlcHub` boundary and thin route/Zero/job adapters.
@@ -19,7 +19,7 @@ Evidence: `docs/sdlc/PRD.md`.
 ## T1 — Persistence and shared contracts
 
 - [x] T1.1 Extend `Repo` with Project, hidden Channel, canonical URL, and setup execution relations/fields.
-- [x] T1.2 Extend `Project` with optional shared SDLC Board relation.
+- [x] T1.2 Keep Project Board ownership unchanged; SDLC stores no preferred Board relation.
 - [x] T1.3 Add `SdlcEntityLink` with duplicate guard and lookup indexes; add safe 1:1 indexes in migration if supported.
 - [x] T1.4 Add migration preserving legacy Repo rows and existing uniqueness behavior.
 - [x] T1.5 Mirror fields/table/relations in shared Zero schema.
@@ -144,18 +144,17 @@ Evidence: AI prompt/context inspection and answers against known functions; ACL 
 
 ## T10 — Start Work and PR lifecycle
 
-- [x] T10.1 Add start-work route/UI from Ticket, PRD, and Tech Doc.
-- [x] T10.2 Block before five approvals and on conflicting active Ticket execution.
-- [x] T10.3 Launch one coding agent with approved baseline/current chain/linked context/channel history/tools.
-- [x] T10.4 Create a safe non-default branch, edit, run safe repository checks, commit, push, and open draft PR.
-- [x] T10.5 Never merge from agent workflow.
-- [x] T10.6 Move Ticket to In Progress on start.
-- [x] T10.7 Move Ticket to In Review on PR create/update.
-- [x] T10.8 Move Ticket to Done on merge using provider-adapter reconciliation; do not require repository
-      webhook installation.
-- [x] T10.9 Display linked PR status in trace spine/Ticket.
+- [x] T10.1 Embed the normal Project ticket experience and expose all Project Boards.
+- [x] T10.2 Remove the preferred SDLC Board relation and dedicated ticket/start-work HTTP commands.
+- [x] T10.3 Resolve direct and PRD/Tech Doc-chain Ticket links within the same Project.
+- [x] T10.4 Open a fresh repository-scoped AI conversation with the artifact and selected Ticket attached.
+- [x] T10.5 Automatically submit the explicit Start Work prompt.
+- [x] T10.6 Show a Ticket picker when an artifact has multiple related Tickets.
+- [x] T10.7 Leave Ticket creation, stages, permissions, and lifecycle to the normal ticket system.
+- [x] T10.8 Preserve historical SDLC work callback compatibility without creating new executions.
+- [x] T10.9 Display linked PR status in the trace spine.
 
-Evidence: dry/manual run in test repository, remote draft PR, ticket stages, workflow state/log inspection.
+Evidence: artifact Ticket-link policy tests, dashboard/backend typechecks, and manual Start Work smoke.
 
 ## T11 — Verification and delivery audit
 
@@ -719,8 +718,8 @@ Evidence: fixture-repository end-to-end tests with relevant/no-op/refactor/renam
 - [x] T27.7.1 Quick completes after commit processing without an LLM validator.
 - [x] T27.7.2 Standard runs one read-only structured validator then one correction role only for actionable
       findings.
-- [x] T27.7.3 Thorough runs independent architecture/domain/flow and operations/failure/security/source validators,
-      merges reports deterministically, then runs one correction role.
+- [x] T27.7.3 Standard runs one independent architecture/domain/flow validator, then one correction role for
+      confirmed findings.
 - [x] T27.7.4 Bind validators read-only; correction must verify findings at target head and create
       `Wiki audit @ <short-head>` revisions only for confirmed changes.
 - [x] T27.7.5 Validate report schemas, missing/stale/contradictory/source findings, empty-report skip, invalid-report
@@ -744,7 +743,8 @@ Evidence: Agent context tests, prompt tests, interactive public/private reposito
 
 - [x] T27.9.1 Replace importer empty state with admin **Generate Wiki** and explanatory member state.
 - [x] T27.9.2 Add start panel: Latest 20% default / Latest 50% / Full / Custom SHA; 1 / 10 default / 25 / 50 /
-      100 commits per Agent Session; Quick / Standard default / Thorough.
+      100 commits per Agent Session; Quick / Standard default.
+      Historical defaults and quality modes are superseded by T29.1, T29.4, and T29.5.
 - [x] T27.9.3 Explain each option's quality/time/cost tradeoff, show the exact selected count after preparation,
       and display the common quality/runtime/cost warning before start.
 - [x] T27.9.4 Show durable phase, branch/head, processed/total, chunk/current commit, update/no-op counts, quality
@@ -955,7 +955,7 @@ T27.10.6 or the overall feature can be marked complete.
 | 30 — current and historical revision/source tuple | page-store tests plus configured 24 outcomes, 19 revisions, 21 CanvasVersions, content hashes, version identities, and 58 revalidated source mappings | Automated + runtime | None beyond final audit |
 | 31 — human-edit conflict | live Y-Sweet hash comparison and `CONTENT_CONFLICT` page-store test | Automated | Inject edit during configured run and Retry |
 | 32 — archive without hard delete; move/partial removal update | archive/restore source-history/version tests; normal listing filters archived metadata | Automated | Inspect archive/restore in configured run |
-| 33 — quality modes, same agent, read-only validators | prompt/palette/role tests and execution dispatch contracts | Automated | Complete Standard; optionally inspect Thorough role sequence |
+| 33 — quality modes, same agent, read-only validators | prompt/palette/role tests and execution dispatch contracts | Automated | Complete Standard role sequence |
 | 34 — Ask AI freshness policy | freshness and Ask-AI context/prompt tests; successful run cursor and observed base head both `044cd79e9` resolve to `CURRENT` | Automated + current runtime | Stale configured Ask AI smoke after a later branch commit |
 | 35 — durable truthful recovery | checkpoint/CAS/cancel/duplicate/lost-callback/transient-fetch/partial-side-effect tests plus configured lost-callback Retry completion | Automated + partial runtime | Injected mid-chunk and private fault sequence |
 
@@ -1118,7 +1118,7 @@ Observed durable result:
       retain an editable source fallback, and show a bounded parse error without breaking the page. Do not execute
       Mermaid links/scripts or trust diagram URLs. Add conversion, Canvas read/edit, version restore, theme, and
       invalid-diagram coverage. Keep the prompt rule that diagrams are optional, focused, and evidence-backed.
-- [~] T27.11.8 Add a deterministic post-run content audit before Standard/Thorough completion: active scratch pages,
+- [~] T27.11.8 Add a deterministic post-run content audit before Standard completion: active scratch pages,
       duplicate topic/content hashes, active pages under `archive/`, missing index links, empty or stale sources,
       unsupported source citations, broken Mermaid, suspiciously broad rewrites, and pages untouched despite source
       overlap. Validator findings remain read-only until the normal correction role confirms them against code.
@@ -1153,7 +1153,7 @@ Observed durable result:
       and persists the complete resulting Canvas/version. Give diagram sections stable headings/anchors so later
       windows can update or remove them with the generic section operations. The Wiki Map should inventory diagram
       purpose/type/page so later windows update an existing diagram when its architecture changes instead of
-      duplicating or silently leaving it stale. Standard/Thorough validators must flag missing high-value diagrams,
+      duplicating or silently leaving it stale. Standard validators must flag missing high-value diagrams,
       unsupported relationships, stale diagrams, unreadable density, decorative diagrams, and prose/diagram
       contradictions; Quick keeps diagrams optional. Cover the observability-style application → collection →
       storage → visualization flow, sequence, state, ER, rename/removal, invalid syntax, stale-source, and
@@ -1175,7 +1175,7 @@ Observed durable result:
       information order, density, unsupported rationale, repetition, stale paths, cross-links, table/diagram value,
       and agreement between prose and evidence. It may request corrections only through the normal serialized Wiki
       mutations. Quick performs structural checks; Standard adds the page editorial pass and end-of-run coverage
-      review; Thorough adds a second architecture/operations gap review. Add deterministic rubric fixtures covering
+      review. Add deterministic rubric fixtures covering
       a polished observability page, a no-diagram page, a deliberately shallow file inventory, an oversized page
       needing a split, and an incremental update that must preserve existing context. The target is stable,
       source-grounded technical memory—not a copied DeepWiki layout, diagram quota, marketing prose, or symbol dump.
@@ -1186,11 +1186,11 @@ failures, and stop after three no-progress recoveries. Wiki writes support seria
 generic unique-heading section replacement/insertion/removal while persisting full CanvasVersion snapshots. Source
 preflight reports the exact invalid path, structured `[[source:N]]` references are resolved server-side to trusted
 GitHub blob/line URLs, the list tool returns a derived Wiki Map, and Canvas code blocks with language `mermaid` use
-the existing sanitized Mermaid renderer with an editable source fallback. Standard/Thorough validation now appends
+the existing sanitized Mermaid renderer with an editable source fallback. Standard validation now appends
 a deterministic structural audit, and the authenticated repair-preview endpoint is read-only.
 
 Bootstrap is now a durable same-agent sequence: bounded repository survey and page plan, exactly one planned page
-write per run, a separate read-only editorial run for Standard/Thorough, at most one serialized correction and a
+write per run, a separate read-only editorial run for Standard, at most one serialized correction and a
 second review, then a final checkpoint-only run. Each role receives only its required tools, and every transition
 reloads the server-owned execution context, so compaction or a fresh Claw session cannot replace trusted IDs,
 commit order, plan position, pending revisions, or source evidence with model memory.
@@ -1303,6 +1303,18 @@ Verification (2026-08-13): backend, shared, Claw, and Claw Auth typechecks pass.
 tests, and shared sandbox tests pass. Full package test commands also ran unrelated suites and exposed pre-existing
 network/timing/mention-test failures; focused SDLC test files themselves pass. No database mutation or Wiki run was
 started.
+
+### T27.11.19 — Restore globally scoped runtime file tools
+
+- [x] Register `read`, `write`, `grep`, `find`, and `ls` centrally for every main Claw agent, including
+      `sdlc-agent`, instead of allowing callers to remove the shared runtime capability.
+- [x] Keep reads confined to the ephemeral workspace and approved session `.context`/skill roots; keep writes
+      confined to the ephemeral workspace. Repository source remains sandbox-only.
+- [x] Prove an oversized SDLC sandbox result can spill to `.context/tool-results` and be recovered through scoped
+      `read`; retain cross-session read denial and read-only spill-root enforcement.
+
+Verification (2026-08-14): 17 focused Claw agent-helper/tool-output/scoped-tool tests pass, and the Claw typecheck
+passes. No configured Wiki run was started.
 
 ## T28 — Round 2 proper code review and cleanup
 
@@ -1423,6 +1435,26 @@ are mandatory inputs to this round rather than isolated follow-ups.
       dashboard typechecks, lint/build, and `git diff --check`. Run at most one small synthetic sample if required.
       Stop after implementation and automated verification; the human starts, monitors, cancels, retries, and
       evaluates the configured large-repository stress run.
+
+## T29 — simplify Wiki review modes
+
+- [x] T29.1 Offer only Quick and Standard for new Wiki generation and refresh runs; keep Standard as default.
+- [x] T29.2 Remove the second focused validator and reject the removed quality mode in durable and request schemas.
+- [x] T29.3 Simplify the Wiki run settings UI and update the active product/design contract.
+- [x] T29.4 Make Full history the default for new Wiki generation runs.
+- [x] T29.5 Make one commit per Wiki update the default for generation and refresh runs.
+
+## T30 — converge interactive SDLC repository setup on Kata
+
+- [x] T30.1 Route every attached GitHub repository through the existing dynamic `kata-workspace-template`; remove
+      the interactive Xyne Spaces mirror and SDLC dependency on gVisor A/B/C/D rotation.
+- [x] T30.2 Issue a short-lived signed interactive repository grant and accept it at encrypted credential
+      bootstrap after current membership/read-capability validation; preserve anonymous public cloning.
+- [x] T30.3 Remove SDLC read-only/write-request routing flags. Keep non-mutation as explicit agent prompt policy.
+- [x] T30.4 Allow the narrow backend-owned PR tool to accept trusted interactive authority while retaining
+      capability, repository, branch, commit, and draft verification.
+- [x] T30.5 Remove the temporary local rotation switch/template workaround and verify context, grant, sandbox,
+      credential, prompt, and trusted MCP binding tests.
 
 ## V2 backlog — multi-ticket Tech Doc execution
 

@@ -20,7 +20,7 @@ capabilities available for that repository.
 
 The hub then advances through a strict progressive gate:
 
-`Access check → Baseline generation → Five approvals → Artifact work`
+`Access check → Wiki generation → Baseline reconciliation → Seven approvals → Artifact work`
 
 Start Work has an additional repository capability gate: the credential must support direct branch
 push and draft pull-request creation. Public repositories remain usable for read-only baseline work
@@ -44,7 +44,7 @@ without any credential.
 - Repository attachment no longer auto-starts baseline generation.
 - The repository access check runs first. A repository admin explicitly selects **Next: Generate
   baseline** after read access passes.
-- PRDs, Tech Docs, Tickets, and their creation actions stay locked until all five
+- PRDs, Tech Docs, Tickets, and their creation actions stay locked until all seven
   baseline documents are approved.
 - Start Work additionally requires direct-repository branch push and pull-request creation
   capability.
@@ -115,18 +115,18 @@ decrypts the original PAT.
 
 ## 5. Roles and access
 
-| Action | Workspace owner/admin | Project-authorized user | Repository member |
-| --- | ---: | ---: | ---: |
-| View credential status/identity | Yes | Yes | Yes |
-| Read token | No | No | No |
-| Configure/replace/disconnect token | Yes | No | No |
-| Attach public repository | Yes | Yes | Subject to project access |
-| Attach private repository using shared token | Yes | Yes | Subject to project access |
-| Run/retry repository access check | Yes | Yes | Repository member |
-| Start baseline | Repository admin | Repository admin | No |
-| Approve baseline | Repository admin | Repository admin | No |
-| Use unlocked artifact surfaces | Yes | Yes | Repository member |
-| Start Work | Repository member with normal ticket access | Same | Same |
+| Action                                       |                       Workspace owner/admin | Project-authorized user |         Repository member |
+| -------------------------------------------- | ------------------------------------------: | ----------------------: | ------------------------: |
+| View credential status/identity              |                                         Yes |                     Yes |                       Yes |
+| Read token                                   |                                          No |                      No |                        No |
+| Configure/replace/disconnect token           |                                         Yes |                      No |                        No |
+| Attach public repository                     |                                         Yes |                     Yes | Subject to project access |
+| Attach private repository using shared token |                                         Yes |                     Yes | Subject to project access |
+| Run/retry repository access check            |                                         Yes |                     Yes |         Repository member |
+| Start baseline                               |                            Repository admin |        Repository admin |                        No |
+| Approve baseline                             |                            Repository admin |        Repository admin |                        No |
+| Use unlocked artifact surfaces               |                                         Yes |                     Yes |         Repository member |
+| Start Work                                   | Repository member with normal ticket access |                    Same |                      Same |
 
 The backend, not the dashboard, enforces every role and gate. Sharing a capability never shares the
 credential value.
@@ -198,16 +198,16 @@ This is normal hub state, not a separate onboarding framework or modal.
 
 - Show authenticated identity or public unauthenticated access.
 - Show proven/inferred capabilities and missing capabilities.
-- Enable **Next: Generate baseline** for repository admins.
+- Enable **Generate Wiki** for repository admins; Wiki completion queues baseline reconciliation.
 - PRDs, Tech Docs, Tickets, and Start Work remain disabled.
 
 #### State 3 — baseline generation/review
 
-- Existing five-document progress, failure, retry, cancel, and debug behavior remains.
+- Seven-document progress, failure, retry, cancel, and debug behavior remains.
 - Artifact modules remain disabled during generation and review.
 - Approval checklist remains on the normal Baseline surface.
 
-#### State 4 — all five baseline documents approved
+#### State 4 — all seven baseline documents approved
 
 - PRDs, Tech Docs, and Tickets unlock.
 - Start Work unlocks only when `PUSH_BRANCH` and `CREATE_PULL_REQUEST` are available.
@@ -215,13 +215,13 @@ This is normal hub state, not a separate onboarding framework or modal.
 
 ## 7. Capability behavior
 
-| Repository/token state | Read/baseline | Artifact authoring after approval | Start Work |
-| --- | ---: | ---: | ---: |
-| Public, no credential | Yes | Yes | No |
-| Public, invalid credential | Public fallback only, with warning | Yes after approval | No |
-| Private, no credential | No | No | No |
-| Private, credential can read only | Yes | Yes after approval | No |
-| Public/private, credential can push and create PRs | Yes | Yes after approval | Yes |
+| Repository/token state                             |                      Read/baseline | Artifact authoring after approval | Start Work |
+| -------------------------------------------------- | ---------------------------------: | --------------------------------: | ---------: |
+| Public, no credential                              |                                Yes |                               Yes |         No |
+| Public, invalid credential                         | Public fallback only, with warning |                Yes after approval |         No |
+| Private, no credential                             |                                 No |                                No |         No |
+| Private, credential can read only                  |                                Yes |                Yes after approval |         No |
+| Public/private, credential can push and create PRs |                                Yes |                Yes after approval |        Yes |
 
 GitHub exposes endpoint permission requirements but does not provide a reliable, non-mutating
 fine-grained-PAT introspection call proving every future write operation. The access check must label
@@ -245,12 +245,22 @@ use this interface rather than parsing providers or decrypting credentials thems
 
 ```ts
 interface SdlcVcs {
-  configureCredential(input: ConfigureVcsCredentialInput): Promise<VcsCredentialSummary>;
+  configureCredential(
+    input: ConfigureVcsCredentialInput,
+  ): Promise<VcsCredentialSummary>;
   disconnectCredential(input: DisconnectVcsCredentialInput): Promise<void>;
-  checkRepository(input: CheckRepositoryAccessInput): Promise<RepositoryAccessResult>;
-  requireCapabilities(input: RequireRepositoryCapabilitiesInput): Promise<RepositoryAccessResult>;
-  bootstrapSandboxCredential(input: BootstrapSandboxCredentialInput): Promise<SandboxCredentialEnvelope>;
-  createDraftPullRequest(input: CreateDraftPullRequestInput): Promise<PullRequestResult>;
+  checkRepository(
+    input: CheckRepositoryAccessInput,
+  ): Promise<RepositoryAccessResult>;
+  requireCapabilities(
+    input: RequireRepositoryCapabilitiesInput,
+  ): Promise<RepositoryAccessResult>;
+  bootstrapSandboxCredential(
+    input: BootstrapSandboxCredentialInput,
+  ): Promise<SandboxCredentialEnvelope>;
+  createDraftPullRequest(
+    input: CreateDraftPullRequestInput,
+  ): Promise<PullRequestResult>;
 }
 ```
 
@@ -261,10 +271,18 @@ interface VcsProviderAdapter {
   readonly provider: string;
   parseRepositoryUrl(value: string): ParsedVcsRepository;
   validateCredential(secret: unknown): Promise<ProviderCredentialIdentity>;
-  inspectRepository(input: ProviderRepositoryInspectionInput): Promise<ProviderInspection>;
-  buildGitAuthentication(input: ProviderGitAuthenticationInput): GitAuthentication;
-  createDraftPullRequest(input: ProviderCreatePullRequestInput): Promise<ProviderPullRequest>;
-  validatePullRequestUrl(input: ProviderPullRequestValidationInput): ParsedPullRequest;
+  inspectRepository(
+    input: ProviderRepositoryInspectionInput,
+  ): Promise<ProviderInspection>;
+  buildGitAuthentication(
+    input: ProviderGitAuthenticationInput,
+  ): GitAuthentication;
+  createDraftPullRequest(
+    input: ProviderCreatePullRequestInput,
+  ): Promise<ProviderPullRequest>;
+  validatePullRequestUrl(
+    input: ProviderPullRequestValidationInput,
+  ): ParsedPullRequest;
 }
 ```
 
@@ -346,7 +364,7 @@ Eliminating this exposure is a v2 decision.
 9. Derive normalized capability evidence without performing writes.
 10. Lock and re-read the current credential before persisting; retry if it changed during inspection.
 11. Persist capability evidence on success. Clear capabilities on failure. Keep status/error/evidence in job result.
-12. Publish progress; unlock **Next: Generate baseline** only when read is proven.
+12. Publish progress; unlock **Generate Wiki** only when read is proven.
 
 Stable error examples:
 
@@ -383,6 +401,20 @@ Stable error examples:
 6. The agent receives repository path and capability metadata, never token text.
 
 Public repositories without a credential skip the grant and clone anonymously.
+
+### 12.1.1 Interactive SDLC repository access
+
+1. Spaces validates the current user, workspace, repository membership, and conversation, then issues a
+   short-lived signed interactive grant containing only identity and scope metadata.
+2. Claw treats this grant as server-owned context and always provisions `kata-workspace-template` for the exact
+   attached repository. It never resolves SDLC repositories through static Xyne Spaces clone configuration or
+   gVisor A/B/C/D template rotation.
+3. Credential bootstrap revalidates the grant, repository membership, and read capability. A connected workspace
+   credential is encrypted into the sandbox; public repositories may clone anonymously when none exists.
+4. The sandbox does not enforce a separate read-only filesystem mode. The SDLC prompt forbids mutation for
+   questions, PRDs, Tech Docs, reviews, and other non-implementation work.
+5. Explicit implementation requests may branch, edit, check, commit, and push. The narrow PR tool accepts the
+   trusted interactive grant, revalidates current PR capability and remote refs, and creates a draft PR.
 
 ### 12.2 Start Work
 
@@ -501,22 +533,22 @@ Required checks:
 
 Manual matrix:
 
-| Scenario | Expected result |
-| --- | --- |
-| Public repo, no credential | Read check passes anonymously; baseline available; Start Work blocked |
-| Invalid PAT | Metadata shows invalid credential; public fallback labeled; private repo blocked |
-| Fine-grained PAT pending org approval | Actionable blocked status |
-| Private repo with read-only PAT | Baseline succeeds; Start Work blocked |
-| Full permitted private repo | Baseline, approvals, feature push, draft PR succeed |
-| Wrong resource owner | Repository-specific access blocked |
-| Missing base branch | Baseline remains locked with branch error |
-| Rotate credential | Existing checks become stale; recheck uses new identity/revision |
-| Disconnect credential | Private repositories block; public repositories fall back to read only |
-| Member views settings | Metadata visible; secret/config actions denied |
-| Member attaches private repo | Uses shared capability without receiving token |
-| Attempt artifacts before approvals | UI disabled and backend rejects |
-| Attempt Start Work without push/PR | UI disabled and backend rejects |
-| Agent completes work | Only convention-derived safe feature branch pushed; draft PR linked; never merged |
+| Scenario                              | Expected result                                                                   |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| Public repo, no credential            | Read check passes anonymously; baseline available; Start Work blocked             |
+| Invalid PAT                           | Metadata shows invalid credential; public fallback labeled; private repo blocked  |
+| Fine-grained PAT pending org approval | Actionable blocked status                                                         |
+| Private repo with read-only PAT       | Baseline succeeds; Start Work blocked                                             |
+| Full permitted private repo           | Baseline, approvals, feature push, draft PR succeed                               |
+| Wrong resource owner                  | Repository-specific access blocked                                                |
+| Missing base branch                   | Baseline remains locked with branch error                                         |
+| Rotate credential                     | Existing checks become stale; recheck uses new identity/revision                  |
+| Disconnect credential                 | Private repositories block; public repositories fall back to read only            |
+| Member views settings                 | Metadata visible; secret/config actions denied                                    |
+| Member attaches private repo          | Uses shared capability without receiving token                                    |
+| Attempt artifacts before approvals    | UI disabled and backend rejects                                                   |
+| Attempt Start Work without push/PR    | UI disabled and backend rejects                                                   |
+| Agent completes work                  | Only convention-derived safe feature branch pushed; draft PR linked; never merged |
 
 ## 17. Delivery slices
 
@@ -546,8 +578,8 @@ redaction, and logging exclusions.
 5. Attachment starts a durable, non-mutating access check and does not auto-start baseline.
 6. Public repository without PAT passes read-only access; private repository without read access is
    blocked.
-7. Hub enables **Next: Generate baseline** only after proven read access.
-8. PRDs, Tech Docs, Tickets, and their creation actions stay locked until all five
+7. Hub enables **Generate Wiki** only after proven read access; Wiki completion queues baseline reconciliation.
+8. PRDs, Tech Docs, Tickets, and their creation actions stay locked until all seven
    baseline documents are approved; backend commands enforce the same gate.
 9. Start Work additionally requires direct branch push and draft-PR capability.
 10. Private baseline clone uses the workspace credential without serializing it into durable run/debug

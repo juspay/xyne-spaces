@@ -96,14 +96,14 @@ Expected: repository shell persists and one access check is queued; baseline doe
 S2. Refresh while the check runs.
 Expected: queued/checking state survives refresh and resolves to repository/visibility/base/capability evidence.
 
-S3. Select Next: Generate baseline.
-Expected: this is enabled only with proven read and repository-admin membership.
+S3. Select Generate Wiki.
+Expected: this is enabled only with proven read and repository-admin membership; Wiki completion queues baseline reconciliation.
 
-S4. Approve all five baseline documents.
-Expected: PRDs, Tech Docs, and Tickets unlock only after the fifth approval.
+S4. Approve all seven baseline documents.
+Expected: PRDs, Tech Docs, and Tickets unlock only after the seventh current approval.
 
-S5. Create a PRD, Tech Doc, and Ticket, then select Start Work.
-Expected: backend rechecks read/push/PR evidence and approvals before dispatch.
+S5. Link a normal Project Ticket to a PRD or Tech Doc, then select Start Work.
+Expected: a fresh AI conversation opens with the artifact and Ticket attached, and the implementation prompt is submitted automatically.
 
 S6. Inspect the remote result.
 Expected: exactly the safe convention-conforming feature branch returned by the agent was pushed, default branch was untouched, and a draft PR
@@ -114,6 +114,14 @@ for SDLC commit attribution.
 S7. Inspect API/log/queue/workflow/debug/Zero surfaces using a unique canary PAT in a non-production smoke.
 Expected: no plaintext PAT, ciphertext, authenticated URL, credential-helper contents, or reversible token
 fragment appears.
+
+S8. Open SDLC Chat for a different attached private GitHub repository and ask a repository question.
+Expected: one `kata-workspace-template` claim becomes ready, the selected repository clones with the workspace
+credential, and the agent performs no edits, builds, commits, pushes, or PR creation.
+
+S9. In a new SDLC Chat run, explicitly request an implementation.
+Expected: the same Kata setup creates a safe feature branch, pushes the verified commit, and the narrow backend
+tool creates one draft PR; no `agent-workspace-gvisor-template-a/b/c/d` claim is requested.
 
 ## 6. Negative matrix
 
@@ -177,4 +185,4 @@ Delete one repository only:
 pnpm sdlc:cleanup -- --repo <repository> --yes
 ```
 
-Cleanup is hard-blocked unless both database hosts are loopback and the Spaces backend runs in development/test mode. Without `--repo`, it removes all local SDLC repository hubs, generated boards, Tickets, Canvases (including Wiki pages and versions), conversations, workflow executions (including Wiki runs), Claw run history, and SDLC Redis queue/admission state. With `--repo`, it removes only matching repository state and preserves a shared Project board while another SDLC repository still uses it. It always preserves workspace registration, users, Projects, agent configuration, and workspace GitHub credentials.
+Cleanup is hard-blocked unless both database hosts are loopback and the Spaces backend runs in development/test mode. Without `--repo`, it removes all local SDLC repository hubs, repository-channel Tickets, Canvases (including Wiki pages and versions), conversations, workflow executions (including Wiki runs), Claw run history, and SDLC Redis queue/admission state. With `--repo`, it removes only matching repository state. It preserves normal Project Boards and their Tickets, workspace registration, users, Projects, agent configuration, and workspace GitHub credentials.
