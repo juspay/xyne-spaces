@@ -1830,6 +1830,11 @@ model ExperimentRun {
   /// proofArtifactPath resolves to one of these — proof left behind in a
   /// sandbox dies with the sandbox and is worthless to a human reader.
   deliveredArtifacts String[]           @default([])
+  /// Sessions of in-flight CHECKER runs. Checkers deliberately never claim
+  /// currentSessionId (that would make the epoch handoff chain off their
+  /// completion), which also meant `/experiment stop` could not reach them —
+  /// a stopped run kept emitting checker output into the thread.
+  checkerSessionIds  String[]           @default([])
   finalReport       String?             @db.Text
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt

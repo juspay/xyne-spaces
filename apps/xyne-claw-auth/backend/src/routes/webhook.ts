@@ -1685,6 +1685,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         return;
       }
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+      // Cancel in-flight CHECKER sessions too. They never claim
+      // currentSessionId (claiming it would chain the next epoch off their
+      // completion), so before this they survived stop and kept posting into
+      // the thread after the run was already aborted.
+      let cancelledCheckers = 0;
+      for (const checkerSessionId of run.checkerSessionIds ?? []) {
+        try {
+          await cancelRunSession(checkerSessionId, run.userId);
+          cancelledCheckers++;
+        } catch {
+          // Already finished or unknown to claw — nothing to cancel.
+        }
+      }
       let cancelledEpoch = false;
       if (run.currentSessionId) {
         try {
@@ -1698,8 +1711,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           });
         }
       }
-      await postExperimentReply(cancelledEpoch
-        ? "Stopped /experiment (cancelled the running epoch)."
+      const stoppedParts = [
+        ...(cancelledEpoch ? ["cancelled the running epoch"] : []),
+        ...(cancelledCheckers > 0 ? [`cancelled ${cancelledCheckers} checker run${cancelledCheckers === 1 ? "" : "s"}`] : []),
+      ];
+      await postExperimentReply(stoppedParts.length > 0
+        ? `Stopped /experiment (${stoppedParts.join(", ")}).`
         : "Stopped /experiment.");
       return;
     }
@@ -5677,6 +5694,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     }
     await deleteSession(sessionId).catch(() => {});
+    return;
+  }
+
+  // CHECKER RUNS ARE SILENT. Their verdicts are already persisted to the ledger
+  // via /internal/experiments/:id/reviews and surface in `/experiment findings`.
+  // Posting them to the thread adds noise AND interleaves with real
+  // conversation: a checker that finishes after the user's next message reads
+  // as a reply to it.
+  if (ctx.suppressThreadReply) {
+    log.info(`[webhook/result] suppressed thread reply for silent run session=${sessionId} agent=${ctx.agentSlug ?? ""}`);
+    await deleteSession(sessionId);
     return;
   }
 

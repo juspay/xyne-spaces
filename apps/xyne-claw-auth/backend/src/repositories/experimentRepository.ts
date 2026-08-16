@@ -195,6 +195,17 @@ export const experimentRepository = {
     return prisma.experimentFinding.findUnique({ where: { id } });
   },
 
+  /** Track an in-flight checker session so `/experiment stop` can cancel it. */
+  async addCheckerSession(id: string, sessionId: string): Promise<void> {
+    const run = await prisma.experimentRun.findUnique({ where: { id }, select: { checkerSessionIds: true } });
+    if (!run) return;
+    if (run.checkerSessionIds.includes(sessionId)) return;
+    // Bounded: only recent checkers can still be in flight, and an unbounded
+    // array would grow once per epoch for the life of the run.
+    const merged = [...run.checkerSessionIds, sessionId].slice(-20);
+    await prisma.experimentRun.update({ where: { id }, data: { checkerSessionIds: merged } });
+  },
+
   listFindingsByEpoch(experimentId: string, epoch: number) {
     return prisma.experimentFinding.findMany({
       where: { experimentId, epoch },

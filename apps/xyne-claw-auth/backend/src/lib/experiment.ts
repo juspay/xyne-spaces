@@ -308,6 +308,14 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
   const finalInstruction = run.status === "finishing"
     ? "\n\nDeadline reached - call end-experiment with your final report now. First deliver (sandbox-deliver-files) any proof artifact that has not yet been attached to this thread."
     : "";
+  // EXIT RULE — must match what end-experiment actually enforces for this run's
+  // kind. It did not: every epoch was told the time-boxed rule, so an
+  // understanding run whose frontier had closed kept looping to the safety cap
+  // instead of ending. The agent was obeying the prompt, not being refused —
+  // observed live over 8 wasted epochs with 0 open conjectures and 60 closed.
+  const exitInstruction = run.kind === "understanding"
+    ? `EXIT: this is an understanding run — it ends when the code-path frontier is EXHAUSTED, not on the clock. The moment the ledger shows ZERO open conjectures (with the scope genuinely enumerated and the .html delivered), call end-experiment with your final report. Do NOT keep looping to the safety cap: re-verifying already-closed paths adds nothing. The deadline below is only a hard cap in case the frontier never closes.`
+    : `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`;
   return [
     `You are in /experiment mode, epoch ${run.epoch}.`,
     sandboxInstruction,
@@ -317,7 +325,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     `PROOF DURABILITY: the sandbox is temporary. Any artifact that exists only inside the sandbox is LOST when it recycles. In the SAME epoch you create a proof artifact you MUST call sandbox-deliver-files to attach it to the thread, and record the DELIVERED filename in the ledger's proofArtifactPath. A finding whose proof was never delivered does not count as proved.`,
     `RECOVERY: previously delivered proof attachments can be restored instead of rebuilt: use spaces-thread-attachments to find them, then spaces-fetch-attachment to fetch them into a fresh workspace/sandbox.`,
     deliveredLine,
-    `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
+    exitInstruction,
     run.sandboxNote?.trim() ? `\nSandbox note:\n${run.sandboxNote.trim()}` : "",
     finalInstruction,
     ``,
@@ -332,7 +340,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
  *  completion, double-running the experiment. */
 async function dispatchExperimentRun(
   run: ExperimentRun,
-  opts: { task: string; mode?: "review"; claimAsCurrent: boolean; recover: boolean },
+  opts: { task: string; mode?: "review"; claimAsCurrent: boolean; recover: boolean; silent?: boolean },
 ): Promise<{ sessionId: string }> {
   const traceId = createTraceId();
   const agent = run.orgId
@@ -404,6 +412,10 @@ async function dispatchExperimentRun(
     // Suppresses the channel agent-chain on every epoch callback (see the field
     // doc). An experiment epoch is not a user turn to hand off.
     isExperiment: true,
+    // Checker runs never speak in the thread — their verdicts live in the
+    // ledger. Without this a checker finishing after the user's next message
+    // reads as a reply to it.
+    ...(opts.silent ? { suppressThreadReply: true } : {}),
   };
   await setSession(body.sessionId, sessionContext);
   if (opts.recover) {
@@ -449,7 +461,10 @@ export async function dispatchExperimentChecker(run: ExperimentRun, epoch: numbe
       mode: "review",
       claimAsCurrent: false,
       recover: false,
+      silent: true,
     });
+    // Recorded so `/experiment stop` can cancel a checker that is still running.
+    await experimentRepository.addCheckerSession(run.id, result.sessionId).catch(() => undefined);
     log.info(`[experiment] dispatched checker epoch=${epoch} id=${run.id} findings=${findings.length} session=${result.sessionId}`);
   } catch (err) {
     log.warn(`[experiment] checker dispatch failed id=${run.id} epoch=${epoch}: ${err instanceof Error ? err.message : String(err)}`);
