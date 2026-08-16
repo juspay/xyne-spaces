@@ -24,6 +24,8 @@ export function trustedSdlcToolBindings(
   const hasExecution = typeof executionId === "string" && typeof sessionId === "string";
   const workspaceId = context["workspaceId"];
   const actorUserId = context["actorUserId"];
+  const interactiveGrant = context["interactiveGrant"];
+  const conversationId = execution?.["conversationId"];
   const hasRepositoryIdentity =
     typeof workspaceId === "string" && typeof actorUserId === "string";
   const bindings: TrustedMcpToolBindings = {};
@@ -55,9 +57,19 @@ export function trustedSdlcToolBindings(
     if (
       hasExecution &&
       (capability.trustedBinding === "execution" ||
+        capability.trustedBinding === "execution_or_interactive" ||
         (capability.trustedBinding === "wiki_execution" && context["operation"] === "wiki"))
     ) {
       bindings[capability.name] = { executionId, sessionId, repoId };
+      continue;
+    }
+    if (
+      capability.trustedBinding === "execution_or_interactive" &&
+      context["operation"] === "interactive" &&
+      typeof interactiveGrant === "string" &&
+      typeof conversationId === "string"
+    ) {
+      bindings[capability.name] = { interactiveGrant, conversationId, repoId };
     }
   }
 

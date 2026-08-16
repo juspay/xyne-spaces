@@ -317,10 +317,58 @@ register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
   if (!["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore"].includes(action)) {
     return "unsupported WIKI action";
   }
-  if (!String(params["path"] ?? "").trim()) return "path is required for WIKI";
+  const path = String(params["path"] ?? "").trim();
+  if (!path) return "path is required for WIKI";
+  if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(path)) {
+    return "path must be a normalized relative Markdown path";
+  }
+  const requireString = (key: string): string | null =>
+    String(params[key] ?? "").trim() ? null : `${key} is required for ${action}`;
+  const requireSourcePaths = (allowEmpty = false): string | null => {
+    const value = params["sourcePaths"];
+    if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+      return `sourcePaths is required for ${action}`;
+    }
+    if (value.length > 500 || value.some(item => typeof item !== "string" || !item.trim() || item.length > 1024)) {
+      return "sourcePaths must contain at most 500 non-empty repository-relative paths";
+    }
+    return null;
+  };
   if (action === "move") {
     for (const key of ["destinationPath", "expectedContentHash"]) {
       if (!String(params[key] ?? "").trim()) return `${key} is required for move`;
+    }
+    if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(String(params["destinationPath"]))) {
+      return "destinationPath must be a normalized relative Markdown path";
+    }
+    return null;
+  }
+  const requiredStringsByAction: Record<string, string[]> = {
+    create: ["title", "markdown"],
+    update: ["expectedContentHash", "title", "markdown"],
+    restore: ["expectedContentHash", "title", "markdown"],
+    archive: ["expectedContentHash"],
+    replace_section: ["expectedContentHash", "heading", "markdown"],
+    insert_section: ["expectedContentHash", "heading", "markdown"],
+    remove_section: ["expectedContentHash", "heading"],
+  };
+  for (const key of requiredStringsByAction[action] ?? []) {
+    const error = requireString(key);
+    if (error) return error;
+  }
+  const sourcePathsError = requireSourcePaths(action === "archive");
+  if (sourcePathsError) return sourcePathsError;
+  const references = params["sourceReferences"];
+  if (references !== undefined) {
+    if (!Array.isArray(references) || references.length > 500) {
+      return "sourceReferences must be an array with at most 500 entries";
+    }
+    for (const reference of references) {
+      if (!reference || typeof reference !== "object" || Array.isArray(reference)) {
+        return "sourceReferences entries must be objects";
+      }
+      const item = reference as Record<string, unknown>;
+      if (!String(item["path"] ?? "").trim()) return "sourceReferences.path is required";
     }
   }
   return null;
@@ -333,6 +381,10 @@ register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
   if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
     return "commitHash must be a full 40-character Git commit SHA";
   }
+  if (String(params["title"]).trim().length > 256) return "title must be at most 256 characters";
+  if (String(params["body"] ?? "").length > 65_536) return "body must be at most 65536 characters";
+  if (String(params["head"]).trim().length > 255) return "head must be at most 255 characters";
+  if (String(params["base"]).trim().length > 255) return "base must be at most 255 characters";
   if (params["head"] === params["base"]) return "head must differ from base";
   return null;
 });
@@ -357,9 +409,15 @@ for (const tool of [
     }
     if (tool === SDLC_TOOL_NAMES.verifyWikiSources) {
       if (!Array.isArray(params["paths"]) || params["paths"].length === 0) return "paths is required";
+      if (params["paths"].length > 500) return "paths must contain at most 500 entries";
+      if (params["paths"].some(path => typeof path !== "string" || !path.trim() || path.length > 1024)) {
+        return "paths must contain non-empty repository-relative paths";
+      }
     }
     if (tool === SDLC_TOOL_NAMES.finalizeWikiCommit) {
-      if (!String(params["summary"] ?? "").trim()) return "summary is required";
+      const summary = String(params["summary"] ?? "").trim();
+      if (!summary) return "summary is required";
+      if (summary.length > 4_000) return "summary must be at most 4000 characters";
       if (!['changes', 'noop'].includes(String(params["outcome"] ?? ''))) {
         return "outcome must be changes or noop";
       }
@@ -385,14 +443,29 @@ for (const tool of [
     }
     const selected = selector as Record<string, unknown>;
     if (selected["type"] === "WIKI_PAGE") {
-      if (!String(selected["path"] ?? "").trim()) return "selector.path is required";
+      const path = String(selected["path"] ?? "").trim();
+      if (!path) return "selector.path is required";
+      if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(path)) {
+        return "selector.path must be a normalized relative Markdown path";
+      }
     } else if (selected["type"] === "SDLC_CANVAS") {
-      if (!String(selected["canvasId"] ?? "").trim()) return "selector.canvasId is required";
+      const canvasId = String(selected["canvasId"] ?? "").trim();
+      if (!canvasId) return "selector.canvasId is required";
+      if (canvasId.length > 256) return "selector.canvasId must be at most 256 characters";
     } else {
       return "selector.type must be WIKI_PAGE or SDLC_CANVAS";
     }
     if (tool === SDLC_TOOL_NAMES.readArtifactVersion && !String(params["versionId"] ?? "").trim()) {
       return "versionId is required";
+    }
+    if (tool === SDLC_TOOL_NAMES.listArtifactVersions && params["limit"] !== undefined) {
+      const limit = Number(params["limit"]);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+        return "limit must be an integer between 1 and 25";
+      }
+    }
+    if (tool === SDLC_TOOL_NAMES.listArtifactVersions && params["cursor"] !== undefined) {
+      if (!String(params["cursor"] ?? "").trim()) return "cursor must not be empty";
     }
     return null;
   });

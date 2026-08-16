@@ -31,6 +31,28 @@ function wikiContext(extra: Record<string, string> = {}): ToolExecutionContext {
 }
 
 describe("SDLC Wiki Git context guardrails", () => {
+  it.each([
+    ["commit_context", ["operation", "commitSha"]],
+    ["range_context", ["operation", "beforeSha", "afterSha"]],
+    ["read_file", ["operation", "commitSha", "path"]],
+    ["list_tree", ["operation", "commitSha"]],
+    ["search", ["operation", "commitSha", "pattern"]],
+    ["path_history", ["operation", "commitSha", "path"]],
+  ])("declares required fields for %s", (operation, required) => {
+    const variants = sdlcGitContext.inputSchema.oneOf as Array<{
+      properties: { operation?: { const?: string } };
+      required: string[];
+    }>;
+    const variant = variants.find(candidate => candidate.properties.operation?.const === operation);
+    expect(variant?.required).toEqual(required);
+  });
+
+  it("declares integer patch and output bounds", () => {
+    const properties = sdlcGitContext.inputSchema.properties as Record<string, Record<string, unknown>>;
+    expect(properties["offset"]).toMatchObject({ type: "integer", minimum: 0 });
+    expect(properties["maxBytes"]).toMatchObject({ type: "integer", minimum: 1_000, maximum: 500_000 });
+  });
+
   it("rejects use outside a trusted Wiki run", async () => {
     await expect(
       sdlcGitContext.execute({ operation: "commit_context", commitSha: SHA }, context({})),
@@ -87,6 +109,12 @@ describe("SDLC Wiki Git context guardrails", () => {
         wikiContext(),
       ),
     ).resolves.toBe("Error: offset must be a non-negative integer.");
+    await expect(
+      sdlcGitContext.execute(
+        { operation: "read_patch", commitSha: SHA, maxBytes: 999 },
+        wikiContext(),
+      ),
+    ).resolves.toBe("Error: maxBytes must be an integer between 1000 and 500000.");
   });
 
   it("caps output by UTF-8 bytes and resets the cumulative key per Agent Session", () => {

@@ -2211,18 +2211,35 @@ export const sdlcGitContext: ToolDefinition = {
         type: "string",
         enum: ["commit_context", "range_context", "read_patch", "read_file", "list_tree", "search", "path_history"],
       },
-      commitSha: { type: "string" },
-      beforeSha: { type: "string", description: "Trusted history-window boundary ref." },
-      afterSha: { type: "string", description: "Trusted history-window endpoint ref." },
-      path: { type: "string" },
-      pattern: { type: "string" },
-      maxBytes: { type: "number", description: "Maximum returned bytes; capped at 500000." },
+      commitSha: { type: "string", pattern: "^[0-9a-fA-F]{9,40}$" },
+      beforeSha: { type: "string", pattern: "^(?:[0-9a-fA-F]{9,40}|ROOT_BOOTSTRAP)$", description: "Trusted history-window boundary ref." },
+      afterSha: { type: "string", pattern: "^[0-9a-fA-F]{9,40}$", description: "Trusted history-window endpoint ref." },
+      path: { type: "string", minLength: 1, maxLength: 1024, pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[^\\0\\r\\n]+$" },
+      pattern: { type: "string", minLength: 1, maxLength: 500, pattern: "^[^\\0\\r\\n]+$" },
+      maxBytes: { type: "integer", minimum: 1_000, maximum: 500_000, description: "Maximum returned bytes; capped at 500000." },
       offset: {
-        type: "number",
+        type: "integer",
+        minimum: 0,
         description: "Byte offset for read_patch continuation; defaults to 0.",
       },
     },
     required: ["operation"],
+    oneOf: [
+      { properties: { operation: { const: "commit_context" } }, required: ["operation", "commitSha"] },
+      { properties: { operation: { const: "range_context" } }, required: ["operation", "beforeSha", "afterSha"] },
+      {
+        properties: { operation: { const: "read_patch" } },
+        required: ["operation"],
+        oneOf: [
+          { required: ["commitSha"] },
+          { required: ["beforeSha", "afterSha"] },
+        ],
+      },
+      { properties: { operation: { const: "read_file" } }, required: ["operation", "commitSha", "path"] },
+      { properties: { operation: { const: "list_tree" } }, required: ["operation", "commitSha"] },
+      { properties: { operation: { const: "search" } }, required: ["operation", "commitSha", "pattern"] },
+      { properties: { operation: { const: "path_history" } }, required: ["operation", "commitSha", "path"] },
+    ],
   },
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
@@ -2238,10 +2255,9 @@ export const sdlcGitContext: ToolDefinition = {
     const requestedMax = Number(params["maxBytes"] ?? maximumBytes);
     const requestedOffset = Number(params["offset"] ?? 0);
     const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0 ? requestedOffset : -1;
-    const maxBytes = Math.max(
-      1_000,
-      Math.min(maximumBytes, Number.isFinite(requestedMax) ? requestedMax : maximumBytes),
-    );
+    const maxBytes = Number.isSafeInteger(requestedMax) && requestedMax >= 1_000 && requestedMax <= maximumBytes
+      ? requestedMax
+      : -1;
 
     const allowedRefs = wikiAllowedRefs(context);
     const isRangeRequest =
@@ -2264,10 +2280,16 @@ export const sdlcGitContext: ToolDefinition = {
       return "Error: commit is not assigned to this Wiki run.";
     }
     const displayCommitRef = wikiGitDisplayRef(commitSha, allowedRefs);
-    if (requestedPath && !WIKI_GIT_PATH.test(requestedPath)) return "Error: invalid repository-relative path.";
+    if (
+      requestedPath &&
+      (requestedPath.length > 1024 || requestedPath.includes("//") || !WIKI_GIT_PATH.test(requestedPath))
+    ) return "Error: invalid repository-relative path.";
     if (pattern && (pattern.length > 500 || /[\0\r\n]/.test(pattern))) return "Error: invalid search pattern.";
     if (operation === "read_patch" && offset < 0) {
       return "Error: offset must be a non-negative integer.";
+    }
+    if (maxBytes < 0) {
+      return "Error: maxBytes must be an integer between 1000 and 500000.";
     }
 
     const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
@@ -2519,11 +2541,10 @@ export const sandboxRepoSetup: ToolDefinition = {
   slug: "sandbox-repo-setup",
   name: "Sandbox Repository Setup",
   description:
-    "Set up a repository workspace. For read-first repos (e.g. xyne-spaces) this DEFAULTS to an INSTANT " +
-    "READ-ONLY sandbox (shared git server, no clone/wait): use it for reading, grepping, inspecting code, " +
-    "and PR review — what you want almost always. Pass write:true ONLY when you must edit files, build, run " +
-    "tests, or commit — that claims a short-lived (~20 min, auto-expiring) writable dev sandbox for the given " +
-    "branch. Prefer read; escalate to write only when you actually need to change code, then let it expire.",
+    "Set up a repository workspace. Trusted SDLC repository contexts always receive one write-capable " +
+    "workspace, independent of request type. Access capability does not authorize mutation: agents must only " +
+    "edit/build/commit when their task explicitly requires implementation. Non-SDLC read-first repositories " +
+    "retain their shared read-only default.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -2536,9 +2557,8 @@ export const sandboxRepoSetup: ToolDefinition = {
       write: {
         type: "boolean",
         description:
-          "Default false = instant READ-ONLY git sandbox (read/grep/inspect; no build/run/write). " +
-          "Set true ONLY to edit/build/run/commit — claims a short-lived (~20 min) writable dev sandbox that auto-expires. " +
-          "Do NOT set true just to look at code.",
+          "For SDLC repository contexts this is normalized to true. For other read-first repositories, " +
+          "false uses the shared read-only workspace and true claims a writable workspace.",
       },
       branchName: {
         type: "string",
@@ -2566,7 +2586,6 @@ export const sandboxRepoSetup: ToolDefinition = {
       "sdlcRepositoryName",
       "sdlcRepositoryUrl",
       "sdlcRepositoryBaseBranch",
-      "sdlcRepositoryWrite",
     ].some((key) => context.meta?.[key] !== undefined);
     if (
       !dynamicRepo &&
@@ -2575,17 +2594,9 @@ export const sandboxRepoSetup: ToolDefinition = {
       return "Error: Valid SDLC repository context is required; refusing to fall back to a static repository.";
     }
     const repoName = dynamicRepo?.name || pinnedRepo || (params["repoName"] as string);
-    const wantWrite = params["write"] === true;
+    const wantWrite = Boolean(dynamicRepo) || params["write"] === true;
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
-    if (
-      dynamicRepo &&
-      wantWrite &&
-      context.meta?.["sdlcRepositoryWrite"] !== "true"
-    ) {
-      return "Error: This SDLC run is pinned to read-only repository access.";
-    }
-
     // Import here to avoid circular dependency
     const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
 
@@ -2605,7 +2616,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     const forcedReadOnly =
       (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
       context.meta?.["forceReadOnlySandbox"] === "true";
-    if (forcedReadOnly) {
+    if (forcedReadOnly && !dynamicRepo) {
       return resolveSbxGit(repoName, context);
     }
 
@@ -2630,42 +2641,35 @@ export const sandboxRepoSetup: ToolDefinition = {
       const operation = context.meta?.["sdlcRuntimeCredentialOperation"]?.trim();
       const executionId = context.meta?.["sdlcExecutionId"]?.trim();
       const sessionId = context.meta?.["sdlcSessionId"]?.trim();
+      const conversationId = context.meta?.["sdlcConversationId"]?.trim();
+      const interactiveGrant = context.meta?.["sdlcInteractiveGrant"]?.trim();
       const agentSlug = context.meta?.["agentSlug"]?.trim();
-      // Chat-surface SDLC runs carry repository context but no dispatched
-      // execution, so no runtime credential grant exists and a private-repo
-      // clone cannot be authenticated. When the same repo exists in the local
-      // REPO_CONFIGS mirror, serve the fast read-only sbx-git sandbox instead
-      // (seconds, no credentials). Otherwise point the agent at its canvases.
-      if (!operation && !executionId && !sessionId) {
-        // The SDLC repo row's display name ("Xyne Spaces") rarely matches a
-        // REPO_CONFIGS key ("xyne-spaces") — try the caller's requested name
-        // and a slugified display name before giving up on the local mirror.
-        const mirrorCandidates = [
-          repoName,
-          typeof params["repoName"] === "string" ? (params["repoName"] as string) : "",
-          repoName.trim().toLowerCase().replace(/\s+/g, "-"),
-        ].filter(Boolean);
-        const mirrorName = mirrorCandidates.find((name) => REPO_CONFIGS[name]);
-        if (!wantWrite && mirrorName) {
-          return resolveSbxGit(mirrorName, context);
-        }
-        return (
-          "Error: Repository cloning is only available inside dispatched SDLC executions (setup/artifact/work). " +
-          "This chat run has no repository credential grant. Use the Repo Knowledge baseline canvases " +
-          "(spaces-search / spaces-read-canvas in the repository channel) as the source instead."
-        );
+      if (agentSlug !== "sdlc-agent") {
+        return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
       }
-      if (operation || executionId || sessionId) {
-        if (agentSlug !== "sdlc-agent") {
-          return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
-        }
-        if (
-          (operation !== "CLONE" && operation !== "PUSH") ||
-          !executionId ||
-          !sessionId
-        ) {
-          return "Error: Incomplete SDLC runtime credential grant context.";
-        }
+      if (
+        operation === "INTERACTIVE" &&
+        interactiveGrant &&
+        conversationId &&
+        !executionId &&
+        !sessionId
+      ) {
+        config = {
+          ...config,
+          runtimeCredentialBinding: {
+            agentSlug: "sdlc-agent",
+            operation,
+            interactiveGrant,
+            conversationId,
+            repoId: dynamicRepo.repoId,
+          },
+        };
+      } else if (
+        (operation === "CLONE" || operation === "PUSH") &&
+        executionId &&
+        sessionId &&
+        !interactiveGrant
+      ) {
         config = {
           ...config,
           runtimeCredentialBinding: {
@@ -2676,6 +2680,8 @@ export const sandboxRepoSetup: ToolDefinition = {
             repoId: dynamicRepo.repoId,
           },
         };
+      } else {
+        return "Error: Incomplete SDLC runtime credential grant context.";
       }
     }
     // branchName is now optional in the schema (read-first calls don't pass it).
@@ -2742,6 +2748,8 @@ export const sandboxRepoSetup: ToolDefinition = {
       if (isSandboxUnavailableDeferEnabled()) {
         return formatSandboxUnavailable(firstLine);
       }
+      // SDLC repositories never fall back to a static mirror or sbx-git.
+      if (dynamicRepo) return result;
       const reason =
         `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
       const ro = await resolveSbxGit(repoName, context, reason);

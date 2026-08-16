@@ -9,6 +9,7 @@ import {
   pushInvocation,
   pushDebugProgress,
   applyCopilotProxyIfNeeded,
+  ProviderStallError,
   RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
@@ -1804,12 +1805,6 @@ async function processTask(
       !Array.isArray(trustedSdlcContext["repository"])
         ? (trustedSdlcContext["repository"] as Record<string, unknown>)
         : undefined;
-    const trustedSdlcPermissions =
-      trustedSdlcContext?.["permissions"] &&
-      typeof trustedSdlcContext["permissions"] === "object" &&
-      !Array.isArray(trustedSdlcContext["permissions"])
-        ? (trustedSdlcContext["permissions"] as Record<string, unknown>)
-        : undefined;
     const trustedSdlcExecution =
       trustedSdlcContext?.["execution"] &&
       typeof trustedSdlcContext["execution"] === "object" &&
@@ -1829,12 +1824,14 @@ async function processTask(
       if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
       if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
       if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
-      if (trustedSdlcPermissions?.["writeRequested"] === true) meta["sdlcRepositoryWrite"] = "true";
       if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
         meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
       }
       if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
         meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
+      }
+      if (typeof trustedSdlcExecution?.["conversationId"] === "string") {
+        meta["sdlcConversationId"] = trustedSdlcExecution["conversationId"];
       }
       // Runtime credentials are issued per dispatched execution (setup/
       // artifact/work). Chat-surface runs carry repository context but no
@@ -1846,7 +1843,13 @@ async function processTask(
         typeof trustedSdlcExecution?.["sessionId"] === "string"
       ) {
         meta["sdlcRuntimeCredentialOperation"] =
-          trustedSdlcPermissions?.["writeRequested"] === true ? "PUSH" : "CLONE";
+          trustedSdlcContext?.["operation"] === "work" ? "PUSH" : "CLONE";
+      } else if (
+        trustedSdlcContext?.["operation"] === "interactive" &&
+        typeof trustedSdlcContext["interactiveGrant"] === "string"
+      ) {
+        meta["sdlcRuntimeCredentialOperation"] = "INTERACTIVE";
+        meta["sdlcInteractiveGrant"] = trustedSdlcContext["interactiveGrant"];
       }
     }
     if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
@@ -3219,9 +3222,12 @@ async function processTask(
       return customList.some((s) => s.startsWith("sandbox-"));
     })();
     if (sandboxEnabledForPrompt) {
+      const isSdlcRepositoryContext = Boolean(meta["sdlcRepositoryId"]);
       const sandboxLines: string[] = [
         "## Sandbox usage",
-        "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
+        isSdlcRepositoryContext
+          ? "This SDLC repository uses one write-capable workspace. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
+          : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
         "- Reuse a single sandbox session across many commands when possible. Avoid one-shot `sandbox-run` calls if you need to keep state.",
@@ -3603,9 +3609,6 @@ async function processTask(
         userName,
         userEmail,
         customTools: tools,
-        // SDLC source is isolated in repository sandboxes. Never expose Claw's
-        // host-cwd read/write/grep/find/ls tools to the SDLC agent.
-        localFileTools: agentSlug !== "sdlc-agent",
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,
@@ -4409,7 +4412,27 @@ async function processTask(
       logErr(
         `Session failed (transient — all providers unavailable): ${err instanceof Error ? err.message : String(err)}`,
       );
-      const terminal = transientProviderCallback(requiresStructuredDelivery);
+      const stallProgress = err instanceof ProviderStallError
+        ? {
+            idleMs: err.idleMs,
+            completedToolCount: err.toolInvocations.length,
+            ...(err.toolInvocations.at(-1)
+              ? {
+                  lastTool: {
+                    name: err.toolInvocations.at(-1)!.toolName,
+                    failed: err.toolInvocations.at(-1)!.isError,
+                    ...(err.toolInvocations.at(-1)!.isError
+                      ? { error: err.toolInvocations.at(-1)!.result }
+                      : {}),
+                  },
+                }
+              : {}),
+          }
+        : undefined;
+      const terminal = transientProviderCallback(
+        requiresStructuredDelivery,
+        stallProgress,
+      );
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
@@ -4417,6 +4440,15 @@ async function processTask(
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
         ...terminal,
+        ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
+          ? { toolsUsed: err.toolsUsed }
+          : {}),
+        ...(err instanceof ProviderStallError && err.toolInvocations.length > 0
+          ? { toolInvocations: err.toolInvocations }
+          : {}),
+        ...(err instanceof ProviderStallError
+          ? { tokenUsage: err.tokenUsage }
+          : {}),
         provider: callbackProvider,
         model: callbackModel,
       });

@@ -1,11 +1,7 @@
-const OPERATIONS = new Set(["interactive", "baseline", "artifact", "work"]);
-const BASELINE_KINDS = new Set([
-  "CORE_CODE_MAP",
-  "FRONTEND_DESIGN_SYSTEM",
-  "CODE_LINT_STANDARDS",
-  "RUN_GUIDE",
-  "TEST_GUIDE",
-]);
+import { SDLC_BASELINE_KINDS } from "@xyne/shared/sdlc";
+
+const OPERATIONS = new Set(["interactive", "baseline", "artifact", "work", "wiki"]);
+const BASELINE_KINDS = new Set<string>(SDLC_BASELINE_KINDS);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -42,7 +38,6 @@ export function parseSdlcAgentRunContext(value: unknown): Record<string, unknown
     !nonEmptyString(repository["baseBranch"]) ||
     !permissions ||
     !["ADMIN", "MEMBER"].includes(String(permissions["repositoryRole"] ?? "")) ||
-    typeof permissions["writeRequested"] !== "boolean" ||
     !gates ||
     !Array.isArray(gates["capabilities"]) ||
     typeof gates["allBaselinesApproved"] !== "boolean" ||
@@ -75,11 +70,13 @@ export function parseSdlcAgentRunContext(value: unknown): Record<string, unknown
   if (
     input["operation"] === "work" &&
     (!nonEmptyString(input["ticketId"]) ||
-      permissions["writeRequested"] !== true ||
       !nonEmptyString(execution["workflowExecutionId"]) ||
       !nonEmptyString(execution["sessionId"]))
   ) return null;
-  if (input["operation"] === "interactive" && !nonEmptyString(execution["conversationId"])) {
+  if (
+    input["operation"] === "interactive" &&
+    (!nonEmptyString(execution["conversationId"]) || !nonEmptyString(input["interactiveGrant"]))
+  ) {
     return null;
   }
   return input;

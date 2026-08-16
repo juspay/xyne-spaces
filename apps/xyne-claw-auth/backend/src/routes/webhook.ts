@@ -3509,7 +3509,6 @@ export async function handleAutomationWebhook(
       | "BOOTSTRAP"
       | "GENERATOR"
       | "ARCHITECTURE_VALIDATOR"
-      | "OPERATIONS_VALIDATOR"
       | "CORRECTOR";
     sdlcContext?: Record<string, unknown>;
   };
@@ -3768,8 +3767,7 @@ export async function handleAutomationWebhook(
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
   const wikiValidator =
     payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
-    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR" ||
-    payload.sdlcWikiRole === "OPERATIONS_VALIDATOR";
+    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
   const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
   const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
   const sdlcOutputFormat =

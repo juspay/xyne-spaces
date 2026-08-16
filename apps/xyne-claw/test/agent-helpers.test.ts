@@ -4,11 +4,32 @@ import {
   capCustomToolOutput,
   isQuotaExhaustedError,
   localFileToolNames,
+  ProviderStallError,
 } from "../src/agent.js";
 
-test("SDLC Wiki runs can remove every local filesystem tool from the agent palette", () => {
-  expect(localFileToolNames(false)).toEqual([]);
-  expect(localFileToolNames(true)).toEqual(["read", "write", "grep", "find", "ls"]);
+test("ProviderStallError preserves partial run progress for the terminal callback", () => {
+  const invocation = {
+    toolName: "sandbox-run",
+    args: { cmd: "npm test" },
+    result: "npm: command not found",
+    isError: true,
+    startedAt: "2026-08-16T00:00:00.000Z",
+    durationMs: 10,
+  };
+  const error = new ProviderStallError("spaces", 120_000, {
+    toolsUsed: ["sandbox-run"],
+    toolInvocations: [invocation],
+    tokenUsage: { input: 10, output: 2, cacheRead: 3, cacheWrite: 0 },
+    partialText: "I changed the file, but verification",
+  });
+
+  expect(error.toolInvocations).toEqual([invocation]);
+  expect(error.partialText).toBe("I changed the file, but verification");
+  expect(error.tokenUsage.input).toBe(10);
+});
+
+test("every main agent receives the scoped local filesystem tool palette", () => {
+  expect(localFileToolNames()).toEqual(["read", "write", "grep", "find", "ls"]);
 });
 
 test("isQuotaExhaustedError catches copilot/openrouter quota 429 variants", () => {

@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./sdlc": {
+      "types": "./dist/sdlc.d.ts",
+      "import": "./dist/sdlc.js",
+      "default": "./dist/sdlc.js"
+    },
     "./zero": {
       "types": "./dist/zero/index.d.ts",
       "import": "./dist/zero/index.js",
