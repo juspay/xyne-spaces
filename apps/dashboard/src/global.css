@@ -4452,6 +4452,24 @@ img.inline-emoji,
   pointer-events: none;
 }
 
+/* Flow run search: hits get an indigo ring, everything else fades back.
+   Classes are set on the React Flow node wrappers from KanbanBoardScreen. */
+.flow-run-view .react-flow__node.flow-search-hit {
+  outline: 3px solid rgb(99 102 241 / 0.65);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+.flow-run-view .react-flow__node.flow-search-miss {
+  opacity: 0.25;
+  filter: grayscale(0.6);
+  transition: opacity 150ms ease;
+}
+
+.flow-run-view--searching .react-flow__edge {
+  opacity: 0.35;
+}
+
 /* ----------------------------
    File viewer in-file search (Cmd+F)
    Marks are injected into highlight.js HTML as raw strings (see
