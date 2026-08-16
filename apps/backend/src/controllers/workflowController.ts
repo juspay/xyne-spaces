@@ -1074,6 +1074,8 @@ export class WorkflowController {
           stepSubType: step.stepSubType,
           markdownSummary: step.markdownSummary,
           attachment: step.attachment,
+          entityType: step.entityType,
+          entityId: step.entityId,
         });
 
         // Copy parent agent steps to new execution

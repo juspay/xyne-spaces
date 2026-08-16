@@ -56,6 +56,32 @@ function parseStepIndexFromName(name: string): number | null {
   return Number.isInteger(n) ? n : null;
 }
 
+// Maps a trigger's event type to the key (on the flattened `trigger` object built by
+// buildContext()) holding the id of the entity that fired it — used to stamp debug
+// correlation columns on WorkflowStep rows. WEBHOOK is intentionally omitted: it has
+// no natural entity id to correlate on.
+const TRIGGER_ENTITY_ID_KEY: Readonly<Record<string, string>> = {
+  TICKET_CREATED: 'ticketId',
+  TICKET_UPDATED: 'ticketId',
+  TICKET_COMMENTED: 'ticketId',
+  EMAIL_RECEIVED: 'emailId',
+  EMAIL_SENT: 'emailId',
+  MESSAGE_RECEIVED: 'messageId',
+  CALL_EVENT: 'callId',
+  TAG_GENERATED: 'sourceId',
+};
+
+function resolveDebugEntity(
+  trigger: AutomationContext['trigger'],
+): { entityType: string; entityId: string } | null {
+  const key = TRIGGER_ENTITY_ID_KEY[trigger.type];
+  if (!key) return null;
+  const id = (trigger as Record<string, unknown>)[key];
+  return typeof id === 'string' && id.length > 0
+    ? { entityType: trigger.type, entityId: id }
+    : null;
+}
+
 export class AutomationExecutor {
   private readonly resolver: VariableResolver;
 
@@ -388,13 +414,14 @@ export class AutomationExecutor {
     startIndex: number = 0,
     resumeAtIndex?: number,
   ): Promise<WalkResult> {
+    const debugEntity = resolveDebugEntity(context.trigger);
     for (let i = startIndex; i < steps.length; i++) {
       const step = steps[i] as AutomationStepConfig;
       const stepName = `step_${i}`;
       const isResuming = resumeAtIndex === i;
 
       if (!isResuming) {
-        await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
+        await this.upsertStepRow(runId, stepName, step, 'RUNNING', null, debugEntity);
       }
 
       try {
@@ -451,6 +478,7 @@ export class AutomationExecutor {
     step: AutomationStepConfig,
     status: 'RUNNING' | 'EXTERNAL_WAIT',
     payload: unknown,
+    debugEntity?: { entityType: string; entityId: string } | null,
   ): Promise<void> {
     const data = payload === null ? null : JSON.stringify(payload);
     const executorType =
@@ -473,6 +501,9 @@ export class AutomationExecutor {
         stepExecutorType: executorType,
         status,
         ...(data ? { data } : {}),
+        ...(debugEntity
+          ? { entityType: debugEntity.entityType, entityId: debugEntity.entityId }
+          : {}),
       },
       update: {
         status,
