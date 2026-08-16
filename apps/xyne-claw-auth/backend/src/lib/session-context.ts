@@ -59,6 +59,16 @@ export interface SessionContext {
   /** Resolved workflow ID for this chain run (if any). */
   workflowId?: string;
   /**
+   * True when this run is an /experiment or /understanding epoch (or its
+   * checker). Experiment epochs run dozens of times back-to-back and their
+   * output is a proof artifact, not a user turn — so they must NOT trigger the
+   * channel's agent-chain workflow. Without this, every epoch hands off to the
+   * next agent in the chain, which for euler-doctor meant euler-reviewer
+   * refusing "I only handle PR reviews" once per epoch (40+ noise replies in a
+   * single run).
+   */
+  isExperiment?: boolean;
+  /**
    * MessageId of the "⏳ Working on it…" placeholder we posted at webhook-arrival
    * time. Used ONLY when USE_EPHEMERAL_PROGRESS=false — we edit this message
    * in-place as tools run, and replace its content with the final agent

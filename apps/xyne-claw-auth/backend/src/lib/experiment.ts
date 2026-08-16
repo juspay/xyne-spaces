@@ -292,6 +292,16 @@ export async function postExperimentNotice(run: { channelId: string; conversatio
 export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
   const remaining = formatRemaining(run.deadlineAt);
   const sandboxId = /(?:^|\s)sandboxId=([^\s]+)/.exec(run.sandboxNote ?? "")?.[1];
+  // The sandbox is ephemeral and WILL recycle across a multi-hour run, taking
+  // every generated file with it. The one durable record of what already exists
+  // is the delivered-artifact list — surface it so a fresh sandbox rehydrates
+  // the right files by name instead of rebuilding blind (or, worse, emitting a
+  // new fragment each epoch). Cap the echo so a long run's list can't crowd out
+  // the ledger.
+  const delivered = run.deliveredArtifacts ?? [];
+  const deliveredLine = delivered.length > 0
+    ? `ALREADY DELIVERED (recoverable from the thread with spaces-thread-attachments -> spaces-fetch-attachment, newest wins on a name clash): ${delivered.slice(-40).join(", ")}. Do NOT rebuild one of these from scratch — fetch it and extend it.`
+    : "";
   const sandboxInstruction = sandboxId
     ? `YOUR SANDBOX: ${sandboxId}. This experiment has ONE machine. Reuse this sandbox for every command — do NOT create a new one. Only create a new sandbox if this one is provably unreachable, and if you do, immediately record the new id with experiment-ledger action=sandbox-note.`
     : "";
@@ -306,6 +316,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
     `PROOF DURABILITY: the sandbox is temporary. Any artifact that exists only inside the sandbox is LOST when it recycles. In the SAME epoch you create a proof artifact you MUST call sandbox-deliver-files to attach it to the thread, and record the DELIVERED filename in the ledger's proofArtifactPath. A finding whose proof was never delivered does not count as proved.`,
     `RECOVERY: previously delivered proof attachments can be restored instead of rebuilt: use spaces-thread-attachments to find them, then spaces-fetch-attachment to fetch them into a fresh workspace/sandbox.`,
+    deliveredLine,
     `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
     run.sandboxNote?.trim() ? `\nSandbox note:\n${run.sandboxNote.trim()}` : "",
     finalInstruction,
@@ -390,6 +401,9 @@ async function dispatchExperimentRun(
     spacesAppUserId: agent.spacesAppUserId,
     traceId,
     rootAgentSlug: run.agentSlug,
+    // Suppresses the channel agent-chain on every epoch callback (see the field
+    // doc). An experiment epoch is not a user turn to hand off.
+    isExperiment: true,
   };
   await setSession(body.sessionId, sessionContext);
   if (opts.recover) {

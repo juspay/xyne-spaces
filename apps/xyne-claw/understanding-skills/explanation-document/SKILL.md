@@ -8,6 +8,20 @@ description: Structure a codebase/schema explanation as a self-contained HTML do
 The deliverable is ONE self-contained `.html` file written in the sandbox and
 sent with `sandbox-deliver-files`. Not chat prose, not a ledger dump.
 
+## One document, stable name, survives a sandbox recycle
+
+Give the document a single stable filename and reuse it for the whole run —
+`<topic>-explained.html`, never `epoch1.html`, `epoch2.html`, `…-final-v3.html`.
+Every pass EXTENDS that one file. A pile of per-pass fragments cannot be merged
+later: sandboxes are ephemeral and the earlier ones are gone.
+
+Because the sandbox recycles, treat a missing file as "fresh machine, not blank
+slate": if your canonical `.html` is not on local disk when you start, you were
+moved to a new sandbox — recover the last version you delivered
+(`spaces-thread-attachments` to locate it, `spaces-fetch-attachment` to pull it
+back) and extend that, rather than starting over or shipping a stub. Re-deliver
+the same filename each time so the newest upload is always the whole document.
+
 ## Order it for the reader, not for yourself
 
 You will DISCOVER the system component by component, in whatever order the code

@@ -6310,7 +6310,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
 
     // ── Agent chaining: channel-level workflow keyed by (channelId, rootAgentSlug) ──
-    if (ctx.agentSlug && ctx.agentOrgId) {
+    // Experiment/understanding epochs are exempt: they fire dozens of times per
+    // run and their result is a proof artifact, not a user turn to hand off. A
+    // chain here just makes the next agent (e.g. euler-reviewer) reject every
+    // epoch, once per epoch. The user drives the loop; the loop does not chain.
+    if (ctx.isExperiment) {
+      log.info(`Chain: skipped for experiment epoch (conversation=${ctx.conversationId})`);
+    } else if (ctx.agentSlug && ctx.agentOrgId) {
       try {
         const rootAgentSlug = ctx.rootAgentSlug ?? ctx.agentSlug;
         const binding = await agentChainWorkflowRepository.findActiveWorkflowForChannel(ctx.channelId, rootAgentSlug, ctx.senderId);
