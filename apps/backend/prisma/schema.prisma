@@ -1595,7 +1595,6 @@ model Project {
   updatedBy      String? // User ID (no FK constraint)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime?        @updatedAt
-  sdlcBoardId    String?          @unique
 
   // Relations
   workspace Workspace @relation(fields: [workspaceId], references: [id])
@@ -1606,7 +1605,6 @@ model Project {
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
   repos         Repo[]
-  sdlcBoard     Board? @relation("ProjectSdlcBoard", fields: [sdlcBoardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
@@ -1643,7 +1641,6 @@ model Board {
   mainReleaseApplications Application[] @relation("MainReleaseBoardApplications")
   ownedApplication        Application?  @relation("ApplicationBoard")
   incomingWebhooks      AppIncomingWebhook[]
-  sdlcForProject        Project? @relation("ProjectSdlcBoard")
 
   @@unique([name, projectId])
   @@index([projectId])

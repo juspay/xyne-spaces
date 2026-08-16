@@ -413,12 +413,27 @@ export function isQuotaExhaustedError(err: unknown): boolean {
  * for hours.)
  */
 export class ProviderStallError extends Error {
+  readonly toolsUsed: string[];
+  readonly toolInvocations: ToolInvocation[];
+  readonly tokenUsage: TokenUsage;
+  readonly partialText: string;
+
   constructor(
     public readonly provider: string,
     public readonly idleMs: number,
+    progress?: {
+      toolsUsed: string[];
+      toolInvocations: ToolInvocation[];
+      tokenUsage: TokenUsage;
+      partialText: string;
+    },
   ) {
     super(`Provider ${provider} stalled: no stream activity for ${idleMs}ms`);
     this.name = "ProviderStallError";
+    this.toolsUsed = [...(progress?.toolsUsed ?? [])];
+    this.toolInvocations = [...(progress?.toolInvocations ?? [])];
+    this.tokenUsage = { ...(progress?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) };
+    this.partialText = progress?.partialText ?? "";
   }
 }
 
@@ -1282,10 +1297,6 @@ export interface RunTaskOptions {
   userName?: string | undefined;
   userEmail?: string | undefined;
   customTools?: ToolDefinition[] | undefined;
-  /** Disable Claw-workspace file primitives for repository-isolated runs.
-   * SDLC Wiki source lives in the Kata sandbox and must be read through its
-   * commit-bound Git context tool, never through this process' local cwd. */
-  localFileTools?: boolean | undefined;
   systemPromptOverride?: string | undefined;
   cwd?: string | undefined;
   /** Session key — `${userId}_${rawConversationId}_${agentSlug}` (see progressMeta). */
@@ -1400,9 +1411,9 @@ const FAST_MODE_ACTIVE_TOOLS_CUSTOM_TYPE = "xyne.fastMode.activeToolSet";
 
 const LOCAL_FILE_TOOL_NAMES = ["read", "write", "grep", "find", "ls"] as const;
 
-/** Pi's global tool allowlist for the local Claw workspace. */
-export function localFileToolNames(enabled: boolean): string[] {
-  return enabled ? [...LOCAL_FILE_TOOL_NAMES] : [];
+/** Pi's global tool allowlist for the path-scoped local Claw workspace. */
+export function localFileToolNames(): string[] {
+  return [...LOCAL_FILE_TOOL_NAMES];
 }
 
 function latestFastModeActiveToolSet(sessionManager: SessionManager): string[] {
@@ -1425,7 +1436,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     userName,
     userEmail,
     customTools,
-    localFileTools = true,
     systemPromptOverride,
     cwd,
     conversationId,
@@ -1764,9 +1774,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // tool registry (agent-session.js:1844-1847 — customTools win on name
   // collision at execution time). The names stay in the allowlist below so they
   // remain active.
-  const scopedFileTools = localFileTools
-    ? Object.values(createScopedToolMap(workingDir, fileToolReadRoots))
-    : [];
+  const scopedFileTools = Object.values(createScopedToolMap(workingDir, fileToolReadRoots));
   //
   // "bash" is EXCLUDED from the allowlist (and we never register a scoped bash)
   // — preserves the pre-migration security model. Pi would otherwise enable it.
@@ -1779,7 +1787,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // include every customTool name. We enumerate them right before building
   // the options.
   // (Ref: pi-coding-agent/dist/core/sdk.js:157 — `allowedToolNames = options.tools`)
-  const builtinAllow = localFileToolNames(localFileTools);
+  const builtinAllow = localFileToolNames();
   const customToolNames = (customTools ?? []).map((t) => t.name);
   // Proof that the mandatory twin_deliver tool is actually in the pi payload
   // (allowlist + registered customTools) — logged for the Twin mention flow so a
@@ -2591,6 +2599,16 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     tokenUsage: { ...tokenUsage },
     partialText: streamedText,
   });
+  const buildProviderStallError = (): ProviderStallError => new ProviderStallError(
+    provider ?? "spaces",
+    Date.now() - lastActivityAt,
+    {
+      toolsUsed: [...toolsUsed],
+      toolInvocations: [...toolInvocations],
+      tokenUsage: { ...tokenUsage },
+      partialText: streamedText,
+    },
+  );
 
   // On cancel we must call session.abort() — it stops the agent loop and
   // in-flight tools. dispose() alone only disconnects event listeners, leaving
@@ -2656,7 +2674,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       emitCancelDebugOnce("signal-already-aborted");
       throw buildCancelledError();
     }
-    if (stallSig.aborted) { stopSession(); throw new ProviderStallError(provider ?? "spaces", Date.now() - lastActivityAt); }
+    if (stallSig.aborted) { stopSession(); throw buildProviderStallError(); }
 
     return await new Promise<T>((resolve, reject) => {
       const cleanup = () => {
@@ -2673,7 +2691,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         emitCancelDebugOnce("user-cancel");
         reject(buildCancelledError());
       };
-      const onStallAbort = () => { cleanup(); stopSession(); reject(new ProviderStallError(provider ?? "spaces", Date.now() - lastActivityAt)); };
+      const onStallAbort = () => { cleanup(); stopSession(); reject(buildProviderStallError()); };
       userSig?.addEventListener("abort", onUserAbort, { once: true });
       stallSig.addEventListener("abort", onStallAbort, { once: true });
       promise.then(

@@ -1,5 +1,6 @@
 import {
   applyBaselineDraftSection,
+  baselineRefreshChanged,
   baselineDraftMissingSections,
   buildBaselineDraftMarkdown,
   finalizeBaselineMetadata,
@@ -21,6 +22,9 @@ describe('SDLC baseline draft lifecycle', () => {
       sectionKey: 'architecture',
       sectionTitle: 'Architecture and boundaries',
       markdown: 'The Flask backend lives in `app/server/app.py`.',
+      sourceReferences: [
+        { path: 'app/server/app.py', commitSha: 'a'.repeat(40), symbol: 'app' },
+      ],
     });
 
     expect(isCompletedBaselineMetadata(withArchitecture)).toBe(false);
@@ -35,18 +39,25 @@ describe('SDLC baseline draft lifecycle', () => {
       'missing sections'
     );
 
-    const completeDraft = BASELINE_DEFINITIONS[0].sections.reduce(
+    const completeDraft = BASELINE_DEFINITIONS[0].sections
+      .filter((section) => section.key !== 'architecture')
+      .reduce(
       (metadata, section) =>
         applyBaselineDraftSection(metadata, {
           sectionKey: section.key,
           sectionTitle: section.title,
           markdown: `Evidence for ${section.title}`,
         }),
-      withArchitecture
-    );
+        withArchitecture
+      );
     const finalized = finalizeBaselineMetadata('CORE_CODE_MAP', completeDraft);
     expect(isCompletedBaselineMetadata(finalized)).toBe(true);
     expect(finalized).not.toHaveProperty('draftSections');
+    expect(finalized.sdlcSourceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'app/server/app.py', commitSha: 'a'.repeat(40) }),
+      ])
+    );
   });
 
   it('renders renderer-owned document and section headings only once', () => {
@@ -92,5 +103,10 @@ describe('SDLC baseline draft lifecycle', () => {
         generationStatus: 'FAILED',
       })
     ).toBe(false);
+  });
+
+  it('rewrites only materially changed refresh output', () => {
+    expect(baselineRefreshChanged('# Guide\r\n\r\nSame\n', '# Guide\n\nSame')).toBe(false);
+    expect(baselineRefreshChanged('# Guide\n\nOld', '# Guide\n\nNew')).toBe(true);
   });
 });

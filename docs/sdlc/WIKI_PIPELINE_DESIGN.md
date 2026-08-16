@@ -33,9 +33,10 @@ entity links. It adds no database schema or migration.
 - Protect human edits with expected-content hashes.
 - Archive obsolete whole pages; never hard-delete them.
 - Use dedicated Wiki tools. Do not expose generic Canvas/database writes to Wiki roles.
-- Use deterministic validation in every mode. Standard/Thorough add read-only LLM validation roles.
+- Use deterministic validation in every mode. Standard adds a read-only LLM validation role.
 - Use no new vector index or retrieval database. Current source maps plus bounded Git path history select context.
 - Ask AI treats stale/unknown Wiki as orientation and verifies against current code.
+- Every successful initial or refresh run queues smart reconciliation of required Repo Knowledge baselines.
 
 ## 3. Module shape
 
@@ -46,8 +47,16 @@ interface; none coordinate commits or Canvas mutations themselves.
 interface SdlcWikiPipeline {
   start(actor: SdlcActor, input: StartWikiRunInput): Promise<WikiRun>;
   refresh(actor: SdlcActor, input: RefreshWikiRunInput): Promise<WikiRun>;
-  retry(actor: SdlcActor, repoId: string, executionId: string): Promise<WikiRun>;
-  cancel(actor: SdlcActor, repoId: string, executionId: string): Promise<WikiRun>;
+  retry(
+    actor: SdlcActor,
+    repoId: string,
+    executionId: string,
+  ): Promise<WikiRun>;
+  cancel(
+    actor: SdlcActor,
+    repoId: string,
+    executionId: string,
+  ): Promise<WikiRun>;
   getStatus(actor: SdlcActor, repoId: string): Promise<WikiStatus>;
 }
 ```
@@ -77,12 +86,12 @@ them through the external interface.
 
 ```ts
 type WikiHistoryRange =
-  | { kind: 'LAST_PERCENT'; percent: 20 | 50 }
-  | { kind: 'FULL' }
-  | { kind: 'CUSTOM_SHA'; sha: string };
+  | { kind: "LAST_PERCENT"; percent: 20 | 50 }
+  | { kind: "FULL" }
+  | { kind: "CUSTOM_SHA"; sha: string };
 
 type WikiChunkSize = 1 | 10 | 25 | 50 | 100;
-type WikiQuality = 'QUICK' | 'STANDARD' | 'THOROUGH';
+type WikiQuality = "QUICK" | "STANDARD";
 
 interface StartWikiRunInput {
   repoId: string;
@@ -92,7 +101,7 @@ interface StartWikiRunInput {
 }
 ```
 
-Defaults: latest 20%, 10 commits per Wiki update, Standard quality.
+Defaults: full history, 1 commit per Wiki update, Standard quality.
 
 For percentage ranges, compute `ceil(firstParentCommitCount * percentage / 100)` and select that many newest
 first-parent commits, with at least one commit. A custom SHA must resolve in the fetched repository and be an
@@ -109,28 +118,28 @@ Add text workflow type `SDLC_WIKI`; do not add a Prisma enum. The execution cont
 interface WikiExecutionContext {
   version: 1;
   repoId: string;
-  runMode: 'INITIAL' | 'REFRESH';
+  runMode: "INITIAL" | "REFRESH";
   phase:
-    | 'QUEUED'
-    | 'PREPARING'
-    | 'BOOTSTRAPPING'
-    | 'PROCESSING'
-    | 'VALIDATING'
-    | 'CORRECTING'
-    | 'COMPLETED'
-    | 'PARTIALLY_FAILED'
-    | 'CANCELLED';
+    | "QUEUED"
+    | "PREPARING"
+    | "BOOTSTRAPPING"
+    | "PROCESSING"
+    | "VALIDATING"
+    | "CORRECTING"
+    | "COMPLETED"
+    | "PARTIALLY_FAILED"
+    | "CANCELLED";
   historyRange: WikiHistoryRange | null;
   chunkSize: WikiChunkSize;
   quality: WikiQuality;
   baseBranch: string;
   targetHeadSha: string | null;
-  bootstrapRef: string | 'ROOT_BOOTSTRAP' | null;
+  bootstrapRef: string | "ROOT_BOOTSTRAP" | null;
   selectedStartSha: string | null;
   selectedCommitShas: string[];
   cursorSha: string | null;
   assignedChunk: {
-    kind: 'BOOTSTRAP' | 'COMMITS' | 'VALIDATION' | 'CORRECTION';
+    kind: "BOOTSTRAP" | "COMMITS" | "VALIDATION" | "CORRECTION";
     conversationId: string;
     sessionId: string;
     commitShas: string[];
@@ -156,7 +165,7 @@ Workflow output contains append-only logical evidence for completed writes:
 
 ```ts
 interface WikiRevisionEvidence {
-  action: 'created' | 'updated' | 'archived' | 'restored' | 'refined';
+  action: "created" | "updated" | "archived" | "restored" | "refined";
   commitSha: string;
   canvasId: string;
   canvasVersionId: string;
@@ -166,7 +175,7 @@ interface WikiRevisionEvidence {
 
 interface WikiCommitOutcome {
   commitSha: string;
-  status: 'updated' | 'noop';
+  status: "updated" | "noop";
   revisions: WikiRevisionEvidence[];
   completedAt: string;
 }
@@ -189,9 +198,9 @@ This requires shared text-union additions only. It makes run lookup repository-s
 
 ```ts
 interface SdlcWikiCanvasMetadata {
-  source: 'sdlc-wiki-pipeline';
-  surface: 'SDLC';
-  documentKind: 'WIKI';
+  source: "sdlc-wiki-pipeline";
+  surface: "SDLC";
+  documentKind: "WIKI";
   repoId: string;
   projectId: string;
   repositoryUrl: string;
@@ -199,7 +208,7 @@ interface SdlcWikiCanvasMetadata {
   wikiSourcePaths: string[];
   wikiArchivedSourcePaths?: string[];
   wikiLastCommitSha: string;
-  wikiRevisionKind: 'created' | 'updated' | 'archived' | 'restored' | 'refined';
+  wikiRevisionKind: "created" | "updated" | "archived" | "restored" | "refined";
   wikiRevisionSessionId: string;
   wikiContentHash: string;
   wikiCanvasVersionId: string;
@@ -265,8 +274,6 @@ At target head:
 
 - Quick completes immediately;
 - Standard dispatches one validator then one correction role when actionable findings exist;
-- Thorough dispatches architecture/domain/flow validator and operations/failure/security/source validator, then
-  one correction role for the merged findings.
 
 Validators have Git read plus Wiki list/read, never apply. Correction has apply bound to target head and records
 `refined` revisions. Empty validator findings skip correction.
@@ -276,6 +283,12 @@ Validators have Git read plus Wiki list/read, never apply. Correction has apply 
 Wiki pipeline uses canonical SDLC artifact list/read/mutate tools plus focused Git context, checkpoint, source
 verification, and finalization tools. Same tools remain visible at every SDLC trigger; trusted execution context
 enforces Wiki role and repository scope.
+
+The global Claw runtime also exposes path-scoped `read`, `write`, `grep`, `find`, and `ls` tools. They operate only
+on the run's ephemeral workspace, with read-only access to approved session `.context` roots. This lets a Wiki role
+inspect oversized MCP or sandbox results offloaded to `.context/tool-results` without putting the full payload in
+the model context. Writes cannot modify those persisted results, other sessions, host paths, or repository source;
+all repository reads and mutations continue through sandbox tools.
 
 ### 7.1 `sandbox-sdlc-git-context`
 
@@ -319,11 +332,18 @@ require explicit inclusion. It cannot read arbitrary Canvas IDs outside the repo
 
 ```ts
 interface MutateWikiArtifactInput {
-  artifactType: 'WIKI';
+  artifactType: "WIKI";
   executionId: string;
   commitSha: string;
-  action: 'create' | 'update' | 'replace_section' | 'insert_section'
-    | 'remove_section' | 'move' | 'archive' | 'restore';
+  action:
+    | "create"
+    | "update"
+    | "replace_section"
+    | "insert_section"
+    | "remove_section"
+    | "move"
+    | "archive"
+    | "restore";
   path: string;
   destinationPath?: string;
   expectedContentHash?: string;
@@ -441,8 +461,7 @@ interface WikiValidatorReport {
 }
 ```
 
-The architecture validator focuses on boundaries, concepts, flows, interfaces, state, and evolution. The
-operations validator focuses on failure, retries, security/trust, config, deployment, consistency, and sources.
+The validator focuses on boundaries, concepts, flows, interfaces, state, evolution, and source grounding.
 
 ### 9.5 Correction prompt
 
@@ -531,7 +550,7 @@ Recovery rules:
 Resolve:
 
 ```ts
-type WikiFreshness = 'CURRENT' | 'STALE' | 'UNKNOWN';
+type WikiFreshness = "CURRENT" | "STALE" | "UNKNOWN";
 
 interface WikiFreshnessContext {
   wikiCommitSha: string | null;
@@ -555,11 +574,17 @@ Assistant rules:
 
 Empty Wiki screen shows **Generate Wiki** for admins and an explanatory member state. Start panel fields:
 
-| Field | Options | Default | Explanation |
-|---|---|---|---|
-| History | Latest 20%, Latest 50%, Full, Custom SHA | Latest 20% | More history improves evolution/why capture; costs more |
-| Commits per Wiki update | 1, 10, 25, 50, 100 | 10 | Larger windows launch fewer sessions but compress intermediate history |
-| Quality | Quick, Standard, Thorough | Standard | More review improves coverage; costs more model runs |
+After Wiki completion, backend queues one linked `SDLC_SETUP` reconciliation execution. It regenerates seven
+compact baseline candidates, creates missing kinds, versions and replaces changed Canvases, and leaves
+normalized-equivalent Markdown untouched. Changed documents require reapproval. Wiki success remains durable
+if reconciliation fails; retry resumes reconciliation only. Zero-commit refresh still reconciles definitions,
+so newly introduced baseline kinds appear in existing repositories.
+
+| Field                   | Options                                  | Default  | Explanation                                                            |
+| ----------------------- | ---------------------------------------- | -------- | ---------------------------------------------------------------------- |
+| History                 | Latest 20%, Latest 50%, Full, Custom SHA | Full     | More history improves evolution/why capture; costs more                |
+| Commits per Wiki update | 1, 10, 25, 50, 100                       | 1        | Larger windows launch fewer sessions but compress intermediate history |
+| Review mode             | Quick, Standard                          | Standard | Independent review improves coverage; costs more model runs            |
 
 Before start, explain that the exact selected commit count appears after preparation, then show this common warning:
 
@@ -604,7 +629,7 @@ Focused automated coverage:
 - CanvasVersion creation/reuse and revision evidence tuple;
 - source existence, rename/deletion reconciliation, and active empty-source rejection;
 - Y-Sweet/index partial failure recovery without checkpoint corruption;
-- Quick/Standard/Thorough role dispatch and validator write denial;
+- Quick/Standard role dispatch and validator write denial;
 - freshness `CURRENT`/`STALE`/`UNKNOWN` derivation and prompt policy;
 - dashboard defaults, warnings, role controls, progress, retry/cancel, empty/archive states;
 - existing Wiki navigation, Canvas editing/version history, baseline, artifact, work, VCS, and Chat behavior.

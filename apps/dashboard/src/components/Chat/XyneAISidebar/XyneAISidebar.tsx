@@ -292,6 +292,7 @@ const XyneAISidebar = ({
   useEffect(() => {
     if (!initialContextSelections) return;
     setSelectedCanvases(initialContextSelections.canvases);
+    setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started

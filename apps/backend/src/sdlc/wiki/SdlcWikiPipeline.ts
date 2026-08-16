@@ -1,8 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
-import type {
-  RefreshSdlcWikiRunInput,
-  SdlcWikiRunProgress,
-  StartSdlcWikiRunInput,
+import {
+  SDLC_BASELINE_COUNT,
+  type SdlcBaselineKind,
+  type SdlcSetupStatus,
+  type RefreshSdlcWikiRunInput,
+  type SdlcWikiRunProgress,
+  type StartSdlcWikiRunInput,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -16,6 +19,7 @@ import {
   type WikiExecutionContext,
 } from './wikiRunState';
 import { shortestUniqueWikiCommitRef, wikiCommitRefUniverse } from './wikiCommitRefs';
+import { effectiveWikiRunPhase } from './wikiExecutionPhase';
 
 const ACTIVE_EXECUTION_STATUSES = ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING'] as const;
 
@@ -28,7 +32,7 @@ export interface SdlcWikiRunStatus extends SdlcWikiRunProgress {
   executionId: string;
   runMode: 'INITIAL' | 'REFRESH';
   chunkSize: 1 | 10 | 25 | 50 | 100;
-  quality: 'QUICK' | 'STANDARD' | 'THOROUGH';
+  quality: 'QUICK' | 'STANDARD';
   baseBranch: string;
   currentCommitSha: string | null;
   currentChunkPosition: number | null;
@@ -37,6 +41,13 @@ export interface SdlcWikiRunStatus extends SdlcWikiRunProgress {
   sessionId: string | null;
   createdAt: string;
   updatedAt: string;
+  knowledge: {
+    executionId: string;
+    phase: SdlcSetupStatus | string;
+    completedCount: number;
+    totalCount: number;
+    error: string | null;
+  } | null;
 }
 
 export interface SdlcWikiPipeline {
@@ -122,9 +133,16 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
   async retry(actor: SdlcWikiPipelineActor, repoId: string): Promise<SdlcWikiRunStatus> {
     await this.requireRepository(actor, repoId, true);
     const latest = await this.latestRun(repoId);
-    if (!latest || latest.context.phase !== 'PARTIALLY_FAILED') {
+    if (
+      !latest ||
+      (latest.context.phase !== 'PARTIALLY_FAILED' && latest.context.phase !== 'CANCELLED')
+    ) {
       throw new AppError('Latest Wiki run is not retryable', 409);
     }
+    const orphanedPendingCommit =
+      latest.context.phase === 'CANCELLED' &&
+      latest.context.assignedChunk === null &&
+      latest.context.pendingCommit;
     const context: WikiExecutionContext = {
       ...latest.context,
       phase: 'QUEUED',
@@ -132,14 +150,20 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
         latest.context.version === 2 && latest.context.assignedChunk?.kind === 'COMMITS'
           ? latest.context.assignedChunk
           : null,
+      pendingCommit: orphanedPendingCommit ? null : latest.context.pendingCommit,
+      conversationId: null,
+      sessionId: null,
+      credentialSessionId: null,
+      admissionPermitId: null,
       error: null,
       errorCode: null,
     };
+    const terminalStatus = latest.context.phase === 'CANCELLED' ? 'CANCELLED' : 'FAILURE';
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.workflowExecution.updateMany({
         where: {
           id: latest.execution.id,
-          status: 'FAILURE',
+          status: terminalStatus,
           context: latest.execution.context,
         },
         data: { status: 'PENDING', context: serializeWikiRunState(context) },
@@ -172,7 +196,6 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
     const context: WikiExecutionContext = {
       ...latest.context,
       phase: 'CANCELLED',
-      assignedChunk: null,
       error: null,
       errorCode: null,
     };
@@ -207,14 +230,45 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
   async getStatus(actor: SdlcWikiPipelineActor, repoId: string): Promise<SdlcWikiRunStatus | null> {
     await this.requireRepository(actor, repoId, false);
     const latest = await this.latestRun(repoId);
-    return latest
-      ? this.statusFromExecution(
-          latest.execution.id,
-          latest.execution.createdAt,
-          latest.execution.updatedAt,
-          latest.context
-        )
-      : null;
+    if (!latest) return null;
+    const status = this.statusFromExecution(
+      latest.execution.id,
+      latest.execution.createdAt,
+      latest.execution.updatedAt,
+      latest.context,
+      latest.execution.status
+    );
+    const repo = await this.prisma.repo.findUnique({
+      where: { id: repoId },
+      select: { sdlcSetupExecutionId: true },
+    });
+    if (!repo?.sdlcSetupExecutionId) return status;
+    const knowledgeExecution = await this.prisma.workflowExecution.findUnique({
+      where: { id: repo.sdlcSetupExecutionId },
+      select: { id: true, context: true },
+    });
+    if (!knowledgeExecution?.context) return status;
+    try {
+      const context = JSON.parse(knowledgeExecution.context) as Record<string, unknown>;
+      if (context.parentWikiExecutionId !== latest.execution.id) return status;
+      const completed = Array.isArray(context.completedBaselineKinds)
+        ? context.completedBaselineKinds.filter(
+            (value): value is SdlcBaselineKind => typeof value === 'string'
+          )
+        : [];
+      return {
+        ...status,
+        knowledge: {
+          executionId: knowledgeExecution.id,
+          phase: typeof context.phase === 'string' ? context.phase : 'QUEUED',
+          completedCount: new Set(completed).size,
+          totalCount: SDLC_BASELINE_COUNT,
+          error: typeof context.error === 'string' ? context.error : null,
+        },
+      };
+    } catch {
+      return status;
+    }
   }
 
   private async requireRepository(
@@ -438,7 +492,8 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
     executionId: string,
     createdAt: Date,
     updatedAt: Date,
-    context: WikiExecutionContext
+    context: WikiExecutionContext,
+    executionStatus?: string
   ): SdlcWikiRunStatus {
     const commitRefs = wikiCommitRefUniverse(context);
     const displayRef = (ref: string | null): string | null =>
@@ -446,7 +501,9 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
     return {
       executionId,
       runMode: context.runMode,
-      phase: context.phase,
+      phase: executionStatus
+        ? effectiveWikiRunPhase(executionStatus, context.phase)
+        : context.phase,
       total: context.counts.total,
       processed: context.counts.processed,
       updated: context.counts.updated,
@@ -460,9 +517,7 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
       ...(context.counts.windows ? { windows: context.counts.windows } : {}),
       currentWindowBeforeSha: displayRef(context.assignedChunk?.window?.beforeSha ?? null),
       currentWindowAfterSha: displayRef(context.assignedChunk?.window?.afterSha ?? null),
-      activeCheckpointSha: displayRef(
-        context.assignedChunk?.window?.activeCheckpointSha ?? null
-      ),
+      activeCheckpointSha: displayRef(context.assignedChunk?.window?.activeCheckpointSha ?? null),
       chunkSize: context.chunkSize,
       quality: context.quality,
       baseBranch: context.baseBranch,
@@ -478,6 +533,7 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
       sessionId: context.sessionId,
       createdAt: createdAt.toISOString(),
       updatedAt: updatedAt.toISOString(),
+      knowledge: null,
     };
   }
 }

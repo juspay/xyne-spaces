@@ -166,6 +166,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const canvasParticipants = canvasWithParticipants?.participants;
 
   const currentUserGroupIds = useCurrentUserGroupIds();
+  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const adminChannelIds = useMemo(
+    () => new Set((adminParticipations ?? []).map(participant => participant.channelId)),
+    [adminParticipations],
+  );
   const visibleChannels = useAllVisibleChannels();
   const currentUserChannelIds = useMemo(
     () => new Set(visibleChannels.map(channel => channel.id).filter(Boolean)),
@@ -281,6 +286,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
+      const sdlcMetadata = canvasData.metadata as Record<string, unknown> | null | undefined;
+      const isAdminEditableSdlcBaseline =
+        sdlcMetadata?.['surface'] === 'SDLC' &&
+        sdlcMetadata['artifactKind'] === 'BASELINE' &&
+        Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
+
+      if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;
 
       if (!accessLevel) {
         const inheritedRoles = [
@@ -351,6 +363,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     state,
     currentUserGroupIds,
     currentUserChannelIds,
+    adminChannelIds,
     queryClient,
   ]);
 

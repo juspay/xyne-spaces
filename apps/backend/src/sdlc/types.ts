@@ -3,8 +3,6 @@ import type {
   CreateSdlcArtifactInput,
   CreateSdlcClawArtifactInput,
   CreateSdlcLinkInput,
-  CreateSdlcTicketInput,
-  StartSdlcWorkInput,
   UpdateSdlcBaselineDraftInput,
 } from '@xyne/shared';
 import type { SdlcAgentContext } from './SdlcAgentContextService';
@@ -22,7 +20,6 @@ export interface SdlcRepositoryHub {
   canonicalUrl: string;
   projectId: string;
   channelId: string;
-  boardId: string;
 }
 
 export interface SdlcRepositoryRunContext {
@@ -62,21 +59,12 @@ export interface ApprovedSdlcBaseline {
   allBaselinesApproved: boolean;
 }
 
-export interface SdlcWorkExecution {
-  ticketId: string;
-  workflowExecutionId: string;
-}
-
-export interface SdlcTicket {
-  ticketId: string;
-}
-
 export interface SdlcHub {
   attachRepository(actor: SdlcActor, input: AttachSdlcRepositoryInput): Promise<SdlcRepositoryHub>;
   setupRepository(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
+  refreshSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
   retrySetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
   cancelSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
-  restartSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
   listRepositoryRunContexts(
     actor: SdlcActor,
     query?: string,
@@ -85,7 +73,7 @@ export interface SdlcHub {
   getRepositoryRunContext(
     actor: SdlcActor,
     repoId: string,
-    conversationId: string,
+    conversationId: string
   ): Promise<SdlcRepositoryRunContext>;
   createArtifact(
     actor: SdlcActor,
@@ -100,7 +88,6 @@ export interface SdlcHub {
     actor: SdlcActor,
     input: UpdateSdlcBaselineDraftInput
   ): Promise<SdlcArtifact>;
-  createTicket(actor: SdlcActor, repoId: string, input: CreateSdlcTicketInput): Promise<SdlcTicket>;
   linkContext(actor: SdlcActor, repoId: string, input: CreateSdlcLinkInput): Promise<SdlcLink>;
   unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void>;
   approveBaseline(
@@ -108,9 +95,4 @@ export interface SdlcHub {
     repoId: string,
     canvasId: string
   ): Promise<ApprovedSdlcBaseline>;
-  startWork(
-    actor: SdlcActor,
-    repoId: string,
-    input: StartSdlcWorkInput
-  ): Promise<SdlcWorkExecution>;
 }

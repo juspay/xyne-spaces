@@ -87,7 +87,6 @@ describe("SDLC sandbox repository context", () => {
         sdlcRepositoryUrl:
           "https://github.com/github-samples/pets-workshop.git",
         sdlcRepositoryBaseBranch: "main",
-        sdlcRepositoryWrite: "true",
         sdlcRuntimeCredentialOperation: "PUSH",
         sdlcExecutionId: "execution-1",
         sdlcSessionId: "session-1",
@@ -97,5 +96,22 @@ describe("SDLC sandbox repository context", () => {
     expect(result).toBe(
       "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.",
     );
+  });
+
+  it("never falls back to the static Xyne Spaces mirror for interactive SDLC", async () => {
+    const result = await sandboxRepoSetup.execute(
+      { repoName: "xyne-spaces", write: false },
+      context({
+        agentSlug: "sdlc-agent",
+        sdlcRepositoryId: "repo-xyne",
+        sdlcRepositoryName: "Xyne Spaces",
+        sdlcRepositoryUrl: "https://github.com/xynehq/xyne-spaces.git",
+        sdlcRepositoryBaseBranch: "main",
+        sdlcRuntimeCredentialOperation: "INTERACTIVE",
+        sdlcConversationId: "conversation-1",
+      }),
+    );
+
+    expect(result).toBe("Error: Incomplete SDLC runtime credential grant context.");
   });
 });

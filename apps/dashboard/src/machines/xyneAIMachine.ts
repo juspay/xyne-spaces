@@ -70,6 +70,7 @@ export interface CanvasSelectionContext {
  */
 export interface AskAIInitialContextSelections {
   canvases: Array<{ id: string; title: string; canvasId?: string }>;
+  tickets?: Array<{ id: string; title: string; xyneId?: string; status?: string }>;
   recordings: Array<{
     id: string;
     title: string;

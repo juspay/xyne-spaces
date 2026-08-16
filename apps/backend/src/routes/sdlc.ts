@@ -4,12 +4,10 @@ import {
   checkSdlcRepositoryAccessSchema,
   createSdlcArtifactSchema,
   createSdlcLinkSchema,
-  createSdlcTicketSchema,
   configureSdlcVcsCredentialSchema,
   sdlcVcsProviderSchema,
   startSdlcWikiRunSchema,
   refreshSdlcWikiRunSchema,
-  startSdlcWorkSchema,
 } from '@xyne/shared';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcQueue } from '@/queues/sdlcQueue';
@@ -275,18 +273,18 @@ router.post(
 );
 
 router.post(
-  '/repositories/:repoId/setup/cancel',
+  '/repositories/:repoId/setup/refresh',
   route(async (req, res) => {
-    const execution = await sdlcHub.cancelSetup(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, execution });
+    const execution = await sdlcHub.refreshSetup(actorFromRequest(req), req.params.repoId);
+    res.status(202).json({ success: true, execution });
   })
 );
 
 router.post(
-  '/repositories/:repoId/setup/restart',
+  '/repositories/:repoId/setup/cancel',
   route(async (req, res) => {
-    const execution = await sdlcHub.restartSetup(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
+    const execution = await sdlcHub.cancelSetup(actorFromRequest(req), req.params.repoId);
+    res.status(200).json({ success: true, execution });
   })
 );
 
@@ -320,15 +318,6 @@ router.post(
   })
 );
 
-router.post(
-  '/repositories/:repoId/tickets',
-  route(async (req, res) => {
-    const input = createSdlcTicketSchema.parse(req.body);
-    const ticket = await sdlcHub.createTicket(actorFromRequest(req), req.params.repoId, input);
-    res.status(201).json({ success: true, ticket });
-  })
-);
-
 router.delete(
   '/repositories/:repoId/links/:linkId',
   route(async (req, res) => {
@@ -346,15 +335,6 @@ router.post(
       req.params.canvasId
     );
     res.status(200).json({ success: true, approval });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/start-work',
-  route(async (req, res) => {
-    const input = startSdlcWorkSchema.parse(req.body);
-    const execution = await sdlcHub.startWork(actorFromRequest(req), req.params.repoId, input);
-    res.status(202).json({ success: true, execution });
   })
 );
 

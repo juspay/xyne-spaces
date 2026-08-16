@@ -1,6 +1,11 @@
 export type SdlcToolTransport = "direct" | "custom" | "subagent";
 export type SdlcMutationLevel = "read" | "write";
-export type SdlcTrustedBinding = "none" | "repository" | "execution" | "wiki_execution";
+export type SdlcTrustedBinding =
+  | "none"
+  | "repository"
+  | "execution"
+  | "execution_or_interactive"
+  | "wiki_execution";
 
 export interface SdlcToolCapability {
   name: string;
@@ -37,7 +42,7 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.verifyWikiSources, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "wiki_execution" },
   { name: SDLC_TOOL_NAMES.finalizeWikiCommit, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "wiki_execution" },
   { name: SDLC_TOOL_NAMES.gitContext, transport: "custom", group: "sdlc", mutation: "read", trustedBinding: "wiki_execution" },
-  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "execution" },
+  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "execution_or_interactive" },
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
@@ -69,6 +74,11 @@ export const SDLC_GENERIC_SPACES_WRITE_TOOLS = [
   "spaces-upload-to-kb",
 ] as const;
 
+const SDLC_HIDDEN_GENERIC_SPACES_TOOLS = new Set([
+  "spaces-create-canvas",
+  "spaces-edit-canvas",
+]);
+
 export const SDLC_RETIRED_TOOL_NAMES = [
   "spaces-sdlc-create-artifact",
   "spaces-sdlc-update-baseline",
@@ -96,14 +106,15 @@ export interface SdlcAgentToolProfile {
 }
 
 export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
-  const direct = [...new Set(spacesMcpToolNames)];
-  if (direct.length !== spacesMcpToolNames.length) {
+  const uniqueToolNames = [...new Set(spacesMcpToolNames)];
+  if (uniqueToolNames.length !== spacesMcpToolNames.length) {
     throw new Error("Duplicate tool names in Xyne Spaces MCP export");
   }
-  const retired = SDLC_RETIRED_TOOL_NAMES.filter((name) => direct.includes(name));
+  const retired = SDLC_RETIRED_TOOL_NAMES.filter((name) => uniqueToolNames.includes(name));
   if (retired.length > 0) {
     throw new Error(`Retired SDLC tools remain exported: ${retired.join(", ")}`);
   }
+  const direct = uniqueToolNames.filter((name) => !SDLC_HIDDEN_GENERIC_SPACES_TOOLS.has(name));
   const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !direct.includes(name));
   if (missing.length > 0) {
     throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);

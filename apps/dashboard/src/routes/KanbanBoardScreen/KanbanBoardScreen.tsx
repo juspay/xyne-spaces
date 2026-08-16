@@ -69,6 +69,7 @@ import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
+import { withTicketChannelScope } from './ticketChannelScope';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
@@ -1428,14 +1429,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
       viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+      channelId?: string;
       projectId?: string;
       boardId?: string;
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
-    } = {
-      viewMode: queryViewMode,
-    };
+    } = withTicketChannelScope({ viewMode: queryViewMode }, channelId);
 
     // Always pass boardId if it exists (from URL param)
     // Board ID implicitly scopes to project, so no need for projectId in this case
@@ -1485,6 +1485,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
+    channelId,
   ]);
 
   const [allProjectTickets, ticketsDetails] = useCachedQuery(

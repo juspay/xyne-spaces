@@ -12,11 +12,17 @@ import {
 } from '@/services/clawAgentService';
 import { logger } from '@/utils/logger';
 import { BASELINE_DEFINITIONS } from './baselineDefinitions';
+import { baselineWikiState, type BaselineWikiState } from './baselineWikiContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
 import { buildBaselineExecutionPrompt } from './baselinePrompt';
 import { isCompletedBaselineMetadata } from './sdlcBaselineDraft';
 import { shouldHandleSdlcCallback } from './sdlcCallbackPolicy';
+import { allBaselinesApproved } from './sdlcProgressiveGate';
 import { isSafeSdlcGitRef, requireSdlcBaseBranch } from './sdlcRepositoryContext';
+import {
+  buildSdlcTicketLifecycleInstruction,
+  buildSdlcWorkDeliveryInstruction,
+} from './sdlcTicketLifecyclePrompt';
 import { sdlcVcs } from './vcs';
 
 const SDLC_AGENT_SLUG = 'sdlc-agent';
@@ -37,6 +43,10 @@ interface ExecutionContext {
   credentialSessionId?: string;
   currentBaselineKind?: SdlcBaselineKind;
   completedBaselineKinds?: SdlcBaselineKind[];
+  reconciledBaselineKinds?: SdlcBaselineKind[];
+  refreshExisting?: boolean;
+  parentWikiExecutionId?: string;
+  baselineWikiState?: BaselineWikiState;
   generationCommit?: string;
   kind?: 'PRD' | 'TECH_DOC';
   title?: string;
@@ -62,10 +72,19 @@ export class SdlcClawExecutionService {
     if (!execution || !repo?.channelId || !repo.projectId || !execution.createdBy) {
       throw new Error(`Invalid SDLC setup execution ${executionId}`);
     }
-    const user = await this.requireUser(execution.createdBy);
     const repository = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
     const current = this.readContext(execution.context, repo.id);
-    const completed = await this.completedBaselineKinds(repo.channelId);
+    const [user, wikiState] = await Promise.all([
+      this.requireUser(execution.createdBy),
+      // A setup retry may resume hours after Wiki state changed. Re-resolve it
+      // for every baseline dispatch instead of trusting the cached context.
+      this.resolveBaselineWikiState(repo.id),
+    ]);
+    const generationCommit =
+      current.generationCommit || (await sdlcVcs.resolveBaseBranchHead(repo.id));
+    const completed = current.refreshExisting
+      ? new Set(current.completedBaselineKinds ?? [])
+      : await this.completedBaselineKinds(repo.channelId, execution.id);
     const definition = BASELINE_DEFINITIONS.find((item) => !completed.has(item.kind));
     if (!definition) {
       await this.finishExecution(execution.id, execution.workflowId, {
@@ -90,8 +109,10 @@ export class SdlcClawExecutionService {
       sessionId,
       credentialSessionId: sessionId,
       currentBaselineKind: definition.kind,
+      baselineWikiState: wikiState,
       completedBaselineKinds: [...completed],
       admissionPermitId,
+      generationCommit,
     };
     if (!(await this.setRunning(execution.id, execution.workflowId, context))) return false;
     const agentContext = await sdlcAgentContext.build(
@@ -104,7 +125,8 @@ export class SdlcClawExecutionService {
         conversationId,
         setupExecutionId: execution.id,
         baselineKind: definition.kind,
-      },
+        generationCommit,
+      }
     );
 
     const response = await runS2SClawAgent({
@@ -118,6 +140,8 @@ export class SdlcClawExecutionService {
         channelId: repo.channelId,
         setupExecutionId: execution.id,
         definition,
+        wikiState,
+        generationCommit,
       }),
       userId: user.id,
       userName: user.name || user.email,
@@ -142,6 +166,34 @@ export class SdlcClawExecutionService {
     return true;
   }
 
+  private async resolveBaselineWikiState(repoId: string): Promise<BaselineWikiState> {
+    const link = await this.prisma.sdlcEntityLink.findFirst({
+      where: {
+        repoId,
+        sourceType: 'REPOSITORY',
+        sourceId: repoId,
+        targetType: 'WORKFLOW_EXECUTION',
+        relationType: 'WIKI_RUN',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { targetId: true },
+    });
+    if (!link) return 'UNAVAILABLE';
+    const execution = await this.prisma.workflowExecution.findUnique({
+      where: { id: link.targetId },
+      select: { status: true, context: true },
+    });
+    if (!execution) return 'UNAVAILABLE';
+    let phase: string | null = null;
+    try {
+      const context = JSON.parse(execution.context || '{}') as Record<string, unknown>;
+      phase = typeof context.phase === 'string' ? context.phase : null;
+    } catch {
+      phase = null;
+    }
+    return baselineWikiState({ executionStatus: execution.status, phase });
+  }
+
   async dispatchArtifact(executionId: string, admissionPermitId: string): Promise<boolean> {
     const execution = await this.prisma.workflowExecution.findUnique({
       where: { id: executionId },
@@ -158,6 +210,8 @@ export class SdlcClawExecutionService {
     ]);
     if (!repo?.channelId) throw new Error('SDLC repository unavailable');
     const repository = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
+    const generationCommit =
+      current.generationCommit || (await sdlcVcs.resolveBaseBranchHead(repo.id));
     const conversationId = current.conversationId || `chat-sdlc-artifact-${execution.id}`;
     const sessionId = randomUUID();
     if (
@@ -168,6 +222,7 @@ export class SdlcClawExecutionService {
         sessionId,
         credentialSessionId: sessionId,
         admissionPermitId,
+        generationCommit,
       }))
     )
       return false;
@@ -180,15 +235,16 @@ export class SdlcClawExecutionService {
         sessionId,
         conversationId,
         artifactKind: current.kind,
+        generationCommit,
         sourceType: current.sourceType,
         sourceId: current.sourceId,
-      },
+      }
     );
     const response = await runS2SClawAgent({
       sessionId,
       agentSlug: SDLC_AGENT_SLUG,
       task: this.artifactPrompt(
-        current,
+        { ...current, generationCommit },
         execution.id,
         repo.name,
         repository.cloneUrl,
@@ -253,7 +309,6 @@ export class SdlcClawExecutionService {
       ticketId: ticket.id,
       sourceType: current.sourceType,
       sourceId: current.sourceId,
-      writeRequested: true,
     });
     const response = await runS2SClawAgent({
       sessionId,
@@ -331,7 +386,8 @@ export class SdlcClawExecutionService {
     }
     try {
       if (payload.status !== 'completed') {
-        const failure = payload.error || `Claw run ended with status ${payload.status || 'unknown'}`;
+        const failure =
+          payload.error || `Claw run ended with status ${payload.status || 'unknown'}`;
         await sdlcVcs.markRuntimeFailure(
           context.repoId,
           execution.workflowType === 'SDLC_WORK' ? 'PUSH' : 'CLONE',
@@ -463,14 +519,14 @@ export class SdlcClawExecutionService {
       select: { id: true, context: true },
     });
     await Promise.all(
-      executions.map(async execution => {
+      executions.map(async (execution) => {
         const context = this.readContext(execution.context);
         await sdlcAdmission.restore({
           permitId: context.admissionPermitId,
           repoId: context.repoId,
           jobId: execution.id,
         });
-      }),
+      })
     );
   }
 
@@ -553,8 +609,12 @@ export class SdlcClawExecutionService {
     const context = await this.executionContext(executionId);
     const repo = await this.prisma.repo.findUnique({ where: { id: context.repoId } });
     if (!repo?.channelId) throw new Error('SDLC repository unavailable');
-    const completed = await this.completedBaselineKinds(repo.channelId);
-    if (!completed.has(kind)) {
+    const reconciled = new Set(context.reconciledBaselineKinds ?? []);
+    const completed = context.refreshExisting
+      ? new Set(context.completedBaselineKinds ?? [])
+      : await this.completedBaselineKinds(repo.channelId, executionId);
+    if (context.refreshExisting) completed.add(kind);
+    if (context.refreshExisting ? !reconciled.has(kind) : !completed.has(kind)) {
       throw new Error(`Claw completed without creating ${kind}`);
     }
     const active = await this.patchContext(executionId, {
@@ -565,9 +625,14 @@ export class SdlcClawExecutionService {
     });
     if (!active) return;
     if (completed.size === BASELINE_DEFINITIONS.length) {
+      const baselines = await this.prisma.canvas.findMany({
+        where: { channelId: repo.channelId },
+        select: { metadata: true, lastEditedAt: true },
+      });
+      const terminalPhase = allBaselinesApproved(baselines) ? 'APPROVED' : 'READY_FOR_REVIEW';
       await this.finishExecution(executionId, workflowId, {
         ...context,
-        phase: 'READY_FOR_REVIEW',
+        phase: terminalPhase,
         completedBaselineKinds: [...completed],
         currentBaselineKind: undefined,
       });
@@ -694,15 +759,21 @@ export class SdlcClawExecutionService {
 Repository identity is server-pinned. Do not search Spaces or guess another repository.
 Pinned URL: ${repoUrl}
 Pinned branch: ${baseBranch}
+Pinned generation commit: ${context.generationCommit}
+After sandbox setup, detach the sandbox at that generation commit before inspection.
 Use the repository sandbox, approved baseline canvases, channel messages, and linked context when relevant.
 ${parent}
 Title: ${context.title}
 User direction: ${context.prompt || 'Use the available evidence and repository conventions.'}
 
+Use \`[[source:N]]\` for every repository file reference and submit matching structured sourceReferences
+(path, optional symbol/startLine/endLine). Never construct repository URLs.
+
 Call spaces-sdlc-mutate-artifact exactly once with repoId ${context.repoId}, artifactType ${context.kind}, action create,
 title ${JSON.stringify(context.title)}, workflowExecutionId ${executionId}${
       context.parentCanvasId ? `, parentCanvasId ${context.parentCanvasId}` : ''
-    }, and the complete Markdown. Then submit the returned canvas id. Never create a generic canvas.`;
+    }, complete Markdown, and sourceReferences. Submit only after that mutation succeeds. If validation fails,
+correct the arguments and retry; never submit a failed mutation. Then submit the returned canvas id. Never create a generic canvas.`;
   }
 
   private workPrompt(input: {
@@ -729,6 +800,10 @@ and that branchName. Read the repository and SDLC channel context before editing
 documents. Do not add unit tests in this V1 flow. Run existing lint/type/build checks when practical. Never merge,
 force-push, expose secrets, or modify unrelated files.
 
+${buildSdlcWorkDeliveryInstruction()}
+
+${buildSdlcTicketLifecycleInstruction(input.ticketId)}
+
 Commit changes locally, then push only the chosen work branch directly to origin. Never push
 ${input.baseBranch}, never force-push, and never merge. Use only sandbox Git credentials installed for this run.
 After remote push succeeds, call spaces-sdlc-create-pull-request exactly once with executionId
@@ -753,7 +828,10 @@ as failure.`;
     return user;
   }
 
-  private async completedBaselineKinds(channelId: string): Promise<Set<SdlcBaselineKind>> {
+  private async completedBaselineKinds(
+    channelId: string,
+    setupExecutionId: string
+  ): Promise<Set<SdlcBaselineKind>> {
     const canvases = await this.prisma.canvas.findMany({
       where: { channelId },
       select: { metadata: true },
@@ -761,7 +839,11 @@ as failure.`;
     const result = new Set<SdlcBaselineKind>();
     for (const canvas of canvases) {
       const metadata = canvas.metadata as Record<string, unknown> | null;
-      if (isCompletedBaselineMetadata(metadata) && typeof metadata?.baselineKind === 'string') {
+      if (
+        isCompletedBaselineMetadata(metadata) &&
+        metadata?.setupExecutionId === setupExecutionId &&
+        typeof metadata.baselineKind === 'string'
+      ) {
         result.add(metadata.baselineKind as SdlcBaselineKind);
       }
     }

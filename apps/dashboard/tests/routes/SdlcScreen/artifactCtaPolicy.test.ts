@@ -24,10 +24,10 @@ void test('Tech Doc creates a ticket when none is linked', () => {
   });
 });
 
-void test('Tech Doc views its linked ticket', () => {
+void test('Tech Doc starts work once a ticket is linked', () => {
   assert.deepEqual(artifactCta('TECH_DOC', 'ticket-1'), {
-    action: 'VIEW_TICKET',
-    label: 'View Ticket',
+    action: 'START_WORK',
+    label: 'Start work',
     targetId: 'ticket-1',
   });
 });

@@ -100,7 +100,7 @@ export const wikiExecutionContextSchema = z
     runMode: z.enum(['INITIAL', 'REFRESH']),
     historyRange: historyRangeSchema.nullable(),
     chunkSize: z.union([z.literal(1), z.literal(10), z.literal(25), z.literal(50), z.literal(100)]),
-    quality: z.enum(['QUICK', 'STANDARD', 'THOROUGH']),
+    quality: z.enum(['QUICK', 'STANDARD']),
     baseBranch: z.string().min(1),
     targetHeadSha: gitShaSchema.nullable(),
     bootstrapRef: commitRefSchema.nullable(),

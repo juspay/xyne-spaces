@@ -13,7 +13,7 @@ const pinned = {
   channelId: "channel-1",
   actorUserId: "user-1",
   repository: { id: "repo-1", name: "repo", url: "https://github.com/acme/repo.git", baseBranch: "main" },
-  permissions: { repositoryRole: "ADMIN", writeRequested: false },
+  permissions: { repositoryRole: "ADMIN" },
   gates: { capabilities: [], allBaselinesApproved: false },
   execution: { workflowExecutionId: "setup-1", sessionId: "session-1", conversationId: null },
   artifact: { kind: null, id: null, sourceType: null, sourceId: null },
@@ -67,7 +67,7 @@ describe("SDLC baseline run context", () => {
         ...pinned,
         operation: "work",
         ticketId: "ticket-1",
-        permissions: { ...pinned.permissions, writeRequested: false },
+        execution: { ...pinned.execution, sessionId: null },
       }),
     ).toBeNull();
     expect(

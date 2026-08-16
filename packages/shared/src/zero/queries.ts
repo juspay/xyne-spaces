@@ -64,6 +64,7 @@ const kanbanTicketPageFiltersSchema = z.object({
 
 const kanbanTicketsPageArgsSchema = z.object({
   viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
+  channelId: z.string().optional(),
   projectId: z.string().optional(),
   boardId: z.string().optional(),
   userId: z.string().optional(),
@@ -213,6 +214,7 @@ const applyKanbanTicketPageConditions = (
 ) => {
   const {
     viewMode,
+    channelId,
     projectId,
     boardId,
     userId,
@@ -237,6 +239,10 @@ const applyKanbanTicketPageConditions = (
   }
 
   query = query.where('isArchived', false);
+
+  if (channelId) {
+    query = query.where('channelId', channelId);
+  }
 
   if (stageName && columnType !== 'status' && filters?.stages?.length && !filters.stages.includes(stageName)) {
     return query.where('id', '__kanban_stage_filter_no_match__');
@@ -875,6 +881,7 @@ export const queries = defineQueries({
   ticketsQueryV2: defineQuery(
     z.object({
       viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
+      channelId: z.string().optional(),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
       userId: z.string().optional(),
@@ -886,6 +893,7 @@ export const queries = defineQueries({
       ctx,
       args: {
         viewMode,
+        channelId,
         projectId,
         boardId,
         userId,
@@ -895,6 +903,10 @@ export const queries = defineQueries({
       },
     }) => {
       let query = zql.tickets;
+
+      if (channelId) {
+        query = query.where('channelId', channelId);
+      }
 
       // Apply explicit board filter if provided (works across all view modes)
       // boardId implicitly scopes to project, so no need for separate projectId filter
@@ -3404,13 +3416,8 @@ export const queries = defineQueries({
     zql.repos
       .where('projectId', 'IS NOT', null)
       .where('channelId', 'IS NOT', null)
-      .related('project', project => project.related('sdlcBoard'))
-      .related('channel', channel =>
-        channel
-          .related('participants')
-          .related('channelStats')
-          .related('tickets', ticket => ticket.related('pullRequests')),
-      )
+      .related('project')
+      .related('channel', channel => channel.related('participants').related('channelStats'))
       .related('setupExecution')
       .related('sdlcEntityLinks')
       .orderBy('name', 'asc'),
@@ -3420,25 +3427,13 @@ export const queries = defineQueries({
       .where('id', repoId)
       .where('projectId', 'IS NOT', null)
       .where('channelId', 'IS NOT', null)
-      .related('project', project => project.related('sdlcBoard'))
+      .related('project')
       .related('channel', channel =>
         channel
           .related('participants')
           .related('channelStats')
           .related('canvasFolders', folder =>
             folder.where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs']).related('canvases'),
-          )
-          .related('tickets', ticket =>
-            ticket
-              .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc'))
-              .related('workflows', workflow =>
-                workflow
-                  .where('workflowType', 'SDLC_WORK')
-                  .orderBy('createdAt', 'desc')
-                  .related('workflowExecutions', execution =>
-                    execution.orderBy('updatedAt', 'desc'),
-                  ),
-              ),
           ),
       )
       .related('setupExecution')
@@ -3447,6 +3442,19 @@ export const queries = defineQueries({
   ),
   getSdlcLinks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
     zql.sdlc_entity_links.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  ),
+  sdlcTicketsByIds: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) =>
+      zql.tickets
+        .where(helpers =>
+          helpers.cmp(
+            'id',
+            'IN',
+            ticketIds.length > 0 ? ticketIds : ['__no_sdlc_ticket__'],
+          ),
+        )
+        .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
   ),
   sdlcDiscussionConversations: defineQuery(
     z.object({

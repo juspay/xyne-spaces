@@ -167,15 +167,17 @@ export interface SdlcVcs {
     capabilities: VcsCapability[]
   ): Promise<void>;
   createDraftPullRequest(input: {
-    executionId: string;
-    sessionId: string;
     repoId: string;
     title: string;
     body: string;
     head: string;
     base: string;
     commitHash: string;
-  }): Promise<DraftPullRequestResult>;
+  } & (
+    | { executionId: string; sessionId: string }
+    | { interactiveGrant: string; conversationId: string }
+  )):
+    Promise<DraftPullRequestResult>;
   inspectPullRequest(repoId: string, number: number): Promise<PullRequestInspection>;
   resolveBaseBranchHead(repoId: string): Promise<string>;
   listBaseBranchFirstParentHistory(repoId: string): Promise<FirstParentHistory>;

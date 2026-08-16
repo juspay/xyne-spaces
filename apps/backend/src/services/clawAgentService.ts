@@ -255,7 +255,6 @@ export interface S2SRunAgentRequest {
     | 'BOOTSTRAP'
     | 'GENERATOR'
     | 'ARCHITECTURE_VALIDATOR'
-    | 'OPERATIONS_VALIDATOR'
     | 'CORRECTOR';
   sdlcContext?: Record<string, unknown>;
   allowWriteInReadOnlyJob?: boolean;

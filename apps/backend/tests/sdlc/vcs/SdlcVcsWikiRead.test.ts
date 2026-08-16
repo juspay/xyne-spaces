@@ -18,6 +18,7 @@ jest.mock('../../../src/utils/logger', () => ({
 
 import { generateKeyPairSync } from 'crypto';
 import { SdlcVcsService } from '../../../src/sdlc/vcs/SdlcVcsService';
+import { issueSdlcInteractiveGrant } from '../../../src/sdlc/vcs/sdlcInteractiveGrant';
 
 function publicKey(): string {
   return generateKeyPairSync('x25519').publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
@@ -70,6 +71,60 @@ describe('SdlcVcsService Wiki public read path', () => {
       'repo-1',
       ['READ_REPOSITORY']
     );
+  });
+
+  it('bootstraps an interactive Kata clone from a signed repository grant', async () => {
+    const prisma = {
+      repo: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'repo-1', workspaceId: 'workspace-1' }),
+      },
+    };
+    const service = new SdlcVcsService(prisma as never);
+    jest.spyOn(service as never, 'requireRepositoryMember' as never).mockResolvedValue({} as never);
+    const capability = jest.spyOn(service, 'requireCapabilities').mockResolvedValue(undefined);
+    (service as unknown as { credentialStore: { find: jest.Mock } }).credentialStore = {
+      find: jest.fn().mockResolvedValue(null),
+    };
+    const secret = 'interactive-test-secret';
+    process.env['INTERNAL_S2S_KEY'] = secret;
+    const interactiveGrant = issueSdlcInteractiveGrant(
+      {
+        agentSlug: 'sdlc-agent',
+        workspaceId: 'workspace-1',
+        repoId: 'repo-1',
+        actorUserId: 'user-1',
+        conversationId: 'conversation-1',
+      },
+      secret
+    );
+
+    await expect(
+      service.bootstrapSandboxCredential({
+        agentSlug: 'sdlc-agent',
+        interactiveGrant,
+        conversationId: 'conversation-1',
+        repoId: 'repo-1',
+        operation: 'INTERACTIVE',
+        sandboxId: 'sandbox-1',
+        sandboxPublicKey: publicKey(),
+      })
+    ).resolves.toBeNull();
+    expect(capability).toHaveBeenCalledWith(
+      { userId: 'user-1', workspaceId: 'workspace-1' },
+      'repo-1',
+      ['READ_REPOSITORY']
+    );
+    await expect(
+      service.bootstrapSandboxCredential({
+        agentSlug: 'sdlc-agent',
+        interactiveGrant,
+        conversationId: 'conversation-2',
+        repoId: 'repo-1',
+        operation: 'INTERACTIVE',
+        sandboxId: 'sandbox-2',
+        sandboxPublicKey: publicKey(),
+      })
+    ).rejects.toThrow('interactive binding mismatch');
   });
 
   it('verifies public source paths with no token', async () => {

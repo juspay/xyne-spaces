@@ -53,7 +53,7 @@ describe('Wiki source references', () => {
         repositoryUrl: 'https://github.com/acme/repo',
         reference: { ...reference, path: '../secret' },
       })
-    ).toThrow('Invalid Wiki source path');
+    ).toThrow('Invalid SDLC source path');
     expect(() =>
       githubWikiSourceUrl({ repositoryUrl: 'https://github.com/acme/repo/extra', reference })
     ).toThrow('repository URL');

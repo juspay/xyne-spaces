@@ -25,6 +25,7 @@ import {
   SDLC_TOOL_NAMES,
   type Citation,
 } from "xyne-claw-shared";
+import { SDLC_BASELINE_KINDS } from "@xyne/shared/sdlc";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 
@@ -3987,6 +3988,16 @@ const spacesCreateTicket: ToolDef = {
         description:
           "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
       },
+      sdlcRepoId: {
+        type: "string",
+        description:
+          "Required with sourceCanvasId when creating an implementation ticket for an SDLC Tech Doc. The SDLC repository ID from repository mode.",
+      },
+      sourceCanvasId: {
+        type: "string",
+        description:
+          "Required with sdlcRepoId when creating an implementation ticket for an SDLC Tech Doc. The Tech Doc canvas ID to link to the new ticket.",
+      },
       priority: {
         type: "string",
         enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
@@ -4002,6 +4013,12 @@ const spacesCreateTicket: ToolDef = {
     try {
       if (!args["channelId"]) {
         return err("channelId is required.");
+      }
+
+      const sdlcRepoId = String(args["sdlcRepoId"] ?? "").trim();
+      const sourceCanvasId = String(args["sourceCanvasId"] ?? "").trim();
+      if (Boolean(sdlcRepoId) !== Boolean(sourceCanvasId)) {
+        return err("sdlcRepoId and sourceCanvasId must be provided together.");
       }
 
       const attachConversationId = (args["attachConversationId"] as string | undefined)?.trim() || undefined;
@@ -4042,6 +4059,27 @@ const spacesCreateTicket: ToolDef = {
         priority: string;
         status: string;
       };
+
+      if (sdlcRepoId && sourceCanvasId) {
+        try {
+          await spacesFetch("/api/sdlc/claw/links", {
+            method: "POST",
+            headers: { "x-xyne-acting-user-id": ctx.userId },
+            body: JSON.stringify({
+              repoId: sdlcRepoId,
+              sourceType: "CANVAS",
+              sourceId: sourceCanvasId,
+              targetType: "TICKET",
+              targetId: data.id,
+              relationType: "TICKET",
+            }),
+          });
+        } catch (linkError) {
+          return err(
+            `Ticket ${data.xyneId} was created, but its Tech Doc link failed: ${linkError instanceof Error ? linkError.message : String(linkError)}. Do not create a duplicate ticket.`,
+          );
+        }
+      }
 
       // Step 2: if the caller wants attachments carried over from another
       // conversation, transfer them via the existing standalone endpoint.
@@ -4815,6 +4853,47 @@ const spacesCreateCanvas: ToolDef = {
 };
 
 // ── canonical SDLC artifact mutation ──────────────────────────────
+const SDLC_AGENT_COMMIT_REF_PATTERN = "^(?:[0-9a-fA-F]{9,40}|ROOT_BOOTSTRAP)$";
+const SDLC_WIKI_PATH_PATTERN = "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[^/\\\\]+(?:/[^/\\\\]+)*\\.[mM][dD]$";
+const sdlcSourcePathsSchema = {
+  type: "array",
+  maxItems: 500,
+  items: { type: "string", minLength: 1, maxLength: 1024 },
+} as const;
+const sdlcSourceReferencesSchema = {
+  type: "array",
+  maxItems: 500,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: { type: "string", minLength: 1, maxLength: 1024, description: "Repository-relative source path" },
+      symbol: { type: "string", minLength: 1, maxLength: 512, description: "Optional source symbol shown in the link label" },
+      startLine: { type: "integer", minimum: 1, description: "Optional trusted one-based start line" },
+      endLine: { type: "integer", minimum: 1, description: "Optional trusted one-based end line" },
+    },
+    required: ["path"],
+  },
+} as const;
+
+function sdlcMutationVariant(
+  artifactType: "WIKI" | "BASELINE" | "PRD" | "TECH_DOC",
+  action: string,
+  required: readonly string[],
+  propertyOverrides: Record<string, unknown> = {},
+) {
+  return {
+    type: "object",
+    properties: {
+      artifactType: { const: artifactType },
+      action: { const: action },
+      ...(required.includes("sourcePaths") && action !== "archive" ? { sourcePaths: { minItems: 1 } } : {}),
+      ...propertyOverrides,
+    },
+    required: ["artifactType", "action", ...required],
+  } as const;
+}
+
 const spacesSdlcMutateArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.mutateArtifact,
   description:
@@ -4824,39 +4903,56 @@ const spacesSdlcMutateArtifact: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" },
-      workspaceId: { type: "string" },
-      actorUserId: { type: "string" },
-      executionId: { type: "string" },
-      sessionId: { type: "string" },
+      repoId: { type: "string", minLength: 1 },
+      workspaceId: { type: "string", minLength: 1 },
+      actorUserId: { type: "string", minLength: 1 },
+      executionId: { type: "string", minLength: 1 },
+      sessionId: { type: "string", minLength: 1 },
       artifactType: { type: "string", enum: ["WIKI", "BASELINE", "PRD", "TECH_DOC"] },
       baselineKind: {
         type: "string",
-        enum: ["CORE_CODE_MAP", "FRONTEND_DESIGN_SYSTEM", "CODE_LINT_STANDARDS", "RUN_GUIDE", "TEST_GUIDE"],
+        enum: [...SDLC_BASELINE_KINDS],
       },
-      setupExecutionId: { type: "string" },
-      workflowExecutionId: { type: "string" },
-      title: { type: "string" },
+      setupExecutionId: { type: "string", minLength: 1 },
+      workflowExecutionId: { type: "string", minLength: 1 },
+      title: { type: "string", minLength: 1, maxLength: 255 },
       action: {
         type: "string",
         enum: ["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore", "begin", "upsert_section", "finalize"],
       },
-      sectionKey: { type: "string" },
-      sectionTitle: { type: "string" },
-      markdown: { type: "string", description: "Complete Markdown for one section." },
-      path: { type: "string" },
-      destinationPath: { type: "string" },
-      expectedContentHash: { type: "string" },
-      heading: { type: "string" },
-      commitSha: { type: "string" },
-      sourcePaths: { type: "array", items: { type: "string" } },
-      sourceReferences: { type: "array", items: { type: "object" } },
+      sectionKey: { type: "string", minLength: 1, maxLength: 80 },
+      sectionTitle: { type: "string", minLength: 1, maxLength: 255 },
+      markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
+      path: { type: "string", minLength: 1, maxLength: 512, pattern: SDLC_WIKI_PATH_PATTERN },
+      destinationPath: { type: "string", minLength: 1, maxLength: 512, pattern: SDLC_WIKI_PATH_PATTERN },
+      expectedContentHash: { type: "string", minLength: 1, maxLength: 128 },
+      heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing page heading used as the section mutation target or insertion anchor" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
+      sourcePaths: sdlcSourcePathsSchema,
+      sourceReferences: sdlcSourceReferencesSchema,
       kind: { type: "string", enum: ["PRD", "TECH_DOC"] },
-      parentCanvasId: { type: "string" },
-      generationCommit: { type: "string" },
-      viewAccessId: { type: "string" },
+      parentCanvasId: { type: "string", minLength: 1 },
+      generationCommit: { type: "string", maxLength: 255 },
+      viewAccessId: { type: "string", minLength: 1 },
     },
     required: ["artifactType", "action"],
+    oneOf: [
+      sdlcMutationVariant("WIKI", "create", ["commitSha", "path", "title", "markdown", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "update", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "restore", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "archive", ["commitSha", "path", "expectedContentHash", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "replace_section", ["commitSha", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"], { markdown: { maxLength: 1_000_000 } }),
+      sdlcMutationVariant("WIKI", "insert_section", ["commitSha", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"], { markdown: { maxLength: 1_000_000 } }),
+      sdlcMutationVariant("WIKI", "remove_section", ["commitSha", "path", "expectedContentHash", "heading", "sourcePaths"]),
+      sdlcMutationVariant("WIKI", "move", ["commitSha", "path", "destinationPath", "expectedContentHash"]),
+      sdlcMutationVariant("BASELINE", "begin", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
+      sdlcMutationVariant("BASELINE", "upsert_section", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title", "sectionKey", "sectionTitle", "markdown", "sourceReferences"], { markdown: { maxLength: 1_000_000 }, sourceReferences: { minItems: 1 } }),
+      sdlcMutationVariant("BASELINE", "finalize", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
+      sdlcMutationVariant("PRD", "create", ["title", "markdown"]),
+      sdlcMutationVariant("PRD", "update", ["viewAccessId", "markdown"]),
+      sdlcMutationVariant("TECH_DOC", "create", ["title", "markdown", "parentCanvasId"]),
+      sdlcMutationVariant("TECH_DOC", "update", ["viewAccessId", "markdown"]),
+    ],
   },
   async handler(args, ctx) {
     return mutateSdlcArtifact(args, ctx);
@@ -4939,11 +5035,16 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
       return createSdlcArtifact({ ...args, kind: artifactType }, ctx);
     }
     if (action === "update") {
-      return spacesEditCanvas.handler({
-        viewAccessId: args["viewAccessId"],
-        content: args["markdown"],
-        ...(args["title"] ? { title: args["title"] } : {}),
-      }, ctx);
+      try {
+        const data = (await spacesFetch("/api/sdlc/claw/artifacts/update", {
+          method: "POST",
+          headers: { "x-xyne-acting-user-id": ctx.userId },
+          body: JSON.stringify({ ...args, kind: artifactType }),
+        })) as { artifact: { canvasId: string; viewAccessId?: string; url?: string; kind: string } };
+        return ok(JSON.stringify(data.artifact));
+      } catch (e) {
+        return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     return err(`${artifactType} action must be create or update.`);
   }
@@ -5019,7 +5120,13 @@ const sdlcArtifactSelectorSchema = {
       additionalProperties: false,
       properties: {
         type: { const: "WIKI_PAGE" },
-        path: { type: "string", description: "Current normalized Wiki page path" },
+        path: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+          pattern: SDLC_WIKI_PATH_PATTERN,
+          description: "Current normalized relative Markdown Wiki page path",
+        },
         includeArchived: { type: "boolean" },
       },
       required: ["type", "path"],
@@ -5029,7 +5136,7 @@ const sdlcArtifactSelectorSchema = {
       additionalProperties: false,
       properties: {
         type: { const: "SDLC_CANVAS" },
-        canvasId: { type: "string", description: "Repo Knowledge, PRD, or Tech Doc Canvas ID" },
+        canvasId: { type: "string", minLength: 1, maxLength: 256, description: "Repo Knowledge, PRD, or Tech Doc Canvas ID" },
       },
       required: ["type", "canvasId"],
     },
@@ -5044,8 +5151,8 @@ const spacesSdlcListArtifactVersions: ToolDef = {
     properties: {
       repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
       selector: sdlcArtifactSelectorSchema,
-      cursor: { type: "string" },
-      limit: { type: "number", minimum: 1, maximum: 25 },
+      cursor: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 1, maximum: 25 },
     },
     required: ["repoId", "workspaceId", "actorUserId", "selector"],
   },
@@ -5061,7 +5168,7 @@ const spacesSdlcReadArtifactVersion: ToolDef = {
     properties: {
       repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
       selector: sdlcArtifactSelectorSchema,
-      versionId: { type: "string" },
+      versionId: { type: "string", minLength: 1 },
     },
     required: ["repoId", "workspaceId", "actorUserId", "selector", "versionId"],
   },
@@ -5116,7 +5223,8 @@ const spacesSdlcWikiVerifySources: ToolDef = {
     type: "object",
     properties: {
       executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
-      commitSha: { type: "string" }, paths: { type: "array", maxItems: 500, items: { type: "string" } },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
+      paths: { ...sdlcSourcePathsSchema, minItems: 1 },
     },
     required: ["executionId", "sessionId", "repoId", "commitSha", "paths"],
   },
@@ -5132,7 +5240,7 @@ const spacesSdlcWikiBeginCheckpoint: ToolDef = {
     type: "object",
     properties: {
       executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
-      commitSha: { type: "string" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
     },
     required: ["executionId", "sessionId", "repoId", "commitSha"],
   },
@@ -5148,8 +5256,8 @@ const spacesSdlcWikiFinalizeCommit: ToolDef = {
     type: "object",
     properties: {
       executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
-      commitSha: { type: "string" }, outcome: { type: "string", enum: ["changes", "noop"] },
-      summary: { type: "string" },
+      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN }, outcome: { type: "string", enum: ["changes", "noop"] },
+      summary: { type: "string", minLength: 1, maxLength: 4_000 },
     },
     required: ["executionId", "sessionId", "repoId", "commitSha", "outcome", "summary"],
   },
@@ -5161,22 +5269,24 @@ const spacesSdlcWikiFinalizeCommit: ToolDef = {
 const spacesSdlcCreatePullRequest: ToolDef = {
   name: SDLC_TOOL_NAMES.createPullRequest,
   description:
-    "Create the run-bound draft pull request after a convention-derived safe feature branch has been pushed. " +
-    "The Spaces backend resolves its backend-only authorization and verifies execution/session/repository, " +
+    "Create a draft pull request after a convention-derived safe feature branch has been pushed. " +
+    "The Spaces backend resolves its trusted execution or interactive authorization and verifies repository, " +
     "remote commit, exact head/base, and draft state. Never use generic GitHub credentials for SDLC work.",
   inputSchema: {
     type: "object",
     properties: {
       executionId: { type: "string" },
       sessionId: { type: "string" },
+      interactiveGrant: { type: "string" },
+      conversationId: { type: "string" },
       repoId: { type: "string" },
-      title: { type: "string" },
-      body: { type: "string" },
-      head: { type: "string" },
-      base: { type: "string" },
-      commitHash: { type: "string" },
+      title: { type: "string", minLength: 1, maxLength: 256 },
+      body: { type: "string", maxLength: 65_536 },
+      head: { type: "string", minLength: 1, maxLength: 255 },
+      base: { type: "string", minLength: 1, maxLength: 255 },
+      commitHash: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
     },
-    required: ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"],
+    required: ["repoId", "title", "head", "base", "commitHash"],
   },
   async handler(args) {
     try {

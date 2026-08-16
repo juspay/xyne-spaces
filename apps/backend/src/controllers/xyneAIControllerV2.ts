@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { isSdlcBaselineApprovalCurrent } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -46,17 +47,20 @@ const ResearchContextSchema = z.object({
 // canvas_id accepted for backward compatibility with clients that predate
 // XYNE-17290. At least one must be provided; the newer name wins if multiple
 // are set.
-const SelectionContextSchema = z.object({
-  canvas_id: z.string().min(1).optional(),
-  canvasId: z.string().min(1).optional(),
-  canvas_view_access_id: z.string().min(1).optional(),
-  canvasViewAccessId: z.string().min(1).optional(),
-  selected_text: z.string().min(1),
-  canvas_title: z.string().optional(),
-}).refine(
-  (ctx) => Boolean(ctx.canvas_id || ctx.canvasId || ctx.canvas_view_access_id || ctx.canvasViewAccessId),
-  { message: 'canvas_id is required', path: ['canvas_id'] },
-);
+const SelectionContextSchema = z
+  .object({
+    canvas_id: z.string().min(1).optional(),
+    canvasId: z.string().min(1).optional(),
+    canvas_view_access_id: z.string().min(1).optional(),
+    canvasViewAccessId: z.string().min(1).optional(),
+    selected_text: z.string().min(1),
+    canvas_title: z.string().optional(),
+  })
+  .refine(
+    (ctx) =>
+      Boolean(ctx.canvas_id || ctx.canvasId || ctx.canvas_view_access_id || ctx.canvasViewAccessId),
+    { message: 'canvas_id is required', path: ['canvas_id'] }
+  );
 
 // Attached context item schema - for Add Context feature.
 // `collection` and `file` are appended below from top-level `collection_ids`
@@ -273,8 +277,7 @@ export class XyneAIControllerV2 {
     const effectiveConversationId = conversationId || conversation_id;
     // Legacy pre-XYNE-17290 clients may still send canvasViewAccessId or
     // canvas_view_access_id — coalesce them into effectiveCanvasId.
-    const effectiveCanvasId =
-      canvasId || canvas_id || canvasViewAccessId || canvas_view_access_id;
+    const effectiveCanvasId = canvasId || canvas_id || canvasViewAccessId || canvas_view_access_id;
     const effectiveAttachedContext = attachedContext || attached_context;
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;
@@ -289,7 +292,8 @@ export class XyneAIControllerV2 {
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
-    const effectiveParentAssistantMessageId = parentAssistantMessageIdCC || parentAssistantMessageIdSC;
+    const effectiveParentAssistantMessageId =
+      parentAssistantMessageIdCC || parentAssistantMessageIdSC;
     const effectiveEditedUserMessageId = editedUserMessageIdCC || editedUserMessageIdSC;
     const effectiveIsRegenerate = isRegenerateCC || isRegenerateSC;
     const effectiveIsEditUserMessage = isEditUserMessageCC || isEditUserMessageSC;
@@ -358,11 +362,11 @@ export class XyneAIControllerV2 {
             name: sdlcRepo.name,
           };
         }
-        const [memories, contextLinks] = await Promise.all([
+        const [memories, contextLinks, baselineCanvases] = await Promise.all([
           sdlcRepo.projectId
             ? db.knowledgeDocument.findMany({
                 where: { projectId: sdlcRepo.projectId },
-                select: { title: true, content: true, metadata: true },
+                select: { id: true, title: true, content: true, metadata: true },
               })
             : [],
           db.sdlcEntityLink.findMany({
@@ -371,18 +375,39 @@ export class XyneAIControllerV2 {
             take: 50,
             select: { targetType: true, targetId: true },
           }),
+          db.canvas.findMany({
+            where: { channelId: effectiveChannelIds[0] },
+            select: { metadata: true, lastEditedAt: true },
+          }),
         ]);
+        const currentKnowledgeDocumentIds = new Set(
+          baselineCanvases.flatMap((canvas) => {
+            const metadata = canvas.metadata as Record<string, unknown> | null;
+            return metadata?.artifactKind === 'BASELINE' &&
+              typeof metadata.knowledgeDocumentId === 'string' &&
+              isSdlcBaselineApprovalCurrent({
+                approvedAt: typeof metadata.approvedAt === 'string' ? metadata.approvedAt : null,
+                lastEditedAt: canvas.lastEditedAt,
+              })
+              ? [metadata.knowledgeDocumentId]
+              : [];
+          })
+        );
         const approvedBaseline = memories
-          .filter(memory => {
+          .filter((memory) => {
             const metadata = memory.metadata as Record<string, unknown> | null;
-            return metadata?.repoId === sdlcRepo.id && typeof metadata.baselineKind === 'string';
+            return (
+              metadata?.repoId === sdlcRepo.id &&
+              typeof metadata.baselineKind === 'string' &&
+              currentKnowledgeDocumentIds.has(memory.id)
+            );
           })
           .sort((left, right) => {
             const leftKind = String((left.metadata as Record<string, unknown>).baselineKind);
             const rightKind = String((right.metadata as Record<string, unknown>).baselineKind);
             return (
-              BASELINE_DEFINITIONS.findIndex(item => item.kind === leftKind) -
-              BASELINE_DEFINITIONS.findIndex(item => item.kind === rightKind)
+              BASELINE_DEFINITIONS.findIndex((item) => item.kind === leftKind) -
+              BASELINE_DEFINITIONS.findIndex((item) => item.kind === rightKind)
             );
           });
         const linkedContext = sdlcRepo.workspaceId
@@ -406,7 +431,7 @@ export class XyneAIControllerV2 {
         const latestSuccessfulWiki = wikiRunLinks.length
           ? await db.workflowExecution.findFirst({
               where: {
-                id: { in: wikiRunLinks.map(link => link.targetId) },
+                id: { in: wikiRunLinks.map((link) => link.targetId) },
                 workflowType: 'SDLC_WIKI',
                 status: 'SUCCESS',
               },
@@ -538,8 +563,12 @@ export class XyneAIControllerV2 {
           isRegenerate: effectiveIsRegenerate,
           isEditUserMessage: effectiveIsEditUserMessage,
           ...(effectiveParentMessageId ? { parentMessageId: effectiveParentMessageId } : {}),
-          ...(effectiveParentAssistantMessageId ? { parentAssistantMessageId: effectiveParentAssistantMessageId } : {}),
-          ...(effectiveEditedUserMessageId ? { editedUserMessageId: effectiveEditedUserMessageId } : {}),
+          ...(effectiveParentAssistantMessageId
+            ? { parentAssistantMessageId: effectiveParentAssistantMessageId }
+            : {}),
+          ...(effectiveEditedUserMessageId
+            ? { editedUserMessageId: effectiveEditedUserMessageId }
+            : {}),
         };
 
         // Set SSE headers
@@ -576,9 +605,7 @@ export class XyneAIControllerV2 {
           });
           if (result.error) {
             status = 'error';
-            res.write(
-              `data: ${JSON.stringify({ type: 'error', error: result.error })}\n\n`,
-            );
+            res.write(`data: ${JSON.stringify({ type: 'error', error: result.error })}\n\n`);
           }
         } catch (streamError) {
           status = 'error';
@@ -657,12 +684,7 @@ export class XyneAIControllerV2 {
         res.status(400).json({ error: 'sessionId is required' });
         return;
       }
-      const result = await cancelClawAgentRun(
-        req,
-        userId,
-        sessionId,
-        req.user?.workspaceId,
-      );
+      const result = await cancelClawAgentRun(req, userId, sessionId, req.user?.workspaceId);
       if (!result.success) {
         res.status(502).json({ success: false, error: result.error ?? 'Cancel failed' });
         return;
@@ -847,7 +869,11 @@ export class XyneAIControllerV2 {
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
 
     try {
-      const result = await getClawConversationMessages({ headers: req.headers, userId }, convId, agentSlug);
+      const result = await getClawConversationMessages(
+        { headers: req.headers, userId },
+        convId,
+        agentSlug
+      );
       res.json({
         ...result,
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
@@ -890,7 +916,12 @@ export class XyneAIControllerV2 {
     const clampedComment = typeof comment === 'string' ? comment.slice(0, 500) : null;
 
     try {
-      const result = await rateClawRun({ headers: req.headers, userId }, messageId, rating, clampedComment);
+      const result = await rateClawRun(
+        { headers: req.headers, userId },
+        messageId,
+        rating,
+        clampedComment
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -940,7 +971,9 @@ export class XyneAIControllerV2 {
     });
 
     try {
-      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, { signal: upstreamAbort.signal });
+      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, {
+        signal: upstreamAbort.signal,
+      });
     } catch (error) {
       logger.error('[XyneAIv2] live proxy error:', error);
     } finally {
@@ -969,7 +1002,11 @@ export class XyneAIControllerV2 {
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
 
     try {
-      const result = await deleteClawConversation({ headers: req.headers, userId }, convId, agentSlug);
+      const result = await deleteClawConversation(
+        { headers: req.headers, userId },
+        convId,
+        agentSlug
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -1072,7 +1109,10 @@ export class XyneAIControllerV2 {
     }
 
     try {
-      const result = await listClawAgentModels({ headers: req.headers, userId }, req.params['slug']);
+      const result = await listClawAgentModels(
+        { headers: req.headers, userId },
+        req.params['slug']
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
